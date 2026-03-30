@@ -1,3 +1,6 @@
+# Publish Everywhere
+
+A Docker Compose setup for running Postiz under the `publish-everywhere` project name.
 
 ## Watch the Tutorial for docker-compose install:
 [https://m.youtube.com/watch?v=A6CjAmJOWvA&t=5s](https://m.youtube.com/watch?v=A6CjAmJOWvA&t=5s)
@@ -29,7 +32,7 @@ of configuration settings.
 
 Setup:
 ```
-git clone https://github.com/gitroomhq/postiz-docker-compose
+git clone https://github.com/celleree/publish-everywhere
 ```
 
 Then run:
