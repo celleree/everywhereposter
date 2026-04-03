@@ -1,0 +1,7 @@
+tunnel: c9487391-ac63-4934-b29d-06b1a1fd3801
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: publish-everywhere.halowebsites.com
+    service: http://public-web:80
+  - service: http_status:404

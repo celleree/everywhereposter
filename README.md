@@ -42,7 +42,7 @@ docker compose up
 
 Wait for it to load:
 
-Open your website on https://localhost:4007
+Open your website on https://publish-everywhere.halowebsites.com
 
 ---
 
@@ -56,9 +56,9 @@ services:
     restart: always
     environment:
       # === Required Settings
-      MAIN_URL: 'http://localhost:4007'
-      FRONTEND_URL: 'http://localhost:4007'
-      NEXT_PUBLIC_BACKEND_URL: 'http://localhost:4007/api'
+      MAIN_URL: 'https://publish-everywhere.halowebsites.com'
+      FRONTEND_URL: 'https://publish-everywhere.halowebsites.com'
+      NEXT_PUBLIC_BACKEND_URL: 'https://publish-everywhere.halowebsites.com/api'
       JWT_SECRET: 'random string that is unique to every install - just type random characters here!'
       DATABASE_URL: 'postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local'
       REDIS_URL: 'redis://postiz-redis:6379'

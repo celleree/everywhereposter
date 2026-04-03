@@ -1,0 +1,201 @@
+(function () {
+  const BRAND_NAME = 'Publish Everywhere';
+  const BRAND_ASSET = '/branding/pe-logo.svg';
+  const FAVICON_ASSET = '/branding/favicon.svg';
+  const LOGO_SIGNATURES = [
+    {
+      viewBox: '0 0 101 33',
+      snippet: 'M41.7953 5.76801',
+    },
+    {
+      viewBox: '0 0 60 60',
+      snippet: 'M12.8816 11.4648',
+    },
+  ];
+
+  const textReplacements = [
+    ['Postiz To Grow Their Social Presence', 'Publish Everywhere To Grow Their Social Presence'],
+    ['How to Use Postiz', 'How to Use Publish Everywhere'],
+    ['Use Postiz', 'Use Publish Everywhere'],
+    ['Join 10,000+ Entrepreneurs Who Use Postiz', 'Join 10,000+ Entrepreneurs Who Use Publish Everywhere'],
+    ['watch this short video to learn how to get the most out of Postiz', 'watch this short video to learn how to get the most out of Publish Everywhere'],
+    ['Watch this short video to learn how to get the most out of Postiz', 'Watch this short video to learn how to get the most out of Publish Everywhere'],
+    ['Postiz', BRAND_NAME],
+  ];
+
+  const skipTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT']);
+
+  function replaceText(value) {
+    let next = value;
+    for (const [from, to] of textReplacements) {
+      next = next.split(from).join(to);
+    }
+    return next;
+  }
+
+  function rewriteText(root) {
+    if (!root) {
+      return;
+    }
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+
+    while (node) {
+      const parentTag = node.parentElement && node.parentElement.tagName;
+      if (
+        node.nodeValue &&
+        parentTag &&
+        !skipTags.has(parentTag) &&
+        node.nodeValue.includes('Postiz')
+      ) {
+        const nextValue = replaceText(node.nodeValue);
+        if (nextValue !== node.nodeValue) {
+          node.nodeValue = nextValue;
+        }
+      }
+
+      node = walker.nextNode();
+    }
+  }
+
+  function rewriteLinks(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    for (const link of scope.querySelectorAll('a[href]')) {
+      const href = link.getAttribute('href');
+      if (!href) {
+        continue;
+      }
+
+      if (href.includes('postiz.com/terms')) {
+        link.setAttribute('href', '/terms');
+        link.setAttribute('rel', 'nofollow');
+      }
+
+      if (href.includes('postiz.com/privacy')) {
+        link.setAttribute('href', '/privacy');
+        link.setAttribute('rel', 'nofollow');
+      }
+
+      const title = link.getAttribute('title');
+      if (title && title.includes('Postiz')) {
+        link.setAttribute('title', replaceText(title));
+      }
+    }
+  }
+
+  function rewriteTitle() {
+    if (document.title && document.title.includes('Postiz')) {
+      document.title = replaceText(document.title);
+    }
+  }
+
+  function applyFavicon() {
+    const links = document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"]');
+    if (!links.length) {
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      link.type = 'image/svg+xml';
+      link.href = FAVICON_ASSET;
+      document.head.appendChild(link);
+      return;
+    }
+
+    for (const link of links) {
+      link.setAttribute('href', FAVICON_ASSET);
+      link.setAttribute('type', 'image/svg+xml');
+      if (!link.getAttribute('rel')) {
+        link.setAttribute('rel', 'icon');
+      }
+    }
+  }
+
+  function buildLogoImage(source) {
+    const width = source && source.getAttribute('width') ? source.getAttribute('width') : '84';
+    const height = source && source.getAttribute('height') ? source.getAttribute('height') : '84';
+    const className = source && source.getAttribute('class') ? source.getAttribute('class') : '';
+    const img = document.createElement('img');
+    img.src = BRAND_ASSET;
+    img.alt = BRAND_NAME;
+    img.width = Number(width) || 84;
+    img.height = Number(height) || 84;
+    img.dataset.publishEverywhereLogo = 'true';
+    if (className) {
+      img.setAttribute('class', className);
+    }
+    img.style.display = 'block';
+    img.style.width = /^\d+$/.test(width) ? `${width}px` : width;
+    img.style.height = /^\d+$/.test(height) ? `${height}px` : height;
+    img.style.maxWidth = '100%';
+    img.style.objectFit = 'contain';
+    return img;
+  }
+
+  function rewriteLogos(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    for (const svg of scope.querySelectorAll('svg')) {
+      if (svg.dataset.publishEverywhereLogo === 'true') {
+        continue;
+      }
+
+      const viewBox = svg.getAttribute('viewBox') || '';
+      const inner = svg.innerHTML || '';
+      const isKnownLogo = LOGO_SIGNATURES.some(function (signature) {
+        return viewBox === signature.viewBox && inner.includes(signature.snippet);
+      });
+      if (isKnownLogo) {
+        const replacement = buildLogoImage(svg);
+        svg.replaceWith(replacement);
+      }
+    }
+  }
+
+  function rewriteAttributes(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    for (const node of scope.querySelectorAll('[aria-label],[title],[alt]')) {
+      for (const attribute of ['aria-label', 'title', 'alt']) {
+        const value = node.getAttribute(attribute);
+        if (value && value.includes('Postiz')) {
+          node.setAttribute(attribute, replaceText(value));
+        }
+      }
+    }
+  }
+
+  function applyBranding(root) {
+    rewriteTitle();
+    applyFavicon();
+    rewriteText(root || document.body || document.documentElement);
+    rewriteLinks(root || document);
+    rewriteAttributes(root || document);
+    rewriteLogos(root || document);
+  }
+
+  let scheduled = false;
+  function scheduleBranding() {
+    if (scheduled) {
+      return;
+    }
+
+    scheduled = true;
+    window.requestAnimationFrame(function () {
+      scheduled = false;
+      applyBranding(document.body || document.documentElement);
+    });
+  }
+
+  applyBranding(document.body || document.documentElement);
+
+  const observer = new MutationObserver(function () {
+    scheduleBranding();
+  });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+
+  window.addEventListener('popstate', scheduleBranding);
+  window.addEventListener('pageshow', scheduleBranding);
+})();
