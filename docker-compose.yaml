@@ -2,7 +2,10 @@ name: publish-everywhere
 
 services:
   postiz:
-    image: ghcr.io/gitroomhq/postiz-app:latest
+    image: publish-everywhere/postiz-app:custom
+    build:
+      context: ../postiz-app-upstream
+      dockerfile: Dockerfile.dev
     container_name: postiz
     restart: always
     command: ["/bin/sh", "/start-postiz.sh"]
@@ -19,6 +22,21 @@ services:
       IS_GENERAL: 'true'
       DISABLE_REGISTRATION: 'false'
       RUN_CRON: 'true'
+
+      # === Multi-User / Team Settings
+      # Leave registration enabled if you want multiple people to create accounts
+      # on the same Postiz instance. Configure one email provider below if you
+      # want activation emails and team invite emails to be delivered.
+      # EMAIL_PROVIDER: 'resend'
+      # EMAIL_FROM_NAME: 'Publish Everywhere'
+      # EMAIL_FROM_ADDRESS: 'no-reply@example.com'
+      # RESEND_API_KEY: '${RESEND_API_KEY:-}'
+      # EMAIL_PROVIDER: 'nodemailer'
+      # EMAIL_HOST: '${EMAIL_HOST:-smtp.example.com}'
+      # EMAIL_PORT: '${EMAIL_PORT:-465}'
+      # EMAIL_SECURE: '${EMAIL_SECURE:-true}'
+      # EMAIL_USER: '${EMAIL_USER:-}'
+      # EMAIL_PASS: '${EMAIL_PASS:-}'
 
       # === Storage Settings
       STORAGE_PROVIDER: 'local'
@@ -46,14 +64,16 @@ services:
       GITHUB_CLIENT_SECRET: ''
       BEEHIIVE_API_KEY: ''
       BEEHIIVE_PUBLICATION_ID: ''
-      THREADS_APP_ID: '1428662708463667'
-      THREADS_APP_SECRET: '0afdee41d679ad775ce38082025e0f43'
-      FACEBOOK_APP_ID: '1311595390867645'
-      FACEBOOK_APP_SECRET: '7c63df0df127443ba6e6955ee5b1b976'
+      THREADS_APP_ID: '${THREADS_APP_ID:-}'
+      THREADS_APP_SECRET: '${THREADS_APP_SECRET:-}'
+      FACEBOOK_APP_ID: '${FACEBOOK_APP_ID:-}'
+      FACEBOOK_APP_SECRET: '${FACEBOOK_APP_SECRET:-}'
+      INSTAGRAM_APP_ID: '${INSTAGRAM_APP_ID:-}'
+      INSTAGRAM_APP_SECRET: '${INSTAGRAM_APP_SECRET:-}'
       YOUTUBE_CLIENT_ID: '${YOUTUBE_CLIENT_ID:-}'
       YOUTUBE_CLIENT_SECRET: '${YOUTUBE_CLIENT_SECRET:-}'
-      TIKTOK_CLIENT_ID: ''
-      TIKTOK_CLIENT_SECRET: ''
+      TIKTOK_CLIENT_ID: '${TIKTOK_CLIENT_ID:-}'
+      TIKTOK_CLIENT_SECRET: '${TIKTOK_CLIENT_SECRET:-}'
       PINTEREST_CLIENT_ID: ''
       PINTEREST_CLIENT_SECRET: ''
       DRIBBBLE_CLIENT_ID: ''
@@ -87,7 +107,9 @@ services:
 
       # === Misc Settings
       OPENAI_API_KEY: '${OPENAI_API_KEY}'
-      DISABLE_POSTIZ_MCP: 'true'
+      DISABLE_POSTIZ_MCP: '${DISABLE_POSTIZ_MCP:-false}'
+      MCP_URL: '${PUBLIC_BASE_URL:-https://publish-everywhere.halowebsites.com}'
+      OPENAI_APP_CHALLANGE: '${OPENAI_APP_CHALLANGE:-}'
       NEXT_PUBLIC_DISCORD_SUPPORT: ''
       NEXT_PUBLIC_POLOTNO: ''
       API_LIMIT: 30
@@ -119,7 +141,7 @@ services:
       - postiz-config:/config/
       - postiz-uploads:/uploads/
     ports:
-      - "4007:5000"
+      - "127.0.0.1:4007:5000"
     networks:
       - postiz-network
       - temporal-network
@@ -142,6 +164,7 @@ services:
       - ./nginx/privacy-site.conf:/etc/nginx/conf.d/default.conf:ro
       - ./site/privacy-policy.html:/usr/share/nginx/html/privacy-policy.html:ro
       - ./site/terms-of-service.html:/usr/share/nginx/html/terms-of-service.html:ro
+      - ./site/data-deletion.html:/usr/share/nginx/html/data-deletion.html:ro
       - ./site/branding:/usr/share/nginx/html/branding:ro
     networks:
       - postiz-network
@@ -183,7 +206,7 @@ services:
     container_name: spotlight
     restart: unless-stopped
     ports:
-      - 8969:8969/tcp
+      - 127.0.0.1:8969:8969/tcp
     image: ghcr.io/getsentry/spotlight:latest
     networks:
       - postiz-network
@@ -232,7 +255,7 @@ services:
   temporal:
     container_name: temporal
     ports:
-      - '7233:7233'
+      - '127.0.0.1:7233:7233'
     image: temporalio/auto-setup:1.28.1
     restart: unless-stopped
     depends_on:
@@ -282,7 +305,7 @@ services:
     networks:
       - temporal-network
     ports:
-      - '8080:8080'
+      - '127.0.0.1:8080:8080'
 
   cloudflared:
     image: cloudflare/cloudflared:2026.2.0

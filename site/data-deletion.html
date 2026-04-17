@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Data Deletion | Publish Everywhere</title>
+    <meta
+      name="description"
+      content="How to request account and data deletion for Publish Everywhere."
+    >
+    <link rel="icon" type="image/svg+xml" href="/branding/favicon.svg">
+    <script src="/branding/branding.js?v=20260407a" defer></script>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f1ea;
+        --paper: #fffdf8;
+        --text: #1f2933;
+        --muted: #52606d;
+        --line: #d9d1c3;
+        --accent: #205c44;
+        --accent-soft: #dcefe6;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        background:
+          radial-gradient(circle at top right, rgba(32, 92, 68, 0.14), transparent 32%),
+          linear-gradient(180deg, #faf8f2 0%, var(--bg) 100%);
+        color: var(--text);
+        line-height: 1.7;
+      }
+
+      .shell {
+        width: min(920px, calc(100% - 32px));
+        margin: 48px auto;
+      }
+
+      .hero,
+      .content {
+        background: rgba(255, 253, 248, 0.93);
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(217, 209, 195, 0.9);
+        border-radius: 24px;
+        box-shadow: 0 22px 50px rgba(31, 41, 51, 0.09);
+      }
+
+      .hero {
+        padding: 32px;
+        margin-bottom: 18px;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        margin: 0 0 10px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2rem, 4vw, 3.3rem);
+        line-height: 1.08;
+      }
+
+      .subhead {
+        margin: 14px 0 0;
+        max-width: 65ch;
+        color: var(--muted);
+        font-size: 1.05rem;
+      }
+
+      .content {
+        padding: 36px 32px 48px;
+      }
+
+      h2 {
+        margin: 34px 0 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        font-size: 1.35rem;
+      }
+
+      h2:first-of-type {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      ol,
+      ul {
+        margin: 12px 0 0 22px;
+        padding: 0;
+      }
+
+      li + li {
+        margin-top: 8px;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code {
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 0.95em;
+      }
+
+      .callout {
+        margin-top: 18px;
+        padding: 18px 20px;
+        border-radius: 18px;
+        background: #f3f8f4;
+        border: 1px solid var(--line);
+      }
+
+      .callout p {
+        margin: 0;
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: min(100% - 20px, 920px);
+          margin: 20px auto;
+        }
+
+        .hero,
+        .content {
+          border-radius: 18px;
+          padding: 24px 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Publish Everywhere</p>
+        <h1>Data Deletion</h1>
+        <p class="subhead">
+          How to request deletion of your Publish Everywhere account data and
+          any connected Facebook, Instagram, or Threads data handled by the
+          service.
+        </p>
+      </section>
+
+      <article class="content">
+        <h2>Delete Your Publish Everywhere Data</h2>
+        <p>
+          To request deletion of your account or data, email
+          <a href="mailto:arundelkramer@gmail.com">arundelkramer@gmail.com</a>
+          and include enough information for us to identify your account.
+        </p>
+
+        <h2>Delete Through Meta</h2>
+        <p>
+          If you connected Publish Everywhere through Facebook, Instagram, or
+          Threads, you can also remove the app from Meta and submit a deletion
+          request there.
+        </p>
+        <ol>
+          <li>Open Facebook and go to <strong>Settings &amp; Privacy</strong> then <strong>Settings</strong>.</li>
+          <li>Open <strong>Apps and Websites</strong>.</li>
+          <li>Remove Publish Everywhere.</li>
+          <li>Use the Meta deletion request flow if it is shown.</li>
+        </ol>
+
+        <h2>What Happens Next</h2>
+        <ul>
+          <li>We remove matching connected Meta channel records and stored access credentials from Publish Everywhere.</li>
+          <li>We keep a confirmation code and status record for the request for a limited time so the request can be tracked.</li>
+          <li>Data stored directly by Meta is controlled by Meta and must also be managed in your Meta account settings.</li>
+        </ul>
+
+        <h2>Request Status</h2>
+        <p>
+          Meta callback requests return a status URL and confirmation code.
+          If you have a confirmation code, the status page format is:
+        </p>
+        <div class="callout">
+          <p>
+            <code>/api/public/meta/data-deletion/status?code=&lt;confirmation_code&gt;</code>
+          </p>
+        </div>
+
+        <h2>Contact</h2>
+        <p>
+          Questions about deletion requests can be sent to
+          <a href="mailto:arundelkramer@gmail.com">arundelkramer@gmail.com</a>.
+        </p>
+      </article>
+    </main>
+  </body>
+</html>

@@ -4,27 +4,40 @@ set -eu
 cd /app
 pnpm run prisma-db-push
 
-# Postiz's MCP bootstrap can block backend startup in this containerized setup.
-# Patch the compiled backend entrypoint at runtime so the web app can still boot.
-if [ "${DISABLE_POSTIZ_MCP:-false}" = "true" ]; then
-  node <<'EOF'
+# Start MCP in the background so the app can still boot even if MCP init is
+# slow. Operators can still disable it entirely with DISABLE_POSTIZ_MCP=true.
+node <<'EOF'
 const fs = require('fs');
 const backendMain = '/app/apps/backend/dist/apps/backend/src/main.js';
 const original = '    await (0, start_mcp_1.startMcp)(app);\n';
-const patched = `    if (process.env.DISABLE_POSTIZ_MCP !== 'true') {
+const previousPatched = `    if (process.env.DISABLE_POSTIZ_MCP !== 'true') {
         await (0, start_mcp_1.startMcp)(app);
     }
+`;
+const patched = `    setTimeout(() => {
+        if (process.env.DISABLE_POSTIZ_MCP === 'true') {
+            console.log('MCP bootstrap disabled by DISABLE_POSTIZ_MCP=true');
+            return;
+        }
+        Promise.resolve((0, start_mcp_1.startMcp)(app))
+            .then(() => console.log('MCP bootstrap completed.'))
+            .catch((err) => console.error('MCP bootstrap failed.', err));
+    }, 0);
 `;
 
 if (fs.existsSync(backendMain)) {
   const source = fs.readFileSync(backendMain, 'utf8');
-  if (source.includes(original) && !source.includes('DISABLE_POSTIZ_MCP')) {
+  if (source.includes('MCP bootstrap completed.')) {
+    console.log('MCP bootstrap patch already present.');
+  } else if (source.includes(previousPatched)) {
+    fs.writeFileSync(backendMain, source.replace(previousPatched, patched));
+    console.log('Updated backend startup patch to use background MCP bootstrap.');
+  } else if (source.includes(original)) {
     fs.writeFileSync(backendMain, source.replace(original, patched));
-    console.log('Patched backend startup to skip MCP bootstrap.');
+    console.log('Patched backend startup to use background MCP bootstrap.');
   }
 }
 EOF
-fi
 
 # Surface swallowed social integration auth errors in container logs.
 node <<'EOF'

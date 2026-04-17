@@ -12,6 +12,8 @@
       snippet: 'M12.8816 11.4648',
     },
   ];
+  const LEGAL_BAR_ID = 'publish-everywhere-legal-links';
+  const LEGAL_BAR_STYLE_ID = 'publish-everywhere-legal-links-style';
 
   const textReplacements = [
     ['Postiz To Grow Their Social Presence', 'Publish Everywhere To Grow Their Social Presence'],
@@ -162,6 +164,79 @@
     }
   }
 
+  function ensureLegalBarStyles() {
+    if (document.getElementById(LEGAL_BAR_STYLE_ID)) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = LEGAL_BAR_STYLE_ID;
+    style.textContent = [
+      'body { padding-bottom: max(72px, env(safe-area-inset-bottom)); }',
+      '#' + LEGAL_BAR_ID + ' {',
+      '  position: fixed;',
+      '  left: 50%;',
+      '  bottom: max(16px, env(safe-area-inset-bottom));',
+      '  transform: translateX(-50%);',
+      '  z-index: 2147483647;',
+      '  display: flex;',
+      '  align-items: center;',
+      '  gap: 12px;',
+      '  padding: 10px 16px;',
+      '  border: 1px solid rgba(15, 23, 42, 0.12);',
+      '  border-radius: 999px;',
+      '  background: rgba(255, 255, 255, 0.94);',
+      '  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.12);',
+      '  backdrop-filter: blur(12px);',
+      '  color: #334155;',
+      '  font: 600 13px/1.2 Arial, sans-serif;',
+      '  white-space: nowrap;',
+      '}',
+      '#' + LEGAL_BAR_ID + ' a {',
+      '  color: #0f766e;',
+      '  text-decoration: none;',
+      '}',
+      '#' + LEGAL_BAR_ID + ' a:hover,',
+      '#' + LEGAL_BAR_ID + ' a:focus-visible {',
+      '  text-decoration: underline;',
+      '}',
+      '#' + LEGAL_BAR_ID + ' .separator {',
+      '  color: #94a3b8;',
+      '}',
+      '@media (max-width: 640px) {',
+      '  body { padding-bottom: max(96px, env(safe-area-inset-bottom)); }',
+      '  #' + LEGAL_BAR_ID + ' {',
+      '    width: calc(100% - 24px);',
+      '    justify-content: center;',
+      '    padding: 12px 14px;',
+      '    white-space: normal;',
+      '    text-align: center;',
+      '  }',
+      '}',
+    ].join('');
+    document.head.appendChild(style);
+  }
+
+  function ensureLegalBar() {
+    ensureLegalBarStyles();
+
+    let bar = document.getElementById(LEGAL_BAR_ID);
+    if (!bar) {
+      bar = document.createElement('nav');
+      bar.id = LEGAL_BAR_ID;
+      bar.setAttribute('aria-label', 'Legal');
+      bar.innerHTML = [
+        '<a href="/terms" rel="nofollow">Terms of Service</a>',
+        '<span class="separator" aria-hidden="true">|</span>',
+        '<a href="/privacy" rel="nofollow">Privacy Policy</a>',
+      ].join('');
+    }
+
+    if (document.body && bar.parentElement !== document.body) {
+      document.body.appendChild(bar);
+    }
+  }
+
   function applyBranding(root) {
     rewriteTitle();
     applyFavicon();
@@ -169,6 +244,7 @@
     rewriteLinks(root || document);
     rewriteAttributes(root || document);
     rewriteLogos(root || document);
+    ensureLegalBar();
   }
 
   let scheduled = false;

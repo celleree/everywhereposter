@@ -44,6 +44,76 @@ Wait for it to load:
 
 Open your website on https://publish-everywhere.halowebsites.com
 
+## Multi-Account Support
+
+This deployment can support multiple user accounts on the same Postiz instance.
+
+- `DISABLE_REGISTRATION: 'false'` already allows additional users to sign up.
+- Postiz upstream also supports team collaboration and member invites in the app.
+- If you want invite or activation emails to work reliably, configure an email provider such as Resend or SMTP via the Postiz email settings.
+
+Practical note:
+
+- Multi-user access is controlled by Postiz itself, not by Docker Compose.
+- If you need hard isolation between customers, brands, or teams, run separate Postiz instances instead of treating one instance as a strict multi-tenant deployment.
+- Upstream currently has an open invite-flow bug for organization joins in self-hosted setups: [Issue #819](https://github.com/gitroomhq/postiz-app/issues/819).
+
+---
+
+## Meta Data Deletion
+
+This deployment now includes both a public deletion-instructions page and a Meta-compatible callback/status flow for connected Facebook, Instagram, and Threads accounts.
+
+- Public instructions page: `https://publish-everywhere.halowebsites.com/data-deletion`
+- Meta Data Deletion Request URL: `https://publish-everywhere.halowebsites.com/api/public/meta/data-deletion`
+- Meta callback status page format:
+  `https://publish-everywhere.halowebsites.com/api/public/meta/data-deletion/status?code=<confirmation_code>`
+
+What the callback does:
+
+- validates Meta's `signed_request` using the configured app secret
+- finds matching connected Meta channels by the app-scoped user ID Meta sends
+- scrubs stored tokens/details and soft-deletes the matching integration records
+- returns the human-readable status URL and confirmation code Meta expects
+
+Public-use note:
+
+- This covers repo-side callback handling, but you still need to enter the callback URL in the Meta app dashboard for each Meta app you ship.
+
+---
+
+## AI Assistant Integrations
+
+This deployment can now expose Postiz as an MCP server so users can manage channels and schedule posts from AI clients instead of only inside the web UI.
+
+- Supported directly by the in-app Developers tab: Claude Code, Cursor, VS Code / Copilot, Windsurf, Amp, Codex, Gemini CLI, and Warp.
+- Users can open `Settings -> Developers` in Postiz, copy their `pos_` API key, and paste the generated MCP config into their AI client.
+- `MCP_URL` is set to the public app origin so the generated config points to `/mcp` instead of the `/api` base URL.
+- `DISABLE_POSTIZ_MCP=false` keeps MCP enabled. Set it to `true` if you need to turn the feature off during troubleshooting.
+
+Operator notes:
+
+- MCP startup is patched to run in the background so a slow MCP bootstrap does not prevent the main app from starting.
+- The reverse proxy now forwards `/mcp`, `/mcp-oauth`, legacy `/sse` and `/message`, and the OAuth discovery endpoints under `/.well-known/` directly to the backend.
+- If you want to experiment with OpenAI app verification, set `OPENAI_APP_CHALLANGE` in `.env`. The upstream env name is spelled exactly that way.
+
+Verification:
+
+```bash
+curl -sS --max-time 15 https://publish-everywhere.halowebsites.com/.well-known/oauth-authorization-server | jq .
+curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 https://publish-everywhere.halowebsites.com/mcp
+```
+
+Expected result:
+
+- The OAuth authorization server endpoint returns `200` with JSON metadata.
+- `/mcp` returns `401` without a bearer token, which confirms the route is live and protected.
+
+ChatGPT note:
+
+- Claude Code, Codex, Cursor, and similar MCP-capable tools can connect immediately through the generated config.
+- ChatGPT compatibility depends on OpenAI's current external connector/app flow, so treat the MCP exposure here as the server-side foundation rather than a guarantee that every ChatGPT surface will attach to it directly.
+
 ---
 
 ## Example `docker-compose.yml` file
@@ -66,6 +136,8 @@ services:
       TEMPORAL_ADDRESS: "temporal:7233"
       IS_GENERAL: 'true'
       DISABLE_REGISTRATION: 'false'
+      DISABLE_POSTIZ_MCP: 'false'
+      MCP_URL: 'https://publish-everywhere.halowebsites.com'
 
       # === Storage Settings
       STORAGE_PROVIDER: 'local'
@@ -96,6 +168,8 @@ services:
       THREADS_APP_SECRET: ''
       FACEBOOK_APP_ID: ''
       FACEBOOK_APP_SECRET: ''
+      INSTAGRAM_APP_ID: ''
+      INSTAGRAM_APP_SECRET: ''
       YOUTUBE_CLIENT_ID: ''
       YOUTUBE_CLIENT_SECRET: ''
       TIKTOK_CLIENT_ID: ''
@@ -133,6 +207,8 @@ services:
 
       # === Misc Settings
       OPENAI_API_KEY: ''
+      # Optional: used only if you want to verify an OpenAI app challenge
+      OPENAI_APP_CHALLANGE: ''
       NEXT_PUBLIC_DISCORD_SUPPORT: ''
       NEXT_PUBLIC_POLOTNO: ''
       API_LIMIT: 30
