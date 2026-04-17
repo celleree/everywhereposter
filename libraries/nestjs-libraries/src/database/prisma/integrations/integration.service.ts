@@ -273,6 +273,16 @@ export class IntegrationService {
     return this._integrationRepository.deleteChannel(org, id);
   }
 
+  async scrubIntegrationsForMetaUser(
+    metaUserId: string,
+    providerIdentifiers: string[]
+  ) {
+    return this._integrationRepository.scrubIntegrationsForMetaUser(
+      metaUserId,
+      providerIdentifiers
+    );
+  }
+
   async disableIntegrations(org: string, totalChannels: number) {
     return this._integrationRepository.disableIntegrations(org, totalChannels);
   }

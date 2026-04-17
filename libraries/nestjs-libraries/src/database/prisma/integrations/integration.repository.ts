@@ -495,6 +495,66 @@ export class IntegrationRepository {
     });
   }
 
+  async scrubIntegrationsForMetaUser(
+    metaUserId: string,
+    providerIdentifiers: string[]
+  ) {
+    const matches = await this._integration.model.integration.findMany({
+      where: {
+        deletedAt: null,
+        providerIdentifier: {
+          in: providerIdentifiers,
+        },
+        OR: [
+          {
+            rootInternalId: metaUserId,
+          },
+          {
+            internalId: metaUserId,
+          },
+        ],
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        providerIdentifier: true,
+        name: true,
+        internalId: true,
+        rootInternalId: true,
+      },
+    });
+
+    if (!matches.length) {
+      return [];
+    }
+
+    for (const match of matches) {
+      const oldRootId = match.rootInternalId || match.internalId;
+      await this._integration.model.integration.update({
+        where: {
+          id: match.id,
+        },
+        data: {
+          deletedAt: new Date(),
+          disabled: true,
+          refreshNeeded: true,
+          token: `deleted_${makeId(24)}`,
+          refreshToken: null,
+          tokenExpiration: null,
+          profile: null,
+          picture: null,
+          name: `Deleted ${match.providerIdentifier} connection`,
+          internalId: `deleted_${match.internalId}_${makeId(10)}`,
+          rootInternalId: `deleted_${oldRootId}_${makeId(10)}`,
+          customInstanceDetails: null,
+          additionalSettings: '[]',
+        },
+      });
+    }
+
+    return matches;
+  }
+
   async disableChannel(org: string, id: string) {
     await this._integration.model.integration.update({
       where: {
