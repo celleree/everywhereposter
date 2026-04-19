@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VoiceProfile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile_version",
+    "source_count",
+    "directness",
+    "humor_level",
+    "formality",
+    "sentence_length_pattern",
+    "preferred_patterns",
+    "avoid_patterns",
+    "vocabulary_preferences",
+    "cta_style",
+    "reading_level_target"
+  ],
+  "properties": {
+    "profile_version": {
+      "type": "string"
+    },
+    "source_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "directness": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "humor_level": {
+      "type": "string",
+      "enum": ["none", "light", "moderate", "high"]
+    },
+    "formality": {
+      "type": "string",
+      "enum": ["casual", "conversational", "professional", "formal"]
+    },
+    "sentence_length_pattern": {
+      "type": "string",
+      "enum": ["mostly_short", "short_medium_mix", "balanced", "mostly_long"]
+    },
+    "opener_styles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "preferred_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "avoid_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "vocabulary_preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "favorite_words": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "overused_words_to_avoid": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "jargon_tolerance": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        }
+      }
+    },
+    "punctuation_style": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uses_em_dash": { "type": "boolean" },
+        "uses_parentheses": { "type": "boolean" },
+        "uses_emoji": { "type": "boolean" },
+        "uses_exclamation": { "type": "string", "enum": ["rare", "sometimes", "often"] }
+      }
+    },
+    "cta_style": {
+      "type": "string",
+      "enum": ["soft", "direct", "question_based", "minimal"]
+    },
+    "storytelling_tendency": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "certainty_level": {
+      "type": "string",
+      "enum": ["hedged", "balanced", "assertive"]
+    },
+    "reading_level_target": {
+      "type": "string",
+      "enum": ["very_simple", "simple", "general", "advanced"]
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}
