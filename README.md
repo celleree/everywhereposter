@@ -1,6 +1,6 @@
 # Publish Everywhere
 
-A Docker Compose setup for running Postiz under the `publish-everywhere` project name.
+A single-repo Docker Compose deployment for running Publish Everywhere with the app source tracked in `postiz-app/`.
 
 ## Watch the Tutorial for docker-compose install:
 [https://m.youtube.com/watch?v=A6CjAmJOWvA&t=5s](https://m.youtube.com/watch?v=A6CjAmJOWvA&t=5s)
@@ -30,19 +30,37 @@ The docker containers for Postiz are entirely configured with environment variab
 There is a [configuration reference](/configuration/reference) page with a list
 of configuration settings.
 
+Repo layout:
+```
+publish-everywhere/
+├── docker-compose.yaml
+├── docker-compose.frontend-overlay.yaml
+├── start-postiz.sh
+├── nginx/
+├── site/
+└── postiz-app/
+```
+
 Setup:
 ```
 git clone https://github.com/celleree/publish-everywhere
+cd publish-everywhere
 ```
 
 Then run:
 ```
-docker compose up
+docker compose up --build
 ```
 
 Wait for it to load:
 
 Open your website on https://publish-everywhere.halowebsites.com
+
+Fresh clone note:
+
+- This repo is now self-contained. You do not need a sibling `../postiz-app-upstream` checkout.
+- The main app image is built from `./postiz-app` via `Dockerfile.dev`.
+- If you use the standalone frontend overlay, it also builds from the same in-repo `./postiz-app` source.
 
 ## Multi-Account Support
 
@@ -121,7 +139,10 @@ ChatGPT note:
 ```yaml
 services:
   postiz:
-    image: ghcr.io/gitroomhq/postiz-app:latest
+    image: publish-everywhere/postiz-app:custom
+    build:
+      context: ./postiz-app
+      dockerfile: Dockerfile.dev
     container_name: postiz
     restart: always
     environment:

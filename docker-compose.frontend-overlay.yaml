@@ -1,6 +1,9 @@
 services:
   postiz-frontend:
-    image: ghcr.io/gitroomhq/postiz-app:latest
+    image: publish-everywhere/postiz-app-frontend:custom
+    build:
+      context: ./postiz-app
+      dockerfile: Dockerfile.dev
     container_name: postiz-frontend
     restart: unless-stopped
     command: ["/bin/sh", "-lc", "cd /app/apps/frontend && pnpm start"]

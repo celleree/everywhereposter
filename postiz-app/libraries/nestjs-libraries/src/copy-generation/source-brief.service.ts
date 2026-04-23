@@ -42,6 +42,15 @@ export interface SourceBriefResult {
 }
 
 const MAX_AUTO_TRANSCRIBE_BYTES = 25 * 1024 * 1024;
+const DEFAULT_VOICE_PROFILE: VoiceProfileSnapshot = {
+  sentenceLength: 'mixed',
+  lineBreakHabit: 'moderate',
+  ctaStyle: 'invite',
+  vocabularyTendencies: [],
+  tabooPhrases: [],
+  preferredOpenings: [],
+  confidence: 0.35,
+};
 
 @Injectable()
 export class SourceBriefService {
@@ -154,7 +163,7 @@ export class SourceBriefService {
       transcriptFacts = transcriptInsights.facts || [];
       transcriptUnknowns = transcriptInsights.unknowns || [];
       coreMessage = transcriptInsights.coreMessage || coreMessage;
-      voiceProfile = transcriptInsights.voiceProfile;
+      voiceProfile = this.normalizeVoiceProfile(transcriptInsights.voiceProfile);
       sourceConfidenceParts.push(transcriptInsights.sourceConfidence || 0.7);
 
       if (
@@ -286,5 +295,43 @@ export class SourceBriefService {
 
   private clampConfidence(value: number) {
     return Math.max(0.1, Math.min(0.95, Number(value.toFixed(2))));
+  }
+
+  private normalizeVoiceProfile(
+    profile?: Partial<VoiceProfileSnapshot>
+  ): VoiceProfileSnapshot | undefined {
+    if (!profile) {
+      return undefined;
+    }
+
+    return {
+      sentenceLength:
+        profile.sentenceLength === 'short' || profile.sentenceLength === 'long'
+          ? profile.sentenceLength
+          : DEFAULT_VOICE_PROFILE.sentenceLength,
+      lineBreakHabit:
+        profile.lineBreakHabit === 'tight' || profile.lineBreakHabit === 'airy'
+          ? profile.lineBreakHabit
+          : DEFAULT_VOICE_PROFILE.lineBreakHabit,
+      ctaStyle:
+        profile.ctaStyle === 'none' ||
+        profile.ctaStyle === 'question' ||
+        profile.ctaStyle === 'direct'
+          ? profile.ctaStyle
+          : DEFAULT_VOICE_PROFILE.ctaStyle,
+      vocabularyTendencies: Array.isArray(profile.vocabularyTendencies)
+        ? profile.vocabularyTendencies.filter(Boolean)
+        : DEFAULT_VOICE_PROFILE.vocabularyTendencies,
+      tabooPhrases: Array.isArray(profile.tabooPhrases)
+        ? profile.tabooPhrases.filter(Boolean)
+        : DEFAULT_VOICE_PROFILE.tabooPhrases,
+      preferredOpenings: Array.isArray(profile.preferredOpenings)
+        ? profile.preferredOpenings.filter(Boolean)
+        : DEFAULT_VOICE_PROFILE.preferredOpenings,
+      confidence:
+        typeof profile.confidence === 'number'
+          ? Number(Math.max(0, Math.min(1, profile.confidence)).toFixed(2))
+          : DEFAULT_VOICE_PROFILE.confidence,
+    };
   }
 }

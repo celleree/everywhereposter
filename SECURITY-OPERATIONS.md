@@ -103,4 +103,17 @@ Expected result:
   `/root/security-snapshots/20260408T211645Z`
 - App deployment directory:
   `/opt/publish-everywhere`
+- Deploy from the single canonical repo at `/opt/publish-everywhere`; the app source now lives inside `/opt/publish-everywhere/postiz-app`.
+- Standard deploy flow:
+
+```bash
+ssh arund@46.62.170.47 'cd /opt/publish-everywhere && git pull --ff-only && docker compose up -d --build'
+```
+
+- If the standalone frontend overlay is in use, deploy with:
+
+```bash
+ssh arund@46.62.170.47 'cd /opt/publish-everywhere && git pull --ff-only && docker compose -f docker-compose.yaml -f docker-compose.frontend-overlay.yaml up -d --build'
+```
+
 - If SSH hardening ever misfires, use the Hetzner web console as the recovery path.
