@@ -2,6 +2,21 @@
 
 A single-repo Docker Compose deployment for running Publish Everywhere with the app source tracked in `postiz-app/`.
 
+## Product Planning Docs
+
+The repo now includes first-pass planning docs for the copy generation feature:
+
+- `docs/copy-generation-prd.md`
+- `docs/copy-generation-prompt-spec.md`
+- `docs/voice-profile-schema.json`
+
+These cover the recommended phase 1 build for:
+
+- generating copy from image or video uploads
+- making copy more platform-specific
+- reducing common AI-sounding phrases
+- personalizing output from transcript-based voice profiles stored in a knowledge base
+
 ## Watch the Tutorial for docker-compose install:
 [https://m.youtube.com/watch?v=A6CjAmJOWvA&t=5s](https://m.youtube.com/watch?v=A6CjAmJOWvA&t=5s)
 
@@ -53,7 +68,6 @@ docker compose up --build
 ```
 
 Wait for it to load:
-
 Open your website on https://publish-everywhere.halowebsites.com
 
 Fresh clone note:
