@@ -32,11 +32,20 @@ import {
   organizationId,
   postId as postIdSearchParam,
 } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
-import { AnalyticsData } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import {
+  AnalyticsData,
+  PublishedDeleteResponse,
+  PostDetails,
+  SocialProvider,
+} from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
-import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  BadBody,
+  RefreshToken,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
+import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 
 type PostWithConditionals = Post & {
   integration?: Integration;
@@ -660,7 +669,60 @@ export class PostsService {
       } catch (err) {}
     }
 
-    return { error: true };
+    return { success: true };
+  }
+
+  async deletePublishedPost(
+    orgId: string,
+    group: string,
+    forceRefresh = false
+  ) {
+    const previousPost = await this.loadPublishedUpdateTarget(
+      orgId,
+      group,
+      'deleted on the platform'
+    );
+    const integrationProvider = this.getDeleteProvider(previousPost);
+
+    await this.ensurePublishedIntegrationAccess(
+      orgId,
+      previousPost.integration,
+      integrationProvider,
+      undefined,
+      forceRefresh
+    );
+
+    try {
+      const result = await integrationProvider.deletePublished!(
+        previousPost.integration.internalId,
+        previousPost.integration.token,
+        previousPost.releaseId!,
+        previousPost.integration
+      );
+
+      const finalResult: PublishedDeleteResponse = result || {
+        status: 'deleted',
+      };
+
+      await this._postRepository.markPostsRemoteDeleted(orgId, group);
+
+      return {
+        success: true,
+        status: finalResult.status,
+      };
+    } catch (error) {
+      if (error instanceof RefreshToken) {
+        return this.deletePublishedPost(orgId, group, true);
+      }
+
+      if (error instanceof BadBody) {
+        throw new BadRequestException(
+          error.message || 'Failed to delete the published post.'
+        );
+      }
+
+      throw error;
+    }
   }
 
   async countPostsFromDay(orgId: string, date: Date) {
@@ -734,6 +796,14 @@ export class PostsService {
   async createPost(orgId: string, body: CreatePostDto): Promise<any[]> {
     const postList = [];
     for (const post of body.posts) {
+      const previousPost =
+        body.type === 'update'
+          ? await this.loadPublishedUpdateTarget(orgId, post.group)
+          : undefined;
+      const updateProvider = previousPost
+        ? this.getUpdateProvider(previousPost)
+        : undefined;
+
       const messages = (post.value || []).map((p) => p.content);
       const updateContent = !body.shortLink
         ? messages
@@ -757,7 +827,14 @@ export class PostsService {
         return [] as any[];
       }
 
-      if (body.type !== 'update') {
+      if (body.type === 'update') {
+        await this.updatePublishedPost(
+          orgId,
+          previousPost!,
+          updateProvider!,
+          posts
+        );
+      } else {
         this.startWorkflow(
           post.settings.__type.split('-')[0].toLowerCase(),
           posts[0].id,
@@ -774,6 +851,240 @@ export class PostsService {
     }
 
     return postList;
+  }
+
+  private async loadPublishedUpdateTarget(
+    orgId: string,
+    group?: string,
+    action = 'updated'
+  ): Promise<Post & { integration: Integration }> {
+    if (!group) {
+      throw new BadRequestException(
+        `The published post group is missing, so this post cannot be ${action}.`
+      );
+    }
+
+    const previousPosts = await this._postRepository.getPostsByGroup(orgId, group);
+    const previousPost = previousPosts.find((item) => !item.parentPostId);
+
+    if (!previousPost?.integration) {
+      throw new BadRequestException(
+        'The original published post could not be found.'
+      );
+    }
+
+    if (previousPost.state === 'DELETED_REMOTE') {
+      throw new BadRequestException(
+        'This post was already deleted on the platform.'
+      );
+    }
+
+    if (!previousPost.releaseId || previousPost.releaseId === 'missing') {
+      throw new BadRequestException(
+        `This published post is missing its platform ID, so it cannot be ${action}.`
+      );
+    }
+
+    return previousPost as Post & { integration: Integration };
+  }
+
+  private getUpdateProvider(
+    previousPost: Post & { integration: Integration }
+  ): SocialProvider {
+    const integrationProvider = this._integrationManager.getSocialIntegration(
+      previousPost.integration.providerIdentifier
+    );
+    const capabilities = integrationProvider.getPublishedCapabilities(
+      previousPost.integration
+    );
+
+    if (capabilities.requiresReconnect) {
+      throw new BadRequestException(
+        capabilities.reason ||
+          'Reconnect this channel to manage published posts.'
+      );
+    }
+
+    if (!integrationProvider.update || capabilities.editMode === 'none') {
+      throw new BadRequestException(
+        capabilities.reason ||
+          `${integrationProvider.name} does not support editing already-published posts yet.`
+      );
+    }
+
+    return integrationProvider;
+  }
+
+  private getDeleteProvider(
+    previousPost: Post & { integration: Integration }
+  ): SocialProvider {
+    const integrationProvider = this._integrationManager.getSocialIntegration(
+      previousPost.integration.providerIdentifier
+    );
+    const capabilities = integrationProvider.getPublishedCapabilities(
+      previousPost.integration
+    );
+
+    if (capabilities.requiresReconnect) {
+      throw new BadRequestException(
+        capabilities.reason ||
+          'Reconnect this channel to manage published posts.'
+      );
+    }
+
+    if (
+      !integrationProvider.deletePublished ||
+      !capabilities.canDeletePublished
+    ) {
+      throw new BadRequestException(
+        capabilities.reason ||
+          `${integrationProvider.name} does not support deleting already-published posts yet.`
+      );
+    }
+
+    return integrationProvider;
+  }
+
+  private async buildPostDetailsForProvider(
+    orgId: string,
+    integrationProvider: SocialProvider,
+    posts: Post[]
+  ): Promise<PostDetails[]> {
+    const newPosts = await this.updateTags(orgId, posts);
+
+    return Promise.all(
+      (newPosts || []).map(async (post) => ({
+        id: post.id,
+        message: stripHtmlValidation(
+          integrationProvider.editor,
+          post.content,
+          true,
+          false,
+          !/<\/?[a-z][\s\S]*>/i.test(post.content),
+          integrationProvider.mentionFormat
+        ),
+        settings: JSON.parse(post.settings || '{}'),
+        media: await this.updateMedia(
+          post.id,
+          JSON.parse(post.image || '[]'),
+          integrationProvider?.convertToJPEG || false
+        ),
+      }))
+    );
+  }
+
+  private async markUpdatedPostsAsFailed(posts: Post[], error: unknown) {
+    await Promise.all(
+      posts.map((post, index) =>
+        this._postRepository
+          .changeState(
+            post.id,
+            'ERROR',
+            index === 0 ? error : undefined,
+            index === 0 ? posts : undefined
+          )
+          .catch(() => undefined)
+      )
+    );
+  }
+
+  private async ensurePublishedIntegrationAccess(
+    orgId: string,
+    integration: Integration,
+    integrationProvider: SocialProvider,
+    onRefreshFailure?: () => Promise<void>,
+    forceRefresh = false
+  ) {
+    if (
+      forceRefresh ||
+      (integration.tokenExpiration &&
+        dayjs(integration.tokenExpiration).isBefore(dayjs()))
+    ) {
+      const data = await this._refreshIntegrationService.refresh(integration);
+
+      if (!data || !data.accessToken) {
+        await this._integrationService.disconnectChannel(orgId, integration);
+        await onRefreshFailure?.();
+        throw new BadRequestException(
+          'Token expired or invalid, please reconnect this channel.'
+        );
+      }
+
+      integration.token = data.accessToken;
+
+      if (integrationProvider.refreshWait) {
+        await timer(10000);
+      }
+    }
+  }
+
+  private async updatePublishedPost(
+    orgId: string,
+    previousPost: Post & { integration: Integration },
+    integrationProvider: SocialProvider,
+    posts: Post[],
+    forceRefresh = false
+  ): Promise<void> {
+    const integration = previousPost.integration;
+    await this.ensurePublishedIntegrationAccess(
+      orgId,
+      integration,
+      integrationProvider,
+      async () => {
+        await this.markUpdatedPostsAsFailed(
+          posts,
+          'Token expired or invalid, please reconnect this channel.'
+        );
+      },
+      forceRefresh
+    );
+
+    try {
+      const results = await integrationProvider.update!(
+        integration.internalId,
+        integration.token,
+        previousPost.releaseId!,
+        await this.buildPostDetailsForProvider(orgId, integrationProvider, posts),
+        integration
+      );
+
+      if (!results?.length) {
+        throw new BadRequestException(
+          'The platform did not return an update result.'
+        );
+      }
+
+      await Promise.all(
+        posts.map((post, index) => {
+          const result = results[index] || results[0];
+          return this._postRepository.updatePost(
+            post.id,
+            result?.postId || previousPost.releaseId!,
+            result?.releaseURL || previousPost.releaseURL || ''
+          );
+        })
+      );
+    } catch (error) {
+      if (error instanceof RefreshToken) {
+        return this.updatePublishedPost(
+          orgId,
+          previousPost,
+          integrationProvider,
+          posts,
+          true
+        );
+      }
+
+      await this.markUpdatedPostsAsFailed(posts, error);
+
+      if (error instanceof BadBody) {
+        throw new BadRequestException(
+          error.message || 'Failed to update the published post.'
+        );
+      }
+
+      throw error;
+    }
   }
 
   async separatePosts(content: string, len: number) {

@@ -5,6 +5,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { ChartSocial } from '@gitroom/frontend/components/analytics/chart-social';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { PlatformVideoGrid } from '@gitroom/frontend/components/platform-analytics/platform.video.grid';
 
 interface AnalyticsDataItem {
   label: string;
@@ -12,6 +13,13 @@ interface AnalyticsDataItem {
   average?: boolean;
   percentageChange?: number;
 }
+
+type AnalyticsIntegration = Integration & {
+  identifier: string;
+  internalId: string;
+  canListMedia?: boolean;
+  name: string;
+};
 
 const TrendIndicator: FC<{ value: number; average?: boolean }> = ({
   value,
@@ -168,7 +176,7 @@ const EmptyState: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 };
 
 export const RenderAnalytics: FC<{
-  integration: Integration;
+  integration: AnalyticsIntegration;
   date: number;
 }> = (props) => {
   const { integration, date } = props;
@@ -177,12 +185,12 @@ export const RenderAnalytics: FC<{
 
   const load = useCallback(async () => {
     setLoading(true);
-    const load = (
-      await fetch(`/analytics/${integration.id}?date=${date}`)
-    ).json();
-    setLoading(false);
-    return load;
-  }, [integration, date]);
+    try {
+      return (await fetch(`/analytics/${integration.id}?date=${date}`)).json();
+    } finally {
+      setLoading(false);
+    }
+  }, [fetch, integration.id, date]);
 
   const { data } = useSWR(`/analytics-${integration?.id}-${date}`, load, {
     refreshInterval: 0,
@@ -195,11 +203,7 @@ export const RenderAnalytics: FC<{
   });
 
   const refreshChannel = useCallback(
-    (
-        integrationData: Integration & {
-          identifier: string;
-        }
-      ) =>
+    (integrationData: AnalyticsIntegration) =>
       async () => {
         const { url } = await (
           await fetch(
@@ -211,7 +215,7 @@ export const RenderAnalytics: FC<{
         ).json();
         window.location.href = url;
       },
-    []
+    [fetch]
   );
 
   const t = useT();
@@ -237,18 +241,21 @@ export const RenderAnalytics: FC<{
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[16px]">
-      {data?.length === 0 && (
-        <EmptyState onRefresh={refreshChannel(integration as any)} />
-      )}
-      {data?.map((item: AnalyticsDataItem, index: number) => (
-        <AnalyticsCard
-          key={`analytics-${index}`}
-          item={item}
-          total={totals[index]}
-          index={index}
-        />
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[16px]">
+        {data?.length === 0 && (
+          <EmptyState onRefresh={refreshChannel(integration)} />
+        )}
+        {data?.map((item: AnalyticsDataItem, index: number) => (
+          <AnalyticsCard
+            key={`analytics-${index}`}
+            item={item}
+            total={totals[index]}
+            index={index}
+          />
+        ))}
+      </div>
+      <PlatformVideoGrid integration={integration} />
+    </>
   );
 };

@@ -110,11 +110,20 @@ export class IntegrationService {
     timezone?: number,
     customInstanceDetails?: string
   ) {
-    const uploadedPicture = picture
-      ? picture?.indexOf('imagedelivery.net') > -1
-        ? picture
-        : await this.storage.uploadSimple(picture)
-      : undefined;
+    let uploadedPicture: string | undefined;
+    if (picture) {
+      try {
+        uploadedPicture =
+          picture.indexOf('imagedelivery.net') > -1
+            ? picture
+            : await this.storage.uploadSimple(picture);
+      } catch (err) {
+        console.warn(
+          `Skipping profile picture import for ${provider} integration ${internalId}.`,
+          err
+        );
+      }
+    }
 
     return this._integrationRepository.createOrUpdateIntegration(
       additionalSettings,

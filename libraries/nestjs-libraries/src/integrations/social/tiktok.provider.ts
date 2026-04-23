@@ -1,6 +1,7 @@
 import {
   AnalyticsData,
   AuthTokenDetails,
+  HistoricalMediaPage,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -36,6 +37,18 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   editor = 'normal' as const;
   maxLength() {
     return 2000;
+  }
+
+  override getPublishedCapabilities(integration?: Integration) {
+    return this.buildPublishedCapabilities(integration, {
+      editMode: 'none',
+      canDeletePublished: false,
+      reason:
+        'TikTok published video editing and deletion are still disabled here because the current API coverage in this app does not support stable live-video mutations.',
+      constraints: [
+        'Use native TikTok tools for live video changes until this capability is implemented here.',
+      ],
+    });
   }
 
   override handleErrors(body: string):
@@ -727,6 +740,56 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     } catch (err) {
       console.error('Error fetching TikTok analytics:', err);
       return [];
+    }
+  }
+
+  async listMedia(
+    accessToken: string,
+    data: { page?: number } = {},
+    _id: string,
+    integration: Integration
+  ): Promise<HistoricalMediaPage> {
+    const page = data.page || 1;
+    const pageSize = 12;
+
+    try {
+      const videoListResponse = await this.fetch(
+        'https://open.tiktokapis.com/v2/video/list/?fields=id,cover_image_url,title,create_time',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ max_count: 50 }),
+        }
+      );
+
+      const videoListData = await videoListResponse.json();
+      const videos = videoListData?.data?.videos || [];
+      const start = (page - 1) * pageSize;
+
+      return {
+        results: videos.slice(start, start + pageSize).map((video: any) => ({
+          id: String(video.id),
+          url: integration?.profile
+            ? `https://www.tiktok.com/@${integration.profile}/video/${video.id}`
+            : `https://www.tiktok.com/video/${video.id}`,
+          thumbnail: video.cover_image_url || '',
+          name: video.title || 'TikTok video',
+          type: 'video' as const,
+          publishedAt: video.create_time
+            ? dayjs.unix(Number(video.create_time)).toISOString()
+            : undefined,
+        })),
+        pages: Math.max(1, Math.ceil(videos.length / pageSize)),
+      };
+    } catch (err) {
+      console.error('Error fetching TikTok media list:', err);
+      return {
+        results: [],
+        pages: 1,
+      };
     }
   }
 

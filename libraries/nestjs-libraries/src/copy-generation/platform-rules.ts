@@ -1,0 +1,149 @@
+export const COPY_PLATFORMS = [
+  'linkedin',
+  'x',
+  'threads',
+  'facebook',
+  'bluesky',
+] as const;
+
+export const COPY_TARGET_LENGTHS = ['short', 'medium', 'long'] as const;
+export const LINE_BREAK_BEHAVIORS = ['tight', 'moderate', 'airy'] as const;
+export const HASHTAG_BEHAVIORS = ['none', 'sparse', 'end_only'] as const;
+export const PLATFORM_CTA_STYLES = [
+  'none',
+  'question',
+  'invite',
+  'direct',
+] as const;
+
+export type CopyPlatform = typeof COPY_PLATFORMS[number];
+export type CopyTargetLength = typeof COPY_TARGET_LENGTHS[number];
+export type LineBreakBehavior = typeof LINE_BREAK_BEHAVIORS[number];
+export type HashtagBehavior = typeof HASHTAG_BEHAVIORS[number];
+export type PlatformCtaStyle = typeof PLATFORM_CTA_STYLES[number];
+
+export const X_MAX_CHARACTERS = 280;
+
+export interface PlatformRule {
+  hardCap: number;
+  targetCharacters: Record<CopyTargetLength, number>;
+  defaultTargetLength: CopyTargetLength;
+  lineBreaks: LineBreakBehavior;
+  hashtags: HashtagBehavior;
+  ctaStyle: PlatformCtaStyle;
+  tone: string;
+  nativeFeel: string;
+}
+
+export interface PlatformRuleOverrides {
+  hardCap?: number;
+  targetLength?: CopyTargetLength;
+  lineBreaks?: LineBreakBehavior;
+  hashtags?: HashtagBehavior;
+  ctaStyle?: PlatformCtaStyle;
+}
+
+export const PLATFORM_RULES: Record<CopyPlatform, PlatformRule> = {
+  linkedin: {
+    hardCap: 3000,
+    targetCharacters: {
+      short: 700,
+      medium: 950,
+      long: 1200,
+    },
+    defaultTargetLength: 'medium',
+    lineBreaks: 'airy',
+    hashtags: 'end_only',
+    ctaStyle: 'invite',
+    tone: 'operator detail, concrete lesson, measured confidence, no broetry',
+    nativeFeel:
+      'Write like someone sharing a grounded professional takeaway with specifics, not a motivational thread.',
+  },
+  x: {
+    hardCap: X_MAX_CHARACTERS,
+    targetCharacters: {
+      short: 180,
+      medium: 220,
+      long: 240,
+    },
+    defaultTargetLength: 'medium',
+    lineBreaks: 'tight',
+    hashtags: 'none',
+    ctaStyle: 'question',
+    tone: 'sharp, immediate, concrete, high signal',
+    nativeFeel:
+      'One clear point with immediate payoff. No mini-blog, no generic creator cadence.',
+  },
+  threads: {
+    hardCap: 500,
+    targetCharacters: {
+      short: 220,
+      medium: 320,
+      long: 450,
+    },
+    defaultTargetLength: 'medium',
+    lineBreaks: 'moderate',
+    hashtags: 'none',
+    ctaStyle: 'invite',
+    tone: 'personal, current, reflective, specific',
+    nativeFeel:
+      'More conversational and present-tense than X, with room for a personal observation.',
+  },
+  facebook: {
+    hardCap: 63206,
+    targetCharacters: {
+      short: 180,
+      medium: 350,
+      long: 600,
+    },
+    defaultTargetLength: 'medium',
+    lineBreaks: 'moderate',
+    hashtags: 'none',
+    ctaStyle: 'invite',
+    tone: 'context-forward, approachable, story-driven',
+    nativeFeel:
+      'Write like a real update to a community or audience, not a repackaged thread.',
+  },
+  bluesky: {
+    hardCap: 300,
+    targetCharacters: {
+      short: 120,
+      medium: 180,
+      long: 260,
+    },
+    defaultTargetLength: 'medium',
+    lineBreaks: 'tight',
+    hashtags: 'none',
+    ctaStyle: 'question',
+    tone: 'internet-native, lightly opinionated, specific',
+    nativeFeel:
+      'Feel native to Bluesky: concise, pointed, and not corporate or overpolished.',
+  },
+};
+
+export const resolvePlatformRule = (
+  platform: CopyPlatform,
+  overrides?: PlatformRuleOverrides
+) => {
+  const rule = PLATFORM_RULES[platform];
+  const targetLength = overrides?.targetLength || rule.defaultTargetLength;
+
+  return {
+    name: platform,
+    hardCap: overrides?.hardCap || rule.hardCap,
+    targetLength,
+    targetCharacters: rule.targetCharacters[targetLength],
+    lineBreaks: overrides?.lineBreaks || rule.lineBreaks,
+    hashtags: overrides?.hashtags || rule.hashtags,
+    ctaStyle: overrides?.ctaStyle || rule.ctaStyle,
+    tone: rule.tone,
+    nativeFeel: rule.nativeFeel,
+  };
+};
+
+export const mapIntegrationIdentifierToCopyPlatform = (
+  identifier: string
+): CopyPlatform | null => {
+  const rootIdentifier = identifier.split('-')[0] as CopyPlatform;
+  return COPY_PLATFORMS.includes(rootIdentifier) ? rootIdentifier : null;
+};

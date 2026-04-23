@@ -1,6 +1,7 @@
 import {
   AnalyticsData,
   AuthTokenDetails,
+  HistoricalMediaPage,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -38,6 +39,18 @@ export class InstagramProvider
   dto = InstagramDto;
   maxLength() {
     return 2200;
+  }
+
+  override getPublishedCapabilities(integration?: Integration) {
+    return this.buildPublishedCapabilities(integration, {
+      editMode: 'none',
+      canDeletePublished: false,
+      reason:
+        'Instagram published post editing and deletion are still disabled until we verify stable support for the exact media types this app publishes.',
+      constraints: [
+        'Use native Instagram tools for live post changes until this capability is implemented here.',
+      ],
+    });
   }
 
   async refreshToken(refresh_token: string): Promise<AuthTokenDetails> {
@@ -849,6 +862,54 @@ export class InstagramProvider
     );
 
     return analytics;
+  }
+
+  async listMedia(
+    accessToken: string,
+    data: { page?: number } = {},
+    id: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<HistoricalMediaPage> {
+    const page = data.page || 1;
+    const pageSize = 12;
+
+    try {
+      const { data: media } = await (
+        await this.fetch(
+          `https://${type}/v21.0/${id}/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp&limit=50&access_token=${accessToken}`
+        )
+      ).json();
+
+      const videos = (media || [])
+        .filter((item: any) =>
+          ['VIDEO', 'REELS'].includes(String(item.media_type || '').toUpperCase())
+        )
+        .map((item: any) => ({
+          id: String(item.id),
+          url: item.permalink || '',
+          thumbnail: item.thumbnail_url || item.media_url || '',
+          name: item.caption || 'Instagram video',
+          type: 'video' as const,
+          publishedAt: item.timestamp || undefined,
+        }));
+
+      const start = (page - 1) * pageSize;
+
+      return {
+        results: videos.slice(start, start + pageSize),
+        pages: Math.max(1, Math.ceil(videos.length / pageSize)),
+      };
+    } catch (err) {
+      console.error(
+        `Error fetching Instagram media list for ${integration.providerIdentifier}:`,
+        err
+      );
+      return {
+        results: [],
+        pages: 1,
+      };
+    }
   }
 
   music(accessToken: string, data: { q: string }) {

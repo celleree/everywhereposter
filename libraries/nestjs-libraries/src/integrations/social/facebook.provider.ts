@@ -1,6 +1,7 @@
 import {
   AnalyticsData,
   AuthTokenDetails,
+  HistoricalMediaPage,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -30,6 +31,18 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     return 63206;
   }
   dto = FacebookDto;
+
+  override getPublishedCapabilities(integration?: Integration) {
+    return this.buildPublishedCapabilities(integration, {
+      editMode: 'none',
+      canDeletePublished: false,
+      reason:
+        'Facebook Page published post editing and deletion are still disabled until we verify stable support for the exact post types this app publishes.',
+      constraints: [
+        'Use native Facebook tools for live post changes until this capability is implemented here.',
+      ],
+    });
+  }
 
   override handleErrors(
     body: string,
@@ -578,6 +591,45 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         })),
       })) || []
     );
+  }
+
+  async listMedia(
+    accessToken: string,
+    data: { page?: number } = {},
+    id: string
+  ): Promise<HistoricalMediaPage> {
+    const page = data.page || 1;
+    const pageSize = 12;
+
+    try {
+      const { data: videos } = await (
+        await this.fetch(
+          `https://graph.facebook.com/v20.0/${id}/videos?fields=id,description,permalink_url,created_time,thumbnails&limit=50&access_token=${accessToken}`
+        )
+      ).json();
+
+      const items = (videos || []).map((video: any) => ({
+        id: String(video.id),
+        url: video.permalink_url || '',
+        thumbnail: video.thumbnails?.data?.[0]?.uri || '',
+        name: video.description || 'Facebook video',
+        type: 'video' as const,
+        publishedAt: video.created_time || undefined,
+      }));
+
+      const start = (page - 1) * pageSize;
+
+      return {
+        results: items.slice(start, start + pageSize),
+        pages: Math.max(1, Math.ceil(items.length / pageSize)),
+      };
+    } catch (err) {
+      console.error('Error fetching Facebook media list:', err);
+      return {
+        results: [],
+        pages: 1,
+      };
+    }
   }
 
   async postAnalytics(

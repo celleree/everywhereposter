@@ -56,6 +56,33 @@ export interface AnalyticsData {
   percentageChange: number;
 }
 
+export interface HistoricalMediaItem {
+  id: string;
+  url: string;
+  thumbnail?: string;
+  name: string;
+  type: 'video' | 'image';
+  publishedAt?: string;
+}
+
+export interface HistoricalMediaPage {
+  results: HistoricalMediaItem[];
+  pages: number;
+}
+
+export type PublishedEditMode = 'none' | 'metadata';
+
+export type PublishedPostCapabilities = {
+  editMode: PublishedEditMode;
+  canDeletePublished: boolean;
+  reason?: string;
+  requiresReconnect: boolean;
+  constraints?: string[];
+};
+
+export type PublishedDeleteResponse = {
+  status: 'deleted' | 'already_deleted';
+};
 
 export type GenerateAuthUrlResponse = {
   url: string;
@@ -89,6 +116,14 @@ export interface ISocialMediaIntegration {
     integration: Integration
   ): Promise<PostResponse[]>; // Schedules a new post
 
+  update?(
+    id: string,
+    accessToken: string,
+    releaseId: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]>; // Updates an existing published post
+
   comment?(
     id: string,
     postId: string,
@@ -97,6 +132,13 @@ export interface ISocialMediaIntegration {
     postDetails: PostDetails[],
     integration: Integration
   ): Promise<PostResponse[]>; // Schedules a new post
+
+  deletePublished?(
+    id: string,
+    accessToken: string,
+    releaseId: string,
+    integration: Integration
+  ): Promise<PublishedDeleteResponse>; // Deletes an existing published post
 }
 
 export type PostResponse = {
@@ -179,4 +221,13 @@ export interface SocialProvider
     accessToken: string,
     data: any
   ): Promise<FetchPageInformationResult>;
+  getPublishedCapabilities(
+    integration?: Integration
+  ): PublishedPostCapabilities;
+  listMedia?(
+    accessToken: string,
+    data: { page?: number },
+    id: string,
+    integration: Integration
+  ): Promise<HistoricalMediaPage>;
 }

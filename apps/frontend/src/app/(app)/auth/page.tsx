@@ -2,13 +2,13 @@ import { internalFetch } from '@gitroom/helpers/utils/internal.fetch';
 export const dynamic = 'force-dynamic';
 import { Register } from '@gitroom/frontend/components/auth/register';
 import { Metadata } from 'next';
-import { isGeneralServerSide } from '@gitroom/helpers/utils/is.general.server.side';
 import Link from 'next/link';
 import { getT } from '@gitroom/react/translation/get.translation.service.backend';
 import { LoginWithOidc } from '@gitroom/frontend/components/auth/login.with.oidc';
 export const metadata: Metadata = {
-  title: `${isGeneralServerSide() ? 'Postiz' : 'Gitroom'} Register`,
-  description: '',
+  title: 'Publish Everywhere Register',
+  description:
+    'Create your Publish Everywhere account to plan and publish social media content.',
 };
 export default async function Auth(params: {searchParams: Promise<{provider: string}>}) {
   const t = await getT();

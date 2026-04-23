@@ -24,10 +24,12 @@ import { Response } from 'express';
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 import { ShortLinkService } from '@gitroom/nestjs-libraries/short-linking/short.link.service';
 import { CreateTagDto } from '@gitroom/nestjs-libraries/dtos/posts/create.tag.dto';
+import { GenerateMediaCopyDto } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.dto';
 import {
   AuthorizationActions,
   Sections,
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
 
 @ApiTags('Posts')
 @Controller('/posts')
@@ -35,7 +37,8 @@ export class PostsController {
   constructor(
     private _postsService: PostsService,
     private _agentGraphService: AgentGraphService,
-    private _shortLinkService: ShortLinkService
+    private _shortLinkService: ShortLinkService,
+    private _copyGenerationService: CopyGenerationService
   ) {}
 
   @Get('/:id/statistics')
@@ -200,6 +203,29 @@ export class PostsController {
     }
 
     res.end();
+  }
+
+  @Post('/copy/generate')
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  async generateMediaCopy(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: GenerateMediaCopyDto,
+    @Res({ passthrough: false }) res: Response
+  ) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    for await (const event of this._copyGenerationService.generate(org.id, body)) {
+      res.write(JSON.stringify(event) + '\n');
+    }
+
+    res.end();
+  }
+
+  @Delete('/:group/published')
+  deletePublishedPost(
+    @GetOrgFromRequest() org: Organization,
+    @Param('group') group: string
+  ) {
+    return this._postsService.deletePublishedPost(org.id, group);
   }
 
   @Delete('/:group')

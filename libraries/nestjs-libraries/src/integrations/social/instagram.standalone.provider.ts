@@ -1,5 +1,6 @@
 import {
   AuthTokenDetails,
+  HistoricalMediaPage,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -37,6 +38,18 @@ export class InstagramStandaloneProvider
   editor = 'normal' as const;
   maxLength() {
     return 2200;
+  }
+
+  override getPublishedCapabilities(integration?: Integration) {
+    return this.buildPublishedCapabilities(integration, {
+      editMode: 'none',
+      canDeletePublished: false,
+      reason:
+        'Instagram standalone published post editing and deletion are still disabled until we verify stable support for the exact media types this app publishes.',
+      constraints: [
+        'Use native Instagram tools for live post changes until this capability is implemented here.',
+      ],
+    });
   }
 
   public override handleErrors(
@@ -191,6 +204,21 @@ export class InstagramStandaloneProvider
       id,
       accessToken,
       date,
+      'graph.instagram.com'
+    );
+  }
+
+  async listMedia(
+    accessToken: string,
+    data: { page?: number } = {},
+    id: string,
+    integration: Integration
+  ): Promise<HistoricalMediaPage> {
+    return instagramProvider.listMedia(
+      accessToken,
+      data,
+      id,
+      integration,
       'graph.instagram.com'
     );
   }

@@ -23,6 +23,36 @@ interface SuccessState {
   message: string;
 }
 
+function firstValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return typeof value[0] === 'string' ? value[0] : '';
+  }
+
+  return typeof value === 'string' ? value : '';
+}
+
+function decodeProviderMessage(value: string) {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    return value.replace(/\+/g, ' ');
+  }
+}
+
+function getProviderErrorMessage(params: Record<string, unknown>) {
+  const description =
+    firstValue(params.error_description) ||
+    firstValue(params.errorMessage) ||
+    firstValue(params.message);
+  const error = firstValue(params.error);
+
+  if (!description && !error) {
+    return '';
+  }
+
+  return decodeProviderMessage(description || error);
+}
+
 export const ContinueIntegration: FC<{
   provider: string;
   searchParams: any;
@@ -96,6 +126,13 @@ export const ContinueIntegration: FC<{
 
   useEffect(() => {
     (async () => {
+      const providerErrorMessage = getProviderErrorMessage(modifiedParams);
+      if (providerErrorMessage) {
+        setErrorMessage(providerErrorMessage);
+        setError(true);
+        return;
+      }
+
       const timezone = String(dayjs.tz().utcOffset());
 
       // Try public endpoint first (handles both public and fallback scenarios)

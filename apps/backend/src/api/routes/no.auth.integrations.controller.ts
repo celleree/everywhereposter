@@ -44,7 +44,13 @@ export class NoAuthIntegrationsController {
   @UseFilters(new NotEnoughScopesFilter())
   async connectSocialMedia(
     @Param('integration') integration: string,
-    @Body() body: ConnectIntegrationDto
+    @Body()
+    body: ConnectIntegrationDto & {
+      error?: string;
+      error_description?: string;
+      errorMessage?: string;
+      message?: string;
+    }
   ) {
     if (
       !this._integrationManager
@@ -56,6 +62,18 @@ export class NoAuthIntegrationsController {
 
     const integrationProvider =
       this._integrationManager.getSocialIntegration(integration);
+
+    const providerError =
+      body.error_description || body.errorMessage || body.message || body.error;
+    if (providerError) {
+      console.error(`OAuth callback error for ${integration}`, {
+        error: body.error,
+        error_description: body.error_description,
+        message: body.message,
+        state: body.state,
+      });
+      throw new NotEnoughScopes(providerError);
+    }
 
     const getCodeVerifier = integrationProvider.customFields
       ? 'none'
@@ -150,7 +168,8 @@ export class NoAuthIntegrationsController {
         }
 
         return res(auth);
-      } catch (err) {
+      } catch (err: any) {
+        console.error(`Authentication failed for ${integration}`, err);
         if (err instanceof NotEnoughScopes) {
           return res({
             error: err.message,
@@ -164,7 +183,10 @@ export class NoAuthIntegrationsController {
         }
 
         return res({
-          error: 'Authentication failed',
+          error:
+            typeof err?.message === 'string' && err.message
+              ? err.message
+              : 'Authentication failed',
           accessToken: '',
           id: '',
           name: '',

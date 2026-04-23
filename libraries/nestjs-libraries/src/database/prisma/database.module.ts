@@ -40,6 +40,12 @@ import { OAuthRepository } from '@gitroom/nestjs-libraries/database/prisma/oauth
 import { OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { AnnouncementsRepository } from '@gitroom/nestjs-libraries/database/prisma/announcements/announcements.repository';
 import { AnnouncementsService } from '@gitroom/nestjs-libraries/database/prisma/announcements/announcements.service';
+import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.model.service';
+import { SourceBriefService } from '@gitroom/nestjs-libraries/copy-generation/source-brief.service';
+import { AntiGenericService } from '@gitroom/nestjs-libraries/copy-generation/anti-generic.service';
+import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
+import { KnowledgeBaseRepository } from '@gitroom/nestjs-libraries/database/prisma/knowledge-base/knowledge-base.repository';
+import { KnowledgeBaseService } from '@gitroom/nestjs-libraries/database/prisma/knowledge-base/knowledge-base.service';
 
 @Global()
 @Module({
@@ -89,6 +95,12 @@ import { AnnouncementsService } from '@gitroom/nestjs-libraries/database/prisma/
     VideoManager,
     AnnouncementsRepository,
     AnnouncementsService,
+    CopyGenerationModelService,
+    SourceBriefService,
+    AntiGenericService,
+    CopyGenerationService,
+    KnowledgeBaseRepository,
+    KnowledgeBaseService,
   ],
   get exports() {
     return this.providers;

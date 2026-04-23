@@ -1,6 +1,7 @@
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Integration } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
+import { PublishedPostCapabilities } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 
 export class RefreshToken extends ApplicationFailure {
   constructor(identifier: string, json: string, body: BodyInit, message = '') {
@@ -71,6 +72,49 @@ export abstract class SocialAbstract {
     return { none: true };
   }
 
+  protected buildPublishedCapabilities(
+    integration?: Integration,
+    overrides: Partial<PublishedPostCapabilities> = {}
+  ): PublishedPostCapabilities {
+    const name = (this as any).name || 'This platform';
+    const hasUpdate = typeof (this as any).update === 'function';
+    const hasDeletePublished =
+      typeof (this as any).deletePublished === 'function';
+
+    const capabilities: PublishedPostCapabilities = {
+      editMode: hasUpdate ? 'metadata' : 'none',
+      canDeletePublished: hasDeletePublished,
+      reason: undefined,
+      requiresReconnect: !!integration?.refreshNeeded,
+      constraints: [],
+      ...overrides,
+    };
+
+    if (!capabilities.reason) {
+      if (capabilities.requiresReconnect) {
+        capabilities.reason =
+          'Reconnect this channel to manage published posts.';
+      } else if (
+        capabilities.editMode === 'none' &&
+        !capabilities.canDeletePublished
+      ) {
+        capabilities.reason = `${name} does not support editing or deleting published posts yet.`;
+      } else if (capabilities.editMode === 'none') {
+        capabilities.reason = `${name} only supports deleting published posts right now.`;
+      } else if (!capabilities.canDeletePublished) {
+        capabilities.reason = `${name} supports editing published post metadata, but not deleting the live post yet.`;
+      }
+    }
+
+    return capabilities;
+  }
+
+  public getPublishedCapabilities(
+    integration?: Integration
+  ): PublishedPostCapabilities {
+    return this.buildPublishedCapabilities(integration);
+  }
+
   async runInConcurrent<T>(
     func: (...args: any[]) => Promise<T>,
     ignoreConcurrency?: boolean
@@ -107,7 +151,11 @@ export abstract class SocialAbstract {
   ): Promise<Response> {
     const request = await fetch(url, options);
 
-    if (request.status === 200 || request.status === 201) {
+    if (
+      request.status === 200 ||
+      request.status === 201 ||
+      request.status === 204
+    ) {
       return request;
     }
 
@@ -172,21 +220,22 @@ export abstract class SocialAbstract {
     );
   }
 
-  checkScopes(required: string[], got: string | string[]) {
-    if (Array.isArray(got)) {
-      if (!required.every((scope) => got.includes(scope))) {
-        throw new NotEnoughScopes();
-      }
+  checkScopes(required: string[], got?: string | string[]) {
+    const gotArray = Array.isArray(got)
+      ? got
+      : typeof got === 'string'
+      ? decodeURIComponent(got).split(got.indexOf(',') > -1 ? ',' : ' ')
+      : [];
 
-      return true;
-    }
+    const normalizedScopes = gotArray.filter((scope) => !!scope);
+    const missingScopes = required.filter(
+      (scope) => !normalizedScopes.includes(scope)
+    );
 
-    const newGot = decodeURIComponent(got);
-
-    const splitType = newGot.indexOf(',') > -1 ? ',' : ' ';
-    const gotArray = newGot.split(splitType);
-    if (!required.every((scope) => gotArray.includes(scope))) {
-      throw new NotEnoughScopes();
+    if (missingScopes.length) {
+      throw new NotEnoughScopes(
+        `Missing required permissions: ${missingScopes.join(', ')}`
+      );
     }
 
     return true;

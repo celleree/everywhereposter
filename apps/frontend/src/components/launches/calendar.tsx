@@ -195,12 +195,19 @@ const usePostActions = (onMutate?: () => void) => {
 
   const deletePost = useCallback(
     (post: any) => async () => {
+      const isPublishedPost =
+        post.state === 'PUBLISHED' || post.state === 'DELETED_REMOTE';
       if (
         !(await deleteDialog(
-          t(
-            'are_you_sure_you_want_to_delete_post',
-            'Are you sure you want to delete post?'
-          )
+          isPublishedPost
+            ? t(
+                'are_you_sure_you_want_to_remove_this_post_from_publish_everywhere',
+                'Are you sure you want to remove this post from Publish Everywhere? This does not change the live platform post.'
+              )
+            : t(
+                'are_you_sure_you_want_to_delete_post',
+                'Are you sure you want to delete post?'
+              )
         ))
       ) {
         return;
@@ -211,7 +218,12 @@ const usePostActions = (onMutate?: () => void) => {
       });
 
       toaster.show(
-        t('post_deleted_successfully', 'Post deleted successfully'),
+        isPublishedPost
+          ? t(
+              'post_removed_successfully',
+              'Post removed from Publish Everywhere successfully'
+            )
+          : t('post_deleted_successfully', 'Post deleted successfully'),
         'success'
       );
 
@@ -1005,12 +1017,14 @@ const CalendarItem: FC<{
     missingRelease,
   } = props;
   const { disableXAnalytics } = useVariables();
+  const isRemoteDeleted = post.state === 'DELETED_REMOTE';
   const preview = useCallback(() => {
     window.open(`/p/` + post.id + '?share=true', '_blank');
   }, [post]);
   const [{ opacity }, dragRef] = useDrag(
     () => ({
       type: 'post',
+      canDrag: !isBeforeNow && !isRemoteDeleted,
       item: {
         id: post.id,
         interval: !!post.intervalInDays,
@@ -1029,7 +1043,8 @@ const CalendarItem: FC<{
       className={clsx(
         'w-full flex h-full flex-1 flex-col group',
         'relative',
-        state === 'ERROR' && 'rounded-[10px] ring-2 ring-red-500'
+        state === 'ERROR' && 'rounded-[10px] ring-2 ring-red-500',
+        isRemoteDeleted && 'rounded-[10px] ring-2 ring-[#FF8A5C]/70'
       )}
       style={{
         opacity,
@@ -1089,7 +1104,9 @@ const CalendarItem: FC<{
         >
           <Preview />
         </div>{' '}
-        {((post.integration.providerIdentifier === 'x' && disableXAnalytics) || !post.releaseId) ? (
+        {isRemoteDeleted ||
+        (post.integration.providerIdentifier === 'x' && disableXAnalytics) ||
+        !post.releaseId ? (
           <></>
         ) : post.releaseId === 'missing' && missingRelease ? (
           <div
@@ -1121,15 +1138,22 @@ const CalendarItem: FC<{
           )}
           onClick={deletePost}
         >
-          <DeletePost />
+          <DeletePost
+            label={
+              isRemoteDeleted || post.state === 'PUBLISHED'
+                ? t('remove_from_app', 'Remove from app')
+                : t('delete_post', 'Delete Post')
+            }
+          />
         </div>
       </div>
       <div
-        onClick={editPost}
+        onClick={isRemoteDeleted ? undefined : editPost}
         className={clsx(
           'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor',
           'relative',
-          isBeforeNow && '!grayscale'
+          isBeforeNow && '!grayscale',
+          isRemoteDeleted && 'cursor-default'
         )}
       >
         <div className={clsx('relative min-w-[20px]')}>
@@ -1145,6 +1169,9 @@ const CalendarItem: FC<{
         <div className="w-full flex-1 flex flex-col min-h-[40px]">
           <div className="text-start">
             {state === 'DRAFT' ? t('draft', 'Draft') + ': ' : ''}
+            {isRemoteDeleted
+              ? t('deleted_on_platform', 'Deleted on platform') + ': '
+              : ''}
           </div>
             <div className="w-full relative">
               <div className="absolute top-0 start-0 w-full text-ellipsis break-words line-clamp-1 text-start">
@@ -1241,7 +1268,9 @@ export const Statistics = () => {
   );
 };
 
-export const DeletePost = () => {
+export const DeletePost: FC<{
+  label?: string;
+}> = ({ label }) => {
   const t = useT();
   return (
     <svg
@@ -1251,7 +1280,7 @@ export const DeletePost = () => {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       data-tooltip-id="tooltip"
-      data-tooltip-content={t('delete_post', 'Delete Post')}
+      data-tooltip-content={label || t('delete_post', 'Delete Post')}
     >
       <path
         d="M15 10V18H9V10H15ZM14 4H9.9L8.9 5H6V7H18V5H15L14 4ZM17 8H7V18C7 19.1 7.9 20 9 20H15C16.1 20 17 19.1 17 18V8Z"

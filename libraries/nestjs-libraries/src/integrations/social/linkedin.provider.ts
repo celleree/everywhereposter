@@ -1,5 +1,6 @@
 import {
   AuthTokenDetails,
+  PublishedDeleteResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -8,7 +9,12 @@ import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import sharp from 'sharp';
 import { lookup } from 'mime-types';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  BadBody,
+  NotEnoughScopes,
+  RefreshToken,
+  SocialAbstract,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { Integration } from '@prisma/client';
 import { PostPlug } from '@gitroom/helpers/decorators/post.plug';
 import { LinkedinDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/linkedin.dto';
@@ -29,16 +35,23 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     'openid',
     'profile',
     'w_member_social',
-    'r_basicprofile',
-    'rw_organization_admin',
-    'w_organization_social',
-    'r_organization_social',
   ];
   override maxConcurrentJob = 2; // LinkedIn has professional posting limits
   refreshWait = true;
   editor = 'normal' as const;
   maxLength() {
     return 3000;
+  }
+
+  override getPublishedCapabilities(integration?: Integration) {
+    return this.buildPublishedCapabilities(integration, {
+      editMode: 'metadata',
+      canDeletePublished: true,
+      constraints: [
+        'LinkedIn published post edits are limited to supported metadata such as commentary.',
+        'Replacing uploaded video, image, or document assets is not supported.',
+      ],
+    });
   }
 
   override handleErrors(
@@ -63,45 +76,130 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     return undefined;
   }
 
+  protected getLinkedInErrorMessage(payload: any, fallback: string) {
+    if (!payload || typeof payload !== 'object') {
+      return fallback;
+    }
+
+    const values = [
+      payload.error_description,
+      payload.error,
+      payload.message,
+    ].filter((value): value is string => typeof value === 'string' && !!value);
+
+    const message = [...new Set(values)].join(': ') || fallback;
+
+    return typeof payload.serviceErrorCode !== 'undefined'
+      ? `${message} (serviceErrorCode: ${payload.serviceErrorCode})`
+      : message;
+  }
+
+  protected async getLinkedInJson(response: Response, context: string) {
+    const text = await response.text();
+    let payload: any = {};
+
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = {};
+    }
+
+    if (!response.ok || payload?.error || payload?.error_description) {
+      throw new NotEnoughScopes(
+        this.getLinkedInErrorMessage(
+          payload,
+          `${context} failed with status ${response.status}`
+        )
+      );
+    }
+
+    return payload;
+  }
+
+  protected async getLinkedInToken(
+    body: URLSearchParams,
+    grantType: 'authorization_code' | 'refresh_token'
+  ) {
+    const response = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+    });
+
+    return this.getLinkedInJson(
+      response,
+      grantType === 'refresh_token'
+        ? 'LinkedIn token refresh'
+        : 'LinkedIn token exchange'
+    );
+  }
+
+  protected async getLinkedInUserInfo(accessToken: string) {
+    const {
+      name,
+      sub: id,
+      picture,
+    } = await this.getLinkedInJson(
+      await fetch('https://api.linkedin.com/v2/userinfo', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }),
+      'LinkedIn user info'
+    );
+
+    if (!id) {
+      throw new NotEnoughScopes('LinkedIn did not return a user id');
+    }
+
+    return {
+      id,
+      name: name || '',
+      picture: picture || '',
+    };
+  }
+
+  protected async getLinkedInVanityName(accessToken: string) {
+    try {
+      const profile = await this.getLinkedInJson(
+        await fetch('https://api.linkedin.com/v2/me', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }),
+        'LinkedIn profile'
+      );
+
+      return typeof profile?.vanityName === 'string' ? profile.vanityName : '';
+    } catch (err) {
+      console.warn('LinkedIn vanity name lookup failed', err);
+      return '';
+    }
+  }
+
   async refreshToken(refresh_token: string): Promise<AuthTokenDetails> {
     const {
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_in,
-    } = await (
-      await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token,
-          client_id: process.env.LINKEDIN_CLIENT_ID!,
-          client_secret: process.env.LINKEDIN_CLIENT_SECRET!,
-        }),
-      })
-    ).json();
+    } = await this.getLinkedInToken(
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token,
+        client_id: process.env.LINKEDIN_CLIENT_ID!,
+        client_secret: process.env.LINKEDIN_CLIENT_SECRET!,
+      }),
+      'refresh_token'
+    );
 
-    const { vanityName } = await (
-      await fetch('https://api.linkedin.com/v2/me', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
+    if (!accessToken) {
+      throw new NotEnoughScopes('LinkedIn did not return an access token');
+    }
 
-    const {
-      name,
-      sub: id,
-      picture,
-    } = await (
-      await fetch('https://api.linkedin.com/v2/userinfo', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
+    const { id, name, picture } = await this.getLinkedInUserInfo(accessToken);
+    const vanityName = await this.getLinkedInVanityName(accessToken);
 
     return {
       id,
@@ -119,7 +217,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     const codeVerifier = makeId(30);
     const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${
       process.env.LINKEDIN_CLIENT_ID
-    }&prompt=none&redirect_uri=${encodeURIComponent(
+    }&redirect_uri=${encodeURIComponent(
       `${process.env.FRONTEND_URL}/integrations/social/linkedin`
     )}&state=${state}&scope=${encodeURIComponent(this.scopes.join(' '))}`;
     return {
@@ -151,37 +249,16 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       expires_in: expiresIn,
       refresh_token: refreshToken,
       scope,
-    } = await (
-      await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body,
-      })
-    ).json();
+    } = await this.getLinkedInToken(body, 'authorization_code');
+
+    if (!accessToken) {
+      throw new NotEnoughScopes('LinkedIn did not return an access token');
+    }
 
     this.checkScopes(this.scopes, scope);
 
-    const {
-      name,
-      sub: id,
-      picture,
-    } = await (
-      await fetch('https://api.linkedin.com/v2/userinfo', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
-
-    const { vanityName } = await (
-      await fetch('https://api.linkedin.com/v2/me', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
+    const { id, name, picture } = await this.getLinkedInUserInfo(accessToken);
+    const vanityName = await this.getLinkedInVanityName(accessToken);
 
     return {
       id,
@@ -699,6 +776,112 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     );
 
     return [this.createPostResponse(commentPostId, commentPost.id, false)];
+  }
+
+  async update(
+    id: string,
+    accessToken: string,
+    releaseId: string,
+    postDetails: PostDetails<LinkedinDto>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [firstPost] = postDetails;
+    const encodedReleaseId = encodeURIComponent(releaseId);
+    const settings = firstPost.settings as LinkedinDto & {
+      contentCallToActionLabel?: string;
+      contentLandingPage?: string;
+    };
+    const patchData: Record<string, string> = {
+      commentary: this.fixText(firstPost.message),
+    };
+
+    if (settings?.contentCallToActionLabel) {
+      patchData.contentCallToActionLabel =
+        settings.contentCallToActionLabel;
+    }
+
+    if (settings?.contentLandingPage) {
+      patchData.contentLandingPage = settings.contentLandingPage;
+    }
+
+    await this.fetch(
+      `https://api.linkedin.com/rest/posts/${encodedReleaseId}`,
+      {
+        method: 'POST',
+        headers: {
+          'LinkedIn-Version': '202601',
+          'X-Restli-Protocol-Version': '2.0.0',
+          'X-RestLi-Method': 'PARTIAL_UPDATE',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          patch: {
+            $set: patchData,
+          },
+        }),
+      },
+      'linkedin-update'
+    );
+
+    return [this.createPostResponse(releaseId, firstPost.id, true)];
+  }
+
+  async deletePublished(
+    id: string,
+    accessToken: string,
+    releaseId: string,
+    integration: Integration
+  ): Promise<PublishedDeleteResponse> {
+    const encodedReleaseId = encodeURIComponent(releaseId);
+    const response = await fetch(
+      `https://api.linkedin.com/rest/posts/${encodedReleaseId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'LinkedIn-Version': '202601',
+          'X-Restli-Protocol-Version': '2.0.0',
+          'X-RestLi-Method': 'DELETE',
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (response.status === 204) {
+      return {
+        status: 'deleted',
+      };
+    }
+
+    const body = await response.text();
+
+    if (response.status === 404 || body.includes('NOT_FOUND')) {
+      return {
+        status: 'already_deleted',
+      };
+    }
+
+    const handledError = this.handleErrors(body);
+
+    if (
+      (response.status === 401 &&
+        (!handledError || handledError.type === 'refresh-token')) ||
+      handledError?.type === 'refresh-token'
+    ) {
+      throw new RefreshToken(
+        'linkedin-delete',
+        body,
+        '',
+        handledError?.value || ''
+      );
+    }
+
+    throw new BadBody(
+      'linkedin-delete',
+      body,
+      '',
+      handledError?.value || ''
+    );
   }
 
   @PostPlug({

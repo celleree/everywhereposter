@@ -12,7 +12,7 @@ export const Testimonial: FC<{
       {/* Header */}
       <div className="flex gap-[12px] min-w-0">
         <div className="w-[36px] h-[36px] rounded-full overflow-hidden shrink-0">
-          <SafeImage src={picture} alt={name} width={36} height={36} />
+          <SafeImage src={picture} alt="" width={36} height={36} />
         </div>
 
         <div className="flex flex-col -mt-[4px] min-w-0">

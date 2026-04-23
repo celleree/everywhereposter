@@ -1,7 +1,6 @@
 import { internalFetch } from '@gitroom/helpers/utils/internal.fetch';
 export const dynamic = 'force-dynamic';
 import { Metadata } from 'next';
-import { isGeneralServerSide } from '@gitroom/helpers/utils/is.general.server.side';
 import SafeImage from '@gitroom/react/helpers/safe.image';
 import Link from 'next/link';
 import { CommentsComponents } from '@gitroom/frontend/components/preview/comments.components';
@@ -14,8 +13,8 @@ import { RenderPreviewDateClient } from '@gitroom/frontend/components/preview/re
 
 dayjs.extend(utc);
 export const metadata: Metadata = {
-  title: `${isGeneralServerSide() ? 'Postiz' : 'Gitroom'} Preview`,
-  description: '',
+  title: 'Publish Everywhere Preview',
+  description: 'Preview a shared post from Publish Everywhere.',
 };
 export default async function Auth(
   props: {

@@ -1,6 +1,8 @@
 import {
   AnalyticsData,
   AuthTokenDetails,
+  HistoricalMediaPage,
+  PublishedDeleteResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -8,11 +10,17 @@ import {
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  BadBody,
+  RefreshToken,
+  SocialAbstract,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { capitalize, chunk } from 'lodash';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { Integration } from '@prisma/client';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+
+const THREADS_DELETE_MARKER_TITLE = 'Threads delete enabled';
 
 export class ThreadsProvider extends SocialAbstract implements SocialProvider {
   identifier = 'threads';
@@ -23,6 +31,7 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     'threads_content_publish',
     'threads_manage_replies',
     'threads_manage_insights',
+    'threads_delete',
     // 'threads_profile_discovery',
   ];
   override maxConcurrentJob = 2; // Threads has moderate rate limits
@@ -31,6 +40,22 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
   editor = 'normal' as const;
   maxLength() {
     return 500;
+  }
+
+  override getPublishedCapabilities(integration?: Integration) {
+    const hasDeleteScope = this.hasDeleteScope(integration);
+
+    return this.buildPublishedCapabilities(integration, {
+      editMode: 'none',
+      canDeletePublished: hasDeleteScope,
+      requiresReconnect: !!integration?.refreshNeeded || !hasDeleteScope,
+      reason: !hasDeleteScope
+        ? 'Reconnect this Threads channel to grant delete permissions.'
+        : 'Threads only supports deleting published posts right now.',
+      constraints: [
+        'Threads published posts can be deleted, but not edited, from this app.',
+      ],
+    });
   }
 
   override handleErrors(body: string):
@@ -73,6 +98,14 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
       expiresIn: dayjs().add(58, 'days').unix() - dayjs().unix(),
       picture: picture || '',
       username: '',
+      additionalSettings: [
+        {
+          title: THREADS_DELETE_MARKER_TITLE,
+          description: 'This Threads channel includes published-post delete permission.',
+          type: 'checkbox',
+          value: true,
+        },
+      ],
     };
   }
 
@@ -100,7 +133,7 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     code: string;
     codeVerifier: string;
     refresh?: string;
-  }) {
+  }): Promise<AuthTokenDetails> {
     const getAccessToken = await (
       await this.fetch(
         'https://graph.threads.net/oauth/access_token' +
@@ -139,7 +172,27 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
       expiresIn: dayjs().add(58, 'days').unix() - dayjs().unix(),
       picture: picture || '',
       username: username,
+      additionalSettings: [
+        {
+          title: THREADS_DELETE_MARKER_TITLE,
+          description: 'This Threads channel includes published-post delete permission.',
+          type: 'checkbox',
+          value: true,
+        },
+      ],
     };
+  }
+
+  private hasDeleteScope(integration?: Integration) {
+    try {
+      return JSON.parse(integration?.additionalSettings || '[]').some(
+        (setting: any) =>
+          setting?.title === THREADS_DELETE_MARKER_TITLE &&
+          setting?.value === true
+      );
+    } catch (error) {
+      return false;
+    }
   }
 
   private async checkLoaded(
@@ -434,6 +487,67 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     ];
   }
 
+  async deletePublished(
+    userId: string,
+    accessToken: string,
+    releaseId: string
+  ): Promise<PublishedDeleteResponse> {
+    const response = await fetch(
+      `https://graph.threads.net/v1.0/${releaseId}?access_token=${accessToken}`,
+      {
+        method: 'DELETE',
+      }
+    );
+
+    if (response.status === 200 || response.status === 204) {
+      return {
+        status: 'deleted',
+      };
+    }
+
+    const body = await response.text();
+
+    if (response.status === 404 || body.toLowerCase().includes('not found')) {
+      return {
+        status: 'already_deleted',
+      };
+    }
+
+    if (
+      response.status === 403 &&
+      (body.includes('threads_delete') || body.toLowerCase().includes('permission'))
+    ) {
+      throw new BadBody(
+        'threads-delete',
+        body,
+        '',
+        'Reconnect this Threads channel to grant delete permissions.'
+      );
+    }
+
+    const handledError = this.handleErrors(body);
+
+    if (
+      (response.status === 401 &&
+        (!handledError || handledError.type === 'refresh-token')) ||
+      handledError?.type === 'refresh-token'
+    ) {
+      throw new RefreshToken(
+        'threads-delete',
+        body,
+        '',
+        handledError?.value || ''
+      );
+    }
+
+    throw new BadBody(
+      'threads-delete',
+      body,
+      '',
+      handledError?.value || ''
+    );
+  }
+
   async analytics(
     id: string,
     accessToken: string,
@@ -460,6 +574,47 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
             })),
       })) || []
     );
+  }
+
+  async listMedia(
+    accessToken: string,
+    data: { page?: number } = {},
+    id: string
+  ): Promise<HistoricalMediaPage> {
+    const page = data.page || 1;
+    const pageSize = 12;
+
+    try {
+      const { data: media } = await (
+        await this.fetch(
+          `https://graph.threads.net/v1.0/${id}/threads?fields=id,media_type,media_url,thumbnail_url,permalink,text,timestamp&limit=50&access_token=${accessToken}`
+        )
+      ).json();
+
+      const videos = (media || [])
+        .filter((item: any) => String(item.media_type || '').toUpperCase() === 'VIDEO')
+        .map((item: any) => ({
+          id: String(item.id),
+          url: item.permalink || '',
+          thumbnail: item.thumbnail_url || item.media_url || '',
+          name: item.text || 'Threads video',
+          type: 'video' as const,
+          publishedAt: item.timestamp || undefined,
+        }));
+
+      const start = (page - 1) * pageSize;
+
+      return {
+        results: videos.slice(start, start + pageSize),
+        pages: Math.max(1, Math.ceil(videos.length / pageSize)),
+      };
+    } catch (err) {
+      console.error('Error fetching Threads media list:', err);
+      return {
+        results: [],
+        pages: 1,
+      };
+    }
   }
 
   @Plug({

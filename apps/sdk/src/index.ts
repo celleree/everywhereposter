@@ -92,4 +92,14 @@ export default class Postiz {
       },
     });
   }
+
+  deletePublishedPost(id: string) {
+    return fetch(`${this._path}/public/v1/posts/${id}/published`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: this._apiKey,
+      },
+    });
+  }
 }

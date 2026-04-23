@@ -28,14 +28,23 @@ export class LinkedinPageProvider
   override scopes = [
     'openid',
     'profile',
-    'w_member_social',
-    'r_basicprofile',
     'rw_organization_admin',
     'w_organization_social',
     'r_organization_social',
   ];
 
   override editor = 'normal' as const;
+
+  private getLinkedinPageClientId() {
+    return process.env.LINKEDIN_PAGE_CLIENT_ID || process.env.LINKEDIN_CLIENT_ID!;
+  }
+
+  private getLinkedinPageClientSecret() {
+    return (
+      process.env.LINKEDIN_PAGE_CLIENT_SECRET ||
+      process.env.LINKEDIN_CLIENT_SECRET!
+    );
+  }
 
   override async refreshToken(
     refresh_token: string
@@ -44,40 +53,22 @@ export class LinkedinPageProvider
       access_token: accessToken,
       expires_in,
       refresh_token: refreshToken,
-    } = await (
-      await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token,
-          client_id: process.env.LINKEDIN_CLIENT_ID!,
-          client_secret: process.env.LINKEDIN_CLIENT_SECRET!,
-        }),
-      })
-    ).json();
+    } = await this.getLinkedInToken(
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token,
+        client_id: this.getLinkedinPageClientId(),
+        client_secret: this.getLinkedinPageClientSecret(),
+      }),
+      'refresh_token'
+    );
 
-    const { vanityName } = await (
-      await fetch('https://api.linkedin.com/v2/me', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
+    if (!accessToken) {
+      throw new Error('LinkedIn did not return an access token');
+    }
 
-    const {
-      name,
-      sub: id,
-      picture,
-    } = await (
-      await fetch('https://api.linkedin.com/v2/userinfo', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
+    const { id, name, picture } = await this.getLinkedInUserInfo(accessToken);
+    const vanityName = await this.getLinkedInVanityName(accessToken);
 
     return {
       id,
@@ -123,8 +114,8 @@ export class LinkedinPageProvider
   override async generateAuthUrl() {
     const state = makeId(6);
     const codeVerifier = makeId(30);
-    const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&prompt=none&client_id=${
-      process.env.LINKEDIN_CLIENT_ID
+    const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${
+      this.getLinkedinPageClientId()
     }&redirect_uri=${encodeURIComponent(
       `${process.env.FRONTEND_URL}/integrations/social/linkedin-page`
     )}&state=${state}&scope=${encodeURIComponent(this.scopes.join(' '))}`;
@@ -213,45 +204,24 @@ export class LinkedinPageProvider
       'redirect_uri',
       `${process.env.FRONTEND_URL}/integrations/social/linkedin-page`
     );
-    body.append('client_id', process.env.LINKEDIN_CLIENT_ID!);
-    body.append('client_secret', process.env.LINKEDIN_CLIENT_SECRET!);
+    body.append('client_id', this.getLinkedinPageClientId());
+    body.append('client_secret', this.getLinkedinPageClientSecret());
 
     const {
       access_token: accessToken,
       expires_in: expiresIn,
       refresh_token: refreshToken,
       scope,
-    } = await (
-      await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body,
-      })
-    ).json();
+    } = await this.getLinkedInToken(body, 'authorization_code');
+
+    if (!accessToken) {
+      throw new Error('LinkedIn did not return an access token');
+    }
 
     this.checkScopes(this.scopes, scope);
 
-    const {
-      name,
-      sub: id,
-      picture,
-    } = await (
-      await fetch('https://api.linkedin.com/v2/userinfo', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
-
-    const { vanityName } = await (
-      await fetch('https://api.linkedin.com/v2/me', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-    ).json();
+    const { id, name, picture } = await this.getLinkedInUserInfo(accessToken);
+    const vanityName = await this.getLinkedInVanityName(accessToken);
 
     return {
       id: `p_${id}`,

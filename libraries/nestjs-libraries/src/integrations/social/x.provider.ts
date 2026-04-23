@@ -2,6 +2,7 @@ import { TweetV2, TwitterApi } from 'twitter-api-v2';
 import {
   AnalyticsData,
   AuthTokenDetails,
+  PublishedDeleteResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -9,7 +10,11 @@ import {
 import { lookup } from 'mime-types';
 import sharp from 'sharp';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  BadBody,
+  RefreshToken,
+  SocialAbstract,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { Integration } from '@prisma/client';
 import { timer } from '@gitroom/helpers/utils/timer';
@@ -36,7 +41,18 @@ export class XProvider extends SocialAbstract implements SocialProvider {
   dto = XDto;
 
   maxLength(isTwitterPremium: boolean) {
-    return isTwitterPremium ? 4000 : 200;
+    return isTwitterPremium ? 4000 : 280;
+  }
+
+  override getPublishedCapabilities(integration?: Integration) {
+    return this.buildPublishedCapabilities(integration, {
+      editMode: 'metadata',
+      canDeletePublished: true,
+      constraints: [
+        'X only allows editing eligible posts within 30 minutes of the original post and up to 5 total edits.',
+        'Editing published X posts is currently limited to text-only changes in this app.',
+      ],
+    });
   }
 
   override handleErrors(body: string):
@@ -473,6 +489,122 @@ export class XProvider extends SocialAbstract implements SocialProvider {
         status: 'posted',
       },
     ];
+  }
+
+  async update(
+    id: string,
+    accessToken: string,
+    releaseId: string,
+    postDetails: PostDetails<{
+      active_thread_finisher: boolean;
+      thread_finisher: string;
+      made_with_ai?: boolean;
+      paid_partnership?: boolean;
+    }>[]
+  ): Promise<PostResponse[]> {
+    const client = await this.getClient(accessToken);
+    const [firstPost] = postDetails;
+
+    if ((firstPost.media || []).length) {
+      throw new Error(
+        'Editing published X posts currently supports text-only updates.'
+      );
+    }
+
+    const currentPost = await this.runInConcurrent(async () =>
+      client.v2.singleTweet(releaseId, {
+        'tweet.fields': ['edit_controls'],
+      })
+    );
+
+    if (!currentPost?.data) {
+      throw new Error('The original X post could not be found.');
+    }
+
+    if (!currentPost.data.edit_controls?.is_edit_eligible) {
+      throw new Error(
+        'This X post is no longer eligible for editing. X only allows edits within 30 minutes and up to 5 total edits.'
+      );
+    }
+
+    const {
+      data: { username },
+    } = await this.runInConcurrent(async () =>
+      client.v2.me({
+        'user.fields': 'username',
+      })
+    );
+
+    const response = await this.runInConcurrent(async () =>
+      (client.v2 as any).tweet({
+        text: firstPost.message,
+        edit_options: {
+          previous_post_id: releaseId,
+        },
+        ...(firstPost?.settings?.made_with_ai
+          ? { made_with_ai: true }
+          : {}),
+        ...(firstPost?.settings?.paid_partnership
+          ? { paid_partnership: true }
+          : {}),
+      })
+    );
+
+    const updatedPostId = response?.data?.id;
+
+    if (!updatedPostId) {
+      throw new Error('X did not return the updated post ID.');
+    }
+
+    return [
+      {
+        postId: updatedPostId,
+        id: firstPost.id,
+        releaseURL: `https://twitter.com/${username}/status/${updatedPostId}`,
+        status: 'posted',
+      },
+    ];
+  }
+
+  async deletePublished(
+    id: string,
+    accessToken: string,
+    releaseId: string
+  ): Promise<PublishedDeleteResponse> {
+    const client = await this.getClient(accessToken);
+
+    try {
+      const result = await client.v2.deleteTweet(releaseId);
+
+      return {
+        status: result?.data?.deleted === false ? 'already_deleted' : 'deleted',
+      };
+    } catch (error: any) {
+      const body = JSON.stringify(error);
+
+      if (
+        error?.code === 404 ||
+        error?.data?.errors?.some((item: any) => item.status === 404) ||
+        body.includes('"status":404') ||
+        body.includes('Resource not found')
+      ) {
+        return {
+          status: 'already_deleted',
+        };
+      }
+
+      const handledError = this.handleErrors(body);
+
+      if (handledError?.type === 'refresh-token') {
+        throw new RefreshToken('x-delete', body, '', handledError.value || '');
+      }
+
+      if (handledError?.type === 'bad-body') {
+        throw new BadBody('x-delete', body, '', handledError.value || '');
+      }
+
+      throw error;
+    }
   }
 
   private loadAllTweets = async (

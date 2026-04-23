@@ -43,6 +43,8 @@ model Organization {
   webhooks            Webhooks[]
   oauthApp            OAuthApp[]
   oauthAuthorizations OAuthAuthorization[]
+  knowledgeDocuments  KnowledgeDocument[]
+  voiceProfiles       VoiceProfile[]
 
   @@index([apiKey])
   @@index([streakSince])
@@ -113,6 +115,7 @@ model User {
   sendFailureEmails     Boolean              @default(true)
   sendStreakEmails      Boolean              @default(true)
   oauthAuthorizations   OAuthAuthorization[]
+  knowledgeDocuments    KnowledgeDocument[]
 
   @@unique([email, providerName])
   @@index([lastReadNotifications])
@@ -228,6 +231,67 @@ model Media {
   @@index([name])
   @@index([organizationId])
   @@index([type])
+}
+
+model KnowledgeDocument {
+  id              String                  @id @default(uuid())
+  organizationId  String
+  createdByUserId String
+  title           String
+  sourceType      KnowledgeSourceType     @default(TRANSCRIPT)
+  inputMethod     KnowledgeInputMethod
+  status          KnowledgeDocumentStatus @default(PENDING)
+  rawText         String
+  normalizedText  String?
+  errorMessage    String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  deletedAt       DateTime?
+  organization    Organization            @relation(fields: [organizationId], references: [id])
+  createdBy       User                    @relation(fields: [createdByUserId], references: [id])
+  chunks          KnowledgeChunk[]
+
+  @@index([organizationId, deletedAt])
+  @@index([createdByUserId])
+  @@index([status])
+}
+
+model KnowledgeChunk {
+  id               String            @id @default(uuid())
+  documentId       String
+  chunkIndex       Int
+  text             String
+  factsJson        Json?
+  styleMarkersJson Json?
+  charCount        Int
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  document         KnowledgeDocument @relation(fields: [documentId], references: [id])
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
+}
+
+model VoiceProfile {
+  id                   String       @id @default(uuid())
+  organizationId       String
+  version              Int
+  isActive             Boolean      @default(false)
+  sentenceLength       String
+  lineBreakHabit       String
+  ctaStyle             String
+  vocabularyTendencies Json?
+  tabooPhrases         Json?
+  preferredOpenings    Json?
+  approvedFactsJson    Json?
+  sourceDocumentCount  Int          @default(0)
+  confidence           Float        @default(0)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  organization         Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, version])
+  @@index([organizationId, isActive])
 }
 
 model SocialMediaAgency {
@@ -415,6 +479,7 @@ model Post {
   createdAt                  DateTime                  @default(now())
   updatedAt                  DateTime                  @updatedAt
   deletedAt                  DateTime?
+  remoteDeletedAt            DateTime?
   comments                   Comments[]
   errors                     Errors[]
   payoutProblems             PayoutProblems[]
@@ -893,6 +958,22 @@ enum OrderStatus {
   COMPLETED
 }
 
+enum KnowledgeSourceType {
+  TRANSCRIPT
+}
+
+enum KnowledgeInputMethod {
+  PASTE
+  UPLOAD
+}
+
+enum KnowledgeDocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
 enum From {
   BUYER
   SELLER
@@ -901,6 +982,7 @@ enum From {
 enum State {
   QUEUE
   PUBLISHED
+  DELETED_REMOTE
   ERROR
   DRAFT
 }

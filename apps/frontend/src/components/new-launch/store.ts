@@ -89,6 +89,11 @@ interface StoreState {
     index: number,
     content: string
   ) => void;
+  upsertInternalValueText: (
+    integrationId: string,
+    index: number,
+    content: string
+  ) => void;
   addInternalValueMedia: (
     integrationId: string,
     index: number,
@@ -469,6 +474,63 @@ export const useLaunchStore = create<StoreState>()((set) => ({
       ),
     }));
   },
+  upsertInternalValueText: (
+    integrationId: string,
+    index: number,
+    content: string
+  ) =>
+    set((state) => {
+      const existing = state.internal.find(
+        (item) => item.integration.id === integrationId
+      );
+
+      if (existing) {
+        return {
+          internal: state.internal.map((item) =>
+            item.integration.id === integrationId
+              ? {
+                  ...item,
+                  integrationValue: item.integrationValue.map((value, i) =>
+                    i === index ? { ...value, content } : value
+                  ),
+                }
+              : item
+          ),
+        };
+      }
+
+      const integration = state.selectedIntegrations.find(
+        (item) => item.integration.id === integrationId
+      )?.integration;
+
+      if (!integration) {
+        return {};
+      }
+
+      const seedValues = state.global.length
+        ? state.global.map((value, currentIndex) => ({
+            ...value,
+            content: currentIndex === index ? content : value.content,
+          }))
+        : [
+            {
+              id: integrationId,
+              content,
+              delay: 0,
+              media: [],
+            },
+          ];
+
+      return {
+        internal: [
+          ...state.internal,
+          {
+            integration,
+            integrationValue: seedValues,
+          },
+        ],
+      };
+    }),
   addInternalValueMedia: (
     integrationId: string,
     index: number,

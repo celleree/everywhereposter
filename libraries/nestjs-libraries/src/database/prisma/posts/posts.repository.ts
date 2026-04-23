@@ -365,6 +365,36 @@ export class PostsRepository {
         state: 'PUBLISHED',
         releaseURL,
         releaseId: postId,
+        remoteDeletedAt: null,
+      },
+    });
+  }
+
+  async markPostsRemoteDeleted(orgId: string, group: string) {
+    await this._post.model.post.updateMany({
+      where: {
+        organizationId: orgId,
+        group,
+        deletedAt: null,
+      },
+      data: {
+        state: 'DELETED_REMOTE',
+        remoteDeletedAt: new Date(),
+        error: null,
+      },
+    });
+
+    return this._post.model.post.findFirst({
+      where: {
+        organizationId: orgId,
+        group,
+        parentPostId: null,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        state: true,
+        remoteDeletedAt: true,
       },
     });
   }

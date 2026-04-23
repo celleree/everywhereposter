@@ -32,6 +32,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { SVGLine } from '@gitroom/frontend/components/launches/launches.component';
 import { GlobalSettings } from '@gitroom/frontend/components/settings/global.settings';
 import { ApprovedAppsComponent } from '@gitroom/frontend/components/approved-apps/approved-apps.component';
+import { KnowledgeBaseSettings } from '@gitroom/frontend/components/settings/knowledge-base.settings';
 export const SettingsPopup: FC<{
   getRef?: Ref<any>;
 }> = (props) => {
@@ -96,6 +97,9 @@ export const SettingsPopup: FC<{
     }
     if (user?.tier?.autoPost) {
       arr.push({ tab: 'autopost', label: t('auto_post', 'Auto Post') });
+    }
+    if (user?.tier?.ai) {
+      arr.push({ tab: 'knowledge_base', label: t('knowledge_base', 'Knowledge Base') });
     }
     if (user?.tier.current !== 'FREE') {
       arr.push({ tab: 'sets', label: t('sets', 'Sets') });
@@ -180,6 +184,12 @@ export const SettingsPopup: FC<{
               {tab === 'autopost' && !!user?.tier?.autoPost && (
                 <div>
                   <Autopost />
+                </div>
+              )}
+
+              {tab === 'knowledge_base' && !!user?.tier?.ai && (
+                <div>
+                  <KnowledgeBaseSettings />
                 </div>
               )}
 

@@ -139,6 +139,143 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     );
   }, [current]);
 
+  const existingRootPost = existingData?.posts?.[0];
+  const existingIntegration = useMemo(
+    () => integrations.find((integration) => integration.id === existingData.integration),
+    [integrations, existingData.integration]
+  );
+  const publishedCapabilities = existingIntegration?.publishedCapabilities;
+  const isPublishedPost = existingRootPost?.state === 'PUBLISHED';
+  const isRemoteDeletedPost = existingRootPost?.state === 'DELETED_REMOTE';
+  const showPublishedActions =
+    !!existingData?.integration && (isPublishedPost || isRemoteDeletedPost);
+  const missingPublishedReleaseId =
+    !!existingData?.integration &&
+    (!existingRootPost?.releaseId || existingRootPost?.releaseId === 'missing');
+
+  const updatePublishedDisabledReason = useMemo(() => {
+    if (!showPublishedActions) {
+      return '';
+    }
+
+    if (isRemoteDeletedPost) {
+      return t(
+        'this_post_was_already_deleted_on_the_platform',
+        'This post was already deleted on the platform.'
+      );
+    }
+
+    if (missingPublishedReleaseId) {
+      return t(
+        'published_post_is_missing_platform_id',
+        'This published post is missing its platform ID, so it cannot be updated.'
+      );
+    }
+
+    if (publishedCapabilities?.requiresReconnect) {
+      return (
+        publishedCapabilities.reason ||
+        t(
+          'reconnect_channel_to_manage_published_posts',
+          'Reconnect this channel to manage published posts.'
+        )
+      );
+    }
+
+    if (publishedCapabilities?.editMode === 'none') {
+      return (
+        publishedCapabilities.reason ||
+        t(
+          'provider_does_not_support_published_edits',
+          'This platform does not support editing published posts yet.'
+        )
+      );
+    }
+
+    return '';
+  }, [
+    showPublishedActions,
+    isRemoteDeletedPost,
+    missingPublishedReleaseId,
+    publishedCapabilities,
+    t,
+  ]);
+
+  const deleteOnPlatformDisabledReason = useMemo(() => {
+    if (!showPublishedActions) {
+      return '';
+    }
+
+    if (isRemoteDeletedPost) {
+      return t(
+        'this_post_was_already_deleted_on_the_platform',
+        'This post was already deleted on the platform.'
+      );
+    }
+
+    if (missingPublishedReleaseId) {
+      return t(
+        'published_post_is_missing_platform_id',
+        'This published post is missing its platform ID, so it cannot be deleted on the platform.'
+      );
+    }
+
+    if (publishedCapabilities?.requiresReconnect) {
+      return (
+        publishedCapabilities.reason ||
+        t(
+          'reconnect_channel_to_manage_published_posts',
+          'Reconnect this channel to manage published posts.'
+        )
+      );
+    }
+
+    if (!publishedCapabilities?.canDeletePublished) {
+      return (
+        publishedCapabilities?.reason ||
+        t(
+          'provider_does_not_support_published_deletes',
+          'This platform does not support deleting published posts yet.'
+        )
+      );
+    }
+
+    return '';
+  }, [
+    showPublishedActions,
+    isRemoteDeletedPost,
+    missingPublishedReleaseId,
+    publishedCapabilities,
+    t,
+  ]);
+
+  const publishedActionHint = useMemo(() => {
+    if (!showPublishedActions) {
+      return '';
+    }
+
+    if (isRemoteDeletedPost) {
+      return t(
+        'deleted_on_platform_keep_remove_from_app',
+        'This post was already deleted on the platform. You can still remove it from Publish Everywhere.'
+      );
+    }
+
+    return (
+      updatePublishedDisabledReason ||
+      deleteOnPlatformDisabledReason ||
+      publishedCapabilities?.constraints?.[0] ||
+      ''
+    );
+  }, [
+    showPublishedActions,
+    isRemoteDeletedPost,
+    updatePublishedDisabledReason,
+    deleteOnPlatformDisabledReason,
+    publishedCapabilities,
+    t,
+  ]);
+
   const changeCustomer = useCallback(
     (customer: string) => {
       const neededIntegrations = integrations.filter(
@@ -178,13 +315,21 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
   const deletePost = useCallback(async () => {
     setLoading(true);
-    if (
-      !(await deleteDialog(
-        t(
+    const confirmationMessage = showPublishedActions
+      ? t(
+          'are_you_sure_you_want_to_remove_this_post_from_publish_everywhere',
+          'Are you sure you want to remove this post from Publish Everywhere? This does not change the live platform post.'
+        )
+      : t(
           'are_you_sure_you_want_to_delete_post',
           'Are you sure you want to delete this post?'
-        ),
-        t('yes_delete_it', 'Yes, delete it!')
+        );
+    if (
+      !(await deleteDialog(
+        confirmationMessage,
+        showPublishedActions
+          ? t('yes_remove_it', 'Yes, remove it!')
+          : t('yes_delete_it', 'Yes, delete it!')
       ))
     ) {
       setLoading(false);
@@ -196,7 +341,72 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     mutate();
     modal.closeAll();
     return;
-  }, [existingData, mutate, modal]);
+  }, [existingData, mutate, modal, showPublishedActions, t]);
+
+  const deletePublishedPost = useCallback(async () => {
+    if (!existingData.group || deleteOnPlatformDisabledReason) {
+      return;
+    }
+
+    setLoading(true);
+
+    if (
+      !(await deleteDialog(
+        t(
+          'are_you_sure_you_want_to_delete_this_post_on_the_platform',
+          'Are you sure you want to delete this post on the live platform?'
+        ),
+        t('yes_delete_on_platform', 'Yes, delete it!')
+      ))
+    ) {
+      setLoading(false);
+      return;
+    }
+
+    const response = await fetch(`/posts/${existingData.group}/published`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      let message = t(
+        'failed_to_delete_the_published_post',
+        'Failed to delete the published post.'
+      );
+
+      try {
+        const raw = await response.text();
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          message = Array.isArray(parsed?.message)
+            ? parsed.message.join(', ')
+            : parsed?.message || parsed?.error || raw;
+        }
+      } catch {
+        // Keep the fallback message when the response is not JSON.
+      }
+
+      toaster.show(message, 'warning');
+      setLoading(false);
+      return;
+    }
+
+    mutate();
+    toaster.show(
+      t(
+        'published_post_deleted_on_platform',
+        'Published post deleted on platform'
+      )
+    );
+    modal.closeAll();
+  }, [
+    existingData.group,
+    deleteOnPlatformDisabledReason,
+    fetch,
+    modal,
+    mutate,
+    t,
+    toaster,
+  ]);
 
   const schedule = useCallback(
     (type: 'draft' | 'now' | 'schedule' | 'update') => async () => {
@@ -413,12 +623,45 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
       }
 
       if (!dummy) {
-        addEditSets
-          ? addEditSets(data)
-          : await fetch('/posts', {
+        try {
+          if (addEditSets) {
+            await addEditSets(data);
+          } else {
+            const response = await fetch('/posts', {
               method: 'POST',
               body: JSON.stringify(data),
             });
+
+            if (!response.ok) {
+              let message = t('failed_to_save_post', 'Failed to save post');
+
+              try {
+                const raw = await response.text();
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  message = Array.isArray(parsed?.message)
+                    ? parsed.message.join(', ')
+                    : parsed?.message || parsed?.error || raw;
+                }
+              } catch {
+                // Keep the fallback message if the response is not JSON.
+              }
+
+              toaster.show(message, 'warning');
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (error) {
+          toaster.show(
+            error instanceof Error
+              ? error.message
+              : t('failed_to_save_post', 'Failed to save post'),
+            'warning'
+          );
+          setLoading(false);
+          return;
+        }
 
         if (!addEditSets) {
           mutate();
@@ -549,7 +792,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             </div>
           </div>
         </div>
-        <div className="select-none h-[84px] py-[20px] border-t border-newBorder flex items-center">
+        <div className="select-none min-h-[84px] py-[16px] border-t border-newBorder flex items-center">
           <div className="flex-1 flex ps-[20px] gap-[8px]">
             {!dummy && (
               <TagsComponent
@@ -566,19 +809,46 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <RepeatComponent repeat={repeater} onChange={setRepeater} />
             )}
           </div>
-          <div className="pe-[20px] flex items-center justify-end gap-[8px]">
-            {existingData?.integration && (
-              <button
-                onClick={deletePost}
-                className="cursor-pointer flex text-[#FF3F3F] gap-[8px] items-center text-[15px] font-[600]"
-              >
-                <div>
-                  <TrashIcon />
-                </div>
-                <div>{t('delete_post', 'Delete Post')}</div>
-              </button>
-            )}
-            <DatePicker onChange={setDate} date={date} />
+          <div className="pe-[20px] flex flex-col items-end gap-[8px]">
+            <div className="flex items-center justify-end gap-[8px]">
+              {showPublishedActions && (
+                <span title={deleteOnPlatformDisabledReason || undefined}>
+                  <button
+                    disabled={
+                      !!deleteOnPlatformDisabledReason || loading || locked
+                    }
+                    onClick={deletePublishedPost}
+                    className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 flex text-[#FF8A5C] gap-[8px] items-center text-[15px] font-[600]"
+                  >
+                    <div>
+                      <TrashIcon />
+                    </div>
+                    <div>
+                      {isRemoteDeletedPost
+                        ? t('deleted_on_platform', 'Deleted on platform')
+                        : t('delete_on_platform', 'Delete on platform')}
+                    </div>
+                  </button>
+                </span>
+              )}
+              {existingData?.integration && (
+                <button
+                  onClick={deletePost}
+                  className="cursor-pointer flex text-[#FF3F3F] gap-[8px] items-center text-[15px] font-[600]"
+                >
+                  <div>
+                    <TrashIcon />
+                  </div>
+                  <div>
+                    {showPublishedActions
+                      ? t('remove_from_app', 'Remove from app')
+                      : t('delete_post', 'Delete Post')}
+                  </div>
+                </button>
+              )}
+              {!showPublishedActions && (
+                <DatePicker onChange={setDate} date={date} />
+              )}
             {!addEditSets && (
               <button
                 disabled={
@@ -612,9 +882,14 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <div className="group cursor-pointer relative">
                 <button
                   disabled={
-                    selectedIntegrations.length === 0 || loading || locked
+                    selectedIntegrations.length === 0 ||
+                    loading ||
+                    locked ||
+                    !!updatePublishedDisabledReason
                   }
-                  onClick={schedule('schedule')}
+                  onClick={schedule(
+                    isPublishedPost ? 'update' : 'schedule'
+                  )}
                   className="text-white relative min-w-[180px] btnSub disabled:cursor-not-allowed disabled:opacity-80 outline-none gap-[8px] flex justify-center items-center h-[44px] rounded-[8px] bg-[#612BD3] ps-[20px] pe-[16px]"
                 >
                   {loading && (
@@ -632,20 +907,24 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       ? t('check_circles_above', 'Check the circles above')
                       : dummy
                       ? t('create_output', 'Create output')
+                      : isRemoteDeletedPost
+                      ? t('deleted_on_platform', 'Deleted on platform')
+                      : isPublishedPost
+                      ? t('update_published_post', 'Update published post')
                       : !existingData?.integration
                       ? t('add_to_calendar', 'Add to calendar')
                       : existingData?.posts?.[0]?.state === 'DRAFT'
                       ? t('schedule', 'Schedule')
                       : t('update', 'Update')}
                   </div>
-                  {!dummy && (
+                  {!dummy && !isPublishedPost && !isRemoteDeletedPost && (
                     <div className="flex justify-center items-center h-[20px] w-[20px] pt-[4px] arrow-change">
                       <DropdownArrowSmallIcon className="group-hover:rotate-180 text-white" />
                     </div>
                   )}
                 </button>
 
-                {!dummy && (
+                {!dummy && !isPublishedPost && !isRemoteDeletedPost && (
                   <button
                     onClick={schedule('now')}
                     disabled={
@@ -658,6 +937,12 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     </div>
                   </button>
                 )}
+              </div>
+            )}
+            </div>
+            {!!publishedActionHint && (
+              <div className="max-w-[420px] text-end text-[12px] text-[#A3A3A3]">
+                {publishedActionHint}
               </div>
             )}
           </div>

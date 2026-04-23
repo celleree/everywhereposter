@@ -1,6 +1,8 @@
 import {
   AnalyticsData,
   AuthTokenDetails,
+  HistoricalMediaPage,
+  PublishedDeleteResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -10,15 +12,13 @@ import { google, youtube_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
 import axios from 'axios';
 import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/youtube.settings.dto';
-import {
-  BadBody,
-  SocialAbstract,
-} from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import * as process from 'node:process';
 import dayjs from 'dayjs';
 import { GaxiosResponse } from 'gaxios/build/src/common';
 import Schema$Video = youtube_v3.Schema$Video;
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { Integration } from '@prisma/client';
 
 const clientAndYoutube = () => {
   const client = new google.auth.OAuth2({
@@ -58,17 +58,26 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   scopes = [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
-    'https://www.googleapis.com/auth/youtube',
     'https://www.googleapis.com/auth/youtube.force-ssl',
     'https://www.googleapis.com/auth/youtube.readonly',
     'https://www.googleapis.com/auth/youtube.upload',
-    'https://www.googleapis.com/auth/youtubepartner',
     'https://www.googleapis.com/auth/yt-analytics.readonly',
   ];
 
   editor = 'normal' as const;
   maxLength() {
     return 5000;
+  }
+
+  override getPublishedCapabilities(integration?: Integration) {
+    return this.buildPublishedCapabilities(integration, {
+      editMode: 'metadata',
+      canDeletePublished: true,
+      constraints: [
+        'YouTube published video edits are limited to metadata such as title, description, tags, privacy, and thumbnail.',
+        'Replacing the uploaded video file is not supported.',
+      ],
+    });
   }
 
   override handleErrors(body: string):
@@ -360,6 +369,213 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         status: 'success',
       },
     ];
+  }
+
+  async update(
+    id: string,
+    accessToken: string,
+    releaseId: string,
+    postDetails: PostDetails[]
+  ): Promise<PostResponse[]> {
+    const [firstPost] = postDetails;
+
+    const { client, youtube } = clientAndYoutube();
+    client.setCredentials({ access_token: accessToken });
+    const youtubeClient = youtube(client);
+
+    const { settings }: { settings: YoutubeSettingsDto } = firstPost;
+
+    const existingVideo = await this.runInConcurrent(
+      async () =>
+        youtubeClient.videos.list({
+          part: ['snippet', 'status'],
+          id: [releaseId],
+        }),
+      true
+    );
+
+    const currentVideo = existingVideo.data.items?.[0];
+
+    if (!currentVideo) {
+      throw new Error('The original YouTube video could not be found.');
+    }
+
+    const currentSnippet = currentVideo.snippet;
+    const currentStatus = currentVideo.status;
+
+    const updatedVideo = await this.runInConcurrent(
+      async () =>
+        youtubeClient.videos.update({
+          part: ['id', 'snippet', 'status'],
+          requestBody: {
+            id: releaseId,
+            snippet: {
+              title: settings.title,
+              description: firstPost?.message || '',
+              tags: (settings?.tags || []).map((tag) => tag.label),
+              categoryId: currentSnippet?.categoryId || '22',
+              ...(currentSnippet?.defaultLanguage
+                ? { defaultLanguage: currentSnippet.defaultLanguage }
+                : {}),
+              ...(currentSnippet?.defaultAudioLanguage
+                ? {
+                    defaultAudioLanguage: currentSnippet.defaultAudioLanguage,
+                  }
+                : {}),
+            },
+            status: {
+              privacyStatus: settings.type,
+              selfDeclaredMadeForKids:
+                settings.selfDeclaredMadeForKids === 'yes',
+              ...(typeof currentStatus?.embeddable === 'boolean'
+                ? { embeddable: currentStatus.embeddable }
+                : {}),
+              ...(currentStatus?.license
+                ? { license: currentStatus.license }
+                : {}),
+              ...(typeof currentStatus?.publicStatsViewable === 'boolean'
+                ? {
+                    publicStatsViewable: currentStatus.publicStatsViewable,
+                  }
+                : {}),
+              ...(currentStatus?.publishAt
+                ? { publishAt: currentStatus.publishAt }
+                : {}),
+            },
+          },
+        }),
+      true
+    );
+
+    if (settings?.thumbnail?.path) {
+      await this.runInConcurrent(async () =>
+        youtubeClient.thumbnails.set({
+          videoId: releaseId,
+          media: {
+            body: (
+              await axios({
+                url: settings.thumbnail?.path,
+                method: 'GET',
+                responseType: 'stream',
+              })
+            ).data,
+          },
+        })
+      );
+    }
+
+    const finalId = updatedVideo?.data?.id || releaseId;
+
+    return [
+      {
+        id: firstPost.id,
+        releaseURL: `https://www.youtube.com/watch?v=${finalId}`,
+        postId: finalId,
+        status: 'success',
+      },
+    ];
+  }
+
+  async deletePublished(
+    id: string,
+    accessToken: string,
+    releaseId: string
+  ): Promise<PublishedDeleteResponse> {
+    const { client, youtube } = clientAndYoutube();
+    client.setCredentials({ access_token: accessToken });
+    const youtubeClient = youtube(client);
+
+    try {
+      await youtubeClient.videos.delete({
+        id: releaseId,
+      });
+
+      return {
+        status: 'deleted',
+      };
+    } catch (error: any) {
+      if (
+        error?.response?.status === 404 ||
+        error?.code === 404 ||
+        JSON.stringify(error).includes('videoNotFound')
+      ) {
+        return {
+          status: 'already_deleted',
+        };
+      }
+
+      throw error;
+    }
+  }
+
+  async listMedia(
+    accessToken: string,
+    data: { page?: number } = {}
+  ): Promise<HistoricalMediaPage> {
+    const page = data.page || 1;
+    const pageSize = 12;
+
+    try {
+      const { client, youtube } = clientAndYoutube();
+      client.setCredentials({ access_token: accessToken });
+      const youtubeClient = youtube(client);
+
+      const channelResponse = await youtubeClient.channels.list({
+        part: ['contentDetails'],
+        mine: true,
+      });
+
+      const uploadsPlaylistId =
+        channelResponse.data.items?.[0]?.contentDetails?.relatedPlaylists
+          ?.uploads;
+
+      if (!uploadsPlaylistId) {
+        return {
+          results: [],
+          pages: 1,
+        };
+      }
+
+      const playlistResponse = await youtubeClient.playlistItems.list({
+        part: ['contentDetails', 'snippet'],
+        playlistId: uploadsPlaylistId,
+        maxResults: 50,
+      });
+
+      const items = (playlistResponse.data.items || [])
+        .filter((item) => item.contentDetails?.videoId)
+        .map((item) => {
+          const videoId = item.contentDetails?.videoId!;
+          const thumbnails = item.snippet?.thumbnails;
+
+          return {
+            id: videoId,
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            thumbnail:
+              thumbnails?.maxres?.url ||
+              thumbnails?.high?.url ||
+              thumbnails?.medium?.url ||
+              thumbnails?.default?.url ||
+              '',
+            name: item.snippet?.title || 'YouTube video',
+            type: 'video' as const,
+            publishedAt: item.contentDetails?.videoPublishedAt || undefined,
+          };
+        });
+
+      const start = (page - 1) * pageSize;
+
+      return {
+        results: items.slice(start, start + pageSize),
+        pages: Math.max(1, Math.ceil(items.length / pageSize)),
+      };
+    } catch (err) {
+      console.error('Error fetching YouTube media list:', err);
+      return {
+        results: [],
+        pages: 1,
+      };
+    }
   }
 
   async analytics(

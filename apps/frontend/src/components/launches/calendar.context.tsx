@@ -93,6 +93,14 @@ export interface Integrations {
   changeProfilePicture: boolean;
   additionalSettings: string;
   changeNickName: boolean;
+  canListMedia?: boolean;
+  publishedCapabilities?: {
+    editMode: 'none' | 'metadata';
+    canDeletePublished: boolean;
+    reason?: string;
+    requiresReconnect: boolean;
+    constraints?: string[];
+  };
   time: {
     time: number;
   }[];

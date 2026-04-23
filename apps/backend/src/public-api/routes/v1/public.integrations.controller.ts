@@ -167,6 +167,25 @@ export class PublicIntegrationsController {
     return this._postsService.createPost(org.id, body);
   }
 
+  @Delete('/posts/:id/published')
+  async deletePublishedPost(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const getPostById = await this._postsService.getPost(org.id, id);
+    return this._postsService.deletePublishedPost(org.id, getPostById.group);
+  }
+
+  @Delete('/posts/group/:group/published')
+  deletePublishedPostByGroup(
+    @GetOrgFromRequest() org: Organization,
+    @Param('group') group: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._postsService.deletePublishedPost(org.id, group);
+  }
+
   @Delete('/posts/:id')
   async deletePost(
     @GetOrgFromRequest() org: Organization,
@@ -196,20 +215,29 @@ export class PublicIntegrationsController {
   async listIntegration(@GetOrgFromRequest() org: Organization) {
     Sentry.metrics.count('public_api-request', 1);
     return (await this._integrationService.getIntegrationsList(org.id)).map(
-      (org) => ({
-        id: org.id,
-        name: org.name,
-        identifier: org.providerIdentifier,
-        picture: org.picture,
-        disabled: org.disabled,
-        profile: org.profile,
-        customer: org.customer
+      (integration) => {
+        const provider = this._integrationManager.getSocialIntegration(
+          integration.providerIdentifier
+        );
+
+        return {
+          id: integration.id,
+          name: integration.name,
+          identifier: integration.providerIdentifier,
+          picture: integration.picture,
+          disabled: integration.disabled,
+          profile: integration.profile,
+          canListMedia: !!provider.listMedia,
+          publishedCapabilities:
+            provider.getPublishedCapabilities(integration),
+          customer: integration.customer
           ? {
-              id: org.customer.id,
-              name: org.customer.name,
+              id: integration.customer.id,
+              name: integration.customer.name,
             }
           : undefined,
-      })
+        };
+      }
     );
   }
 

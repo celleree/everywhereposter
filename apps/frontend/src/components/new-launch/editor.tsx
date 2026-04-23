@@ -67,6 +67,7 @@ import {
   DelayIcon,
 } from '@gitroom/frontend/components/ui/icons';
 import { DelayComponent } from '@gitroom/frontend/components/new-launch/delay.component';
+import { MediaCopyButton } from '@gitroom/frontend/components/new-launch/media.copy.button';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
@@ -777,6 +778,10 @@ export const Editor: FC<{
                   toolBar={
                     <div className="flex gap-[5px]">
                       <SignatureBox editor={editorRef?.current?.editor} />
+                      <MediaCopyButton
+                        media={pictures || []}
+                        postIndex={num || 0}
+                      />
                       {editorType !== 'none' && (
                         <>
                           <UText
