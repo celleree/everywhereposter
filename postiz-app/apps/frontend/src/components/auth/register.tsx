@@ -89,8 +89,17 @@ export function RegisterAfter({
   provider: string;
 }) {
   const t = useT();
-  const { isGeneral, genericOauth, neynarClientId, billingEnabled } =
+  const {
+    isGeneral,
+    genericOauth,
+    neynarClientId,
+    billingEnabled,
+    frontEndUrl,
+  } =
     useVariables();
+  const legalBaseUrl = frontEndUrl?.replace(/\/$/, '') || '';
+  const termsHref = legalBaseUrl ? `${legalBaseUrl}/terms` : '/terms';
+  const privacyHref = legalBaseUrl ? `${legalBaseUrl}/privacy` : '/privacy';
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const fireEvents = useFireEvents();
@@ -219,7 +228,7 @@ export function RegisterAfter({
                 )}
                 &nbsp;
                 <a
-                  href={`https://postiz.com/terms`}
+                  href={termsHref}
                   className="underline hover:font-bold"
                   rel="nofollow"
                 >
@@ -228,7 +237,7 @@ export function RegisterAfter({
                 &nbsp;
                 {t('and', 'and')}&nbsp;
                 <a
-                  href={`https://postiz.com/privacy`}
+                  href={privacyHref}
                   rel="nofollow"
                   className="underline hover:font-bold"
                 >
