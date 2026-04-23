@@ -55,12 +55,67 @@ if (fs.existsSync(integrationsController)) {
 }
 EOF
 
+wait_for_tcp() {
+  HOST="$1"
+  PORT="$2"
+  LABEL="$3"
+  TIMEOUT_SECONDS="${4:-90}"
+
+  echo "Waiting for ${LABEL} on ${HOST}:${PORT}..."
+
+  node - "$HOST" "$PORT" "$LABEL" "$TIMEOUT_SECONDS" <<'EOF'
+const net = require('net');
+
+const [host, portValue, label, timeoutValue] = process.argv.slice(2);
+const port = Number(portValue);
+const timeoutMs = Number(timeoutValue) * 1000;
+const deadline = Date.now() + timeoutMs;
+
+function attempt() {
+  const socket = net.connect({ host, port });
+  let settled = false;
+
+  const finish = (ok, message) => {
+    if (settled) {
+      return;
+    }
+
+    settled = true;
+    socket.destroy();
+
+    if (ok) {
+      console.log(message);
+      process.exit(0);
+    }
+
+    if (Date.now() >= deadline) {
+      console.error(message);
+      process.exit(1);
+    }
+
+    setTimeout(attempt, 1000);
+  };
+
+  socket.setTimeout(1000);
+  socket.on('connect', () => finish(true, `${label} is ready on ${host}:${port}`));
+  socket.on('timeout', () => finish(false, `Timed out waiting for ${label} on ${host}:${port}`));
+  socket.on('error', () => finish(false, `Still waiting for ${label} on ${host}:${port}`));
+}
+
+attempt();
+EOF
+}
+
 nginx -g 'daemon off;' &
 NGINX_PID=$!
 
+wait_for_tcp temporal 7233 "Temporal" 90
+
 cd /app/apps/backend
-pnpm start &
+node --experimental-require-module ./dist/apps/backend/src/main.js &
 BACKEND_PID=$!
+
+wait_for_tcp 127.0.0.1 3000 "Backend" 90
 
 cd /app/apps/frontend
 pnpm start &

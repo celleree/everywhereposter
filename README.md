@@ -158,6 +158,9 @@ services:
       X_API_SECRET: ''
       LINKEDIN_CLIENT_ID: ''
       LINKEDIN_CLIENT_SECRET: ''
+      # Optional: override only the LinkedIn Page flow with a separate app
+      LINKEDIN_PAGE_CLIENT_ID: ''
+      LINKEDIN_PAGE_CLIENT_SECRET: ''
       REDDIT_CLIENT_ID: ''
       REDDIT_CLIENT_SECRET: ''
       GITHUB_CLIENT_ID: ''
@@ -394,3 +397,9 @@ networks:
     driver: bridge
     name: temporal-network
 ```
+
+LinkedIn note:
+
+- `LINKEDIN_CLIENT_ID` and `LINKEDIN_CLIENT_SECRET` continue to drive the standard LinkedIn member/profile connection.
+- `LINKEDIN_PAGE_CLIENT_ID` and `LINKEDIN_PAGE_CLIENT_SECRET` are optional overrides for the `linkedin-page` flow only. If you leave them blank, Postiz falls back to the standard LinkedIn app.
+- A LinkedIn developer verification URL is an operator-only approval link, not a public site-verification file. Keep it in your local `.env` for reference if needed rather than serving it from Nginx.

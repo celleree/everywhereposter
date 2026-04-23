@@ -58,6 +58,8 @@ services:
       X_URL: '${PUBLIC_BASE_URL:-https://publish-everywhere.halowebsites.com}'
       LINKEDIN_CLIENT_ID: '${LINKEDIN_CLIENT_ID:-}'
       LINKEDIN_CLIENT_SECRET: '${LINKEDIN_CLIENT_SECRET:-}'
+      LINKEDIN_PAGE_CLIENT_ID: '${LINKEDIN_PAGE_CLIENT_ID:-}'
+      LINKEDIN_PAGE_CLIENT_SECRET: '${LINKEDIN_PAGE_CLIENT_SECRET:-}'
       REDDIT_CLIENT_ID: '${REDDIT_CLIENT_ID:-}'
       REDDIT_CLIENT_SECRET: '${REDDIT_CLIENT_SECRET:-}'
       GITHUB_CLIENT_ID: ''
@@ -165,6 +167,7 @@ services:
       - ./site/privacy-policy.html:/usr/share/nginx/html/privacy-policy.html:ro
       - ./site/terms-of-service.html:/usr/share/nginx/html/terms-of-service.html:ro
       - ./site/data-deletion.html:/usr/share/nginx/html/data-deletion.html:ro
+      - ./tiktokue6AnjOZKCYFEu1KyerrdZASM9Gtd8mF.txt:/usr/share/nginx/html/tiktokue6AnjOZKCYFEu1KyerrdZASM9Gtd8mF.txt:ro
       - ./site/branding:/usr/share/nginx/html/branding:ro
     networks:
       - postiz-network

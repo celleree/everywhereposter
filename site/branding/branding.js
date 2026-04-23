@@ -2,6 +2,13 @@
   const BRAND_NAME = 'Publish Everywhere';
   const BRAND_ASSET = '/branding/pe-logo.svg';
   const FAVICON_ASSET = '/branding/favicon.svg';
+  const IMAGE_ASSET_PATHS = [
+    '/logo.svg',
+    '/logo-text.svg',
+    '/postiz.svg',
+    '/postiz-text.svg',
+    '/no-picture.jpg',
+  ];
   const LOGO_SIGNATURES = [
     {
       viewBox: '0 0 101 33',
@@ -133,6 +140,48 @@
     return img;
   }
 
+  function matchesAssetPath(value) {
+    if (!value) {
+      return false;
+    }
+
+    try {
+      const url = new URL(value, window.location.origin);
+      return IMAGE_ASSET_PATHS.includes(url.pathname);
+    } catch (_error) {
+      return IMAGE_ASSET_PATHS.some(function (path) {
+        return value === path || value.endsWith(path);
+      });
+    }
+  }
+
+  function rewriteImages(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    for (const img of scope.querySelectorAll('img')) {
+      const src = img.getAttribute('src') || img.currentSrc || '';
+      const srcset = img.getAttribute('srcset') || '';
+      const firstSrcsetValue = srcset.split(',')[0].trim().split(/\s+/)[0];
+
+      if (!matchesAssetPath(src) && !matchesAssetPath(firstSrcsetValue)) {
+        continue;
+      }
+
+      if (img.getAttribute('src') !== BRAND_ASSET) {
+        img.setAttribute('src', BRAND_ASSET);
+      }
+      if (img.hasAttribute('srcset')) {
+        img.removeAttribute('srcset');
+      }
+      img.setAttribute('alt', BRAND_NAME);
+      img.dataset.publishEverywhereLogo = 'true';
+
+      if (!img.style.maxWidth) {
+        img.style.maxWidth = '100%';
+      }
+      img.style.objectFit = 'contain';
+    }
+  }
+
   function rewriteLogos(root) {
     const scope = root && root.querySelectorAll ? root : document;
     for (const svg of scope.querySelectorAll('svg')) {
@@ -243,6 +292,7 @@
     rewriteText(root || document.body || document.documentElement);
     rewriteLinks(root || document);
     rewriteAttributes(root || document);
+    rewriteImages(root || document);
     rewriteLogos(root || document);
     ensureLegalBar();
   }
@@ -267,6 +317,8 @@
   });
 
   observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['src', 'srcset'],
     childList: true,
     subtree: true,
     characterData: true,
