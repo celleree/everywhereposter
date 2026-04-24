@@ -37,6 +37,9 @@ export class InstagramProvider
   override maxConcurrentJob = 400;
   editor = 'normal' as const;
   dto = InstagramDto;
+  private getAccountLabel(name?: string, username?: string) {
+    return username || name || '';
+  }
   maxLength() {
     return 2200;
   }
@@ -491,13 +494,15 @@ export class InstagramProvider
       allFacebookPages
         .filter((f: any) => f.instagram_business_account)
         .map(async (p: any) => {
+          const account = await (
+            await fetch(
+              `https://graph.facebook.com/v20.0/${p.instagram_business_account.id}?fields=name,username,profile_picture_url&access_token=${accessToken}`
+            )
+          ).json();
+
           return {
             pageId: p.id,
-            ...(await (
-              await fetch(
-                `https://graph.facebook.com/v20.0/${p.instagram_business_account.id}?fields=name,profile_picture_url&access_token=${accessToken}`
-              )
-            ).json()),
+            ...account,
             id: p.instagram_business_account.id,
           };
         })
@@ -506,7 +511,8 @@ export class InstagramProvider
     return onlyConnectedAccounts.map((p: any) => ({
       pageId: p.pageId,
       id: p.id,
-      name: p.name,
+      name: this.getAccountLabel(p.name, p.username),
+      username: p.username,
       picture: { data: { url: p.profile_picture_url } },
     }));
   }
@@ -529,7 +535,7 @@ export class InstagramProvider
 
     return {
       id,
-      name,
+      name: this.getAccountLabel(name, username),
       picture: profile_picture_url,
       access_token,
       username,

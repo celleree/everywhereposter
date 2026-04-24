@@ -1,5 +1,5 @@
 import React, { FC, Fragment, useCallback, useMemo, useState } from 'react';
-import useSWR, { useSWRConfig } from 'swr';
+import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { ChartSocial } from '@gitroom/frontend/components/analytics/chart-social';
@@ -12,6 +12,24 @@ interface AnalyticsData {
   data: Array<{ total: number; date: string }>;
   percentageChange: number;
   average?: boolean;
+}
+
+interface PublishedComment {
+  id: string;
+  message: string;
+  authorName: string;
+  createdTime: string;
+  likeCount: number;
+  replyCount: number;
+  permalinkUrl: string;
+}
+
+interface PublishedCommentsResponse {
+  supported: boolean;
+  comments: PublishedComment[];
+  missing?: boolean;
+  reconnectRequired?: boolean;
+  message?: string;
 }
 
 export const StatisticsModal: FC<{
@@ -30,13 +48,20 @@ export const StatisticsModal: FC<{
     return (await fetch(`/analytics/post/${postId}?date=${dateRange}`)).json();
   }, [postId, dateRange, fetch]);
 
+  const loadPostComments = useCallback(async () => {
+    return (await fetch(`/analytics/post/${postId}/comments`)).json();
+  }, [postId, fetch]);
+
   const { data: statisticsData, isLoading: isLoadingStatistics } = useSWR(
     `/posts/${postId}/statistics`,
     loadStatistics
   );
 
-  const { data: analyticsData, isLoading: isLoadingAnalytics, mutate: mutateAnalytics } = useSWR(
-    `/analytics/post/${postId}?date=${dateRange}`,
+  const {
+    data: analyticsData,
+    isLoading: isLoadingAnalytics,
+    mutate: mutateAnalytics,
+  } = useSWR(`/analytics/post/${postId}?date=${dateRange}`,
     loadPostAnalytics,
     {
       revalidateOnFocus: false,
@@ -48,7 +73,21 @@ export const StatisticsModal: FC<{
     }
   );
 
+  const { data: commentsData, isLoading: isLoadingComments } = useSWR<PublishedCommentsResponse>(
+    `/analytics/post/${postId}/comments`,
+    loadPostComments,
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+      revalidateOnMount: true,
+      refreshWhenHidden: false,
+      refreshWhenOffline: false,
+    }
+  );
+
   const isMissing = analyticsData && !Array.isArray(analyticsData) && analyticsData.missing;
+  const showCommentsSection = !!commentsData?.supported;
 
   const dateOptions = useMemo(() => {
     return [
@@ -71,7 +110,8 @@ export const StatisticsModal: FC<{
     });
   }, [analyticsData]);
 
-  const isLoading = isLoadingStatistics || isLoadingAnalytics;
+  const isLoading =
+    isLoadingStatistics || isLoadingAnalytics || isLoadingComments;
 
   return (
     <div className="relative min-h-[200px]">
@@ -146,6 +186,67 @@ export const StatisticsModal: FC<{
             </div>
           )}
 
+          {showCommentsSection && (
+            <div className="flex flex-col gap-[14px]">
+              <h3 className="text-[18px] font-[500]">
+                {t('recent_facebook_comments', 'Recent Facebook comments')}
+              </h3>
+              {commentsData?.reconnectRequired || commentsData?.message ? (
+                <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">
+                  {commentsData.message}
+                </div>
+              ) : commentsData?.comments?.length ? (
+                <div className="flex flex-col gap-[12px]">
+                  {commentsData.comments.map((comment: PublishedComment) => (
+                    <div
+                      key={comment.id}
+                      className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px]"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-[8px]">
+                        <div className="text-[15px] font-medium text-newTableText">
+                          {comment.authorName}
+                        </div>
+                        <div className="text-[12px] text-gray-400">
+                          {comment.createdTime
+                            ? new Date(comment.createdTime).toLocaleString()
+                            : ''}
+                        </div>
+                      </div>
+                      <div className="mt-[10px] whitespace-pre-wrap text-[14px] text-gray-200">
+                        {comment.message || t('no_comment_text', 'No comment text')}
+                      </div>
+                      <div className="mt-[12px] flex flex-wrap items-center gap-[12px] text-[12px] text-gray-400">
+                        <span>
+                          {t('likes', 'Likes')}: {comment.likeCount}
+                        </span>
+                        <span>
+                          {t('replies', 'Replies')}: {comment.replyCount}
+                        </span>
+                        {!!comment.permalinkUrl && (
+                          <a
+                            href={comment.permalinkUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[#7aa2ff] hover:text-[#9db9ff]"
+                          >
+                            {t('open_comment', 'Open comment')}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-gray-400">
+                  {t(
+                    'no_recent_facebook_comments',
+                    'No recent Facebook comments yet.'
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Short Links Statistics Section */}
           <div className="flex flex-col gap-[14px]">
             <h3 className="text-[18px] font-[500]">
@@ -185,7 +286,8 @@ export const StatisticsModal: FC<{
 
           {/* No analytics available message */}
           {(!analyticsData || !Array.isArray(analyticsData) || analyticsData.length === 0) &&
-            (!statisticsData?.clicks || statisticsData.clicks.length === 0) && (
+            (!statisticsData?.clicks || statisticsData.clicks.length === 0) &&
+            !showCommentsSection && (
               <div className="text-center text-gray-400 py-[20px]">
                 {t('no_statistics_available', 'No statistics available for this post')}
               </div>

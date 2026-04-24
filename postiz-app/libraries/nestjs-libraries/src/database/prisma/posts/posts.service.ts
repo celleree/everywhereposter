@@ -34,6 +34,7 @@ import {
 } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import {
   AnalyticsData,
+  PublishedComment,
   PublishedDeleteResponse,
   PostDetails,
   SocialProvider,
@@ -51,6 +52,22 @@ type PostWithConditionals = Post & {
   integration?: Integration;
   childrenPost: Post[];
 };
+
+type PublishedCommentsResult =
+  | {
+      supported: false;
+      comments: [];
+    }
+  | {
+      supported: true;
+      comments: PublishedComment[];
+      missing?: boolean;
+      reconnectRequired?: boolean;
+      message?: string;
+    };
+
+const FACEBOOK_COMMENT_RECONNECT_MESSAGE =
+  'Reconnect this Facebook Page to grant pages_read_user_content and load Page comments.';
 
 @Injectable()
 export class PostsService {
@@ -219,6 +236,90 @@ export class PostsService {
     }
 
     return [];
+  }
+
+  async getPublishedComments(
+    orgId: string,
+    postId: string
+  ): Promise<PublishedCommentsResult> {
+    const post = await this._postRepository.getPostById(postId, orgId);
+    if (!post?.integration) {
+      return {
+        supported: false,
+        comments: [],
+      };
+    }
+
+    if (!post.releaseId || post.releaseId === 'missing') {
+      return {
+        supported: true,
+        missing: true,
+        comments: [],
+      };
+    }
+
+    const integrationProvider = this._integrationManager.getSocialIntegration(
+      post.integration.providerIdentifier
+    );
+
+    if (!integrationProvider.readComments) {
+      return {
+        supported: false,
+        comments: [],
+      };
+    }
+
+    const getIntegration = post.integration;
+    const requiresReconnect =
+      integrationProvider.identifier === 'facebook' &&
+      typeof (integrationProvider as any).hasPageContentReadScope ===
+        'function' &&
+      !(integrationProvider as any).hasPageContentReadScope(getIntegration);
+
+    if (requiresReconnect) {
+      return this.getFacebookCommentReconnectResponse();
+    }
+
+    try {
+      await this.ensurePublishedIntegrationAccess(
+        orgId,
+        getIntegration,
+        integrationProvider
+      );
+
+      return {
+        supported: true,
+        comments: await integrationProvider.readComments(
+          getIntegration.internalId,
+          getIntegration.token,
+          post.releaseId,
+          getIntegration
+        ),
+      };
+    } catch (error) {
+      console.log(error);
+
+      if (
+        integrationProvider.identifier === 'facebook' &&
+        (error instanceof RefreshToken || error instanceof BadRequestException)
+      ) {
+        await this._integrationService.refreshNeeded(orgId, getIntegration.id);
+        return this.getFacebookCommentReconnectResponse(
+          error.message || FACEBOOK_COMMENT_RECONNECT_MESSAGE
+        );
+      }
+
+      if (error instanceof BadBody) {
+        return {
+          supported: true,
+          comments: [],
+          message:
+            error.message || 'Could not load Facebook Page comments right now.',
+        };
+      }
+
+      throw error;
+    }
   }
 
   async getStatistics(orgId: string, id: string) {
@@ -809,16 +910,28 @@ export class PostsService {
         ? messages
         : await this._shortLinkService.convertTextToShortLinks(orgId, messages);
 
-      post.value = (post.value || []).map((p, i) => ({
-        ...p,
-        content: updateContent[i],
-      }));
+      const shouldCreateFreshPostIds =
+        body.type !== 'update'
+          ? await this.shouldCreateFreshPostIds(orgId, post.group)
+          : false;
+
+      const postPayload = {
+        ...post,
+        value: (post.value || []).map((p, i) => {
+          const { id, ...postValue } = p;
+          return {
+            ...postValue,
+            ...(shouldCreateFreshPostIds ? {} : id ? { id } : {}),
+            content: updateContent[i],
+          };
+        }),
+      };
 
       const { posts } = await this._postRepository.createOrUpdatePost(
         body.type,
         orgId,
         body.type === 'now' ? dayjs().format('YYYY-MM-DDTHH:mm:00') : body.date,
-        post,
+        postPayload,
         body.tags,
         body.inter
       );
@@ -836,7 +949,7 @@ export class PostsService {
         );
       } else {
         this.startWorkflow(
-          post.settings.__type.split('-')[0].toLowerCase(),
+          postPayload.settings.__type.split('-')[0].toLowerCase(),
           posts[0].id,
           orgId,
           posts[0].state
@@ -851,6 +964,23 @@ export class PostsService {
     }
 
     return postList;
+  }
+
+  private async shouldCreateFreshPostIds(orgId: string, group?: string) {
+    if (!group) {
+      return false;
+    }
+
+    const existingPosts = await this._postRepository.getPostsByGroup(
+      orgId,
+      group
+    );
+    const existingRootPost = existingPosts.find((item) => !item.parentPostId);
+
+    return (
+      existingRootPost?.state === 'PUBLISHED' ||
+      existingRootPost?.state === 'DELETED_REMOTE'
+    );
   }
 
   private async loadPublishedUpdateTarget(
@@ -1016,6 +1146,17 @@ export class PostsService {
         await timer(10000);
       }
     }
+  }
+
+  private getFacebookCommentReconnectResponse(
+    message = FACEBOOK_COMMENT_RECONNECT_MESSAGE
+  ): PublishedCommentsResult {
+    return {
+      supported: true,
+      reconnectRequired: true,
+      message,
+      comments: [],
+    };
   }
 
   private async updatePublishedPost(

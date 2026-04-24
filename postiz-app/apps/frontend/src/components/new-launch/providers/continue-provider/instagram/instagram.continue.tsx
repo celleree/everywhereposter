@@ -5,7 +5,7 @@ import { withContinueProvider } from '../with-continue-provider';
 interface InstagramItem {
   id: string;
   pageId: string;
-  username: string;
+  username?: string;
   name: string;
   picture: {
     data: {
@@ -45,16 +45,20 @@ export const InstagramContinue = withContinueProvider<
   getSelectionValue: (item) => ({ id: item.id, pageId: item.pageId }),
   transformSaveData: (selection) => selection,
   isSelected: (item, selection) => selection?.id === item.id,
-  renderItem: (item) => (
-    <>
-      <div>
-        <img
-          className="w-full max-w-[156px]"
-          src={item.picture.data.url}
-          alt="profile"
-        />
-      </div>
-      <div>{item.name}</div>
-    </>
-  ),
+  renderItem: (item) => {
+    const handle = item.username || item.name;
+
+    return (
+      <>
+        <div>
+          <img
+            className="w-full max-w-[156px]"
+            src={item.picture.data.url}
+            alt="profile"
+          />
+        </div>
+        <div>@{handle}</div>
+      </>
+    );
+  },
 });

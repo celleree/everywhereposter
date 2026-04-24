@@ -84,6 +84,16 @@ export type PublishedDeleteResponse = {
   status: 'deleted' | 'already_deleted';
 };
 
+export type PublishedComment = {
+  id: string;
+  message: string;
+  authorName: string;
+  createdTime: string;
+  likeCount: number;
+  replyCount: number;
+  permalinkUrl: string;
+};
+
 export type GenerateAuthUrlResponse = {
   url: string;
   codeVerifier: string;
@@ -139,6 +149,13 @@ export interface ISocialMediaIntegration {
     releaseId: string,
     integration: Integration
   ): Promise<PublishedDeleteResponse>; // Deletes an existing published post
+
+  readComments?(
+    id: string,
+    accessToken: string,
+    postId: string,
+    integration: Integration
+  ): Promise<PublishedComment[]>;
 }
 
 export type PostResponse = {

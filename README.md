@@ -112,6 +112,11 @@ Public-use note:
 
 - This covers repo-side callback handling, but you still need to enter the callback URL in the Meta app dashboard for each Meta app you ship.
 
+Facebook Page permission upgrade note:
+
+- Existing Facebook Page integrations must reconnect to grant `pages_read_user_content`.
+- This permission is now requested alongside `pages_manage_engagement` so Publish Everywhere can honestly read Page comment content for connected Page posts during Meta review.
+
 ---
 
 ## AI Assistant Integrations

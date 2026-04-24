@@ -79,6 +79,7 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
     changeState: jest.fn(),
     createOrUpdatePost: jest.fn(),
     deletePost: jest.fn(),
+    getPostById: jest.fn(),
     getPostUrls: jest.fn().mockResolvedValue([]),
     getPostsByGroup: jest.fn(),
     markPostsRemoteDeleted: jest.fn(),
@@ -94,6 +95,7 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
     disconnectChannel: jest.fn(),
     getIntegrationById: jest.fn(),
     getPlugs: jest.fn().mockResolvedValue([]),
+    refreshNeeded: jest.fn(),
   };
 
   const mediaService = {
@@ -113,6 +115,7 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
       getRawClient: jest.fn(() => ({
         workflow: {
           list: jest.fn(),
+          start: jest.fn(),
         },
       })),
       getWorkflowHandle: jest.fn(),
@@ -356,5 +359,205 @@ describe('PostsService published post management', () => {
     await expect(service.deletePost('org-1', 'group-1')).resolves.toEqual({
       success: true,
     });
+  });
+
+  it('creates fresh post ids when republishing a post that was deleted on-platform', async () => {
+    const { service, postRepository } = createService();
+
+    postRepository.getPostsByGroup.mockResolvedValue([
+      {
+        id: 'deleted-root-post',
+        group: 'group-1',
+        parentPostId: null,
+        state: 'DELETED_REMOTE',
+        releaseId: 'release-1',
+        integration: { ...publishedIntegration },
+      },
+    ]);
+
+    postRepository.createOrUpdatePost.mockResolvedValue({
+      posts: [
+        {
+          id: 'new-root-post',
+          state: 'QUEUE',
+        },
+      ],
+    });
+
+    await service.createPost('org-1', {
+      type: 'schedule',
+      shortLink: false,
+      date: '2026-04-21T15:00:00.000Z',
+      tags: [],
+      posts: [
+        {
+          integration: { id: 'integration-db-id' },
+          group: 'group-1',
+          settings: { __type: 'instagram' },
+          value: [
+            {
+              id: 'deleted-root-post',
+              content: 'Republish this reel',
+              image: [],
+            },
+          ],
+        },
+      ],
+    } as any);
+
+    expect(postRepository.createOrUpdatePost).toHaveBeenCalledWith(
+      'schedule',
+      'org-1',
+      '2026-04-21T15:00:00.000Z',
+      expect.objectContaining({
+        group: 'group-1',
+        value: [
+          {
+            content: 'Republish this reel',
+            image: [],
+          },
+        ],
+      }),
+      [],
+      undefined
+    );
+  });
+
+  it('prompts reconnect for legacy Facebook integrations before loading published comments', async () => {
+    const { service, provider, postRepository, integrationService } =
+      createService({
+        identifier: 'facebook',
+        name: 'Facebook Page',
+        readComments: jest.fn(),
+        hasPageContentReadScope: jest.fn(() => false),
+      });
+
+    postRepository.getPostById.mockResolvedValue({
+      id: 'post-1',
+      releaseId: 'release-1',
+      integration: {
+        ...publishedIntegration,
+        id: 'integration-db-id',
+        providerIdentifier: 'facebook',
+        additionalSettings: '[]',
+      },
+    });
+
+    await expect(
+      service.getPublishedComments('org-1', 'post-1')
+    ).resolves.toEqual({
+      supported: true,
+      reconnectRequired: true,
+      message:
+        'Reconnect this Facebook Page to grant pages_read_user_content and load Page comments.',
+      comments: [],
+    });
+
+    expect(provider.readComments).not.toHaveBeenCalled();
+    expect(integrationService.refreshNeeded).not.toHaveBeenCalled();
+  });
+
+  it('returns Facebook published comments when the upgraded scope marker is present', async () => {
+    const comments = [
+      {
+        id: 'comment-1',
+        message: 'First comment',
+        authorName: 'Alex',
+        createdTime: '2026-04-23T12:00:00.000Z',
+        likeCount: 3,
+        replyCount: 1,
+        permalinkUrl: 'https://facebook.com/comment-1',
+      },
+    ];
+    const { service, provider, postRepository } = createService({
+      identifier: 'facebook',
+      name: 'Facebook Page',
+      readComments: jest.fn().mockResolvedValue(comments),
+      hasPageContentReadScope: jest.fn(() => true),
+    });
+
+    postRepository.getPostById.mockResolvedValue({
+      id: 'post-1',
+      releaseId: 'release-1',
+      integration: {
+        ...publishedIntegration,
+        id: 'integration-db-id',
+        providerIdentifier: 'facebook',
+        internalId: 'page-123',
+        token: 'page-token',
+        additionalSettings: JSON.stringify([
+          {
+            title: 'Facebook page content read enabled',
+            value: true,
+          },
+        ]),
+      },
+    });
+
+    await expect(
+      service.getPublishedComments('org-1', 'post-1')
+    ).resolves.toEqual({
+      supported: true,
+      comments,
+    });
+
+    expect(provider.readComments).toHaveBeenCalledWith(
+      'page-123',
+      'page-token',
+      'release-1',
+      expect.objectContaining({
+        id: 'integration-db-id',
+        providerIdentifier: 'facebook',
+      })
+    );
+  });
+
+  it('marks upgraded Facebook integrations for reconnect when published comment reads hit permission errors', async () => {
+    const { service, postRepository, integrationService } = createService({
+      identifier: 'facebook',
+      name: 'Facebook Page',
+      readComments: jest
+        .fn()
+        .mockRejectedValue(
+          new RefreshToken(
+            'facebook-read-comments',
+            '{}',
+            '',
+            'Reconnect this Facebook Page to grant pages_read_user_content and load Page comments.'
+          )
+        ),
+      hasPageContentReadScope: jest.fn(() => true),
+    });
+
+    postRepository.getPostById.mockResolvedValue({
+      id: 'post-1',
+      releaseId: 'release-1',
+      integration: {
+        ...publishedIntegration,
+        id: 'integration-db-id',
+        providerIdentifier: 'facebook',
+        additionalSettings: JSON.stringify([
+          {
+            title: 'Facebook page content read enabled',
+            value: true,
+          },
+        ]),
+      },
+    });
+
+    await expect(
+      service.getPublishedComments('org-1', 'post-1')
+    ).resolves.toEqual({
+      supported: true,
+      reconnectRequired: true,
+      message:
+        'Reconnect this Facebook Page to grant pages_read_user_content and load Page comments.',
+      comments: [],
+    });
+
+    expect(integrationService.refreshNeeded).toHaveBeenCalledWith(
+      'org-1',
+      'integration-db-id'
+    );
   });
 });

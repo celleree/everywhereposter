@@ -31,6 +31,24 @@ dayjs.extend(utc);
 @Injectable()
 export class IntegrationService {
   private storage = UploadFactory.createStorage();
+  private normalizeDisplayName<T extends { providerIdentifier: string; profile?: string | null; name: string }>(
+    integration: T
+  ): T {
+    if (
+      ['instagram', 'instagram-standalone'].includes(
+        integration.providerIdentifier
+      ) &&
+      integration.profile
+    ) {
+      return {
+        ...integration,
+        name: integration.profile,
+      };
+    }
+
+    return integration;
+  }
+
   constructor(
     private _integrationRepository: IntegrationRepository,
     private _autopostsRepository: AutopostRepository,
@@ -153,8 +171,10 @@ export class IntegrationService {
     return this._integrationRepository.updateOnCustomerName(org, id, name);
   }
 
-  getIntegrationsList(org: string) {
-    return this._integrationRepository.getIntegrationsList(org);
+  async getIntegrationsList(org: string) {
+    return (await this._integrationRepository.getIntegrationsList(org)).map(
+      (integration) => this.normalizeDisplayName(integration)
+    );
   }
 
   getIntegrationForOrder(id: string, order: string, user: string, org: string) {

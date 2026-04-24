@@ -256,8 +256,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
     if (isRemoteDeletedPost) {
       return t(
-        'deleted_on_platform_keep_remove_from_app',
-        'This post was already deleted on the platform. You can still remove it from Publish Everywhere.'
+        'deleted_on_platform_can_republish',
+        'This post was already deleted on the platform. You can republish it or remove it from Publish Everywhere.'
       );
     }
 
@@ -846,7 +846,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   </div>
                 </button>
               )}
-              {!showPublishedActions && (
+              {(!showPublishedActions || isRemoteDeletedPost) && (
                 <DatePicker onChange={setDate} date={date} />
               )}
             {!addEditSets && (
@@ -885,7 +885,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     selectedIntegrations.length === 0 ||
                     loading ||
                     locked ||
-                    !!updatePublishedDisabledReason
+                    (isPublishedPost && !!updatePublishedDisabledReason)
                   }
                   onClick={schedule(
                     isPublishedPost ? 'update' : 'schedule'
@@ -908,7 +908,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       : dummy
                       ? t('create_output', 'Create output')
                       : isRemoteDeletedPost
-                      ? t('deleted_on_platform', 'Deleted on platform')
+                      ? t('republish_post', 'Republish post')
                       : isPublishedPost
                       ? t('update_published_post', 'Update published post')
                       : !existingData?.integration
@@ -917,14 +917,14 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       ? t('schedule', 'Schedule')
                       : t('update', 'Update')}
                   </div>
-                  {!dummy && !isPublishedPost && !isRemoteDeletedPost && (
+                  {!dummy && !isPublishedPost && (
                     <div className="flex justify-center items-center h-[20px] w-[20px] pt-[4px] arrow-change">
                       <DropdownArrowSmallIcon className="group-hover:rotate-180 text-white" />
                     </div>
                   )}
                 </button>
 
-                {!dummy && !isPublishedPost && !isRemoteDeletedPost && (
+                {!dummy && !isPublishedPost && (
                   <button
                     onClick={schedule('now')}
                     disabled={

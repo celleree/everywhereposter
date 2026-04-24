@@ -2,16 +2,26 @@ import {
   AnalyticsData,
   AuthTokenDetails,
   HistoricalMediaPage,
+  PublishedComment,
   PostDetails,
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import dayjs from 'dayjs';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  BadBody,
+  RefreshToken,
+  SocialAbstract,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { FacebookDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/facebook.dto';
 import { DribbbleDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/dribbble.dto';
 import { Integration } from '@prisma/client';
+
+const FACEBOOK_PAGE_CONTENT_READ_MARKER_TITLE =
+  'Facebook page content read enabled';
+const FACEBOOK_PAGE_CONTENT_READ_RECONNECT_MESSAGE =
+  'Reconnect this Facebook Page to grant pages_read_user_content and load Page comments.';
 
 export class FacebookProvider extends SocialAbstract implements SocialProvider {
   identifier = 'facebook';
@@ -22,6 +32,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     'business_management',
     'pages_manage_posts',
     'pages_manage_engagement',
+    'pages_read_user_content',
     'pages_read_engagement',
     'read_insights',
   ];
@@ -226,6 +237,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       accessToken: information.access_token,
       picture: information.picture,
       username: information.username,
+      additionalSettings: this.getPageContentReadAdditionalSettings(),
     };
   }
 
@@ -283,7 +295,61 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       expiresIn: dayjs().add(59, 'days').unix() - dayjs().unix(),
       picture: picture?.data?.url || '',
       username: '',
+      additionalSettings: this.getPageContentReadAdditionalSettings(),
     };
+  }
+
+  hasPageContentReadScope(integration?: Integration) {
+    try {
+      return JSON.parse(integration?.additionalSettings || '[]').some(
+        (setting: any) =>
+          setting?.title === FACEBOOK_PAGE_CONTENT_READ_MARKER_TITLE &&
+          setting?.value === true
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async readComments(
+    _id: string,
+    accessToken: string,
+    postId: string,
+    _integration: Integration
+  ): Promise<PublishedComment[]> {
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/${postId}/comments?fields=id,message,from{name},created_time,like_count,comment_count,permalink_url&limit=25&access_token=${accessToken}`
+    );
+    const rawBody = await response.text();
+
+    if (!response.ok) {
+      if (this.isCommentReadReconnectError(rawBody, response.status)) {
+        throw new RefreshToken(
+          'facebook-read-comments',
+          rawBody || '{}',
+          '',
+          FACEBOOK_PAGE_CONTENT_READ_RECONNECT_MESSAGE
+        );
+      }
+
+      throw new BadBody(
+        'facebook-read-comments',
+        rawBody || '{}',
+        '',
+        'Failed to load Facebook Page comments.'
+      );
+    }
+
+    const parsedBody = rawBody ? JSON.parse(rawBody) : {};
+    return (parsedBody?.data || []).map((comment: any) => ({
+      id: String(comment.id || ''),
+      message: comment.message || '',
+      authorName: comment.from?.name || 'Facebook user',
+      createdTime: comment.created_time || '',
+      likeCount: Number(comment.like_count || 0),
+      replyCount: Number(comment.comment_count || 0),
+      permalinkUrl: comment.permalink_url || '',
+    }));
   }
 
   async pages(accessToken: string) {
@@ -706,5 +772,31 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       console.error('Error fetching Facebook post analytics:', err);
       return [];
     }
+  }
+
+  private getPageContentReadAdditionalSettings() {
+    return [
+      {
+        title: FACEBOOK_PAGE_CONTENT_READ_MARKER_TITLE,
+        description:
+          'This Facebook Page connection includes read access for Page comments and other user-generated Page content.',
+        type: 'checkbox' as const,
+        value: true,
+      },
+    ];
+  }
+
+  private isCommentReadReconnectError(body: string, status: number) {
+    const normalizedBody = body.toLowerCase();
+
+    return (
+      status === 401 ||
+      status === 403 ||
+      normalizedBody.includes('access token') ||
+      normalizedBody.includes('permission') ||
+      normalizedBody.includes('scope') ||
+      normalizedBody.includes('oauthexception') ||
+      normalizedBody.includes('pages_read_user_content')
+    );
   }
 }
