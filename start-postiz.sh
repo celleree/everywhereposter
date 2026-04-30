@@ -117,12 +117,11 @@ BACKEND_PID=$!
 
 wait_for_tcp 127.0.0.1 3000 "Backend" 90
 
-cd /app/apps/frontend
-pnpm start &
+cd /app
+pnpm --filter ./apps/frontend start &
 FRONTEND_PID=$!
 
-cd /app/apps/orchestrator
-pnpm start &
+pnpm --filter ./apps/orchestrator start &
 ORCHESTRATOR_PID=$!
 
 cleanup() {

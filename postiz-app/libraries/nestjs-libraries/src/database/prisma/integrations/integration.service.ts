@@ -177,21 +177,33 @@ export class IntegrationService {
     );
   }
 
-  getIntegrationForOrder(id: string, order: string, user: string, org: string) {
-    return this._integrationRepository.getIntegrationForOrder(
+  async getIntegrationForOrder(
+    id: string,
+    order: string,
+    user: string,
+    org: string
+  ) {
+    const integration = await this._integrationRepository.getIntegrationForOrder(
       id,
       order,
       user,
       org
     );
+
+    return integration ? this.normalizeDisplayName(integration) : integration;
   }
 
   updateNameAndUrl(id: string, name: string, url: string) {
     return this._integrationRepository.updateNameAndUrl(id, name, url);
   }
 
-  getIntegrationById(org: string, id: string) {
-    return this._integrationRepository.getIntegrationById(org, id);
+  async getIntegrationById(org: string, id: string) {
+    const integration = await this._integrationRepository.getIntegrationById(
+      org,
+      id
+    );
+
+    return integration ? this.normalizeDisplayName(integration) : integration;
   }
 
   async refreshToken(provider: SocialProvider, refresh: string) {

@@ -32,10 +32,14 @@ export class InstagramStandaloneProvider
     'instagram_business_manage_comments',
     'instagram_business_manage_insights',
   ];
-    override maxConcurrentJob = 200; // Instagram standalone has stricter limits
+  override maxConcurrentJob = 200; // Instagram standalone has stricter limits
   dto = InstagramDto;
 
   editor = 'normal' as const;
+  private getAccountLabel(name?: string, username?: string) {
+    return username || name || '';
+  }
+
   maxLength() {
     return 2200;
   }
@@ -81,7 +85,7 @@ export class InstagramStandaloneProvider
 
     return {
       id: user_id,
-      name,
+      name: this.getAccountLabel(name, username),
       accessToken: access_token,
       refreshToken: access_token,
       expiresIn: dayjs().add(58, 'days').unix() - dayjs().unix(),
@@ -156,7 +160,7 @@ export class InstagramStandaloneProvider
 
     return {
       id: user_id,
-      name,
+      name: this.getAccountLabel(name, username),
       accessToken: access_token,
       refreshToken: access_token,
       expiresIn: dayjs().add(58, 'days').unix() - dayjs().unix(),

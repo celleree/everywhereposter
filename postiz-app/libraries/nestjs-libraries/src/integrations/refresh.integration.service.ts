@@ -31,14 +31,15 @@ export class RefreshIntegrationService {
       undefined,
       !!socialProvider.oneTimeToken,
       integration.organizationId,
-      integration.name,
-      integration.picture!,
+      refresh.name || refresh.username || integration.name,
+      refresh.picture || integration.picture || undefined,
       'social',
       integration.internalId,
       integration.providerIdentifier,
       refresh.accessToken,
       refresh.refreshToken,
-      refresh.expiresIn
+      refresh.expiresIn,
+      refresh.username || integration.profile || undefined
     );
 
     return refresh;

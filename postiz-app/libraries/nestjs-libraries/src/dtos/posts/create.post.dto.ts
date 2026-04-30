@@ -35,7 +35,7 @@ export class PostContent {
 
   @IsOptional()
   @IsString()
-  id: string;
+  id?: string;
 
   @IsOptional()
   @IsNumber()

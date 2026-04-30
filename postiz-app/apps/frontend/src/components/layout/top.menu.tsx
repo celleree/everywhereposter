@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, ReactNode, useCallback } from 'react';
+import { FC, ReactNode, useCallback, useMemo } from 'react';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -313,71 +313,94 @@ export const useMenuItem = () => {
   };
 };
 
-export const TopMenu: FC = () => {
+export const TopMenu: FC<{ mobileNav?: boolean }> = ({ mobileNav }) => {
   const user = useUser();
   const { firstMenu, secondMenu } = useMenuItem();
   const { isGeneral, billingEnabled } = useVariables();
+
+  const filterMenuItems = useCallback(
+    (items: MenuItemInterface[]) =>
+      items.filter((f) => {
+        if (f.hide) {
+          return false;
+        }
+        if (f.requireBilling && !billingEnabled) {
+          return false;
+        }
+        if (f.name === 'Billing' && user?.isLifetime) {
+          return false;
+        }
+        if (f.role) {
+          return f.role.includes(user?.role!);
+        }
+        return true;
+      }),
+    [billingEnabled, user?.isLifetime, user?.role]
+  );
+
+  const visibleFirstMenu = useMemo(() => {
+    if (
+      !user?.orgId ||
+      (user?.tier?.current === 'FREE' && isGeneral && billingEnabled)
+    ) {
+      return [];
+    }
+
+    return filterMenuItems(firstMenu);
+  }, [
+    billingEnabled,
+    filterMenuItems,
+    firstMenu,
+    isGeneral,
+    user?.orgId,
+    user?.tier,
+  ]);
+
+  const visibleSecondMenu = useMemo(
+    () => filterMenuItems(secondMenu),
+    [filterMenuItems, secondMenu]
+  );
+
+  if (mobileNav) {
+    return (
+      <div className="flex gap-[8px] overflow-x-auto scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner">
+        {[...visibleFirstMenu, ...visibleSecondMenu].map((item) => (
+          <MenuItem
+            mobileNav={true}
+            path={item.path}
+            label={item.name}
+            icon={item.icon}
+            key={item.name}
+            onClick={item.onClick}
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex flex-1 flex-col minCustom:gap-[16px] blurMe">
-        {
-          // @ts-ignore
-          user?.orgId &&
-            // @ts-ignore
-            (user.tier !== 'FREE' || !isGeneral || !billingEnabled) &&
-            firstMenu
-              .filter((f) => {
-                if (f.hide) {
-                  return false;
-                }
-                if (f.requireBilling && !billingEnabled) {
-                  return false;
-                }
-                if (f.name === 'Billing' && user?.isLifetime) {
-                  return false;
-                }
-                if (f.role) {
-                  return f.role.includes(user?.role!);
-                }
-                return true;
-              })
-              .map((item, index) => (
-                <MenuItem
-                  path={item.path}
-                  label={item.name}
-                  icon={item.icon}
-                  key={item.name}
-                  onClick={item.onClick}
-                />
-              ))
-        }
+        {visibleFirstMenu.map((item) => (
+          <MenuItem
+            path={item.path}
+            label={item.name}
+            icon={item.icon}
+            key={item.name}
+            onClick={item.onClick}
+          />
+        ))}
       </div>
       <div className="flex flex-col minCustom:gap-[16px] blurMe">
-        {secondMenu
-          .filter((f) => {
-            if (f.hide) {
-              return false;
-            }
-            if (f.requireBilling && !billingEnabled) {
-              return false;
-            }
-            if (f.name === 'Billing' && user?.isLifetime) {
-              return false;
-            }
-            if (f.role) {
-              return f.role.includes(user?.role!);
-            }
-            return true;
-          })
-          .map((item, index) => (
-            <MenuItem
-              path={item.path}
-              label={item.name}
-              icon={item.icon}
-              key={item.name}
-              onClick={item.onClick}
-            />
-          ))}
+        {visibleSecondMenu.map((item) => (
+          <MenuItem
+            path={item.path}
+            label={item.name}
+            icon={item.icon}
+            key={item.name}
+            onClick={item.onClick}
+          />
+        ))}
       </div>
     </>
   );

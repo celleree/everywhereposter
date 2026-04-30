@@ -361,7 +361,24 @@ export const LaunchesComponent = () => {
   const [reload, setReload] = useState(false);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
   const [mode] = useCookie('mode', 'dark');
+  const [isMobile, setIsMobile] = useState(false);
   const { isLoading, data: integrations, mutate } = useIntegrationList();
+  const isCollapsed = collapseMenu === '1' && !isMobile;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 1025px)');
+    const handleViewportChange = () => setIsMobile(mediaQuery.matches);
+
+    handleViewportChange();
+    mediaQuery.addEventListener('change', handleViewportChange);
+
+    return () =>
+      mediaQuery.removeEventListener('change', handleViewportChange);
+  }, []);
 
   const totalNonDisabledChannels = useMemo(() => {
     return (
@@ -499,24 +516,24 @@ export const LaunchesComponent = () => {
       <CalendarWeekProvider integrations={sortedIntegrations}>
         <div
           className={clsx(
-            'flex relative flex-col',
-            collapseMenu === '1' ? 'group sidebar w-[100px]' : 'w-[260px]'
+            'relative flex flex-col mobile:w-full mobile:min-h-[340px]',
+            isCollapsed ? 'group sidebar w-[100px]' : 'w-[260px]'
           )}
         >
           <div
             className={clsx(
-              'bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all absolute start-0 top-0 w-full h-full overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor'
+              'absolute start-0 top-0 flex h-full w-full flex-col gap-[15px] overflow-x-hidden overflow-y-auto bg-newBgColorInner p-[20px] transition-all scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor mobile:p-[16px]'
             )}
           >
             <div className="flex items-center">
-              <h2 className="group-[.sidebar]:hidden flex-1 text-[20px] font-[500]">
+              <h2 className="flex-1 text-[20px] font-[500] group-[.sidebar]:hidden">
                 {t('channels')}
               </h2>
               <div
                 onClick={() =>
                   setCollapseMenu(collapseMenu === '1' ? '0' : '1')
                 }
-                className="group-[.sidebar]:rotate-[180deg] group-[.sidebar]:mx-auto text-btnText bg-btnSimple rounded-[6px] w-[24px] h-[24px] flex items-center justify-center cursor-pointer select-none"
+                className="flex h-[24px] w-[24px] cursor-pointer select-none items-center justify-center rounded-[6px] bg-btnSimple text-btnText group-[.sidebar]:mx-auto group-[.sidebar]:rotate-[180deg] mobile:hidden"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -535,9 +552,9 @@ export const LaunchesComponent = () => {
                 </svg>
               </div>
             </div>
-            <div className="flex flex-col gap-[8px] group-[.sidebar]:mx-auto group-[.sidebar]:w-[44px]">
+            <div className="flex flex-col gap-[8px] group-[.sidebar]:mx-auto group-[.sidebar]:w-[44px] mobile:w-full">
               <AddProviderButton update={() => update(true)} />
-              <div className="flex gap-[8px] group-[.sidebar]:flex-col">
+              <div className="flex gap-[8px] group-[.sidebar]:flex-col mobile:flex-col">
                 {sortedIntegrations?.length > 0 && <NewPost />}
                 {sortedIntegrations?.length > 0 &&
                   user?.tier?.ai &&
@@ -545,7 +562,7 @@ export const LaunchesComponent = () => {
               </div>
             </div>
             <div className="gap-[32px] flex flex-col select-none flex-1">
-              {sortedIntegrations.length === 0 && collapseMenu === '0' && (
+              {sortedIntegrations.length === 0 && !isCollapsed && (
                 <div className="flex-1 max-h-[500px] justify-center items-center flex">
                   <div className="flex flex-col gap-[12px] text-center">
                     <img
@@ -568,7 +585,7 @@ export const LaunchesComponent = () => {
               )}
               {menuIntegrations.map((menu) => (
                 <MenuGroupComponent
-                  collapsed={collapseMenu === '1'}
+                  collapsed={isCollapsed}
                   changeItemGroup={changeItemGroup}
                   key={menu.name}
                   group={menu}
@@ -592,9 +609,9 @@ export const LaunchesComponent = () => {
             </div>
           </div>
         </div>
-        <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px]">
+        <div className="flex min-w-0 flex-1 flex-col gap-[12px] bg-newBgColorInner p-[20px] mobile:min-h-[70vh] mobile:p-[16px]">
           <Filters />
-          <div className="flex-1 flex">
+          <div className="flex flex-1 min-w-0">
             <Calendar />
           </div>
         </div>

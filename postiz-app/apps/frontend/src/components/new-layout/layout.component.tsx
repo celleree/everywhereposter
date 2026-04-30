@@ -88,7 +88,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
             <ContinueProvider />
             <div
               className={clsx(
-                'flex flex-col min-h-screen min-w-screen text-newTextColor p-[12px]',
+                'flex min-h-screen w-full flex-col text-newTextColor p-[12px] mobile:px-[8px] mobile:pt-[8px] mobile:pb-[92px]',
                 jakartaSans.className
               )}
             >
@@ -98,9 +98,9 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
               ) : (
                 <>
                   <AnnouncementBanner />
-                  <div className="flex-1 flex gap-[8px]">
+                  <div className="flex flex-1 gap-[8px] mobile:flex-col">
                     <Support />
-                    <div className="flex flex-col bg-newBgColorInner w-[80px] rounded-[12px]">
+                    <div className="flex flex-col bg-newBgColorInner w-[80px] rounded-[12px] mobile:hidden">
                       <div
                         id="left-menu"
                         className={clsx(
@@ -114,27 +114,39 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                         </div>
                       </div>
                     </div>
-                    <div className="flex-1 bg-newBgLineColor rounded-[12px] overflow-hidden flex flex-col gap-[1px] blurMe">
-                      <div className="flex bg-newBgColorInner h-[80px] px-[20px] items-center">
-                        <div className="text-[24px] font-[600] flex flex-1">
-                          <Title />
+                    <div className="flex min-w-0 flex-1 flex-col gap-[1px] overflow-hidden rounded-[12px] bg-newBgLineColor blurMe">
+                      <div className="flex h-[80px] items-center bg-newBgColorInner px-[20px] mobile:h-auto mobile:flex-col mobile:items-start mobile:gap-[12px] mobile:px-[16px] mobile:py-[14px]">
+                        <div className="flex min-w-0 flex-1 items-center gap-[6px] mobile:w-full">
+                          <div className="hidden origin-left scale-[0.72] mobile:flex">
+                            <Logo />
+                          </div>
+                          <div className="min-w-0 text-[24px] font-[600] mobile:text-[20px]">
+                            <Title />
+                          </div>
                         </div>
-                        <div className="flex gap-[20px] text-textItemBlur">
+                        <div className="flex items-center gap-[20px] text-textItemBlur mobile:w-full mobile:gap-[14px] mobile:overflow-x-auto mobile:pb-[2px]">
                           <StreakComponent />
-                          <div className="w-[1px] h-[20px] bg-blockSeparator" />
+                          <div className="h-[20px] w-[1px] bg-blockSeparator mobile:hidden" />
                           <OrganizationSelector />
                           <div className="hover:text-newTextColor">
                             <ModeComponent />
                           </div>
-                          <div className="w-[1px] h-[20px] bg-blockSeparator" />
+                          <div className="h-[20px] w-[1px] bg-blockSeparator mobile:hidden" />
                           <LanguageComponent />
                           <ChromeExtensionComponent />
-                          <div className="w-[1px] h-[20px] bg-blockSeparator" />
+                          <div className="h-[20px] w-[1px] bg-blockSeparator mobile:hidden" />
                           <AttachToFeedbackIcon />
                           <NotificationComponent />
                         </div>
                       </div>
-                      <div className="flex flex-1 gap-[1px]">{children}</div>
+                      <div className="flex min-h-0 flex-1 gap-[1px] mobile:flex-col">
+                        {children}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="fixed inset-x-[8px] bottom-[8px] z-[90] hidden mobile:block">
+                    <div className="rounded-[16px] border border-newBorder bg-newBgColorInner/95 p-[8px] shadow-menu backdrop-blur">
+                      <TopMenu mobileNav={true} />
                     </div>
                   </div>
                 </>
