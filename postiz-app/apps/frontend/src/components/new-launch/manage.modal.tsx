@@ -815,11 +815,11 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   );
 
   return (
-    <div className="relative flex h-full w-full flex-1 p-[40px] mobile:p-[12px]">
-      <div className="flex flex-1 flex-col rounded-[20px] bg-newBgColorInner">
-        <div className="flex flex-1 mobile:min-h-0 mobile:flex-col">
-          <div className="flex flex-1 flex-col border-e border-newBorder mobile:border-e-0 mobile:border-b">
-            <div className="flex min-h-[65px] items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:rounded-e-[20px] mobile:px-[16px]">
+    <div className="relative flex h-full w-full flex-1 p-[40px] mobile:h-auto mobile:min-h-full mobile:p-0">
+      <div className="flex flex-1 flex-col rounded-[20px] bg-newBgColorInner mobile:rounded-none">
+        <div className="flex flex-1 mobile:block mobile:flex-none mobile:min-h-0">
+          <div className="flex flex-1 flex-col border-e border-newBorder mobile:block mobile:border-e-0 mobile:border-b">
+            <div className="flex min-h-[65px] items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:min-h-0 mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
               <div className="flex flex-1 flex-col">
                 <div>{t('create_post_title', 'Create Post')}</div>
                 <div className="mt-[4px] text-[13px] font-[500] text-textColor/65">
@@ -828,10 +828,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 </div>
               </div>
             </div>
-            <div className="relative flex-1 mobile:min-h-[460px]">
+            <div className="relative flex-1 mobile:static mobile:min-h-0">
               <div
                 id="social-content"
-                className="absolute left-0 top-0 flex h-full w-full flex-col gap-[20px] overflow-x-hidden overflow-y-scroll pe-[8px] pt-[20px] ps-[20px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:gap-[16px] mobile:px-[16px]"
+                className="absolute left-0 top-0 flex h-full w-full flex-col gap-[20px] overflow-x-hidden overflow-y-scroll pe-[8px] pt-[20px] ps-[20px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:gap-[12px] mobile:overflow-visible mobile:px-[12px] mobile:py-[12px]"
               >
                 <ComposerSection
                   step="1"
@@ -850,7 +850,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   title="Pick platforms and accounts"
                   description="Choose every account that should receive this post. The shared version stays in sync until you customize a specific channel."
                 >
-                  <div className="mb-[14px] flex flex-wrap items-center justify-between gap-[12px]">
+                  <div className="mb-[14px] flex flex-wrap items-center justify-between gap-[12px] mobile:flex-col mobile:items-stretch">
                     <div className="text-[13px] text-textColor/65">
                       {selectedIntegrations.length > 0
                         ? `${selectedIntegrations.length} account${
@@ -873,14 +873,14 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   title="Generate or customize with AI"
                   description="Use quick actions to jump into the existing assistant with prompts tailored to the current composer."
                 >
-                  <div className="grid grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3 mobile:gap-[8px]">
                     {AI_PRESETS.map((preset) => (
                       <button
                         key={preset.id}
                         type="button"
                         onClick={() => openAiPreset(preset.id)}
                         className={clsx(
-                          'rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
+                          'rounded-[16px] border px-[14px] py-[14px] text-start transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[12px]',
                           activeAiPreset === preset.id
                             ? 'border-[#7C4DFF] bg-[#22163B]'
                             : 'border-newBorder bg-newBgColor hover:border-[#7C4DFF] hover:bg-newBgLineColor/70'
@@ -920,7 +920,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       ? 'You are editing the shared version used by every selected account until a platform is customized.'
                       : 'You are reviewing a platform-specific version. Changes here only affect the active account.'}
                   </div>
-                  <div className="flex flex-1">
+                  <div className="flex flex-1 mobile:block">
                     {!hide && <EditorWrapper totalPosts={1} value="" />}
                   </div>
                   <div id="social-empty" className="pb-[4px]" />
@@ -974,8 +974,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             </div>
           </div>
 
-          <div className="flex w-[580px] flex-col mobile:w-full mobile:min-h-[360px]">
-            <div className="flex min-h-[65px] items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-e-[20px] !rounded-b-[0] mobile:rounded-s-none mobile:px-[16px]">
+          <div className="flex w-[580px] flex-col mobile:w-full mobile:min-h-0">
+            <div className="flex min-h-[65px] items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-e-[20px] !rounded-b-[0] mobile:min-h-0 mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
               <div className="flex flex-1 flex-col">
                 <div>{t('post_preview', 'Post Preview')}</div>
                 <div className="mt-[4px] text-[13px] font-[500] text-textColor/65">
@@ -987,10 +987,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 <CloseIcon onClick={askClose} className="text-[#A3A3A3]" />
               </div>
             </div>
-            <div className="relative flex-1 mobile:min-h-[320px]">
+            <div className="relative flex-1 mobile:static mobile:min-h-0">
               <Scrollable
                 scrollClasses="!pe-[20px]"
-                className="absolute left-0 top-0 h-full w-full overflow-x-hidden overflow-y-scroll p-[20px] pe-[8px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:px-[16px]"
+                className="absolute left-0 top-0 h-full w-full overflow-x-hidden overflow-y-scroll p-[20px] pe-[8px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:min-h-[220px] mobile:overflow-visible mobile:px-[12px] mobile:py-[12px]"
               >
                 <ShowAllProviders ref={ref} />
               </Scrollable>
@@ -998,8 +998,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
           </div>
         </div>
 
-        <div className="flex min-h-[84px] items-center border-t border-newBorder py-[16px] select-none mobile:flex-col mobile:items-stretch mobile:gap-[12px]">
-          <div className="flex flex-1 gap-[8px] ps-[20px] mobile:flex-wrap mobile:px-[16px]">
+        <div className="flex min-h-[84px] items-center border-t border-newBorder py-[16px] select-none mobile:sticky mobile:bottom-0 mobile:z-[30] mobile:flex-col mobile:items-stretch mobile:gap-[12px] mobile:bg-newBgColorInner/95 mobile:py-[12px] mobile:shadow-menu mobile:backdrop-blur">
+          <div className="flex flex-1 gap-[8px] ps-[20px] mobile:flex-col mobile:px-[12px] mobile:[&>*]:ml-0 mobile:[&>*]:w-full">
             {!dummy && (
               <TagsComponent
                 name="tags"
@@ -1015,7 +1015,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <RepeatComponent repeat={repeater} onChange={setRepeater} />
             )}
           </div>
-          <div className="flex flex-col items-end gap-[8px] pe-[20px] mobile:px-[16px] mobile:items-stretch">
+          <div className="flex flex-col items-end gap-[8px] pe-[20px] mobile:items-stretch mobile:px-[12px]">
             <div className="flex items-center justify-end gap-[8px] mobile:flex-col mobile:items-stretch">
               {showPublishedActions && (
                 <span title={deleteOnPlatformDisabledReason || undefined}>
@@ -1190,13 +1190,15 @@ const ComposerSection: FC<{
   children: ReactNode;
 }> = ({ step, title, description, children }) => {
   return (
-    <section className="rounded-[18px] border border-newBorder bg-newBgColor px-[18px] py-[18px]">
-      <div className="mb-[16px] flex items-start gap-[12px]">
-        <div className="flex h-[32px] w-[32px] min-w-[32px] items-center justify-center rounded-full bg-newBgLineColor text-[13px] font-[700] text-white">
+    <section className="rounded-[18px] border border-newBorder bg-newBgColor px-[18px] py-[18px] mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]">
+      <div className="mb-[16px] flex items-start gap-[12px] mobile:mb-[12px]">
+        <div className="flex h-[32px] w-[32px] min-w-[32px] items-center justify-center rounded-full bg-newBgLineColor text-[13px] font-[700] text-white mobile:h-[28px] mobile:w-[28px] mobile:min-w-[28px] mobile:text-[12px]">
           {step}
         </div>
         <div>
-          <div className="text-[18px] font-[700] text-white">{title}</div>
+          <div className="text-[18px] font-[700] text-white mobile:text-[16px]">
+            {title}
+          </div>
           <div className="mt-[4px] text-[13px] leading-[1.5] text-textColor/65">
             {description}
           </div>
@@ -1263,7 +1265,7 @@ const ComposerUploadCard: FC<{
     <div
       {...getRootProps()}
       className={clsx(
-        'rounded-[18px] border border-dashed px-[18px] py-[18px] transition-all',
+        'rounded-[18px] border border-dashed px-[18px] py-[18px] transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]',
         isDragActive
           ? 'border-[#7C4DFF] bg-[#22163B]'
           : 'border-newBorder bg-newBgColor',
@@ -1271,12 +1273,12 @@ const ComposerUploadCard: FC<{
       )}
     >
       <input {...getInputProps()} />
-      <div className="flex flex-wrap items-start justify-between gap-[16px]">
+      <div className="flex flex-wrap items-start justify-between gap-[16px] mobile:flex-col mobile:gap-[12px]">
         <div className="max-w-[520px]">
-          <div className="text-[18px] font-[700] text-white">
+          <div className="text-[18px] font-[700] text-white mobile:text-[16px]">
             Upload once, customize later
           </div>
-          <div className="mt-[8px] text-[14px] leading-[1.5] text-textColor/65">
+          <div className="mt-[8px] text-[14px] leading-[1.5] text-textColor/65 mobile:text-[13px]">
             Drop files here or browse from your device. New uploads land on the
             shared composer version first, and you can still adjust media inside
             any platform-specific version below.
@@ -1289,7 +1291,7 @@ const ComposerUploadCard: FC<{
             event.stopPropagation();
             open();
           }}
-          className="rounded-[12px] bg-[#612BD3] px-[16px] py-[12px] text-[14px] font-[700] text-white transition-opacity hover:opacity-90"
+          className="rounded-[12px] bg-[#612BD3] px-[16px] py-[12px] text-[14px] font-[700] text-white transition-opacity hover:opacity-90 mobile:w-full"
         >
           Choose files
         </button>
@@ -1315,7 +1317,8 @@ const ComposerUploadCard: FC<{
       <div
         className={clsx(
           'mt-[16px] rounded-[16px] border border-newBorder bg-newBgColorInner p-[14px]',
-          !media.length && 'flex min-h-[150px] items-center justify-center'
+          !media.length &&
+            'flex min-h-[150px] items-center justify-center mobile:min-h-[120px]'
         )}
       >
         {!media.length ? (

@@ -59,7 +59,7 @@ export const PicksSocialsComponent: FC<{ toolTip?: boolean }> = ({
                     addOrRemoveSelectedIntegration(integration, {});
                   }}
                   className={clsx(
-                    'group relative flex min-h-[88px] w-full items-center gap-[14px] rounded-[16px] border bg-newBgColor px-[14px] py-[14px] text-start transition-all',
+                    'group relative flex min-h-[88px] w-full items-center gap-[14px] rounded-[16px] border bg-newBgColor px-[14px] py-[14px] text-start transition-all xs:flex-col xs:items-start xs:gap-[10px]',
                     existing.integration && 'cursor-default',
                     !existing.integration && 'hover:border-[#7C4DFF] hover:bg-newBgLineColor/70',
                     selected
@@ -95,7 +95,7 @@ export const PicksSocialsComponent: FC<{ toolTip?: boolean }> = ({
                       />
                     )}
                   </div>
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 xs:w-full">
                     <div className="truncate text-[15px] font-[700] text-white">
                       {integration.name}
                     </div>
@@ -103,14 +103,14 @@ export const PicksSocialsComponent: FC<{ toolTip?: boolean }> = ({
                       {integration.display || integration.identifier}
                     </div>
                     {!!integration.customer?.name && (
-                      <div className="mt-[6px] inline-flex rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[600] uppercase tracking-[0.04em] text-textColor/70">
+                      <div className="mt-[6px] inline-flex max-w-full rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[600] uppercase tracking-[0.04em] text-textColor/70">
                         {integration.customer.name}
                       </div>
                     )}
                   </div>
                   <div
                     className={clsx(
-                      'flex h-[28px] min-w-[86px] items-center justify-center rounded-full border px-[12px] text-[12px] font-[700] uppercase tracking-[0.04em]',
+                      'flex h-[28px] min-w-[86px] items-center justify-center rounded-full border px-[12px] text-[12px] font-[700] uppercase tracking-[0.04em] xs:w-full',
                       selected
                         ? 'border-[#9F7AEA] bg-[#612BD3] text-white'
                         : 'border-newBorder text-textColor/65'

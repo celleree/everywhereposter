@@ -120,13 +120,13 @@ export const CreateComponent = () => {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-newBgColorInner">
-      <div className="flex flex-wrap items-center justify-between gap-[12px] border-b border-newBorder bg-newBgColorInner px-[20px] py-[14px] mobile:px-[16px]">
+    <div className="flex min-h-0 flex-1 flex-col bg-newBgColorInner mobile:overflow-y-auto">
+      <div className="flex flex-wrap items-center justify-between gap-[12px] border-b border-newBorder bg-newBgColorInner px-[20px] py-[14px] mobile:px-[12px] mobile:py-[10px]">
         <div className="flex min-w-0 flex-col">
-          <div className="text-[16px] font-[700] text-white">
+          <div className="text-[16px] font-[700] text-white mobile:text-[15px]">
             {t('create_post', 'Create Post')}
           </div>
-          <div className="mt-[3px] text-[13px] text-textColor/65">
+          <div className="mt-[3px] text-[13px] text-textColor/65 mobile:hidden">
             {t(
               'create_post_inline_set_hint',
               'Start blank or preload a saved Set without leaving the composer.'
@@ -155,7 +155,7 @@ export const CreateComponent = () => {
           </label>
         )}
       </div>
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 mobile:block mobile:flex-none">
         <AddEditModal
           key={`${selectedSetId || 'blank'}-${nextSlot}`}
           allIntegrations={integrations.map((integration: any) => ({
