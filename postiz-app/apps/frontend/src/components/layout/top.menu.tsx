@@ -36,6 +36,34 @@ export const useMenuItem = () => {
 
   const firstMenu = [
     {
+      name: t('create', 'Create'),
+      icon: (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="21"
+          height="21"
+          viewBox="0 0 21 21"
+          fill="none"
+        >
+          <path
+            d="M10.5 4.66699V16.3337M4.66675 10.5003H16.3334"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M7.3 19.5H13.7C15.3802 19.5 16.2202 19.5 16.862 19.173C17.4265 18.8854 17.8854 18.4265 18.173 17.862C18.5 17.2202 18.5 16.3802 18.5 14.7V6.3C18.5 4.61984 18.5 3.77976 18.173 3.13803C17.8854 2.57354 17.4265 2.1146 16.862 1.82698C16.2202 1.5 15.3802 1.5 13.7 1.5H7.3C5.61984 1.5 4.77976 1.5 4.13803 1.82698C3.57354 2.1146 3.1146 2.57354 2.82698 3.13803C2.5 3.77976 2.5 4.61984 2.5 6.3V14.7C2.5 16.3802 2.5 17.2202 2.82698 17.862C3.1146 18.4265 3.57354 18.8854 4.13803 19.173C4.77976 19.5 5.61984 19.5 7.3 19.5Z"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+      path: '/create',
+    },
+    {
       name: isGeneral ? t('calendar', 'Calendar') : t('launches', 'Launches'),
       icon: (
         <svg

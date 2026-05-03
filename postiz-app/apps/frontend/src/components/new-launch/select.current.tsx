@@ -1,54 +1,14 @@
 'use client';
 
-import { FC, RefObject, useCallback, useEffect, useRef, useState } from 'react';
-import {
-  SelectedIntegrations,
-  useLaunchStore,
-} from '@gitroom/frontend/components/new-launch/store';
+import { FC, useCallback } from 'react';
+import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import clsx from 'clsx';
 import SafeImage from '@gitroom/react/helpers/safe.image';
 import { useShallow } from 'zustand/react/shallow';
 import { GlobalIcon } from '@gitroom/frontend/components/ui/icons';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
-import {
-  useDecisionModal,
-  useModals,
-} from '@gitroom/frontend/components/layout/new-modal';
-
-export function useHasScroll(ref: RefObject<HTMLElement | null>): boolean {
-  const [hasHorizontalScroll, setHasHorizontalScroll] = useState(false);
-
-  useEffect(() => {
-    if (!ref.current) return;
-
-    const checkScroll = () => {
-      const el = ref.current;
-      if (el) {
-        setHasHorizontalScroll(el.scrollWidth > el.clientWidth);
-      }
-    };
-
-    checkScroll(); // initial check
-
-    const resizeObserver = new ResizeObserver(checkScroll);
-    resizeObserver.observe(ref.current);
-
-    const mutationObserver = new MutationObserver(checkScroll);
-    mutationObserver.observe(ref.current, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-
-    return () => {
-      resizeObserver.disconnect();
-      mutationObserver.disconnect();
-    };
-  }, [ref]);
-
-  return hasHorizontalScroll;
-}
+import { useDecisionModal } from '@gitroom/frontend/components/layout/new-modal';
 
 export const SelectCurrent: FC = () => {
   const modals = useDecisionModal();
@@ -70,9 +30,6 @@ export const SelectCurrent: FC = () => {
     }))
   );
 
-  const contentRef = useRef<HTMLDivElement>(null);
-  const hasScroll = useHasScroll(contentRef);
-
   const removeSocial = useCallback(
     (sIntegration: Integrations) => async (e: any) => {
       e.stopPropagation();
@@ -89,98 +46,128 @@ export const SelectCurrent: FC = () => {
 
       addOrRemoveSelectedIntegration(sIntegration, {});
     },
-    []
+    [addOrRemoveSelectedIntegration, modals]
   );
 
   return (
-    <>
-      <div className="select-none left-0 absolute w-full z-[100] px-[20px]">
-        <div
-          ref={contentRef}
+    <div
+      className={clsx(
+        'flex flex-col gap-[12px] select-none',
+        locked && 'opacity-50 pointer-events-none'
+      )}
+    >
+      <div className="text-[13px] font-[600] uppercase tracking-[0.04em] text-textColor/55">
+        Review versions
+      </div>
+      <div className="flex gap-[12px] overflow-x-auto pb-[4px] scrollbar scrollbar-thumb-tableBorder scrollbar-track-secondary">
+        <button
+          type="button"
+          onClick={() => {
+            setHide(true);
+            setCurrent('global');
+          }}
           className={clsx(
-            'flex gap-[6px] w-full overflow-x-auto scrollbar scrollbar-thumb-tableBorder scrollbar-track-secondary',
-            locked && 'opacity-50 pointer-events-none'
+            'flex min-w-[220px] items-center gap-[12px] rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
+            current === 'global'
+              ? 'border-[#FC69FF] bg-[#24142F]'
+              : 'border-newBorder bg-newBgColor hover:border-[#FC69FF]/60'
           )}
         >
           <div
-            onClick={() => {
-              setHide(true);
-              setCurrent('global');
-            }}
             className={clsx(
-              'cursor-pointer flex gap-[8px] rounded-[8px] w-[40px] h-[40px] justify-center items-center bg-newBgLineColor',
-              current !== 'global'
-                ? 'text-[#A3A3A3]'
-                : 'border border-[#FC69FF] text-[#FC69FF]'
+              'flex h-[44px] w-[44px] items-center justify-center rounded-[14px] bg-newBgLineColor',
+              current === 'global' ? 'text-[#FC69FF]' : 'text-textColor/70'
             )}
           >
-            <div>
-              <GlobalIcon />
+            <GlobalIcon />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[15px] font-[700] text-white">
+              Global version
+            </div>
+            <div className="mt-[2px] text-[13px] text-textColor/65">
+              Shared caption and media used unless you customize a platform.
             </div>
           </div>
-          {selectedIntegrations.map(({ integration }) => (
-            <div
-              onClick={() => {
+        </button>
+        {selectedIntegrations.map(({ integration }) => (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => {
+              setHide(true);
+              setCurrent(integration.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
                 setHide(true);
                 setCurrent(integration.id);
-              }}
-              key={integration.id}
-              className={clsx(
-                'border cursor-pointer relative flex gap-[8px] w-[40px] h-[40px] rounded-[8px] items-center bg-newBgLineColor justify-center',
-                current === integration.id
-                  ? 'border-[#FC69FF] text-[#FC69FF]'
-                  : 'border-transparent'
-              )}
-            >
-              <div
-                onClick={removeSocial(integration)}
-                className="absolute justify-center items-center flex w-[8px] h-[8px] -top-[1px] -start-[3px] bg-red-500 rounded-full text-white text-[8px]"
-              >
-                X
-              </div>
-              <IsGlobal id={integration.id} />
-              <div
-                {...{
-                  'data-tooltip-id': 'tooltip',
-                  'data-tooltip-content': integration.name,
+              }
+            }}
+            key={integration.id}
+            className={clsx(
+              'group relative flex min-w-[250px] items-center gap-[12px] rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
+              current === integration.id
+                ? 'border-[#FC69FF] bg-[#24142F]'
+                : 'border-newBorder bg-newBgColor hover:border-[#FC69FF]/60'
+            )}
+          >
+            <div className="relative">
+              <SafeImage
+                src={integration.picture || '/no-picture.jpg'}
+                className="h-[44px] w-[44px] rounded-full object-cover"
+                alt={integration.identifier}
+                width={44}
+                height={44}
+                onError={(e) => {
+                  e.currentTarget.src = '/no-picture.jpg';
+                  e.currentTarget.srcset = '/no-picture.jpg';
                 }}
-                className={clsx(
-                  'relative w-full h-full rounded-full flex justify-center items-center filter transition-all duration-500'
-                )}
-              >
-                <SafeImage
-                  src={integration.picture || '/no-picture.jpg'}
-                  className="rounded-full min-w-[26px]"
-                  alt={integration.identifier}
-                  width={26}
-                  height={26}
-                  onError={(e) => {
-                    e.currentTarget.src = '/no-picture.jpg';
-                    e.currentTarget.srcset = '/no-picture.jpg';
-                  }}
+              />
+              {integration.identifier === 'youtube' ? (
+                <img
+                  src="/icons/platforms/youtube.svg"
+                  className="absolute bottom-0 end-0 z-10 min-w-[14px]"
+                  width={14}
                 />
-                {integration.identifier === 'youtube' ? (
-                  <img
-                    src="/icons/platforms/youtube.svg"
-                    className="absolute z-10 bottom-[2px] end-[2px] min-w-[12px]"
-                    width={12}
-                  />
-                ) : (
-                  <SafeImage
-                    src={`/icons/platforms/${integration.identifier}.png`}
-                    className="min-w-[12px] min-h-[12px] rounded-[3px] absolute z-10 bottom-[6px] end-[6px]"
-                    alt={integration.identifier}
-                    width={12}
-                    height={12}
-                  />
+              ) : (
+                <SafeImage
+                  src={`/icons/platforms/${integration.identifier}.png`}
+                  className="absolute bottom-0 end-0 z-10 h-[14px] w-[14px] rounded-[4px]"
+                  alt={integration.identifier}
+                  width={14}
+                  height={14}
+                />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[15px] font-[700] text-white">
+                {integration.name}
+              </div>
+              <div className="mt-[2px] text-[13px] text-textColor/65">
+                Platform review
+              </div>
+              <div className="mt-[8px] flex items-center gap-[8px]">
+                <IsGlobal id={integration.id} />
+                {current === integration.id && (
+                  <span className="inline-flex rounded-full bg-[#612BD3] px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-white">
+                    Active
+                  </span>
                 )}
               </div>
             </div>
-          ))}
-        </div>
+            <button
+              type="button"
+              onClick={removeSocial(integration)}
+              className="flex h-[28px] w-[28px] items-center justify-center rounded-full border border-newBorder bg-newBgLineColor text-[11px] font-[700] text-textColor/70 opacity-0 transition-opacity group-hover:opacity-100"
+            >
+              X
+            </button>
+          </div>
+        ))}
       </div>
-      <div className={clsx(hasScroll ? 'h-[55px]' : 'h-[40px]')} />
-    </>
+    </div>
   );
 };
 
@@ -197,13 +184,15 @@ export const IsGlobal: FC<{ id: string }> = ({ id }) => {
   }
 
   return (
-    <div
+    <span
       data-tooltip-id="tooltip"
       data-tooltip-content={t(
         'no_longer_global_mode',
         'No longer in global mode'
       )}
-      className="w-[8px] h-[8px] bg-[#FC69FF] -top-[1px] -end-[3px] absolute rounded-full"
-    />
+      className="inline-flex rounded-full bg-[#FC69FF]/15 px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-[#FC69FF]"
+    >
+      Custom
+    </span>
   );
 };

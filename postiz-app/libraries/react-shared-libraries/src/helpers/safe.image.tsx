@@ -18,6 +18,7 @@ const SafeImage: FC<SafeImageProps> = ({
 }) => {
   return (
     <img
+      {...rest}
       src={src}
       alt={alt?.toString() || ''}
       width={typeof width === 'number' ? width : undefined}

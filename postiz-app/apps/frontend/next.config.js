@@ -4,6 +4,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const localBackendProxy =
+  process.env.NODE_ENV === 'development' && process.env.BACKEND_INTERNAL_URL
+    ? process.env.BACKEND_INTERNAL_URL.replace(/\/$/, '')
+    : null;
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -52,7 +56,7 @@ const nextConfig = {
     ];
   },
   async rewrites() {
-    return [
+    const rewrites = [
       {
         source: '/uploads/:path*',
         destination:
@@ -61,6 +65,15 @@ const nextConfig = {
             : '/404',
       },
     ];
+
+    if (localBackendProxy) {
+      rewrites.unshift({
+        source: '/backend-api/:path*',
+        destination: `${localBackendProxy}/:path*`,
+      });
+    }
+
+    return rewrites;
   },
 };
 

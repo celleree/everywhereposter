@@ -37,7 +37,7 @@ const BRAND_DESCRIPTION =
 const SITE_URL = (
   process.env.FRONTEND_URL ||
   process.env.MAIN_URL ||
-  'https://publish-everywhere.halowebsites.com'
+  'https://publisheverywhere.halowebsites.com'
 ).replace(/\/$/, '');
 const SOCIAL_IMAGE_URL = `${SITE_URL}/branding/pe-logo.png`;
 

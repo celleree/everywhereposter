@@ -1,6 +1,6 @@
 # Security Operations
 
-This checklist captures the recurring commands for the Hetzner host at `46.62.170.47` and the public app at `https://publish-everywhere.halowebsites.com`.
+This checklist captures the recurring commands for the Hetzner host at `46.62.170.47` and the public app at `https://publisheverywhere.halowebsites.com`.
 
 ## Admin Access
 
@@ -37,10 +37,10 @@ for p in 22 4007 7233 8080 8969; do
   (timeout 5 bash -lc "</dev/tcp/46.62.170.47/$p" && echo open) || echo closed
 done
 
-curl -sS -I --max-time 15 https://publish-everywhere.halowebsites.com/auth | tr -d '\r'
-curl -sS -I --max-time 15 https://publish-everywhere.halowebsites.com/api | tr -d '\r'
-curl -sS --max-time 15 https://publish-everywhere.halowebsites.com/.well-known/oauth-authorization-server | head
-curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 https://publish-everywhere.halowebsites.com/mcp
+curl -sS -I --max-time 15 https://publisheverywhere.halowebsites.com/auth | tr -d '\r'
+curl -sS -I --max-time 15 https://publisheverywhere.halowebsites.com/api | tr -d '\r'
+curl -sS --max-time 15 https://publisheverywhere.halowebsites.com/.well-known/oauth-authorization-server | head
+curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 https://publisheverywhere.halowebsites.com/mcp
 ```
 
 Expected result:
@@ -48,7 +48,7 @@ Expected result:
 - `22` is open
 - `4007`, `7233`, `8080`, and `8969` are closed externally
 - `/auth` returns `200`
-- `/api` returns `308` to `https://publish-everywhere.halowebsites.com/api/`
+- `/api` returns `308` to `https://publisheverywhere.halowebsites.com/api/`
 - `/.well-known/oauth-authorization-server` returns `200` JSON
 - `/mcp` returns `401` when called without an API key
 

@@ -6,13 +6,12 @@ import SafeImage from '@gitroom/react/helpers/safe.image';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import { useExistingData } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
-import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 
 export const PicksSocialsComponent: FC<{ toolTip?: boolean }> = ({
   toolTip,
 }) => {
-  const exising = useExistingData();
+  const existing = useExistingData();
 
   const {
     locked,
@@ -30,75 +29,98 @@ export const PicksSocialsComponent: FC<{ toolTip?: boolean }> = ({
 
   return (
     <div className={clsx('flex', locked && 'opacity-50 pointer-events-none')}>
-      <div className="flex flex-1">
-        <div className="innerComponent flex-1 flex">
-          <div className="flex flex-wrap gap-[12px] flex-1">
-            {integrations
-              .filter((f) => {
-                if (exising.integration) {
-                  return f.id === exising.integration;
-                }
-                return !f.inBetweenSteps && !f.disabled;
-              })
-              .map((integration) => (
-                <div
+      <div className="innerComponent flex w-full flex-1">
+        <div className="grid w-full grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3">
+          {integrations
+            .filter((integration) => {
+              if (existing.integration) {
+                return integration.id === existing.integration;
+              }
+              return !integration.inBetweenSteps && !integration.disabled;
+            })
+            .map((integration) => {
+              const selected =
+                selectedIntegrations.findIndex(
+                  (item) => item.integration.id === integration.id
+                ) > -1;
+
+              return (
+                <button
                   key={integration.id}
-                  className="flex gap-[8px] items-center"
+                  type="button"
                   {...(toolTip && {
                     'data-tooltip-id': 'tooltip',
                     'data-tooltip-content': integration.name,
                   })}
+                  onClick={() => {
+                    if (existing.integration) {
+                      return;
+                    }
+                    addOrRemoveSelectedIntegration(integration, {});
+                  }}
+                  className={clsx(
+                    'group relative flex min-h-[88px] w-full items-center gap-[14px] rounded-[16px] border bg-newBgColor px-[14px] py-[14px] text-start transition-all',
+                    existing.integration && 'cursor-default',
+                    !existing.integration && 'hover:border-[#7C4DFF] hover:bg-newBgLineColor/70',
+                    selected
+                      ? 'border-[#7C4DFF] bg-[#22163B]'
+                      : 'border-newBorder'
+                  )}
                 >
-                  <div
-                    onClick={() => {
-                      if (exising.integration) {
-                        return;
-                      }
-                      addOrRemoveSelectedIntegration(integration, {});
-                    }}
-                    className={clsx(
-                      'cursor-pointer border-[2px] relative rounded-full flex justify-center items-center bg-fifth filter transition-all duration-500',
-                      selectedIntegrations.findIndex(
-                        (p) => p.integration.id === integration.id
-                      ) === -1
-                        ? 'grayscale border-transparent'
-                        : 'border-[#622FF6]'
-                    )}
-                  >
+                  <div className="relative">
                     <ImageWithFallback
                       fallbackSrc="/no-picture.jpg"
                       src={integration.picture || '/no-picture.jpg'}
                       className={clsx(
-                        'rounded-full transition-all min-w-[42px] border-[1.5px] min-h-[42px]',
-                        selectedIntegrations.findIndex(
-                          (p) => p.integration.id === integration.id
-                        ) === -1
-                          ? 'border-transparent'
-                          : 'border-[#000]'
+                        'h-[52px] w-[52px] rounded-full border object-cover transition-all',
+                        selected ? 'border-black' : 'border-transparent'
                       )}
                       alt={integration.identifier}
-                      width={42}
-                      height={42}
+                      width={52}
+                      height={52}
                     />
                     {integration.identifier === 'youtube' ? (
                       <img
                         src="/icons/platforms/youtube.svg"
-                        className="absolute z-10 bottom-0 -end-[5px] min-w-[16px]"
-                        width={16}
+                        className="absolute -bottom-[2px] -end-[4px] z-10 min-w-[18px]"
+                        width={18}
                       />
                     ) : (
                       <SafeImage
                         src={`/icons/platforms/${integration.identifier}.png`}
-                        className="rounded-[4px] absolute z-10 bottom-0 -end-[5px] min-w-[16px] min-h-[16px]"
+                        className="absolute -bottom-[2px] -end-[4px] z-10 h-[18px] w-[18px] rounded-[5px]"
                         alt={integration.identifier}
-                        width={16}
-                        height={16}
+                        width={18}
+                        height={18}
                       />
                     )}
                   </div>
-                </div>
-              ))}
-          </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[15px] font-[700] text-white">
+                      {integration.name}
+                    </div>
+                    <div className="mt-[2px] text-[13px] text-textColor/70">
+                      {integration.display || integration.identifier}
+                    </div>
+                    {!!integration.customer?.name && (
+                      <div className="mt-[6px] inline-flex rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[600] uppercase tracking-[0.04em] text-textColor/70">
+                        {integration.customer.name}
+                      </div>
+                    )}
+                  </div>
+                  <div
+                    className={clsx(
+                      'flex h-[28px] min-w-[86px] items-center justify-center rounded-full border px-[12px] text-[12px] font-[700] uppercase tracking-[0.04em]',
+                      selected
+                        ? 'border-[#9F7AEA] bg-[#612BD3] text-white'
+                        : 'border-newBorder text-textColor/65'
+                    )}
+                  >
+                    {selected ? 'Selected' : 'Select'}
+                  </div>
+                </button>
+              );
+            })}
         </div>
       </div>
     </div>
