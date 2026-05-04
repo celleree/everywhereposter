@@ -2,7 +2,11 @@
 set -eu
 
 cd /app
-pnpm run prisma-db-push
+if [ "${SKIP_PRISMA_DB_PUSH:-false}" = "true" ]; then
+  echo "Skipping Prisma db push because SKIP_PRISMA_DB_PUSH=true"
+else
+  pnpm run prisma-db-push
+fi
 
 # Start MCP in the background so the app can still boot even if MCP init is
 # slow. Operators can still disable it entirely with DISABLE_POSTIZ_MCP=true.
