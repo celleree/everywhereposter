@@ -270,15 +270,6 @@ export class PostsService {
     }
 
     const getIntegration = post.integration;
-    const requiresReconnect =
-      integrationProvider.identifier === 'facebook' &&
-      typeof (integrationProvider as any).hasPageContentReadScope ===
-        'function' &&
-      !(integrationProvider as any).hasPageContentReadScope(getIntegration);
-
-    if (requiresReconnect) {
-      return this.getFacebookCommentReconnectResponse();
-    }
 
     try {
       await this.ensurePublishedIntegrationAccess(

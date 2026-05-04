@@ -767,6 +767,42 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         }
       }
 
+      try {
+        const postCounts = await (
+          await this.fetch(
+            `https://graph.facebook.com/v20.0/${postId}?fields=likes.summary(true).limit(0),comments.summary(true).limit(0)&access_token=${accessToken}`
+          )
+        ).json();
+        const likesTotal = postCounts?.likes?.summary?.total_count;
+        const commentsTotal = postCounts?.comments?.summary?.total_count;
+
+        if (
+          likesTotal !== undefined &&
+          likesTotal !== null &&
+          !Number.isNaN(Number(likesTotal))
+        ) {
+          result.push({
+            label: 'Likes',
+            percentageChange: 0,
+            data: [{ total: String(likesTotal), date: today }],
+          });
+        }
+
+        if (
+          commentsTotal !== undefined &&
+          commentsTotal !== null &&
+          !Number.isNaN(Number(commentsTotal))
+        ) {
+          result.push({
+            label: 'Comments',
+            percentageChange: 0,
+            data: [{ total: String(commentsTotal), date: today }],
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching Facebook post like/comment counts:', err);
+      }
+
       return result;
     } catch (err) {
       console.error('Error fetching Facebook post analytics:', err);

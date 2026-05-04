@@ -423,12 +423,23 @@ describe('PostsService published post management', () => {
     );
   });
 
-  it('prompts reconnect for legacy Facebook integrations before loading published comments', async () => {
+  it('loads Facebook published comments for legacy integrations without preemptive reconnect', async () => {
+    const comments = [
+      {
+        id: 'comment-1',
+        message: 'Legacy comment',
+        authorName: 'Alex',
+        createdTime: '2026-04-23T12:00:00.000Z',
+        likeCount: 2,
+        replyCount: 0,
+        permalinkUrl: 'https://facebook.com/comment-1',
+      },
+    ];
     const { service, provider, postRepository, integrationService } =
       createService({
         identifier: 'facebook',
         name: 'Facebook Page',
-        readComments: jest.fn(),
+        readComments: jest.fn().mockResolvedValue(comments),
         hasPageContentReadScope: jest.fn(() => false),
       });
 
@@ -447,13 +458,18 @@ describe('PostsService published post management', () => {
       service.getPublishedComments('org-1', 'post-1')
     ).resolves.toEqual({
       supported: true,
-      reconnectRequired: true,
-      message:
-        'Reconnect this Facebook Page to grant pages_read_user_content and load Page comments.',
-      comments: [],
+      comments,
     });
 
-    expect(provider.readComments).not.toHaveBeenCalled();
+    expect(provider.readComments).toHaveBeenCalledWith(
+      'provider-internal-id',
+      'token-1',
+      'release-1',
+      expect.objectContaining({
+        id: 'integration-db-id',
+        providerIdentifier: 'facebook',
+      })
+    );
     expect(integrationService.refreshNeeded).not.toHaveBeenCalled();
   });
 
