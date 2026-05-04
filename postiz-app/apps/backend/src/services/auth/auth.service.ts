@@ -12,6 +12,9 @@ import { ForgotReturnPasswordDto } from '@gitroom/nestjs-libraries/dtos/auth/for
 import { EmailService } from '@gitroom/nestjs-libraries/services/email.service';
 import { NewsletterService } from '@gitroom/nestjs-libraries/newsletter/newsletter.service';
 
+const isAuthEnvEnabled = (value?: string) =>
+  ['true', '1', 'yes'].includes(value?.trim().toLowerCase() ?? '');
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -40,7 +43,10 @@ export class AuthService {
     addToOrg?: boolean | { orgId: string; role: 'USER' | 'ADMIN'; id: string }
   ) {
     if (provider === Provider.LOCAL) {
-      if (process.env.DISALLOW_PLUS && body.email.includes('+')) {
+      if (
+        isAuthEnvEnabled(process.env.DISALLOW_PLUS) &&
+        body.email.includes('+')
+      ) {
         throw new Error('Email with plus sign is not allowed');
       }
       const user = await this._userService.getUserByEmail(body.email);
