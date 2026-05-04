@@ -246,6 +246,7 @@ export class IntegrationsController {
 
       return { url };
     } catch (err) {
+      console.error('Failed to generate integration URL for', integration, err);
       return { err: true };
     }
   }

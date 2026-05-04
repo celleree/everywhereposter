@@ -44,7 +44,16 @@ async function start() {
     },
   });
 
-  await startMcp(app);
+  setTimeout(() => {
+    if (process.env.DISABLE_POSTIZ_MCP === 'true') {
+      console.log('MCP bootstrap disabled by DISABLE_POSTIZ_MCP=true');
+      return;
+    }
+
+    Promise.resolve(startMcp(app))
+      .then(() => console.log('MCP bootstrap completed.'))
+      .catch((err) => console.error('MCP bootstrap failed.', err));
+  }, 0);
 
   app.useGlobalPipes(
     new ValidationPipe({
