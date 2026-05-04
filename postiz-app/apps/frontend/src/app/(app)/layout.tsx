@@ -52,6 +52,15 @@ const UPLOAD_DIRECTORY =
   process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY ||
   process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY ||
   '/uploads';
+const parseBooleanEnv = (value?: string) => {
+  const normalized = value?.trim().toLowerCase();
+
+  if (!normalized || ['false', '0', 'no'].includes(normalized)) {
+    return false;
+  }
+
+  return true;
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -161,8 +170,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           billingEnabled={!!process.env.STRIPE_PUBLISHABLE_KEY}
           discordUrl={process.env.NEXT_PUBLIC_DISCORD_SUPPORT!}
           frontEndUrl={process.env.FRONTEND_URL || process.env.PUBLIC_BASE_URL || ''}
-          isGeneral={!!process.env.IS_GENERAL}
-          genericOauth={!!process.env.POSTIZ_GENERIC_OAUTH}
+          isGeneral={parseBooleanEnv(process.env.IS_GENERAL)}
+          genericOauth={parseBooleanEnv(process.env.POSTIZ_GENERIC_OAUTH)}
           oauthLogoUrl={process.env.NEXT_PUBLIC_POSTIZ_OAUTH_LOGO_URL!}
           oauthDisplayName={process.env.NEXT_PUBLIC_POSTIZ_OAUTH_DISPLAY_NAME!}
           uploadDirectory={UPLOAD_DIRECTORY}
@@ -173,9 +182,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           facebookPixel={process.env.NEXT_PUBLIC_FACEBOOK_PIXEL!}
           telegramBotName={process.env.TELEGRAM_BOT_NAME!}
           neynarClientId={process.env.NEYNAR_CLIENT_ID!}
-          isSecured={!process.env.NOT_SECURED}
-          disableImageCompression={!!process.env.DISABLE_IMAGE_COMPRESSION}
-          disableXAnalytics={!!process.env.DISABLE_X_ANALYTICS}
+          isSecured={!parseBooleanEnv(process.env.NOT_SECURED)}
+          disableImageCompression={parseBooleanEnv(process.env.DISABLE_IMAGE_COMPRESSION)}
+          disableXAnalytics={parseBooleanEnv(process.env.DISABLE_X_ANALYTICS)}
           sentryDsn={process.env.NEXT_PUBLIC_SENTRY_DSN!}
           extensionId={process.env.EXTENSION_ID || ''}
           language={language}
