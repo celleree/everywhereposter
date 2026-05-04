@@ -22,6 +22,7 @@ import { DatePicker } from '@gitroom/frontend/components/launches/helpers/date.p
 import { useShallow } from 'zustand/react/shallow';
 import { RepeatComponent } from '@gitroom/frontend/components/launches/repeat.component';
 import { TagsComponent } from '@gitroom/frontend/components/launches/tags.component';
+import { StatisticsModal } from '@gitroom/frontend/components/launches/statistics';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { weightedLength } from '@gitroom/helpers/utils/count.length';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
@@ -217,6 +218,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   const publishedCapabilities = existingIntegration?.publishedCapabilities;
   const isPublishedPost = existingRootPost?.state === 'PUBLISHED';
   const isRemoteDeletedPost = existingRootPost?.state === 'DELETED_REMOTE';
+  const isPublishedManagementView = isPublishedPost;
   const showPublishedActions =
     !!existingData?.integration && (isPublishedPost || isRemoteDeletedPost);
   const missingPublishedReleaseId =
@@ -250,6 +252,12 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
       alt: media.alt || '',
     })),
   });
+
+  useEffect(() => {
+    if (isPublishedManagementView && current !== 'global') {
+      setShowSettings(true);
+    }
+  }, [current, isPublishedManagementView]);
 
   const copilotSuggestions = useMemo(() => {
     const active =
@@ -821,10 +829,18 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
           <div className="flex flex-1 flex-col border-e border-newBorder mobile:block mobile:border-e-0 mobile:border-b">
             <div className="flex min-h-[65px] items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:min-h-0 mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
               <div className="flex flex-1 flex-col">
-                <div>{t('create_post_title', 'Create Post')}</div>
+                <div>
+                  {isPublishedManagementView
+                    ? t('published_post', 'Published post')
+                    : t('create_post_title', 'Create Post')}
+                </div>
                 <div className="mt-[4px] text-[13px] font-[500] text-textColor/65">
-                  Build the post once, then tailor it where needed without
-                  leaving the existing composer flow.
+                  {isPublishedManagementView
+                    ? t(
+                        'published_post_management_hint',
+                        'Review live metrics and platform settings without reopening the upload workflow.'
+                      )
+                    : 'Build the post once, then tailor it where needed without leaving the existing composer flow.'}
                 </div>
               </div>
             </div>
@@ -833,104 +849,120 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 id="social-content"
                 className="absolute left-0 top-0 flex h-full w-full flex-col gap-[20px] overflow-x-hidden overflow-y-scroll pe-[8px] pt-[20px] ps-[20px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:gap-[12px] mobile:overflow-visible mobile:px-[12px] mobile:py-[12px]"
               >
-                <ComposerSection
-                  step="1"
-                  title="Upload media"
-                  description="Drop images or video into the shared composer first. You can still fine-tune attachments in the editor below."
-                >
-                  <ComposerUploadCard
-                    disabled={locked}
-                    media={globalMedia}
-                    onUpload={(media) => appendGlobalValueMedia(0, media)}
-                  />
-                </ComposerSection>
-
-                <ComposerSection
-                  step="2"
-                  title="Pick platforms and accounts"
-                  description="Choose every account that should receive this post. The shared version stays in sync until you customize a specific channel."
-                >
-                  <div className="mb-[14px] flex flex-wrap items-center justify-between gap-[12px] mobile:flex-col mobile:items-stretch">
-                    <div className="text-[13px] text-textColor/65">
-                      {selectedIntegrations.length > 0
-                        ? `${selectedIntegrations.length} account${
-                            selectedIntegrations.length > 1 ? 's' : ''
-                          } selected`
-                        : 'Select one or more destination accounts to continue.'}
-                    </div>
-                    {!dummy && (
-                      <SelectCustomer
-                        onChange={changeCustomer}
-                        integrations={integrations}
+                {!isPublishedManagementView && (
+                  <>
+                    <ComposerSection
+                      step="1"
+                      title="Upload media"
+                      description="Drop images or video into the shared composer first. You can still fine-tune attachments in the editor below."
+                    >
+                      <ComposerUploadCard
+                        disabled={locked}
+                        media={globalMedia}
+                        onUpload={(media) => appendGlobalValueMedia(0, media)}
                       />
-                    )}
-                  </div>
-                  <PicksSocialsComponent toolTip={true} />
-                </ComposerSection>
+                    </ComposerSection>
 
-                <ComposerSection
-                  step="3"
-                  title="Generate or customize with AI"
-                  description="Use quick actions to jump into the existing assistant with prompts tailored to the current composer."
-                >
-                  <div className="grid grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3 mobile:gap-[8px]">
-                    {AI_PRESETS.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => openAiPreset(preset.id)}
-                        className={clsx(
-                          'rounded-[16px] border px-[14px] py-[14px] text-start transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[12px]',
-                          activeAiPreset === preset.id
-                            ? 'border-[#7C4DFF] bg-[#22163B]'
-                            : 'border-newBorder bg-newBgColor hover:border-[#7C4DFF] hover:bg-newBgLineColor/70'
+                    <ComposerSection
+                      step="2"
+                      title="Pick platforms and accounts"
+                      description="Choose every account that should receive this post. The shared version stays in sync until you customize a specific channel."
+                    >
+                      <div className="mb-[14px] flex flex-wrap items-center justify-between gap-[12px] mobile:flex-col mobile:items-stretch">
+                        <div className="text-[13px] text-textColor/65">
+                          {selectedIntegrations.length > 0
+                            ? `${selectedIntegrations.length} account${
+                                selectedIntegrations.length > 1 ? 's' : ''
+                              } selected`
+                            : 'Select one or more destination accounts to continue.'}
+                        </div>
+                        {!dummy && (
+                          <SelectCustomer
+                            onChange={changeCustomer}
+                            integrations={integrations}
+                          />
                         )}
-                      >
-                        <div className="text-[15px] font-[700] text-white">
-                          {preset.title}
-                        </div>
-                        <div className="mt-[6px] text-[13px] text-textColor/65">
-                          {preset.helper}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-[14px] rounded-[14px] border border-dashed border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
-                    Active AI prompt targets{' '}
-                    <span className="font-[700] text-white">
-                      {selectedPlatformText}
-                    </span>
-                    . The assistant still uses the existing composer actions, so
-                    save and scheduling behavior remains unchanged.
-                  </div>
-                </ComposerSection>
+                      </div>
+                      <PicksSocialsComponent toolTip={true} />
+                    </ComposerSection>
 
-                <ComposerSection
-                  step="4"
-                  title="Review per-platform versions"
-                  description="Global is your shared base version. Switch into a channel only when you want to create a platform-specific override."
-                >
-                  {!existingData.integration && selectedIntegrations.length > 0 && (
-                    <div className="mb-[16px]">
-                      <SelectCurrent />
-                    </div>
-                  )}
-                  <div className="mb-[12px] rounded-[14px] border border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
-                    {current === 'global'
-                      ? 'You are editing the shared version used by every selected account until a platform is customized.'
-                      : 'You are reviewing a platform-specific version. Changes here only affect the active account.'}
-                  </div>
-                  <div className="flex flex-1 mobile:block">
-                    {!hide && <EditorWrapper totalPosts={1} value="" />}
-                  </div>
-                  <div id="social-empty" className="pb-[4px]" />
-                </ComposerSection>
+                    <ComposerSection
+                      step="3"
+                      title="Generate or customize with AI"
+                      description="Use quick actions to jump into the existing assistant with prompts tailored to the current composer."
+                    >
+                      <div className="grid grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3 mobile:gap-[8px]">
+                        {AI_PRESETS.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => openAiPreset(preset.id)}
+                            className={clsx(
+                              'rounded-[16px] border px-[14px] py-[14px] text-start transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[12px]',
+                              activeAiPreset === preset.id
+                                ? 'border-[#7C4DFF] bg-[#22163B]'
+                                : 'border-newBorder bg-newBgColor hover:border-[#7C4DFF] hover:bg-newBgLineColor/70'
+                            )}
+                          >
+                            <div className="text-[15px] font-[700] text-white">
+                              {preset.title}
+                            </div>
+                            <div className="mt-[6px] text-[13px] text-textColor/65">
+                              {preset.helper}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-[14px] rounded-[14px] border border-dashed border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
+                        Active AI prompt targets{' '}
+                        <span className="font-[700] text-white">
+                          {selectedPlatformText}
+                        </span>
+                        . The assistant still uses the existing composer actions,
+                        so save and scheduling behavior remains unchanged.
+                      </div>
+                    </ComposerSection>
+
+                    <ComposerSection
+                      step="4"
+                      title="Review per-platform versions"
+                      description="Global is your shared base version. Switch into a channel only when you want to create a platform-specific override."
+                    >
+                      {!existingData.integration &&
+                        selectedIntegrations.length > 0 && (
+                          <div className="mb-[16px]">
+                            <SelectCurrent />
+                          </div>
+                        )}
+                      <div className="mb-[12px] rounded-[14px] border border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
+                        {current === 'global'
+                          ? 'You are editing the shared version used by every selected account until a platform is customized.'
+                          : 'You are reviewing a platform-specific version. Changes here only affect the active account.'}
+                      </div>
+                      <div className="flex flex-1 mobile:block">
+                        {!hide && <EditorWrapper totalPosts={1} value="" />}
+                      </div>
+                      <div id="social-empty" className="pb-[4px]" />
+                    </ComposerSection>
+                  </>
+                )}
 
                 {current !== 'global' && (
                   <ComposerSection
-                    step="5"
-                    title="Advanced settings"
-                    description="Keep provider-specific settings available without making them the center of the composer."
+                    step={isPublishedManagementView ? undefined : '5'}
+                    title={
+                      isPublishedManagementView
+                        ? t('platform_settings', 'Platform settings')
+                        : 'Advanced settings'
+                    }
+                    description={
+                      isPublishedManagementView
+                        ? t(
+                            'published_platform_settings_hint',
+                            'Review the exact settings stored for this platform post.'
+                          )
+                        : 'Keep provider-specific settings available without making them the center of the composer.'
+                    }
                   >
                     <div
                       id="wrapper-settings"
@@ -970,6 +1002,18 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     </div>
                   </ComposerSection>
                 )}
+
+                {isPublishedManagementView && existingRootPost?.id && (
+                  <ComposerSection
+                    title={t('metrics', 'Metrics')}
+                    description={t(
+                      'published_post_metrics_hint',
+                      'Live platform analytics and short-link statistics for this published post.'
+                    )}
+                  >
+                    <StatisticsModal postId={existingRootPost.id} />
+                  </ComposerSection>
+                )}
               </div>
             </div>
           </div>
@@ -979,8 +1023,12 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <div className="flex flex-1 flex-col">
                 <div>{t('post_preview', 'Post Preview')}</div>
                 <div className="mt-[4px] text-[13px] font-[500] text-textColor/65">
-                  Preview updates as you switch between the shared version and
-                  per-platform edits.
+                  {isPublishedManagementView
+                    ? t(
+                        'published_preview_hint',
+                        'Preview of the post that was published on this platform.'
+                      )
+                    : 'Preview updates as you switch between the shared version and per-platform edits.'}
                 </div>
               </div>
               <div className="cursor-pointer">
@@ -1155,13 +1203,14 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
         </div>
       </div>
 
-      <CopilotPopup
-        key={`composer-copilot-${copilotSeed}-${activeAiPreset}`}
-        defaultOpen={copilotSeed > 0}
-        hitEscapeToClose={false}
-        clickOutsideToClose={true}
-        suggestions={copilotSuggestions}
-        instructions={`
+      {!isPublishedManagementView && (
+        <CopilotPopup
+          key={`composer-copilot-${copilotSeed}-${activeAiPreset}`}
+          defaultOpen={copilotSeed > 0}
+          hitEscapeToClose={false}
+          clickOutsideToClose={true}
+          suggestions={copilotSuggestions}
+          instructions={`
 You are an assistant that helps the user improve and schedule social media posts.
 Here are the things you can do:
 - rewrite and refine post content
@@ -1171,20 +1220,21 @@ Here are the things you can do:
 
 Keep the output practical, platform-aware, and less generic.
 `}
-        labels={{
-          title: t('your_assistant', 'Your Assistant'),
-          initial: t(
-            'assistant_initial_message',
-            'Hi! I can help you refine your social media posts.'
-          ),
-        }}
-      />
+          labels={{
+            title: t('your_assistant', 'Your Assistant'),
+            initial: t(
+              'assistant_initial_message',
+              'Hi! I can help you refine your social media posts.'
+            ),
+          }}
+        />
+      )}
     </div>
   );
 };
 
 const ComposerSection: FC<{
-  step: string;
+  step?: string;
   title: string;
   description: string;
   children: ReactNode;
@@ -1192,9 +1242,11 @@ const ComposerSection: FC<{
   return (
     <section className="rounded-[18px] border border-newBorder bg-newBgColor px-[18px] py-[18px] mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]">
       <div className="mb-[16px] flex items-start gap-[12px] mobile:mb-[12px]">
-        <div className="flex h-[32px] w-[32px] min-w-[32px] items-center justify-center rounded-full bg-newBgLineColor text-[13px] font-[700] text-white mobile:h-[28px] mobile:w-[28px] mobile:min-w-[28px] mobile:text-[12px]">
-          {step}
-        </div>
+        {!!step && (
+          <div className="flex h-[32px] w-[32px] min-w-[32px] items-center justify-center rounded-full bg-newBgLineColor text-[13px] font-[700] text-white mobile:h-[28px] mobile:w-[28px] mobile:min-w-[28px] mobile:text-[12px]">
+            {step}
+          </div>
+        )}
         <div>
           <div className="text-[18px] font-[700] text-white mobile:text-[16px]">
             {title}

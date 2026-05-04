@@ -36,10 +36,22 @@ const BRAND_DESCRIPTION =
   'Publish Everywhere helps you plan, schedule, and publish social media content from one place.';
 const SITE_URL = (
   process.env.FRONTEND_URL ||
+  process.env.PUBLIC_BASE_URL ||
   process.env.MAIN_URL ||
   'https://publisheverywhere.halowebsites.com'
 ).replace(/\/$/, '');
 const SOCIAL_IMAGE_URL = `${SITE_URL}/branding/pe-logo.png`;
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  (process.env.NODE_ENV === 'development' && process.env.BACKEND_INTERNAL_URL
+    ? '/backend-api'
+    : '') ||
+  process.env.PUBLIC_BACKEND_URL ||
+  '';
+const UPLOAD_DIRECTORY =
+  process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY ||
+  process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY ||
+  '/uploads';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -75,9 +87,55 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     ? PlausibleProvider
     : Fragment;
   return (
-    <html>
+    <html suppressHydrationWarning>
       <head>
         <link rel="icon" href="/favicon.ico" sizes="any" />
+        <Script
+          id="strip-extension-hydration-attributes"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function () {
+                var extensionAttributePattern = /^(data-new-gr-|data-gr-)/;
+
+                function stripExtensionAttributes() {
+                  [document.documentElement, document.body].forEach(function (element) {
+                    if (!element) {
+                      return;
+                    }
+
+                    Array.prototype.slice.call(element.attributes).forEach(function (attribute) {
+                      if (extensionAttributePattern.test(attribute.name)) {
+                        element.removeAttribute(attribute.name);
+                      }
+                    });
+                  });
+                }
+
+                stripExtensionAttributes();
+
+                if (typeof MutationObserver === 'undefined') {
+                  document.addEventListener('DOMContentLoaded', stripExtensionAttributes, { once: true });
+                  return;
+                }
+
+                var observer = new MutationObserver(stripExtensionAttributes);
+                observer.observe(document.documentElement, {
+                  attributes: true,
+                  childList: true,
+                  subtree: true
+                });
+
+                window.addEventListener('load', function () {
+                  stripExtensionAttributes();
+                  window.setTimeout(function () {
+                    observer.disconnect();
+                  }, 2000);
+                }, { once: true });
+              })();
+            `,
+          }}
+        />
         {!!process.env.DATAFAST_WEBSITE_ID && (
           <Script
             data-website-id={process.env.DATAFAST_WEBSITE_ID}
@@ -89,6 +147,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       </head>
       <ChangeDirClient />
       <body
+        suppressHydrationWarning
         className={clsx(jakartaSans.className, 'dark text-primary !bg-primary')}
       >
         <VariableContextComponent
@@ -96,20 +155,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             process.env.STORAGE_PROVIDER! as 'local' | 'cloudflare'
           }
           environment={process.env.NODE_ENV!}
-          backendUrl={process.env.NEXT_PUBLIC_BACKEND_URL!}
+          backendUrl={BACKEND_URL}
           plontoKey={process.env.NEXT_PUBLIC_POLOTNO!}
           stripeClient={process.env.STRIPE_PUBLISHABLE_KEY!}
           billingEnabled={!!process.env.STRIPE_PUBLISHABLE_KEY}
           discordUrl={process.env.NEXT_PUBLIC_DISCORD_SUPPORT!}
-          frontEndUrl={process.env.FRONTEND_URL!}
+          frontEndUrl={process.env.FRONTEND_URL || process.env.PUBLIC_BASE_URL || ''}
           isGeneral={!!process.env.IS_GENERAL}
           genericOauth={!!process.env.POSTIZ_GENERIC_OAUTH}
           oauthLogoUrl={process.env.NEXT_PUBLIC_POSTIZ_OAUTH_LOGO_URL!}
           oauthDisplayName={process.env.NEXT_PUBLIC_POSTIZ_OAUTH_DISPLAY_NAME!}
-          uploadDirectory={process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY!}
+          uploadDirectory={UPLOAD_DIRECTORY}
           cloudflareUrl={process.env.CLOUDFLARE_BUCKET_URL || ''}
-          mainUrl={process.env.MAIN_URL || ''}
-          mcpUrl={process.env.MCP_URL}
+          mainUrl={process.env.MAIN_URL || process.env.PUBLIC_BASE_URL || ''}
+          mcpUrl={process.env.MCP_URL || process.env.PUBLIC_BASE_URL}
           dub={!!process.env.STRIPE_PUBLISHABLE_KEY}
           facebookPixel={process.env.NEXT_PUBLIC_FACEBOOK_PIXEL!}
           telegramBotName={process.env.TELEGRAM_BOT_NAME!}

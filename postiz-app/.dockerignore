@@ -18,6 +18,7 @@ dist
 **/LICENSE
 **/npm-debug.log
 **/*.vscode
+**/.env*
 .git
 .github
 reports
