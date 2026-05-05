@@ -178,6 +178,14 @@ export class MediaController {
     res.status(200).json({ ...upload, saved: saveFile });
   }
 
+  @Get('/post-attached')
+  getPostAttachedMedia(
+    @GetOrgFromRequest() org: Organization,
+    @Query('page') page: number
+  ) {
+    return this._mediaService.getPostAttachedMedia(org.id, page);
+  }
+
   @Get('/')
   getMedia(
     @GetOrgFromRequest() org: Organization,

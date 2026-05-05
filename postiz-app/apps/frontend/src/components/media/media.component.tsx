@@ -205,18 +205,28 @@ export const MediaBox: FC<{
   closeModal: () => void;
 }> = ({ type, standalone, setMedia }) => {
   const [page, setPage] = useState(0);
+  const [source, setSource] = useState<'library' | 'posted'>('library');
   const fetch = useFetch();
   const modals = useModals();
   const toaster = useToaster();
+  const postedMedia = source === 'posted';
   const loadMedia = useCallback(async () => {
-    return (await fetch(`/media?page=${page + 1}`)).json();
-  }, [page]);
-  const { data, mutate, isLoading } = useSWR(`get-media-${page}`, loadMedia);
+    const endpoint = postedMedia ? '/media/post-attached' : '/media';
+    return (await fetch(`${endpoint}?page=${page + 1}`)).json();
+  }, [page, postedMedia]);
+  const { data, mutate, isLoading } = useSWR(
+    `get-media-${source}-${page}`,
+    loadMedia
+  );
   const [selected, setSelected] = useState([]);
   const t = useT();
   const uploaderRef = useRef<any>(null);
   const mediaDirectory = useMediaDirectory();
   const [loading, setLoading] = useState(false);
+  const changeSource = useCallback((nextSource: 'library' | 'posted') => {
+    setPage(0);
+    setSource(nextSource);
+  }, []);
 
   const uppy = useUppyUploader({
     allowedFileTypes:
@@ -400,11 +410,40 @@ export const MediaBox: FC<{
   }, [t, loading]);
 
   return (
-    <DropFiles disabled={loading} className="flex flex-col flex-1" onDrop={dragAndDrop}>
+    <DropFiles
+      disabled={loading || postedMedia}
+      className="flex flex-col flex-1"
+      onDrop={dragAndDrop}
+    >
       <div className="flex flex-col flex-1">
+        <div className="flex gap-[8px] mb-[12px]">
+          <button
+            onClick={() => changeSource('library')}
+            className={clsx(
+              'cursor-pointer h-[34px] px-[14px] rounded-[8px] text-[13px] font-[600]',
+              source === 'library'
+                ? 'bg-btnSimple text-white'
+                : 'bg-newColColor text-textColor'
+            )}
+          >
+            {t('media_library', 'Media Library')}
+          </button>
+          <button
+            onClick={() => changeSource('posted')}
+            className={clsx(
+              'cursor-pointer h-[34px] px-[14px] rounded-[8px] text-[13px] font-[600]',
+              postedMedia
+                ? 'bg-btnSimple text-white'
+                : 'bg-newColColor text-textColor'
+            )}
+          >
+            {t('posted_media', 'Posted media')}
+          </button>
+        </div>
         <div
           className={clsx(
             'flex',
+            postedMedia && 'hidden',
             !isLoading && !data?.results?.length && 'hidden'
           )}
         >
@@ -428,14 +467,19 @@ export const MediaBox: FC<{
             className="hidden"
             multiple={true}
           />
-          {!isLoading && !!data?.results?.length && (
+          {!postedMedia && !isLoading && !!data?.results?.length && (
             <div className="flex gap-[8px]">
               {btn}
               <ThirdPartyMediaLibrary onImported={() => mutate()} />
             </div>
           )}
         </div>
-        <div className="w-full pointer-events-none relative mt-[5px] mb-[5px]">
+        <div
+          className={clsx(
+            'w-full pointer-events-none relative mt-[5px] mb-[5px]',
+            postedMedia && 'hidden'
+          )}
+        >
           <div className="w-full h-[46px] overflow-hidden absolute left-0 bg-newBgColorInner uppyChange">
             <Dashboard
               height={46}
@@ -471,26 +515,42 @@ export const MediaBox: FC<{
               <>
                 <NoMediaIcon />
                 <div className="text-[20px] font-[600]">
-                  {t(
-                    'you_dont_have_any_media_yet',
-                    "You don't have any media yet"
-                  )}
+                  {postedMedia
+                    ? t(
+                        'you_dont_have_any_posted_media_yet',
+                        "You don't have any posted media yet"
+                      )
+                    : t(
+                        'you_dont_have_any_media_yet',
+                        "You don't have any media yet"
+                      )}
                 </div>
                 <div className="whitespace-pre-line text-newTextColor/[0.6] text-center">
-                  {t(
-                    'select_or_upload_pictures_max_1gb',
-                    'Select or upload pictures (maximum 1 GB per upload).'
-                  )}{' '}
-                  {'\n'}
-                  {t(
-                    'you_can_drag_drop_pictures',
-                    'You can also drag & drop pictures.'
-                  )}
+                  {postedMedia
+                    ? t(
+                        'media_attached_to_previous_posts_will_appear_here',
+                        'Media attached to previous posts will appear here.'
+                      )
+                    : (
+                        <>
+                          {t(
+                            'select_or_upload_pictures_max_1gb',
+                            'Select or upload pictures (maximum 1 GB per upload).'
+                          )}{' '}
+                          {'\n'}
+                          {t(
+                            'you_can_drag_drop_pictures',
+                            'You can also drag & drop pictures.'
+                          )}
+                        </>
+                      )}
                 </div>
-                <div className="forceChange flex gap-[8px]">
-                  {btn}
-                  <ThirdPartyMediaLibrary onImported={() => mutate()} />
-                </div>
+                {!postedMedia && (
+                  <div className="forceChange flex gap-[8px]">
+                    {btn}
+                    <ThirdPartyMediaLibrary onImported={() => mutate()} />
+                  </div>
+                )}
               </>
             )}
             {isLoading && (
@@ -537,12 +597,12 @@ export const MediaBox: FC<{
                       <div className="text-white flex z-[101] justify-center items-center text-[14px] font-[500] w-[24px] h-[24px] rounded-full bg-[#612BD3] absolute -bottom-[10px] -end-[10px]">
                         {selected.findIndex((z: any) => z.id === media.id) + 1}
                       </div>
-                    ) : (
+                    ) : !media.postedMedia ? (
                       <DeleteCircleIcon
                         className="cursor-pointer hidden z-[100] group-hover:block absolute -top-[5px] -end-[5px]"
                         onClick={deleteImage(media)}
                       />
-                    )}
+                    ) : null}
                     <div className="absolute bottom-[10px] end-[10px] z-[100]">{media.originalName}</div>
                     <div className="w-full h-full rounded-[6px] overflow-hidden relative">
                       <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">

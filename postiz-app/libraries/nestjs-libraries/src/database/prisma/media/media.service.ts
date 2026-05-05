@@ -60,6 +60,10 @@ export class MediaService {
     return this._mediaRepository.getMedia(org, page);
   }
 
+  getPostAttachedMedia(org: string, page: number) {
+    return this._mediaRepository.getPostAttachedMedia(org, page);
+  }
+
   saveMediaInformation(org: string, data: SaveMediaInformationDto) {
     return this._mediaRepository.saveMediaInformation(org, data);
   }
