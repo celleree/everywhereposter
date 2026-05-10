@@ -294,7 +294,6 @@
     rewriteAttributes(root || document);
     rewriteImages(root || document);
     rewriteLogos(root || document);
-    ensureLegalBar();
   }
 
   let scheduled = false;
