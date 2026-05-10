@@ -11,11 +11,14 @@ services:
     command: ["/bin/sh", "/start-postiz.sh"]
     environment:
       # === Required Settings
-      MAIN_URL: '${PUBLIC_BASE_URL:-https://publisheverywhere.halowebsites.com}'
-      FRONTEND_URL: '${PUBLIC_BASE_URL:-https://publisheverywhere.halowebsites.com}'
-      NEXT_PUBLIC_BACKEND_URL: '${PUBLIC_BACKEND_URL:-https://publisheverywhere.halowebsites.com/api}'
+      # Local dev should use localhost or an explicitly chosen local tunnel URL.
+      # Do not point local Compose at the production public domain.
+      MAIN_URL: '${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
+      FRONTEND_URL: '${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
+      NEXT_PUBLIC_BACKEND_URL: '${PUBLIC_BACKEND_URL:?PUBLIC_BACKEND_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
       JWT_SECRET: '${JWT_SECRET}'
-      DATABASE_URL: 'postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local'
+      # The bundled postiz-postgres service is a local Docker database, not production data.
+      DATABASE_URL: '${DATABASE_URL:-postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local}'
       REDIS_URL: 'redis://postiz-redis:6379'
       BACKEND_INTERNAL_URL: 'http://localhost:3000'
       TEMPORAL_ADDRESS: "temporal:7233"
@@ -55,7 +58,7 @@ services:
       # === Social Media API Settings
       X_API_KEY: '${X_API_KEY:-}'
       X_API_SECRET: '${X_API_SECRET:-}'
-      X_URL: '${PUBLIC_BASE_URL:-https://publisheverywhere.halowebsites.com}'
+      X_URL: '${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
       LINKEDIN_CLIENT_ID: '${LINKEDIN_CLIENT_ID:-}'
       LINKEDIN_CLIENT_SECRET: '${LINKEDIN_CLIENT_SECRET:-}'
       LINKEDIN_PAGE_CLIENT_ID: '${LINKEDIN_PAGE_CLIENT_ID:-}'
@@ -110,7 +113,7 @@ services:
       # === Misc Settings
       OPENAI_API_KEY: '${OPENAI_API_KEY}'
       DISABLE_POSTIZ_MCP: '${DISABLE_POSTIZ_MCP:-false}'
-      MCP_URL: '${PUBLIC_BASE_URL:-https://publisheverywhere.halowebsites.com}'
+      MCP_URL: '${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
       OPENAI_APP_CHALLANGE: '${OPENAI_APP_CHALLANGE:-}'
       NEXT_PUBLIC_DISCORD_SUPPORT: ''
       NEXT_PUBLIC_POLOTNO: ''
@@ -313,6 +316,9 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:2026.2.0
     container_name: cloudflared-publish-everywhere
+    # Opt in with: docker compose --profile public-tunnel up -d cloudflared
+    # Enabling this exposes the local stack publicly through Cloudflare Tunnel.
+    profiles: ["public-tunnel"]
     user: "0:0"
     restart: unless-stopped
     command: tunnel --config /etc/cloudflared/config.yml run
@@ -321,7 +327,7 @@ services:
         condition: service_started
     volumes:
       - ./cloudflared.publish-everywhere.yml:/etc/cloudflared/config.yml:ro
-      - ${CLOUDFLARED_CREDENTIALS_FILE}:/etc/cloudflared/credentials.json:ro
+      - ${CLOUDFLARED_CREDENTIALS_FILE:?CLOUDFLARED_CREDENTIALS_FILE is required when enabling the public-tunnel profile}:/etc/cloudflared/credentials.json:ro
     networks:
       - postiz-network
 

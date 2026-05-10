@@ -2,9 +2,36 @@
 set -eu
 
 cd /app
+
+PRODUCTION_DOMAIN="publisheverywhere.halowebsites.com"
+PUBLIC_DOMAIN_MODE="false"
+LOCAL_DOCKER_DB="false"
+
+case "${MAIN_URL:-} ${FRONTEND_URL:-}" in
+  *"$PRODUCTION_DOMAIN"*) PUBLIC_DOMAIN_MODE="true" ;;
+esac
+
+case "${DATABASE_URL:-}" in
+  *"@postiz-postgres:"*|*"postiz-postgres:5432/postiz-db-local"*) LOCAL_DOCKER_DB="true" ;;
+esac
+
+if [ "$PUBLIC_DOMAIN_MODE" = "true" ] && [ "$LOCAL_DOCKER_DB" = "true" ] && [ "${ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB:-false}" != "true" ]; then
+  cat >&2 <<EOF
+ERROR: Refusing to start Publish Everywhere with the public production domain and the bundled local Docker Postgres database.
+
+This protects users from accidentally serving production traffic from a fresh/local DB, which can make real profile/data appear deleted.
+
+Use a local URL for MAIN_URL/FRONTEND_URL, point DATABASE_URL at the intended production database, or set ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB=true only after a deliberate safety review.
+EOF
+  exit 1
+fi
+
 if [ "${SKIP_PRISMA_DB_PUSH:-false}" = "true" ]; then
   echo "Skipping Prisma db push because SKIP_PRISMA_DB_PUSH=true"
+elif [ "$PUBLIC_DOMAIN_MODE" = "true" ] && [ "${RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE:-false}" != "true" ]; then
+  echo "Skipping Prisma db push in public-domain mode. Set RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE=true to run it intentionally."
 else
+  echo "WARNING: Running Prisma db push against DATABASE_URL. Set SKIP_PRISMA_DB_PUSH=true to skip."
   pnpm run prisma-db-push
 fi
 

@@ -1,3 +1,5 @@
+# This tunnel exposes the local Docker stack publicly. Start it only with the
+# public-tunnel Compose profile after confirming the DB and domain are intended.
 tunnel: c9487391-ac63-4934-b29d-06b1a1fd3801
 credentials-file: /etc/cloudflared/credentials.json
 
