@@ -821,14 +821,14 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     ? t('published_post', 'Published post')
                     : t('upload', 'Upload')}
                 </div>
-                <div className="mt-[4px] text-[13px] font-[500] text-textColor/65">
-                  {isPublishedManagementView
-                    ? t(
-                        'published_post_management_hint',
-                        'Review metrics and platform settings.'
-                      )
-                    : 'Upload media, choose platforms, generate copy, then review.'}
-                </div>
+                {isPublishedManagementView && (
+                  <div className="mt-[4px] text-[13px] font-[500] text-textColor/65">
+                    {t(
+                      'published_post_management_hint',
+                      'Review metrics and platform settings.'
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <div className="min-w-0 overflow-x-hidden mobile:w-full">
@@ -841,7 +841,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     <ComposerSection
                       step="1"
                       title="Upload media"
-                      description="Add images or video to start."
+                      description="Add images or video, then choose where to post."
                     >
                       <ComposerUploadCard
                         disabled={locked}
@@ -1340,15 +1340,7 @@ const ComposerUploadCard: FC<{
       )}
     >
       <input {...getInputProps()} />
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-[16px] mobile:flex-col mobile:gap-[12px]">
-        <div className="min-w-0 max-w-[520px] mobile:max-w-full">
-          <div className="break-words text-[16px] font-[700] text-white">
-            Choose files
-          </div>
-          <div className="mt-[6px] break-words text-[13px] leading-[1.4] text-textColor/65">
-            Drop files here or browse from your device.
-          </div>
-        </div>
+      <div className="flex min-w-0 flex-col items-center justify-center gap-[10px] text-center">
         <button
           type="button"
           onClick={(event) => {
@@ -1356,10 +1348,13 @@ const ComposerUploadCard: FC<{
             event.stopPropagation();
             open();
           }}
-          className="rounded-[12px] bg-[#612BD3] px-[16px] py-[12px] text-[14px] font-[700] text-white transition-opacity [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
+          className="rounded-[12px] bg-[#612BD3] px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
         >
           Choose files
         </button>
+        <div className="break-words text-[13px] leading-[1.4] text-textColor/65">
+          Drop files here or browse from your device.
+        </div>
       </div>
 
       <div className="pointer-events-none relative mt-[16px]">
@@ -1388,14 +1383,15 @@ const ComposerUploadCard: FC<{
       >
         {!media.length ? (
           <div className="text-center">
-            <div className="text-[16px] font-[700] text-white">
-              {loading
-                ? t('drop_files_here_to_upload', 'Drop your files here to upload')
-                : 'No shared media uploaded yet'}
-            </div>
-            <div className="mt-[8px] text-[13px] text-textColor/65">
-              Images and video are supported.
-            </div>
+            {loading ? (
+              <div className="text-[15px] font-[700] text-white">
+                {t('drop_files_here_to_upload', 'Drop your files here to upload')}
+              </div>
+            ) : (
+              <div className="text-[13px] text-textColor/65">
+                Images and video are supported.
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex min-w-0 flex-col gap-[14px]">

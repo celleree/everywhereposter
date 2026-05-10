@@ -181,6 +181,8 @@ export const withProvider = function <T extends object>(params: {
 
       return global;
     }, [internal, global, isGlobal]);
+    const hasPreviewContent = !!value?.[0]?.content?.length;
+    const hasPreviewMedia = !!value?.[0]?.media?.length;
 
     const form = useForm({
       resolver: classValidatorResolver(dto || Empty),
@@ -270,7 +272,8 @@ export const withProvider = function <T extends object>(params: {
             {current &&
               (tab === 0 ||
                 (!SettingsComponent && !data?.internalPlugs?.length)) &&
-              !value?.[0]?.content?.length && (
+              !hasPreviewContent &&
+              !hasPreviewMedia && (
                 <div>
                   {t(
                     'start_writing_your_post',
@@ -281,7 +284,7 @@ export const withProvider = function <T extends object>(params: {
             {current &&
               (tab === 0 ||
                 (!SettingsComponent && !data?.internalPlugs?.length)) &&
-              !!value?.[0]?.content?.length &&
+              (hasPreviewContent || hasPreviewMedia) &&
               (CustomPreviewComponent ? (
                 <CustomPreviewComponent
                   maximumCharacters={
