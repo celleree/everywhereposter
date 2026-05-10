@@ -176,11 +176,13 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   const currentIntegrationText = useMemo(() => {
     if (current === 'global') {
       return (
-        <div className="flex items-center gap-[10px]">
+        <div className="flex min-w-0 items-center gap-[10px]">
           <div className="relative">
             <SettingsIcon size={15} className="text-white" />
           </div>
-          <div>{t('channel_settings', 'Advanced settings')}</div>
+          <div className="min-w-0 break-words">
+            {t('channel_settings', 'Advanced settings')}
+          </div>
         </div>
       );
     }
@@ -188,7 +190,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     const currentIntegration = integrations.find((p) => p.id === current)!;
 
     return (
-      <div className="flex items-center gap-[10px]">
+      <div className="flex min-w-0 items-center gap-[10px]">
         <div className="relative">
           <img
             src={`/icons/platforms/${currentIntegration.identifier}.png`}
@@ -200,7 +202,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             className="absolute -bottom-[5px] -end-[5px] text-white"
           />
         </div>
-        <div>
+        <div className="min-w-0 break-words">
           {currentIntegration.name} {t('channel_settings', 'Advanced settings')}
         </div>
       </div>
@@ -823,12 +825,12 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   );
 
   return (
-    <div className="relative flex h-full w-full flex-1 p-[40px] mobile:h-auto mobile:min-h-full mobile:p-0">
-      <div className="flex flex-1 flex-col rounded-[20px] bg-newBgColorInner mobile:rounded-none">
-        <div className="flex flex-1 mobile:block mobile:flex-none mobile:min-h-0">
-          <div className="flex flex-1 flex-col border-e border-newBorder mobile:block mobile:border-e-0 mobile:border-b">
-            <div className="flex min-h-[65px] items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:min-h-0 mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
-              <div className="flex flex-1 flex-col">
+    <div className="relative flex h-full w-full flex-1 p-[40px] mobile:h-auto mobile:min-h-full mobile:max-w-[100vw] mobile:min-w-0 mobile:overflow-x-hidden mobile:p-0">
+      <div className="flex min-w-0 flex-1 flex-col rounded-[20px] bg-newBgColorInner mobile:w-full mobile:max-w-full mobile:overflow-x-hidden mobile:rounded-none">
+        <div className="flex min-w-0 flex-1 mobile:block mobile:w-full mobile:flex-none mobile:overflow-x-hidden mobile:min-h-0">
+          <div className="flex min-w-0 flex-1 flex-col border-e border-newBorder mobile:block mobile:w-full mobile:border-e-0 mobile:border-b">
+            <div className="flex min-h-[65px] min-w-0 items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:min-h-0 mobile:w-full mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
+              <div className="flex min-w-0 flex-1 flex-col">
                 <div>
                   {isPublishedManagementView
                     ? t('published_post', 'Published post')
@@ -844,10 +846,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 </div>
               </div>
             </div>
-            <div className="relative flex-1 mobile:static mobile:min-h-0">
+            <div className="relative min-w-0 flex-1 mobile:static mobile:w-full mobile:overflow-x-hidden mobile:min-h-0">
               <div
                 id="social-content"
-                className="absolute left-0 top-0 flex h-full w-full flex-col gap-[20px] overflow-x-hidden overflow-y-scroll pe-[8px] pt-[20px] ps-[20px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:gap-[12px] mobile:overflow-visible mobile:px-[12px] mobile:py-[12px]"
+                className="absolute left-0 top-0 flex h-full w-full min-w-0 max-w-full flex-col gap-[20px] overflow-x-hidden overflow-y-scroll pe-[8px] pt-[20px] ps-[20px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:gap-[12px] mobile:overflow-x-hidden mobile:overflow-y-visible mobile:px-[12px] mobile:py-[12px]"
               >
                 {!isPublishedManagementView && (
                   <>
@@ -868,8 +870,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       title="Pick platforms and accounts"
                       description="Choose every account that should receive this post. The shared version stays in sync until you customize a specific channel."
                     >
-                      <div className="mb-[14px] flex flex-wrap items-center justify-between gap-[12px] mobile:flex-col mobile:items-stretch">
-                        <div className="text-[13px] text-textColor/65">
+                      <div className="mb-[14px] flex min-w-0 flex-wrap items-center justify-between gap-[12px] mobile:flex-col mobile:items-stretch">
+                        <div className="min-w-0 text-[13px] text-textColor/65">
                           {selectedIntegrations.length > 0
                             ? `${selectedIntegrations.length} account${
                                 selectedIntegrations.length > 1 ? 's' : ''
@@ -883,7 +885,9 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                           />
                         )}
                       </div>
-                      <PicksSocialsComponent toolTip={true} />
+                      <div className="min-w-0 max-w-full overflow-x-hidden">
+                        <PicksSocialsComponent toolTip={true} />
+                      </div>
                     </ComposerSection>
 
                     <ComposerSection
@@ -891,17 +895,17 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       title="Generate or customize with AI"
                       description="Use quick actions to jump into the existing assistant with prompts tailored to the current composer."
                     >
-                      <div className="grid grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3 mobile:gap-[8px]">
+                      <div className="grid min-w-0 max-w-full grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3 mobile:gap-[8px]">
                         {AI_PRESETS.map((preset) => (
                           <button
                             key={preset.id}
                             type="button"
                             onClick={() => openAiPreset(preset.id)}
                             className={clsx(
-                              'rounded-[16px] border px-[14px] py-[14px] text-start transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[12px]',
+                              'min-w-0 max-w-full rounded-[16px] border px-[14px] py-[14px] text-start transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[12px]',
                               activeAiPreset === preset.id
                                 ? 'border-[#7C4DFF] bg-[#22163B]'
-                                : 'border-newBorder bg-newBgColor hover:border-[#7C4DFF] hover:bg-newBgLineColor/70'
+                                : 'border-newBorder bg-newBgColor [@media(hover:hover)]:hover:border-[#7C4DFF] [@media(hover:hover)]:hover:bg-newBgLineColor/70'
                             )}
                           >
                             <div className="text-[15px] font-[700] text-white">
@@ -913,7 +917,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                           </button>
                         ))}
                       </div>
-                      <div className="mt-[14px] rounded-[14px] border border-dashed border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
+                      <div className="mt-[14px] min-w-0 break-words rounded-[14px] border border-dashed border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
                         Active AI prompt targets{' '}
                         <span className="font-[700] text-white">
                           {selectedPlatformText}
@@ -930,16 +934,16 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     >
                       {!existingData.integration &&
                         selectedIntegrations.length > 0 && (
-                          <div className="mb-[16px]">
+                          <div className="mb-[16px] min-w-0 max-w-full overflow-x-hidden">
                             <SelectCurrent />
                           </div>
                         )}
-                      <div className="mb-[12px] rounded-[14px] border border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
+                      <div className="mb-[12px] min-w-0 break-words rounded-[14px] border border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
                         {current === 'global'
                           ? 'You are editing the shared version used by every selected account until a platform is customized.'
                           : 'You are reviewing a platform-specific version. Changes here only affect the active account.'}
                       </div>
-                      <div className="flex flex-1 mobile:block">
+                      <div className="flex min-w-0 max-w-full flex-1 overflow-x-hidden mobile:block">
                         {!hide && <EditorWrapper totalPosts={1} value="" />}
                       </div>
                       <div id="social-empty" className="pb-[4px]" />
@@ -966,18 +970,18 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   >
                     <div
                       id="wrapper-settings"
-                      className="select-none"
+                      className="min-w-0 max-w-full overflow-x-hidden select-none"
                     >
-                      <div className="flex flex-col overflow-hidden rounded-[16px] border border-newBorder bg-newSettings">
+                      <div className="flex min-w-0 max-w-full flex-col overflow-hidden rounded-[16px] border border-newBorder bg-newSettings">
                         <button
                           type="button"
                           onClick={() => setShowSettings(!showSettings)}
                           className={clsx(
-                            'flex items-center gap-[8px] bg-[#612BD3] p-[14px] text-left',
+                            'flex min-w-0 items-center gap-[8px] bg-[#612BD3] p-[14px] text-left',
                             showSettings ? 'rounded-b-none' : ''
                           )}
                         >
-                          <div className="flex-1 text-[14px] font-[600] text-white">
+                          <div className="min-w-0 flex-1 text-[14px] font-[600] text-white">
                             {currentIntegrationText}
                           </div>
                           <ChevronDownIcon
@@ -987,10 +991,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                         </button>
                         {showSettings && (
                           <div className="relative text-[14px] font-[500] text-textColor">
-                            <div className="max-h-[460px] overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newBgColorInner scrollbar-track-newColColor">
+                            <div className="max-h-[460px] max-w-full overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newBgColorInner scrollbar-track-newColColor">
                               <div
                                 id="social-settings"
-                                className="flex flex-col gap-[20px] bg-newBgColor p-[12px] mobile:px-[2px]"
+                                className="flex min-w-0 max-w-full flex-col gap-[20px] bg-newBgColor p-[12px] mobile:px-[2px]"
                               />
                             </div>
                           </div>
@@ -1018,9 +1022,9 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             </div>
           </div>
 
-          <div className="flex w-[580px] flex-col mobile:w-full mobile:min-h-0">
-            <div className="flex min-h-[65px] items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-e-[20px] !rounded-b-[0] mobile:min-h-0 mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
-              <div className="flex flex-1 flex-col">
+          <div className="flex w-[580px] min-w-0 max-w-full flex-col mobile:w-full mobile:overflow-x-hidden mobile:min-h-0">
+            <div className="flex min-h-[65px] min-w-0 items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-e-[20px] !rounded-b-[0] mobile:min-h-0 mobile:w-full mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
+              <div className="flex min-w-0 flex-1 flex-col">
                 <div>{t('post_preview', 'Post Preview')}</div>
                 <div className="mt-[4px] text-[13px] font-[500] text-textColor/65">
                   {isPublishedManagementView
@@ -1035,19 +1039,21 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 <CloseIcon onClick={askClose} className="text-[#A3A3A3]" />
               </div>
             </div>
-            <div className="relative flex-1 mobile:static mobile:min-h-0">
+            <div className="relative min-w-0 flex-1 mobile:static mobile:w-full mobile:overflow-x-hidden mobile:min-h-0">
               <Scrollable
                 scrollClasses="!pe-[20px]"
-                className="absolute left-0 top-0 h-full w-full overflow-x-hidden overflow-y-scroll p-[20px] pe-[8px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:min-h-[220px] mobile:overflow-visible mobile:px-[12px] mobile:py-[12px]"
+                className="absolute left-0 top-0 h-full w-full min-w-0 max-w-full overflow-x-hidden overflow-y-scroll p-[20px] pe-[8px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:min-h-[220px] mobile:overflow-x-hidden mobile:overflow-y-visible mobile:px-[12px] mobile:py-[12px]"
               >
-                <ShowAllProviders ref={ref} />
+                <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
+                  <ShowAllProviders ref={ref} />
+                </div>
               </Scrollable>
             </div>
           </div>
         </div>
 
-        <div className="flex min-h-[84px] items-center border-t border-newBorder py-[16px] select-none mobile:sticky mobile:bottom-0 mobile:z-[30] mobile:flex-col mobile:items-stretch mobile:gap-[12px] mobile:bg-newBgColorInner/95 mobile:py-[12px] mobile:shadow-menu mobile:backdrop-blur">
-          <div className="flex flex-1 gap-[8px] ps-[20px] mobile:flex-col mobile:px-[12px] mobile:[&>*]:ml-0 mobile:[&>*]:w-full">
+        <div className="flex min-h-[84px] min-w-0 items-center border-t border-newBorder py-[16px] select-none mobile:relative mobile:flex-col mobile:items-stretch mobile:gap-[12px] mobile:overflow-x-hidden mobile:py-[12px]">
+          <div className="flex min-w-0 flex-1 gap-[8px] ps-[20px] mobile:flex-col mobile:px-[12px] mobile:[&>*]:ml-0 mobile:[&>*]:w-full">
             {!dummy && (
               <TagsComponent
                 name="tags"
@@ -1063,10 +1069,13 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <RepeatComponent repeat={repeater} onChange={setRepeater} />
             )}
           </div>
-          <div className="flex flex-col items-end gap-[8px] pe-[20px] mobile:items-stretch mobile:px-[12px]">
-            <div className="flex items-center justify-end gap-[8px] mobile:flex-col mobile:items-stretch">
+          <div className="flex min-w-0 max-w-full flex-col items-end gap-[8px] pe-[20px] mobile:items-stretch mobile:px-[12px]">
+            <div className="flex min-w-0 max-w-full items-center justify-end gap-[8px] mobile:flex-col mobile:items-stretch">
               {showPublishedActions && (
-                <span title={deleteOnPlatformDisabledReason || undefined}>
+                <span
+                  className="mobile:w-full"
+                  title={deleteOnPlatformDisabledReason || undefined}
+                >
                   <button
                     disabled={
                       !!deleteOnPlatformDisabledReason || loading || locked
@@ -1101,7 +1110,9 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 </button>
               )}
               {(!showPublishedActions || isRemoteDeletedPost) && (
-                <DatePicker onChange={setDate} date={date} />
+                <div className="mobile:w-full mobile:min-w-0 mobile:[&>*]:w-full">
+                  <DatePicker onChange={setDate} date={date} />
+                </div>
               )}
               {!addEditSets && (
                 <button
@@ -1133,7 +1144,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 </button>
               )}
               {!addEditSets && (
-                <div className="group relative cursor-pointer mobile:w-full">
+                <div className="group relative min-w-0 cursor-pointer mobile:w-full">
                   <button
                     disabled={
                       selectedIntegrations.length === 0 ||
@@ -1173,7 +1184,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     </div>
                     {!dummy && !isPublishedPost && (
                       <div className="arrow-change flex h-[20px] w-[20px] items-center justify-center pt-[4px]">
-                        <DropdownArrowSmallIcon className="text-white group-hover:rotate-180" />
+                        <DropdownArrowSmallIcon className="text-white [@media(hover:hover)]:group-hover:rotate-180" />
                       </div>
                     )}
                   </button>
@@ -1184,7 +1195,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       disabled={
                         selectedIntegrations.length === 0 || loading || locked
                       }
-                      className="absolute bottom-[100%] -left-[12px] z-[300] hidden w-[206px] rounded-[8px] bg-newBgColorInner p-[12px] disabled:cursor-not-allowed disabled:opacity-80 group-hover:flex mobile:hidden"
+                      className="absolute bottom-[100%] -left-[12px] z-[300] hidden w-[206px] rounded-[8px] bg-newBgColorInner p-[12px] disabled:cursor-not-allowed disabled:opacity-80 [@media(hover:hover)]:group-hover:flex mobile:hidden"
                     >
                       <div className="post-now flex h-[44px] w-full items-center justify-center rounded-[8px] bg-[#D82D7E] text-white">
                         {t('post_now', 'Post Now')}
@@ -1229,6 +1240,45 @@ Keep the output practical, platform-aware, and less generic.
           }}
         />
       )}
+
+      <style>
+        {`
+          @media (max-width: 1025px) {
+            #social-content .preview,
+            #composer-preview-content .preview {
+              overflow-wrap: anywhere;
+              white-space: pre-wrap;
+            }
+
+            #composer-preview-content,
+            #composer-preview-content > div {
+              max-width: 100%;
+              min-width: 0;
+              overflow-x: hidden;
+            }
+
+            #composer-preview-content img,
+            #composer-preview-content video {
+              max-width: 100%;
+            }
+
+            #composer-preview-content [class*="-mx-[15px]"] {
+              margin-left: 0;
+              margin-right: 0;
+            }
+
+            #composer-preview-content [class*="h-[585px]"],
+            #composer-preview-content [class*="h-[375px]"],
+            #composer-preview-content [class*="h-[280px]"] {
+              height: min(220px, 58vw);
+            }
+
+            #composer-preview-content [class*="h-[100px]"] {
+              height: min(120px, 36vw);
+            }
+          }
+        `}
+      </style>
     </div>
   );
 };
@@ -1240,18 +1290,18 @@ const ComposerSection: FC<{
   children: ReactNode;
 }> = ({ step, title, description, children }) => {
   return (
-    <section className="rounded-[18px] border border-newBorder bg-newBgColor px-[18px] py-[18px] mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]">
-      <div className="mb-[16px] flex items-start gap-[12px] mobile:mb-[12px]">
+    <section className="w-full min-w-0 max-w-full overflow-x-hidden rounded-[18px] border border-newBorder bg-newBgColor px-[18px] py-[18px] mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]">
+      <div className="mb-[16px] flex min-w-0 items-start gap-[12px] mobile:mb-[12px]">
         {!!step && (
           <div className="flex h-[32px] w-[32px] min-w-[32px] items-center justify-center rounded-full bg-newBgLineColor text-[13px] font-[700] text-white mobile:h-[28px] mobile:w-[28px] mobile:min-w-[28px] mobile:text-[12px]">
             {step}
           </div>
         )}
-        <div>
-          <div className="text-[18px] font-[700] text-white mobile:text-[16px]">
+        <div className="min-w-0">
+          <div className="break-words text-[18px] font-[700] text-white mobile:text-[16px]">
             {title}
           </div>
-          <div className="mt-[4px] text-[13px] leading-[1.5] text-textColor/65">
+          <div className="mt-[4px] break-words text-[13px] leading-[1.5] text-textColor/65">
             {description}
           </div>
         </div>
@@ -1317,7 +1367,7 @@ const ComposerUploadCard: FC<{
     <div
       {...getRootProps()}
       className={clsx(
-        'rounded-[18px] border border-dashed px-[18px] py-[18px] transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]',
+        'w-full min-w-0 max-w-full overflow-x-hidden rounded-[18px] border border-dashed px-[18px] py-[18px] transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]',
         isDragActive
           ? 'border-[#7C4DFF] bg-[#22163B]'
           : 'border-newBorder bg-newBgColor',
@@ -1325,12 +1375,12 @@ const ComposerUploadCard: FC<{
       )}
     >
       <input {...getInputProps()} />
-      <div className="flex flex-wrap items-start justify-between gap-[16px] mobile:flex-col mobile:gap-[12px]">
-        <div className="max-w-[520px]">
-          <div className="text-[18px] font-[700] text-white mobile:text-[16px]">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-[16px] mobile:flex-col mobile:gap-[12px]">
+        <div className="min-w-0 max-w-[520px] mobile:max-w-full">
+          <div className="break-words text-[18px] font-[700] text-white mobile:text-[16px]">
             Upload once, customize later
           </div>
-          <div className="mt-[8px] text-[14px] leading-[1.5] text-textColor/65 mobile:text-[13px]">
+          <div className="mt-[8px] break-words text-[14px] leading-[1.5] text-textColor/65 mobile:text-[13px]">
             Drop files here or browse from your device. New uploads land on the
             shared composer version first, and you can still adjust media inside
             any platform-specific version below.
@@ -1343,7 +1393,7 @@ const ComposerUploadCard: FC<{
             event.stopPropagation();
             open();
           }}
-          className="rounded-[12px] bg-[#612BD3] px-[16px] py-[12px] text-[14px] font-[700] text-white transition-opacity hover:opacity-90 mobile:w-full"
+          className="rounded-[12px] bg-[#612BD3] px-[16px] py-[12px] text-[14px] font-[700] text-white transition-opacity [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
         >
           Choose files
         </button>
@@ -1368,7 +1418,7 @@ const ComposerUploadCard: FC<{
 
       <div
         className={clsx(
-          'mt-[16px] rounded-[16px] border border-newBorder bg-newBgColorInner p-[14px]',
+          'mt-[16px] min-w-0 max-w-full overflow-x-hidden rounded-[16px] border border-newBorder bg-newBgColorInner p-[14px]',
           !media.length &&
             'flex min-h-[150px] items-center justify-center mobile:min-h-[120px]'
         )}
@@ -1386,8 +1436,8 @@ const ComposerUploadCard: FC<{
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-[14px]">
-            <div className="flex flex-wrap items-center justify-between gap-[12px]">
+          <div className="flex min-w-0 flex-col gap-[14px]">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-[12px]">
               <div className="text-[14px] font-[700] text-white">
                 Shared media
               </div>
@@ -1395,11 +1445,11 @@ const ComposerUploadCard: FC<{
                 {media.length} asset{media.length > 1 ? 's' : ''} attached
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-[10px] md:grid-cols-3 xl:grid-cols-4">
+            <div className="grid min-w-0 max-w-full grid-cols-2 gap-[10px] md:grid-cols-3 xl:grid-cols-4 mobile:gap-[8px]">
               {media.slice(0, 8).map((item: any) => (
                 <div
                   key={item.id}
-                  className="overflow-hidden rounded-[14px] border border-newBorder bg-black/20"
+                  className="min-w-0 overflow-hidden rounded-[14px] border border-newBorder bg-black/20"
                 >
                   <div className="aspect-[1/1]">
                     <VideoOrImage
