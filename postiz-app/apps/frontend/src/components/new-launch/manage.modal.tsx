@@ -42,7 +42,6 @@ import {
   TrashIcon,
   DropdownArrowSmallIcon,
 } from '@gitroom/frontend/components/ui/icons';
-import { useHasScroll } from '@gitroom/frontend/components/ui/is.scroll.hook';
 import { useShortlinkPreference } from '@gitroom/frontend/components/settings/shortlink-preference.component';
 import dayjs from 'dayjs';
 import { Button } from '@gitroom/react/form/button';
@@ -56,46 +55,32 @@ const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
 const AI_PRESETS = [
   {
-    id: 'generate-caption',
-    title: 'Generate caption',
-    helper: 'Start from the current post and attached media.',
-    buildMessage: (platformText: string) =>
-      `Generate a strong caption for ${platformText} using the current post content and attached media context. Keep it human and platform-friendly, then apply it with the setPosts action.`,
-  },
-  {
     id: 'rewrite-linkedin',
-    title: 'Rewrite for LinkedIn',
-    helper: 'Make it feel direct, credible, and readable.',
-    buildMessage: () =>
-      'Rewrite the current post for LinkedIn. Keep it clear, useful, and less generic, then apply the result with the setPosts action.',
+    title: 'Generate LinkedIn post',
+    helper: 'Professional and useful.',
+    buildMessage: (platformText: string) =>
+      `Generate a LinkedIn post using the uploaded media context, current draft, and selected accounts: ${platformText}. Keep it clear, useful, and professional. Apply the result with the setPosts action.`,
   },
   {
     id: 'rewrite-x',
-    title: 'Rewrite for X',
-    helper: 'Tighten the message for a shorter feed format.',
-    buildMessage: () =>
-      'Rewrite the current post for X. Make it concise, punchy, and platform-native, then apply the result with the setPosts action.',
-  },
-  {
-    id: 'make-shorter',
-    title: 'Make shorter',
-    helper: 'Trim the post without losing the main point.',
-    buildMessage: () =>
-      'Shorten the current post while keeping the core message intact. Apply the tighter version with the setPosts action.',
-  },
-  {
-    id: 'make-human',
-    title: 'Make more human',
-    helper: 'Reduce polished AI cadence and keep plain language.',
-    buildMessage: () =>
-      'Rewrite the current post so it sounds more human and less AI-polished. Use plain language, avoid hype, and apply it with the setPosts action.',
-  },
-  {
-    id: 'platform-variations',
-    title: 'Create platform variations',
-    helper: 'Draft direction for the channels you selected.',
+    title: 'Generate X post',
+    helper: 'Short and feed-native.',
     buildMessage: (platformText: string) =>
-      `Suggest platform-specific variations for ${platformText}. Call out which variation fits which platform, and apply the best shared working version with the setPosts action.`,
+      `Generate an X post using the uploaded media context, current draft, and selected accounts: ${platformText}. Keep it concise, specific, and platform-native. Apply the result with the setPosts action.`,
+  },
+  {
+    id: 'generate-facebook',
+    title: 'Generate Facebook post',
+    helper: 'Friendly and readable.',
+    buildMessage: (platformText: string) =>
+      `Generate a Facebook post using the uploaded media context, current draft, and selected accounts: ${platformText}. Make it warm, readable, and easy to engage with. Apply the result with the setPosts action.`,
+  },
+  {
+    id: 'generate-bluesky',
+    title: 'Generate Bluesky post',
+    helper: 'Conversational and direct.',
+    buildMessage: (platformText: string) =>
+      `Generate a Bluesky post using the uploaded media context, current draft, and selected accounts: ${platformText}. Keep it conversational, direct, and not overly polished. Apply the result with the setPosts action.`,
   },
 ] as const;
 
@@ -827,36 +812,36 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   return (
     <div className="relative flex h-full w-full flex-1 p-[40px] mobile:h-auto mobile:min-h-full mobile:max-w-[100vw] mobile:min-w-0 mobile:overflow-x-hidden mobile:p-0">
       <div className="flex min-w-0 flex-1 flex-col rounded-[20px] bg-newBgColorInner mobile:w-full mobile:max-w-full mobile:overflow-x-hidden mobile:rounded-none">
-        <div className="flex min-w-0 flex-1 mobile:block mobile:w-full mobile:flex-none mobile:overflow-x-hidden mobile:min-h-0">
-          <div className="flex min-w-0 flex-1 flex-col border-e border-newBorder mobile:block mobile:w-full mobile:border-e-0 mobile:border-b">
+        <div className="flex min-h-0 min-w-0 flex-1 mobile:block mobile:w-full mobile:flex-none mobile:overflow-x-hidden mobile:min-h-0">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col border-e border-newBorder mobile:block mobile:w-full mobile:border-e-0 mobile:border-b">
             <div className="flex min-h-[65px] min-w-0 items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:min-h-0 mobile:w-full mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
               <div className="flex min-w-0 flex-1 flex-col">
                 <div>
                   {isPublishedManagementView
                     ? t('published_post', 'Published post')
-                    : t('create_post_title', 'Create Post')}
+                    : t('upload', 'Upload')}
                 </div>
                 <div className="mt-[4px] text-[13px] font-[500] text-textColor/65">
                   {isPublishedManagementView
                     ? t(
                         'published_post_management_hint',
-                        'Review live metrics and platform settings without reopening the upload workflow.'
+                        'Review metrics and platform settings.'
                       )
-                    : 'Build the post once, then tailor it where needed without leaving the existing composer flow.'}
+                    : 'Upload media, choose platforms, generate copy, then review.'}
                 </div>
               </div>
             </div>
-            <div className="relative min-w-0 flex-1 mobile:static mobile:w-full mobile:overflow-x-hidden mobile:min-h-0">
+            <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:w-full mobile:overflow-y-visible mobile:min-h-0">
               <div
                 id="social-content"
-                className="absolute left-0 top-0 flex h-full w-full min-w-0 max-w-full flex-col gap-[20px] overflow-x-hidden overflow-y-scroll pe-[8px] pt-[20px] ps-[20px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:gap-[12px] mobile:overflow-x-hidden mobile:overflow-y-visible mobile:px-[12px] mobile:py-[12px]"
+                className="flex w-full min-w-0 max-w-full flex-col gap-[24px] overflow-x-hidden p-[20px] mobile:gap-[16px] mobile:px-[12px] mobile:py-[12px]"
               >
                 {!isPublishedManagementView && (
                   <>
                     <ComposerSection
                       step="1"
                       title="Upload media"
-                      description="Drop images or video into the shared composer first. You can still fine-tune attachments in the editor below."
+                      description="Add images or video to start."
                     >
                       <ComposerUploadCard
                         disabled={locked}
@@ -867,8 +852,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
                     <ComposerSection
                       step="2"
-                      title="Pick platforms and accounts"
-                      description="Choose every account that should receive this post. The shared version stays in sync until you customize a specific channel."
+                      title="Choose platforms"
+                      description="Select where this post should go."
                     >
                       <div className="mb-[14px] flex min-w-0 flex-wrap items-center justify-between gap-[12px] mobile:flex-col mobile:items-stretch">
                         <div className="min-w-0 text-[13px] text-textColor/65">
@@ -876,7 +861,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                             ? `${selectedIntegrations.length} account${
                                 selectedIntegrations.length > 1 ? 's' : ''
                               } selected`
-                            : 'Select one or more destination accounts to continue.'}
+                            : 'No accounts selected'}
                         </div>
                         {!dummy && (
                           <SelectCustomer
@@ -892,17 +877,17 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
                     <ComposerSection
                       step="3"
-                      title="Generate or customize with AI"
-                      description="Use quick actions to jump into the existing assistant with prompts tailored to the current composer."
+                      title="Generate copy"
+                      description="Create captions from your uploaded media."
                     >
-                      <div className="grid min-w-0 max-w-full grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3 mobile:gap-[8px]">
+                      <div className="grid min-w-0 max-w-full grid-cols-1 gap-[10px] md:grid-cols-2 mobile:gap-[8px]">
                         {AI_PRESETS.map((preset) => (
                           <button
                             key={preset.id}
                             type="button"
                             onClick={() => openAiPreset(preset.id)}
                             className={clsx(
-                              'min-w-0 max-w-full rounded-[16px] border px-[14px] py-[14px] text-start transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[12px]',
+                              'min-w-0 max-w-full rounded-[12px] border px-[14px] py-[12px] text-start transition-all mobile:px-[12px] mobile:py-[12px]',
                               activeAiPreset === preset.id
                                 ? 'border-[#7C4DFF] bg-[#22163B]'
                                 : 'border-newBorder bg-newBgColor [@media(hover:hover)]:hover:border-[#7C4DFF] [@media(hover:hover)]:hover:bg-newBgLineColor/70'
@@ -911,26 +896,18 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                             <div className="text-[15px] font-[700] text-white">
                               {preset.title}
                             </div>
-                            <div className="mt-[6px] text-[13px] text-textColor/65">
+                            <div className="mt-[4px] text-[13px] text-textColor/65">
                               {preset.helper}
                             </div>
                           </button>
                         ))}
                       </div>
-                      <div className="mt-[14px] min-w-0 break-words rounded-[14px] border border-dashed border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
-                        Active AI prompt targets{' '}
-                        <span className="font-[700] text-white">
-                          {selectedPlatformText}
-                        </span>
-                        . The assistant still uses the existing composer actions,
-                        so save and scheduling behavior remains unchanged.
-                      </div>
                     </ComposerSection>
 
                     <ComposerSection
                       step="4"
-                      title="Review per-platform versions"
-                      description="Global is your shared base version. Switch into a channel only when you want to create a platform-specific override."
+                      title="Review and edit"
+                      description="Edit the shared post or a platform version."
                     >
                       {!existingData.integration &&
                         selectedIntegrations.length > 0 && (
@@ -938,11 +915,6 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                             <SelectCurrent />
                           </div>
                         )}
-                      <div className="mb-[12px] min-w-0 break-words rounded-[14px] border border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
-                        {current === 'global'
-                          ? 'You are editing the shared version used by every selected account until a platform is customized.'
-                          : 'You are reviewing a platform-specific version. Changes here only affect the active account.'}
-                      </div>
                       <div className="flex min-w-0 max-w-full flex-1 overflow-x-hidden mobile:block">
                         {!hide && <EditorWrapper totalPosts={1} value="" />}
                       </div>
@@ -963,9 +935,9 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       isPublishedManagementView
                         ? t(
                             'published_platform_settings_hint',
-                            'Review the exact settings stored for this platform post.'
+                            'Review saved platform settings.'
                           )
-                        : 'Keep provider-specific settings available without making them the center of the composer.'
+                        : 'Optional platform settings.'
                     }
                   >
                     <div
@@ -991,12 +963,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                         </button>
                         {showSettings && (
                           <div className="relative text-[14px] font-[500] text-textColor">
-                            <div className="max-h-[460px] max-w-full overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newBgColorInner scrollbar-track-newColColor">
-                              <div
-                                id="social-settings"
-                                className="flex min-w-0 max-w-full flex-col gap-[20px] bg-newBgColor p-[12px] mobile:px-[2px]"
-                              />
-                            </div>
+                            <div
+                              id="social-settings"
+                              className="flex min-w-0 max-w-full flex-col gap-[20px] bg-newBgColor p-[12px] mobile:px-[2px]"
+                            />
                           </div>
                         )}
                         <style>
@@ -1012,7 +982,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     title={t('metrics', 'Metrics')}
                     description={t(
                       'published_post_metrics_hint',
-                      'Live platform analytics and short-link statistics for this published post.'
+                      'Live platform analytics.'
                     )}
                   >
                     <StatisticsModal postId={existingRootPost.id} />
@@ -1022,7 +992,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             </div>
           </div>
 
-          <div className="flex w-[580px] min-w-0 max-w-full flex-col mobile:w-full mobile:overflow-x-hidden mobile:min-h-0">
+          <div className="flex min-h-0 w-[580px] min-w-0 max-w-full flex-col mobile:w-full mobile:overflow-x-hidden mobile:min-h-0">
             <div className="flex min-h-[65px] min-w-0 items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-e-[20px] !rounded-b-[0] mobile:min-h-0 mobile:w-full mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
               <div className="flex min-w-0 flex-1 flex-col">
                 <div>{t('post_preview', 'Post Preview')}</div>
@@ -1030,24 +1000,19 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   {isPublishedManagementView
                     ? t(
                         'published_preview_hint',
-                        'Preview of the post that was published on this platform.'
+                        'Published post preview.'
                       )
-                    : 'Preview updates as you switch between the shared version and per-platform edits.'}
+                    : 'Preview updates as you edit.'}
                 </div>
               </div>
               <div className="cursor-pointer">
                 <CloseIcon onClick={askClose} className="text-[#A3A3A3]" />
               </div>
             </div>
-            <div className="relative min-w-0 flex-1 mobile:static mobile:w-full mobile:overflow-x-hidden mobile:min-h-0">
-              <Scrollable
-                scrollClasses="!pe-[20px]"
-                className="absolute left-0 top-0 h-full w-full min-w-0 max-w-full overflow-x-hidden overflow-y-scroll p-[20px] pe-[8px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:relative mobile:h-auto mobile:min-h-[220px] mobile:overflow-x-hidden mobile:overflow-y-visible mobile:px-[12px] mobile:py-[12px]"
-              >
-                <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
-                  <ShowAllProviders ref={ref} />
-                </div>
-              </Scrollable>
+            <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-[20px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:w-full mobile:min-h-[220px] mobile:overflow-y-visible mobile:px-[12px] mobile:py-[12px]">
+              <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
+                <ShowAllProviders ref={ref} />
+              </div>
             </div>
           </div>
         </div>
@@ -1290,10 +1255,10 @@ const ComposerSection: FC<{
   children: ReactNode;
 }> = ({ step, title, description, children }) => {
   return (
-    <section className="w-full min-w-0 max-w-full overflow-x-hidden rounded-[18px] border border-newBorder bg-newBgColor px-[18px] py-[18px] mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]">
-      <div className="mb-[16px] flex min-w-0 items-start gap-[12px] mobile:mb-[12px]">
+    <section className="w-full min-w-0 max-w-full overflow-x-hidden border-b border-newBorder pb-[24px] last:border-b-0 last:pb-0 mobile:pb-[18px]">
+      <div className="mb-[14px] flex min-w-0 items-start gap-[12px] mobile:mb-[10px]">
         {!!step && (
-          <div className="flex h-[32px] w-[32px] min-w-[32px] items-center justify-center rounded-full bg-newBgLineColor text-[13px] font-[700] text-white mobile:h-[28px] mobile:w-[28px] mobile:min-w-[28px] mobile:text-[12px]">
+          <div className="flex h-[28px] w-[28px] min-w-[28px] items-center justify-center rounded-full bg-newBgLineColor text-[12px] font-[700] text-white mobile:h-[26px] mobile:w-[26px] mobile:min-w-[26px]">
             {step}
           </div>
         )}
@@ -1367,7 +1332,7 @@ const ComposerUploadCard: FC<{
     <div
       {...getRootProps()}
       className={clsx(
-        'w-full min-w-0 max-w-full overflow-x-hidden rounded-[18px] border border-dashed px-[18px] py-[18px] transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]',
+        'w-full min-w-0 max-w-full overflow-x-hidden rounded-[14px] border border-dashed px-[16px] py-[16px] transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]',
         isDragActive
           ? 'border-[#7C4DFF] bg-[#22163B]'
           : 'border-newBorder bg-newBgColor',
@@ -1377,13 +1342,11 @@ const ComposerUploadCard: FC<{
       <input {...getInputProps()} />
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-[16px] mobile:flex-col mobile:gap-[12px]">
         <div className="min-w-0 max-w-[520px] mobile:max-w-full">
-          <div className="break-words text-[18px] font-[700] text-white mobile:text-[16px]">
-            Upload once, customize later
+          <div className="break-words text-[16px] font-[700] text-white">
+            Choose files
           </div>
-          <div className="mt-[8px] break-words text-[14px] leading-[1.5] text-textColor/65 mobile:text-[13px]">
-            Drop files here or browse from your device. New uploads land on the
-            shared composer version first, and you can still adjust media inside
-            any platform-specific version below.
+          <div className="mt-[6px] break-words text-[13px] leading-[1.4] text-textColor/65">
+            Drop files here or browse from your device.
           </div>
         </div>
         <button
@@ -1431,8 +1394,7 @@ const ComposerUploadCard: FC<{
                 : 'No shared media uploaded yet'}
             </div>
             <div className="mt-[8px] text-[13px] text-textColor/65">
-              Image and video uploads use the same uploader, limits, and media
-              settings flow that already works elsewhere in the composer.
+              Images and video are supported.
             </div>
           </div>
         ) : (
@@ -1463,20 +1425,6 @@ const ComposerUploadCard: FC<{
           </div>
         )}
       </div>
-    </div>
-  );
-};
-
-const Scrollable: FC<{
-  className: string;
-  scrollClasses: string;
-  children: ReactNode;
-}> = ({ className, scrollClasses, children }) => {
-  const ref = useRef<HTMLDivElement>(null);
-  const hasScroll = useHasScroll(ref);
-  return (
-    <div className={clsx(className, hasScroll && scrollClasses)} ref={ref}>
-      {children}
     </div>
   );
 };
