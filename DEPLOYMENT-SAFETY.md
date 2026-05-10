@@ -2,6 +2,8 @@
 
 Use this checklist before any public deploy or tunnel exposure.
 
+For managed PostgreSQL setup and migration guidance, see `PRODUCTION-DATABASE.md`.
+
 ## Before Deploy
 
 - Take a database backup first: `scripts/backup-postgres.sh`.
