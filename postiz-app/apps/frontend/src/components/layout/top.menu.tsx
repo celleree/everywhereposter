@@ -36,7 +36,7 @@ export const useMenuItem = () => {
 
   const firstMenu = [
     {
-      name: t('create', 'Create'),
+      name: t('upload', 'Upload'),
       icon: (
         <svg
           xmlns="http://www.w3.org/2000/svg"

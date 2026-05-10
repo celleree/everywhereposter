@@ -100,9 +100,11 @@ export async function proxy(request: NextRequest) {
             : 'github'
           : findIndex
         ).toUpperCase()}`;
-    return NextResponse.redirect(
-      new URL(`/auth${url}${additional}`, nextUrl.href)
-    );
+    const authUrl = new URL(`/auth${url}${additional}`, nextUrl.href);
+    if (nextUrl.pathname !== '/') {
+      authUrl.searchParams.set('returnUrl', nextUrl.href);
+    }
+    return NextResponse.redirect(authUrl);
   }
 
   // If the url is /auth and the cookie exists, redirect to /
@@ -158,12 +160,7 @@ export async function proxy(request: NextRequest) {
       return redirect;
     }
     if (nextUrl.pathname === '/') {
-      return NextResponse.redirect(
-        new URL(
-          !!process.env.IS_GENERAL ? '/launches' : `/analytics`,
-          nextUrl.href
-        )
-      );
+      return NextResponse.redirect(new URL('/create', nextUrl.href));
     }
 
     return topResponse;
