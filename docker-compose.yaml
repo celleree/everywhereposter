@@ -25,6 +25,9 @@ services:
       IS_GENERAL: 'true'
       DISABLE_REGISTRATION: 'false'
       RUN_CRON: 'true'
+      SKIP_PRISMA_DB_PUSH: '${SKIP_PRISMA_DB_PUSH:-false}'
+      ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB: '${ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB:-false}'
+      RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE: '${RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE:-false}'
 
       # === Multi-User / Team Settings
       # Leave registration enabled if you want multiple people to create accounts
