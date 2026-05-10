@@ -810,10 +810,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   );
 
   return (
-    <div className="relative flex h-full w-full flex-1 p-[40px] mobile:h-auto mobile:min-h-full mobile:max-w-[100vw] mobile:min-w-0 mobile:overflow-x-hidden mobile:p-0">
+    <div className="relative flex h-full w-full flex-1 overflow-x-hidden overflow-y-auto p-[40px] mobile:h-auto mobile:min-h-full mobile:max-w-[100vw] mobile:min-w-0 mobile:overflow-y-visible mobile:p-0">
       <div className="flex min-w-0 flex-1 flex-col rounded-[20px] bg-newBgColorInner mobile:w-full mobile:max-w-full mobile:overflow-x-hidden mobile:rounded-none">
-        <div className="flex min-h-0 min-w-0 flex-1 mobile:block mobile:w-full mobile:flex-none mobile:overflow-x-hidden mobile:min-h-0">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col border-e border-newBorder mobile:block mobile:w-full mobile:border-e-0 mobile:border-b">
+        <div className="flex min-w-0 mobile:block mobile:w-full mobile:flex-none mobile:overflow-x-hidden">
+          <div className="flex min-w-0 flex-1 flex-col border-e border-newBorder mobile:block mobile:w-full mobile:border-e-0 mobile:border-b">
             <div className="flex min-h-[65px] min-w-0 items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:min-h-0 mobile:w-full mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
               <div className="flex min-w-0 flex-1 flex-col">
                 <div>
@@ -831,7 +831,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 </div>
               </div>
             </div>
-            <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:w-full mobile:overflow-y-visible mobile:min-h-0">
+            <div className="min-w-0 overflow-x-hidden mobile:w-full">
               <div
                 id="social-content"
                 className="flex w-full min-w-0 max-w-full flex-col gap-[24px] overflow-x-hidden p-[20px] mobile:gap-[16px] mobile:px-[12px] mobile:py-[12px]"
@@ -992,7 +992,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             </div>
           </div>
 
-          <div className="flex min-h-0 w-[580px] min-w-0 max-w-full flex-col mobile:w-full mobile:overflow-x-hidden mobile:min-h-0">
+          <div className="flex w-[580px] min-w-0 max-w-full flex-col mobile:w-full mobile:overflow-x-hidden">
             <div className="flex min-h-[65px] min-w-0 items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-e-[20px] !rounded-b-[0] mobile:min-h-0 mobile:w-full mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
               <div className="flex min-w-0 flex-1 flex-col">
                 <div>{t('post_preview', 'Post Preview')}</div>
@@ -1009,7 +1009,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 <CloseIcon onClick={askClose} className="text-[#A3A3A3]" />
               </div>
             </div>
-            <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-[20px] scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:w-full mobile:min-h-[220px] mobile:overflow-y-visible mobile:px-[12px] mobile:py-[12px]">
+            <div className="min-w-0 overflow-x-hidden p-[20px] mobile:w-full mobile:min-h-[220px] mobile:px-[12px] mobile:py-[12px]">
               <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
                 <ShowAllProviders ref={ref} />
               </div>
