@@ -163,7 +163,7 @@ export const PostStatisticsPanel: FC<{
             <div className="flex flex-col gap-[14px]">
               <div className="flex items-center justify-between gap-[12px]">
                 <h3 className="text-[18px] font-[500]">
-                  {t('post_analytics', 'Post Analytics')}
+                  {t('post_analytics', 'Post analytics')}
                 </h3>
                 <div className="max-w-[150px]">
                   <Select
@@ -243,7 +243,7 @@ export const PostStatisticsPanel: FC<{
           {showCommentsSection && (
             <div className="flex flex-col gap-[14px]">
               <h3 className="text-[18px] font-[500]">
-                {t('platform_comments', 'Platform comments')}
+                {t('recent_platform_comments', 'Recent platform comments')}
               </h3>
               {commentsData?.reconnectRequired || commentsData?.message ? (
                 <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">
