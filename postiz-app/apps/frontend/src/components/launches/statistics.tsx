@@ -1,3 +1,5 @@
+'use client';
+
 import React, { FC, Fragment, useCallback, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -32,10 +34,18 @@ interface PublishedCommentsResponse {
   message?: string;
 }
 
-export const StatisticsModal: FC<{
+export const PostStatisticsPanel: FC<{
   postId: string;
+  isPublished?: boolean;
+  hideWhenEmpty?: boolean;
+  compact?: boolean;
 }> = (props) => {
-  const { postId } = props;
+  const {
+    postId,
+    isPublished = true,
+    hideWhenEmpty = false,
+    compact = false,
+  } = props;
   const t = useT();
   const fetch = useFetch();
   const [dateRange, setDateRange] = useState(7);
@@ -61,33 +71,50 @@ export const StatisticsModal: FC<{
     data: analyticsData,
     isLoading: isLoadingAnalytics,
     mutate: mutateAnalytics,
-  } = useSWR(`/analytics/post/${postId}?date=${dateRange}`,
-    loadPostAnalytics,
-    {
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      revalidateIfStale: false,
-      revalidateOnMount: true,
-      refreshWhenHidden: false,
-      refreshWhenOffline: false,
-    }
-  );
+  } = useSWR(`/analytics/post/${postId}?date=${dateRange}`, loadPostAnalytics, {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    revalidateIfStale: false,
+    revalidateOnMount: true,
+    refreshWhenHidden: false,
+    refreshWhenOffline: false,
+  });
 
-  const { data: commentsData, isLoading: isLoadingComments } = useSWR<PublishedCommentsResponse>(
-    `/analytics/post/${postId}/comments`,
-    loadPostComments,
-    {
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      revalidateIfStale: false,
-      revalidateOnMount: true,
-      refreshWhenHidden: false,
-      refreshWhenOffline: false,
-    }
-  );
+  const { data: commentsData, isLoading: isLoadingComments } =
+    useSWR<PublishedCommentsResponse>(
+      `/analytics/post/${postId}/comments`,
+      loadPostComments,
+      {
+        revalidateOnFocus: false,
+        revalidateOnReconnect: false,
+        revalidateIfStale: false,
+        revalidateOnMount: true,
+        refreshWhenHidden: false,
+        refreshWhenOffline: false,
+      }
+    );
 
-  const isMissing = analyticsData && !Array.isArray(analyticsData) && analyticsData.missing;
-  const showCommentsSection = !!commentsData?.supported;
+  const isMissing =
+    analyticsData && !Array.isArray(analyticsData) && analyticsData.missing;
+  const hasAnalytics =
+    analyticsData && Array.isArray(analyticsData) && analyticsData.length > 0;
+  const hasShortLinks = !!statisticsData?.clicks?.length;
+  const hasPlatformComments = !!commentsData?.comments?.length;
+  const hasCommentsStatus =
+    !!commentsData?.supported ||
+    !!commentsData?.reconnectRequired ||
+    !!commentsData?.message;
+  const hasAnyInsights =
+    !!hasAnalytics ||
+    hasShortLinks ||
+    hasPlatformComments ||
+    !!isMissing ||
+    !!commentsData?.reconnectRequired ||
+    !!commentsData?.message;
+  const showAnalyticsSection = !!hasAnalytics || isPublished || !hideWhenEmpty;
+  const showCommentsSection =
+    hasCommentsStatus || isPublished || !hideWhenEmpty;
+  const showShortLinksSection = hasShortLinks || isPublished || !hideWhenEmpty;
 
   const dateOptions = useMemo(() => {
     return [
@@ -101,8 +128,10 @@ export const StatisticsModal: FC<{
     if (!analyticsData || !Array.isArray(analyticsData)) return [];
     return analyticsData.map((p: AnalyticsData) => {
       const value =
-        (p?.data?.reduce((acc: number, curr: any) => acc + Number(curr.total), 0) || 0) /
-        (p.average ? p.data.length : 1);
+        (p?.data?.reduce(
+          (acc: number, curr: any) => acc + Number(curr.total),
+          0
+        ) || 0) / (p.average ? p.data.length : 1);
       if (p.average) {
         return value.toFixed(2) + '%';
       }
@@ -113,6 +142,10 @@ export const StatisticsModal: FC<{
   const isLoading =
     isLoadingStatistics || isLoadingAnalytics || isLoadingComments;
 
+  if (hideWhenEmpty && !isPublished && !hasAnyInsights) {
+    return null;
+  }
+
   return (
     <div className="relative min-h-[200px]">
       {isLoading ? (
@@ -120,13 +153,15 @@ export const StatisticsModal: FC<{
           <LoadingComponent />
         </div>
       ) : isMissing ? (
-        <MissingReleaseModal postId={postId} onSuccess={() => mutateAnalytics()} />
+        <MissingReleaseModal
+          postId={postId}
+          onSuccess={() => mutateAnalytics()}
+        />
       ) : (
         <div className="flex flex-col gap-[24px]">
-          {/* Post Analytics Section */}
-          {analyticsData && Array.isArray(analyticsData) && analyticsData.length > 0 && (
+          {showAnalyticsSection && (
             <div className="flex flex-col gap-[14px]">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-[12px]">
                 <h3 className="text-[18px] font-[500]">
                   {t('post_analytics', 'Post Analytics')}
                 </h3>
@@ -147,57 +182,81 @@ export const StatisticsModal: FC<{
                   </Select>
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[16px]">
-                {analyticsData.map((p: AnalyticsData, index: number) => {
-                  const colorVariants = ['purple', 'green', 'blue'] as const;
-                  const color = colorVariants[index % colorVariants.length];
-                  return (
-                    <div key={`analytics-${index}`} className="group">
-                      <div className="flex flex-col h-full bg-newTableHeader border border-newTableBorder rounded-[12px] overflow-hidden transition-all duration-200 hover:border-[#612bd3]/50">
-                        <div className="flex items-center justify-between px-[16px] pt-[14px] pb-[8px]">
-                          <div className="flex items-center gap-[10px]">
-                            <div
-                              className={`w-[8px] h-[8px] rounded-full ${
-                                color === 'purple' ? 'bg-[#612bd3]' : ''
-                              } ${color === 'green' ? 'bg-[#32d583]' : ''} ${
-                                color === 'blue' ? 'bg-[#1d9bf0]' : ''
-                              }`}
-                            />
-                            <span className="text-[15px] font-medium text-newTableText">
-                              {p.label}
-                            </span>
+              {hasAnalytics ? (
+                <div
+                  className={`grid gap-[16px] ${
+                    compact
+                      ? 'grid-cols-1'
+                      : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+                  }`}
+                >
+                  {analyticsData.map((p: AnalyticsData, index: number) => {
+                    const colorVariants = ['purple', 'green', 'blue'] as const;
+                    const color = colorVariants[index % colorVariants.length];
+                    return (
+                      <div key={`analytics-${index}`} className="group">
+                        <div className="flex flex-col h-full bg-newTableHeader border border-newTableBorder rounded-[12px] overflow-hidden transition-all duration-200 hover:border-[#612bd3]/50">
+                          <div className="flex items-center justify-between px-[16px] pt-[14px] pb-[8px]">
+                            <div className="flex items-center gap-[10px]">
+                              <div
+                                className={`w-[8px] h-[8px] rounded-full ${
+                                  color === 'purple' ? 'bg-[#612bd3]' : ''
+                                } ${color === 'green' ? 'bg-[#32d583]' : ''} ${
+                                  color === 'blue' ? 'bg-[#1d9bf0]' : ''
+                                }`}
+                              />
+                              <span className="text-[15px] font-medium text-newTableText">
+                                {p.label}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex-1 px-[12px] py-[8px]">
-                          <div className="h-[120px] relative">
-                            <ChartSocial data={p.data} color={color} key={`chart-${index}`} />
+                          <div className="flex-1 px-[12px] py-[8px]">
+                            <div className="h-[120px] relative">
+                              <ChartSocial
+                                data={p.data}
+                                color={color}
+                                key={`chart-${index}`}
+                              />
+                            </div>
                           </div>
-                        </div>
-                        <div className="px-[16px] pb-[14px]">
-                          <div className="text-[36px] leading-[42px] font-semibold tracking-tight">
-                            {totals[index]}
+                          <div className="px-[16px] pb-[14px]">
+                            <div className="text-[36px] leading-[42px] font-semibold tracking-tight">
+                              {totals[index]}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-gray-400">
+                  {t(
+                    'no_post_analytics_available_yet',
+                    'No post analytics available yet.'
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           {showCommentsSection && (
             <div className="flex flex-col gap-[14px]">
               <h3 className="text-[18px] font-[500]">
-                {t('recent_facebook_comments', 'Recent Facebook comments')}
+                {t('platform_comments', 'Platform comments')}
               </h3>
               {commentsData?.reconnectRequired || commentsData?.message ? (
                 <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">
-                  {commentsData.message}
+                  {commentsData?.reconnectRequired
+                    ? t(
+                        'reconnect_this_channel_to_load_comments',
+                        'Reconnect this channel to load comments'
+                      )
+                    : commentsData?.message}
                 </div>
               ) : commentsData?.comments?.length ? (
                 <div className="flex flex-col gap-[12px]">
-                  {commentsData.comments.map((comment: PublishedComment) => (
+                  {commentsData?.comments?.map((comment: PublishedComment) => (
                     <div
                       key={comment.id}
                       className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px]"
@@ -213,7 +272,8 @@ export const StatisticsModal: FC<{
                         </div>
                       </div>
                       <div className="mt-[10px] whitespace-pre-wrap text-[14px] text-gray-200">
-                        {comment.message || t('no_comment_text', 'No comment text')}
+                        {comment.message ||
+                          t('no_comment_text', 'No comment text')}
                       </div>
                       <div className="mt-[12px] flex flex-wrap items-center gap-[12px] text-[12px] text-gray-400">
                         <span>
@@ -238,62 +298,68 @@ export const StatisticsModal: FC<{
                 </div>
               ) : (
                 <div className="text-gray-400">
-                  {t(
-                    'no_recent_facebook_comments',
-                    'No recent Facebook comments yet.'
-                  )}
+                  {t('no_platform_comments_yet', 'No platform comments yet.')}
                 </div>
               )}
             </div>
           )}
 
-          {/* Short Links Statistics Section */}
-          <div className="flex flex-col gap-[14px]">
-            <h3 className="text-[18px] font-[500]">
-              {t('short_links_statistics', 'Short Links Statistics')}
-            </h3>
-            {statisticsData?.clicks?.length === 0 ? (
-              <div className="text-gray-400">
-                {t('no_short_link_results', 'No short link results')}
-              </div>
-            ) : (
-              <div className="grid grid-cols-3">
-                <div className="bg-forth p-[4px] rounded-tl-lg">
-                  {t('short_link', 'Short Link')}
+          {showShortLinksSection && (
+            <div className="flex flex-col gap-[14px]">
+              <h3 className="text-[18px] font-[500]">
+                {t('short_links_statistics', 'Short Links Statistics')}
+              </h3>
+              {!hasShortLinks ? (
+                <div className="text-gray-400">
+                  {t('no_short_link_results', 'No short link results')}
                 </div>
-                <div className="bg-forth p-[4px]">
-                  {t('original_link', 'Original Link')}
+              ) : (
+                <div className="grid grid-cols-3 overflow-hidden rounded-t-lg">
+                  <div className="bg-forth p-[4px] rounded-tl-lg">
+                    {t('short_link', 'Short Link')}
+                  </div>
+                  <div className="bg-forth p-[4px]">
+                    {t('original_link', 'Original Link')}
+                  </div>
+                  <div className="bg-forth p-[4px] rounded-tr-lg">
+                    {t('clicks', 'Clicks')}
+                  </div>
+                  {statisticsData?.clicks?.map((p: any) => (
+                    <Fragment key={p.short}>
+                      <div className="p-[4px] py-[10px] bg-customColor6 break-words">
+                        {p.short}
+                      </div>
+                      <div className="p-[4px] py-[10px] bg-customColor6 break-words">
+                        {p.original}
+                      </div>
+                      <div className="p-[4px] py-[10px] bg-customColor6">
+                        {p.clicks}
+                      </div>
+                    </Fragment>
+                  ))}
                 </div>
-                <div className="bg-forth p-[4px] rounded-tr-lg">
-                  {t('clicks', 'Clicks')}
-                </div>
-                {statisticsData?.clicks?.map((p: any) => (
-                  <Fragment key={p.short}>
-                    <div className="p-[4px] py-[10px] bg-customColor6">
-                      {p.short}
-                    </div>
-                    <div className="p-[4px] py-[10px] bg-customColor6">
-                      {p.original}
-                    </div>
-                    <div className="p-[4px] py-[10px] bg-customColor6">
-                      {p.clicks}
-                    </div>
-                  </Fragment>
-                ))}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
-          {/* No analytics available message */}
-          {(!analyticsData || !Array.isArray(analyticsData) || analyticsData.length === 0) &&
-            (!statisticsData?.clicks || statisticsData.clicks.length === 0) &&
-            !showCommentsSection && (
+          {!showAnalyticsSection &&
+            !showCommentsSection &&
+            !showShortLinksSection && (
               <div className="text-center text-gray-400 py-[20px]">
-                {t('no_statistics_available', 'No statistics available for this post')}
+                {t(
+                  'no_statistics_available',
+                  'No statistics available for this post'
+                )}
               </div>
             )}
         </div>
       )}
     </div>
   );
+};
+
+export const StatisticsModal: FC<{
+  postId: string;
+}> = ({ postId }) => {
+  return <PostStatisticsPanel postId={postId} />;
 };

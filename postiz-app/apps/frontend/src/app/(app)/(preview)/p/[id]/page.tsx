@@ -10,6 +10,7 @@ import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { CopyClient } from '@gitroom/frontend/components/preview/copy.client';
 import { getT } from '@gitroom/react/translation/get.translation.service.backend';
 import { RenderPreviewDateClient } from '@gitroom/frontend/components/preview/render.preview.date.client';
+import { PostStatisticsPanel } from '@gitroom/frontend/components/launches/statistics';
 
 dayjs.extend(utc);
 export const metadata: Metadata = {
@@ -42,6 +43,13 @@ export default async function Auth(
       </div>
     );
   }
+
+  const rootPost = post[0];
+  const isPublishedPost =
+    rootPost.state === 'PUBLISHED' || rootPost.state === 'DELETED_REMOTE';
+  const showInsightsPanel =
+    !searchParams?.share && !!rootPost.viewerCanAccessAnalytics;
+
   return (
     <div>
       <div className="mx-auto w-full max-w-[1346px] py-3 text-white">
@@ -170,8 +178,26 @@ export default async function Auth(
           </div>
         </div>
         <div className="w-full lg:w-96 lg:flex-shrink-0">
-          <div className="p-4 pt-0">
-            <CommentsComponents postId={id} />
+          <div className="p-4 pt-0 flex flex-col gap-[24px]">
+            <div className="flex flex-col gap-[14px]">
+              <h3 className="text-[18px] font-[500]">
+                {t('client_internal_comments', 'Client/internal comments')}
+              </h3>
+              <CommentsComponents postId={id} />
+            </div>
+            {showInsightsPanel && (
+              <div className="flex flex-col gap-[14px]">
+                <h3 className="text-[18px] font-[500]">
+                  {t('post_performance', 'Post performance')}
+                </h3>
+                <PostStatisticsPanel
+                  postId={rootPost.id}
+                  isPublished={isPublishedPost}
+                  hideWhenEmpty={true}
+                  compact={true}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

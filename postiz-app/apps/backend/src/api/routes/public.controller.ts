@@ -30,6 +30,7 @@ import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/we
 import { createHmac, timingSafeEqual } from 'crypto';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
+import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 
 const pump = promisify(pipeline);
 const META_DATA_DELETION_PREFIX = 'meta:data-deletion:';
@@ -57,7 +58,8 @@ export class PublicController {
     private _postsService: PostsService,
     private _nowpayments: Nowpayments,
     private _subscriptionService: SubscriptionService,
-    private _integrationService: IntegrationService
+    private _integrationService: IntegrationService,
+    private _organizationService: OrganizationService
   ) {}
   @Post('/agent')
   async createAgent(@Body() body: { text: string; apiKey: string }) {
@@ -72,10 +74,18 @@ export class PublicController {
   }
 
   @Get(`/posts/:id`)
-  async getPreview(@Param('id') id: string) {
-    return (await this._postsService.getPostsRecursively(id, true)).map(
-      ({ childrenPost, ...p }) => ({
+  async getPreview(@Param('id') id: string, @Req() req: Request) {
+    const posts = await this._postsService.getPostsRecursively(id, true);
+    const viewerCanAccessAnalytics = await this.viewerCanAccessAnalytics(
+      req,
+      posts[0]?.organizationId
+    );
+
+    return posts.map(
+      ({ childrenPost, ...p }, index) => ({
         ...p,
+        viewerCanAccessAnalytics:
+          index === 0 ? viewerCanAccessAnalytics : false,
         ...(p.integration
           ? {
               integration: {
@@ -89,6 +99,40 @@ export class PublicController {
           : {}),
       })
     );
+  }
+
+  private async viewerCanAccessAnalytics(
+    req: Request,
+    organizationId?: string
+  ) {
+    if (!organizationId) {
+      return false;
+    }
+
+    const auth = req.cookies?.auth || req.headers.auth;
+    if (!auth || Array.isArray(auth)) {
+      return false;
+    }
+
+    try {
+      const user = AuthService.verifyJWT(auth) as {
+        id?: string;
+        activated?: boolean;
+      };
+      if (!user?.id || !user.activated) {
+        return false;
+      }
+
+      const orgHeader = req.cookies?.showorg || req.headers.showorg;
+      const orgs = (
+        await this._organizationService.getOrgsByUserId(user.id)
+      ).filter((org) => !org.users[0]?.disabled);
+      const activeOrg = orgs.find((org) => org.id === orgHeader) || orgs[0];
+
+      return activeOrg?.id === organizationId;
+    } catch {
+      return false;
+    }
   }
 
   @Get(`/posts/:id/comments`)
