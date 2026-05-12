@@ -13,7 +13,7 @@ export const CopyClient = () => {
       t('link_copied_to_clipboard', 'Link copied to clipboard'),
       'success'
     );
-    copy(window.location.href.split?.('?')?.shift()!);
+    copy(`${window.location.origin}${window.location.pathname}?share=true`);
   }, []);
   return (
     <Button onClick={copyToClipboard}>

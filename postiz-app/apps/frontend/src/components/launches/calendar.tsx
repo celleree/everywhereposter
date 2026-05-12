@@ -1019,7 +1019,7 @@ const CalendarItem: FC<{
   const { disableXAnalytics } = useVariables();
   const isRemoteDeleted = post.state === 'DELETED_REMOTE';
   const preview = useCallback(() => {
-    window.open(`/p/` + post.id + '?share=true', '_blank');
+    window.open(`/p/` + post.id, '_blank');
   }, [post]);
   const [{ opacity }, dragRef] = useDrag(
     () => ({

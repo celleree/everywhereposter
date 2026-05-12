@@ -177,7 +177,7 @@ export default async function Auth(
             ))}
           </div>
         </div>
-        <div className="w-full lg:w-96 lg:flex-shrink-0">
+        <div className="w-full lg:w-[560px] xl:w-[640px] lg:flex-shrink-0">
           <div className="p-4 pt-0 flex flex-col gap-[24px]">
             <div className="flex flex-col gap-[14px]">
               <h3 className="text-[18px] font-[500]">
@@ -194,7 +194,6 @@ export default async function Auth(
                   postId={rootPost.id}
                   isPublished={isPublishedPost}
                   hideWhenEmpty={true}
-                  compact={true}
                 />
               </div>
             )}
