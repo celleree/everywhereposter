@@ -206,8 +206,6 @@ export const InstagramPreview: FC<{
                   </div>
                   <div className="flex font-[400] text-[12px] text-textLinkedin items-center">
                     <div className="flex gap-[16px] flex-1">
-                      <div className="font-[700]">30m</div>
-                      <div className="font-[700]">8 Likes</div>
                       <div className="font-[700]">Reply</div>
                     </div>
                   </div>

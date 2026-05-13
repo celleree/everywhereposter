@@ -22,7 +22,7 @@ import { DatePicker } from '@gitroom/frontend/components/launches/helpers/date.p
 import { useShallow } from 'zustand/react/shallow';
 import { RepeatComponent } from '@gitroom/frontend/components/launches/repeat.component';
 import { TagsComponent } from '@gitroom/frontend/components/launches/tags.component';
-import { StatisticsModal } from '@gitroom/frontend/components/launches/statistics';
+import { PostStatisticsPanel } from '@gitroom/frontend/components/launches/statistics';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { weightedLength } from '@gitroom/helpers/utils/count.length';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
@@ -194,7 +194,19 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     );
   }, [current, integrations, t]);
 
-  const existingRootPost = existingData?.posts?.[0];
+  const existingRootPost = useMemo(() => {
+    const posts = existingData?.posts || [];
+    const rootPosts = posts.filter((post) => !post.parentPostId);
+    const targetIntegrationId =
+      current !== 'global' ? current : existingData.integration;
+
+    return (
+      rootPosts.find((post) => post.integrationId === targetIntegrationId) ||
+      rootPosts.find((post) => post.integrationId === existingData.integration) ||
+      rootPosts[0] ||
+      posts[0]
+    );
+  }, [current, existingData.integration, existingData.posts]);
   const existingIntegration = useMemo(
     () =>
       integrations.find(
@@ -977,17 +989,6 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   </ComposerSection>
                 )}
 
-                {isPublishedManagementView && existingRootPost?.id && (
-                  <ComposerSection
-                    title={t('metrics', 'Metrics')}
-                    description={t(
-                      'published_post_metrics_hint',
-                      'Live platform analytics.'
-                    )}
-                  >
-                    <StatisticsModal postId={existingRootPost.id} />
-                  </ComposerSection>
-                )}
               </div>
             </div>
           </div>
@@ -1013,6 +1014,25 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
                 <ShowAllProviders ref={ref} />
               </div>
+              {isPublishedManagementView && existingRootPost?.id && (
+                <div className="mt-[20px] min-w-0 max-w-full overflow-x-hidden rounded-[16px] border border-newBorder bg-newSettings p-[14px]">
+                  <div className="mb-[12px] flex flex-col">
+                    <div className="text-[16px] font-[600]">
+                      {t('metrics', 'Metrics')}
+                    </div>
+                    <div className="text-[13px] font-[500] text-textColor/65">
+                      {t(
+                        'published_post_metrics_hint',
+                        'Live platform analytics.'
+                      )}
+                    </div>
+                  </div>
+                  <PostStatisticsPanel
+                    postId={existingRootPost.id}
+                    compact={true}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>

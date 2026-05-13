@@ -6,59 +6,6 @@ import { textSlicer } from '@gitroom/helpers/utils/count.length';
 import { FC } from 'react';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 
-const Icons = () => {
-  return (
-    <svg
-      width="31"
-      height="16"
-      viewBox="0 0 31 16"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M8 0C5.87827 0 3.84344 0.842855 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842855 10.1217 0 8 0Z"
-        fill="url(#paint0_linear_2511_139661)"
-      />
-      <path
-        d="M12.162 7.338C12.338 7.461 12.5 7.583 12.5 8.012C12.5 8.442 12.271 8.616 12.026 8.737C12.1262 8.90028 12.1581 9.09637 12.115 9.283C12.038 9.627 11.723 9.894 11.443 9.973C11.564 10.167 11.602 10.358 11.458 10.593C11.273 10.888 11.112 11 10.4 11H7.5C6.512 11 6 10.454 6 10V7.665C6 6.435 7.467 5.39 7.467 4.535L7.361 3.47C7.356 3.405 7.369 3.246 7.419 3.2C7.499 3.121 7.72 3 8.054 3C8.272 3 8.417 3.041 8.588 3.123C9.169 3.4 9.32 4.101 9.32 4.665C9.32 4.936 8.906 5.748 8.85 6.029C8.85 6.029 9.717 5.837 10.729 5.83C11.79 5.824 12.478 6.02 12.478 6.672C12.478 6.933 12.259 7.195 12.162 7.338ZM3.6 7H4.4C4.55913 7 4.71174 7.06321 4.82426 7.17574C4.93679 7.28826 5 7.44087 5 7.6V11.4C5 11.5591 4.93679 11.7117 4.82426 11.8243C4.71174 11.9368 4.55913 12 4.4 12H3.6C3.44087 12 3.28826 11.9368 3.17574 11.8243C3.06321 11.7117 3 11.5591 3 11.4V7.6C3 7.44087 3.06321 7.28826 3.17574 7.17574C3.28826 7.06321 3.44087 7 3.6 7Z"
-        fill="white"
-      />
-      <path
-        d="M23 0C20.8783 0 18.8434 0.842855 17.3431 2.34315C15.8429 3.84344 15 5.87827 15 8C15 10.1217 15.8429 12.1566 17.3431 13.6569C18.8434 15.1571 20.8783 16 23 16C25.1217 16 27.1566 15.1571 28.6569 13.6569C30.1571 12.1566 31 10.1217 31 8C31 5.87827 30.1571 3.84344 28.6569 2.34315C27.1566 0.842855 25.1217 0 23 0Z"
-        fill="url(#paint1_linear_2511_139661)"
-      />
-      <path
-        d="M25.473 4C23.275 4 23 5.824 23 5.824C23 5.824 22.726 4 20.528 4C18.414 4 17.798 6.222 18.056 7.41C18.736 10.55 23 12.75 23 12.75C23 12.75 27.265 10.55 27.945 7.41C28.202 6.222 27.585 4 25.473 4Z"
-        fill="white"
-      />
-      <defs>
-        <linearGradient
-          id="paint0_linear_2511_139661"
-          x1="8"
-          y1="0"
-          x2="8"
-          y2="16"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#18AFFF" />
-          <stop offset="1" stopColor="#0062DF" />
-        </linearGradient>
-        <linearGradient
-          id="paint1_linear_2511_139661"
-          x1="23"
-          y1="0"
-          x2="23"
-          y2="16"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#FF6680" />
-          <stop offset="1" stopColor="#E61739" />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-};
-
 export const FacebookPreview: FC<{
   maximumCharacters?: number;
 }> = (props) => {
@@ -111,7 +58,6 @@ export const FacebookPreview: FC<{
         <div className="flex flex-col leading-[18px]">
           <div className="text-[14px] font-[500]">{integration?.name}</div>
           <div className="text-[12px] font-[400] text-[#A3A3A3] flex gap-[4px] items-center">
-            <span>30m •</span>
             <span>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -149,15 +95,6 @@ export const FacebookPreview: FC<{
           ))}
         </div>
       )}
-      <div className="flex text-textLinkedin text-[12px] font-[400] items-center">
-        <div className="flex flex-1 gap-[10px] items-center">
-          <Icons />
-          <div className="">You & 12 other</div>
-        </div>
-        <div className="gap-[9px] items-center flex">
-          <div>20 Comments</div>
-        </div>
-      </div>
       <div className="pt-[8px] flex text-[14px] font-[700] px-[32px] justify-between border-t border-borderLinkedin text-textLinkedin">
         <div className="flex gap-[4px] items-center">
           <svg

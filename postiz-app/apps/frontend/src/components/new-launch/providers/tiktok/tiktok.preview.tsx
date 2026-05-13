@@ -7,13 +7,12 @@ import { FC, ReactNode } from 'react';
 import { SliderComponent } from '@gitroom/frontend/components/third-parties/slider.component';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 
-const TikTokItem: FC<{ icon: ReactNode; num: string }> = ({ icon, num }) => {
+const TikTokItem: FC<{ icon: ReactNode }> = ({ icon }) => {
   return (
     <div className="flex items-center flex-col">
       <div className="w-[29px] h-[29px] rounded-full bg-bgTiktokItem flex justify-center items-center text-bgTiktokItemIcon">
         {icon}
       </div>
-      <div className="text-[8px] font-[700] text-bgTiktokItemIcon">{num}</div>
     </div>
   );
 };
@@ -103,7 +102,6 @@ export const TiktokPreview: FC<{
           </div>
         </div>
         <TikTokItem
-          num="1.3M"
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -120,7 +118,6 @@ export const TiktokPreview: FC<{
           }
         />
         <TikTokItem
-          num="10.7M"
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -137,7 +134,6 @@ export const TiktokPreview: FC<{
           }
         />
         <TikTokItem
-          num="1.2M"
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -154,7 +150,6 @@ export const TiktokPreview: FC<{
           }
         />
         <TikTokItem
-          num="1.2M"
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"
