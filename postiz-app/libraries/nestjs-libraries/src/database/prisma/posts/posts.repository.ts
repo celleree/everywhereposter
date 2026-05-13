@@ -370,6 +370,49 @@ export class PostsRepository {
     });
   }
 
+  async getPostsByIntegrationRelease(
+    orgId: string,
+    integrationId: string,
+    media: { id?: string; url?: string }[]
+  ) {
+    const releaseIds = [
+      ...new Set(media.map((item) => item.id).filter((id): id is string => !!id)),
+    ];
+    const releaseURLs = [
+      ...new Set(
+        media.map((item) => item.url).filter((url): url is string => !!url)
+      ),
+    ];
+    const or: any[] = [];
+
+    if (releaseIds.length) {
+      or.push({ releaseId: { in: releaseIds } });
+    }
+
+    if (releaseURLs.length) {
+      or.push({ releaseURL: { in: releaseURLs } });
+    }
+
+    if (!or.length) {
+      return [];
+    }
+
+    return this._post.model.post.findMany({
+      where: {
+        organizationId: orgId,
+        integrationId,
+        deletedAt: null,
+        OR: or,
+      },
+      select: {
+        id: true,
+        parentPostId: true,
+        releaseId: true,
+        releaseURL: true,
+      },
+    });
+  }
+
   async markPostsRemoteDeleted(orgId: string, group: string) {
     await this._post.model.post.updateMany({
       where: {

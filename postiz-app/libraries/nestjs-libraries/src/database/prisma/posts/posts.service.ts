@@ -91,6 +91,18 @@ export class PostsService {
     return this._postRepository.updatePost(id, postId, releaseURL);
   }
 
+  getPostsByIntegrationRelease(
+    orgId: string,
+    integrationId: string,
+    media: { id?: string; url?: string }[]
+  ) {
+    return this._postRepository.getPostsByIntegrationRelease(
+      orgId,
+      integrationId,
+      media
+    );
+  }
+
   async getMissingContent(
     orgId: string,
     postId: string,

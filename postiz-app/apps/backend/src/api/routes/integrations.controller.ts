@@ -347,6 +347,46 @@ export class IntegrationsController {
           getIntegration
         );
 
+        if (body.name === 'listMedia' && Array.isArray(load?.results)) {
+          const posts = await this._postService.getPostsByIntegrationRelease(
+            org.id,
+            getIntegration.id,
+            load.results.map((item: any) => ({
+              id: item.id ? String(item.id) : undefined,
+              url: item.url || undefined,
+            }))
+          );
+          const postsByReleaseId = new Map(
+            posts
+              .filter((post) => post.releaseId)
+              .map((post) => [String(post.releaseId), post])
+          );
+          const postsByReleaseURL = new Map(
+            posts
+              .filter((post) => post.releaseURL)
+              .map((post) => [String(post.releaseURL), post])
+          );
+
+          return {
+            ...load,
+            results: load.results.map((item: any) => {
+              const post =
+                postsByReleaseId.get(String(item.id || '')) ||
+                postsByReleaseURL.get(String(item.url || ''));
+
+              if (!post) {
+                return item;
+              }
+
+              return {
+                ...item,
+                postId: post.id,
+                rootPostId: post.parentPostId || post.id,
+              };
+            }),
+          };
+        }
+
         return load;
       } catch (err) {
         if (err instanceof RefreshToken) {

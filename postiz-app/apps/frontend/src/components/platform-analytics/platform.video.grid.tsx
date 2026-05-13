@@ -6,6 +6,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { Pagination } from '@gitroom/frontend/components/media/media.component';
 import dayjs from 'dayjs';
+import { useRouter } from 'next/navigation';
 
 type PlatformVideoIntegration = {
   id: string;
@@ -21,6 +22,8 @@ type PlatformVideoItem = {
   name: string;
   type: 'video' | 'image';
   publishedAt?: string;
+  postId?: string;
+  rootPostId?: string;
 };
 
 type PlatformVideoResponse = {
@@ -34,6 +37,7 @@ export const PlatformVideoGrid: FC<{
 }> = ({ integration, showHeader = true }) => {
   const fetch = useFetch();
   const t = useT();
+  const router = useRouter();
   const [page, setPage] = useState(0);
 
   const loadMedia = useCallback(async (): Promise<PlatformVideoResponse> => {
@@ -66,6 +70,16 @@ export const PlatformVideoGrid: FC<{
       refreshWhenHidden: false,
       refreshWhenOffline: false,
     }
+  );
+
+  const openPost = useCallback(
+    (video: PlatformVideoItem) => {
+      const postId = video.rootPostId || video.postId;
+      if (postId) {
+        router.push(`/p/${postId}`);
+      }
+    },
+    [router]
   );
 
   if (!integration.canListMedia) {
@@ -113,73 +127,101 @@ export const PlatformVideoGrid: FC<{
       {!isLoading && !!data?.results?.length && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-[16px]">
-            {data.results.map((video) => (
-              <a
-                key={video.id}
-                href={video.url || '#'}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(event) => {
-                  if (!video.url) {
-                    event.preventDefault();
-                  }
-                }}
-                className="group overflow-hidden rounded-[14px] border border-newTableBorder bg-newTableHeader hover:border-[#612bd3]/60 transition-all"
-              >
-                <div className="relative aspect-[3/4] bg-black">
-                  {video.thumbnail ? (
-                    <img
-                      src={video.thumbnail}
-                      alt={video.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-newBgColorInner text-newTableText/50">
+            {data.results.map((video) => {
+              const postId = video.rootPostId || video.postId;
+
+              return (
+                <div
+                  key={video.id}
+                  role={postId ? 'button' : undefined}
+                  tabIndex={postId ? 0 : undefined}
+                  onClick={() => openPost(video)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      openPost(video);
+                    }
+                  }}
+                  className={`group overflow-hidden rounded-[14px] border border-newTableBorder bg-newTableHeader transition-all ${
+                    postId
+                      ? 'cursor-pointer hover:border-[#612bd3]/60'
+                      : 'cursor-default'
+                  }`}
+                >
+                  <div className="relative aspect-[3/4] bg-black">
+                    {video.thumbnail ? (
                       <img
-                        src={`/icons/platforms/${integration.identifier}.png`}
-                        alt={integration.identifier}
-                        className="w-[48px] h-[48px] rounded-[12px]"
+                        src={video.thumbnail}
+                        alt={video.name}
+                        className="w-full h-full object-cover"
                       />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-newBgColorInner text-newTableText/50">
+                        <img
+                          src={`/icons/platforms/${integration.identifier}.png`}
+                          alt={integration.identifier}
+                          className="w-[48px] h-[48px] rounded-[12px]"
+                        />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-[54px] h-[54px] rounded-full bg-black/45 border border-white/20 flex items-center justify-center group-hover:scale-105 transition-transform">
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 18 18"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="ms-[3px]"
+                        >
+                          <path d="M4 3.5L14 9L4 14.5V3.5Z" fill="white" />
+                        </svg>
+                      </div>
                     </div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-[54px] h-[54px] rounded-full bg-black/45 border border-white/20 flex items-center justify-center group-hover:scale-105 transition-transform">
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 18 18"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="ms-[3px]"
-                      >
-                        <path d="M4 3.5L14 9L4 14.5V3.5Z" fill="white" />
-                      </svg>
+                    {!!video.publishedAt && (
+                      <div className="absolute top-[10px] left-[10px] rounded-full bg-black/55 px-[8px] py-[4px] text-[11px] text-white">
+                        {dayjs(video.publishedAt).format('MMM D, YYYY')}
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-[12px] flex items-start gap-[10px]">
+                    <img
+                      src={`/icons/platforms/${integration.identifier}.png`}
+                      alt={integration.identifier}
+                      className="w-[20px] h-[20px] rounded-[6px] mt-[2px]"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-[500] text-newTableText line-clamp-2">
+                        {video.name}
+                      </div>
+                      <div className="text-[12px] text-newTableText/55 mt-[4px]">
+                        {integration.name}
+                      </div>
+                      {!postId && (
+                        <div className="text-[12px] text-newTableText/45 mt-[6px]">
+                          {t(
+                            'no_linked_publish_everywhere_post_yet',
+                            'No linked Publish Everywhere post yet'
+                          )}
+                        </div>
+                      )}
+                      {!!video.url && (
+                        <a
+                          href={video.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(event) => event.stopPropagation()}
+                          className="inline-flex mt-[8px] text-[12px] text-[#8b5cf6] hover:text-[#a78bfa]"
+                        >
+                          {t('open_on_platform', 'Open on platform')}
+                        </a>
+                      )}
                     </div>
                   </div>
-                  {!!video.publishedAt && (
-                    <div className="absolute top-[10px] left-[10px] rounded-full bg-black/55 px-[8px] py-[4px] text-[11px] text-white">
-                      {dayjs(video.publishedAt).format('MMM D, YYYY')}
-                    </div>
-                  )}
                 </div>
-                <div className="p-[12px] flex items-start gap-[10px]">
-                  <img
-                    src={`/icons/platforms/${integration.identifier}.png`}
-                    alt={integration.identifier}
-                    className="w-[20px] h-[20px] rounded-[6px] mt-[2px]"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-[500] text-newTableText line-clamp-2">
-                      {video.name}
-                    </div>
-                    <div className="text-[12px] text-newTableText/55 mt-[4px]">
-                      {integration.name}
-                    </div>
-                  </div>
-                </div>
-              </a>
-            ))}
+              );
+            })}
           </div>
 
           {(data?.pages || 0) > 1 && (
