@@ -174,7 +174,11 @@ export const Providers = [
     component: MeweProvider,
   },
 ];
-export const ShowAllProviders = forwardRef((props, ref) => {
+export const ShowAllProviders = forwardRef(
+  (
+    props: { previewPostIdsByIntegration?: Record<string, string> },
+    ref
+  ) => {
   const { date, current, global, selectedIntegrations, allIntegrations } =
     useLaunchStore(
       useShallow((state) => ({
@@ -251,6 +255,9 @@ export const ShowAllProviders = forwardRef((props, ref) => {
             ref={integration.ref}
             key={integration.integration.id}
             id={integration.integration.id}
+            previewPostId={
+              props.previewPostIdsByIntegration?.[integration.integration.id]
+            }
           />
         );
       })}

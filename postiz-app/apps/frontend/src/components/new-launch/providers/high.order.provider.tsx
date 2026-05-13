@@ -49,6 +49,7 @@ export const withProvider = function <T extends object>(params: {
   }> | null;
   CustomPreviewComponent?: FC<{
     maximumCharacters?: number;
+    previewPostId?: string;
   }>;
   dto?: any;
   checkValidity?: (
@@ -72,7 +73,7 @@ export const withProvider = function <T extends object>(params: {
     maximumCharacters,
   } = params;
 
-  return forwardRef((props: { id: string }, ref) => {
+  return forwardRef((props: { id: string; previewPostId?: string }, ref) => {
     const t = useT();
     const fetch = useFetch();
     const {
@@ -297,6 +298,7 @@ export const withProvider = function <T extends object>(params: {
                           )
                         )
                   }
+                  previewPostId={props.previewPostId}
                 />
               ) : (
                 <GeneralPreviewComponent

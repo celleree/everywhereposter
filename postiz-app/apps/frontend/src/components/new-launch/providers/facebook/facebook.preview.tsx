@@ -5,13 +5,31 @@ import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validatio
 import { textSlicer } from '@gitroom/helpers/utils/count.length';
 import { FC } from 'react';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
+import {
+  formatPreviewMetric,
+  usePostPreviewMetrics,
+} from '@gitroom/frontend/components/launches/statistics';
+
+const FacebookReactions = () => {
+  return (
+    <div className="flex -space-x-[3px]">
+      <span className="h-[16px] w-[16px] rounded-full border border-bgFacebook bg-[#1877F2]" />
+      <span className="h-[16px] w-[16px] rounded-full border border-bgFacebook bg-[#E61739]" />
+    </div>
+  );
+};
 
 export const FacebookPreview: FC<{
   maximumCharacters?: number;
+  previewPostId?: string;
 }> = (props) => {
   const { value: topValue, integration } = useIntegration();
   const current = useLaunchStore((state) => state.current);
   const mediaDir = useMediaDirectory();
+  const metrics = usePostPreviewMetrics(props.previewPostId);
+  const reactionCount = metrics.reactions ?? metrics.likes;
+  const hasSocialCounts =
+    typeof reactionCount === 'number' || typeof metrics.comments === 'number';
 
   const renderContent = topValue.map((p) => {
     const newContent = stripHtmlValidation(
@@ -93,6 +111,23 @@ export const FacebookPreview: FC<{
               <VideoOrImage autoplay={true} src={mediaDir.set(image.path)} />
             </a>
           ))}
+        </div>
+      )}
+      {hasSocialCounts && (
+        <div className="flex text-textLinkedin text-[12px] font-[400] items-center">
+          {typeof reactionCount === 'number' ? (
+            <div className="flex flex-1 gap-[10px] items-center">
+              <FacebookReactions />
+              <div>{formatPreviewMetric(reactionCount)}</div>
+            </div>
+          ) : (
+            <div className="flex-1" />
+          )}
+          {typeof metrics.comments === 'number' && (
+            <div className="gap-[9px] items-center flex">
+              <div>{formatPreviewMetric(metrics.comments)} Comments</div>
+            </div>
+          )}
         </div>
       )}
       <div className="pt-[8px] flex text-[14px] font-[700] px-[32px] justify-between border-t border-borderLinkedin text-textLinkedin">

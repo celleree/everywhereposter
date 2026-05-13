@@ -22,7 +22,6 @@ import { DatePicker } from '@gitroom/frontend/components/launches/helpers/date.p
 import { useShallow } from 'zustand/react/shallow';
 import { RepeatComponent } from '@gitroom/frontend/components/launches/repeat.component';
 import { TagsComponent } from '@gitroom/frontend/components/launches/tags.component';
-import { PostStatisticsPanel } from '@gitroom/frontend/components/launches/statistics';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { weightedLength } from '@gitroom/helpers/utils/count.length';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
@@ -207,6 +206,23 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
       posts[0]
     );
   }, [current, existingData.integration, existingData.posts]);
+  const previewPostIdsByIntegration = useMemo(() => {
+    return (existingData?.posts || []).reduce<Record<string, string>>(
+      (acc, post) => {
+        if (
+          post.state === 'PUBLISHED' &&
+          !post.parentPostId &&
+          post.integrationId &&
+          post.id
+        ) {
+          acc[post.integrationId] = post.id;
+        }
+
+        return acc;
+      },
+      {}
+    );
+  }, [existingData.posts]);
   const existingIntegration = useMemo(
     () =>
       integrations.find(
@@ -1012,27 +1028,11 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             </div>
             <div className="min-w-0 overflow-x-hidden p-[20px] mobile:w-full mobile:min-h-[220px] mobile:px-[12px] mobile:py-[12px]">
               <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
-                <ShowAllProviders ref={ref} />
+                <ShowAllProviders
+                  ref={ref}
+                  previewPostIdsByIntegration={previewPostIdsByIntegration}
+                />
               </div>
-              {isPublishedManagementView && existingRootPost?.id && (
-                <div className="mt-[20px] min-w-0 max-w-full overflow-x-hidden rounded-[16px] border border-newBorder bg-newSettings p-[14px]">
-                  <div className="mb-[12px] flex flex-col">
-                    <div className="text-[16px] font-[600]">
-                      {t('metrics', 'Metrics')}
-                    </div>
-                    <div className="text-[13px] font-[500] text-textColor/65">
-                      {t(
-                        'published_post_metrics_hint',
-                        'Live platform analytics.'
-                      )}
-                    </div>
-                  </div>
-                  <PostStatisticsPanel
-                    postId={existingRootPost.id}
-                    compact={true}
-                  />
-                </div>
-              )}
             </div>
           </div>
         </div>

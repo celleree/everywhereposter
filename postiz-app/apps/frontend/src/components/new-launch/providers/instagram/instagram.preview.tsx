@@ -6,13 +6,19 @@ import { textSlicer } from '@gitroom/helpers/utils/count.length';
 import { FC } from 'react';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { SliderComponent } from '@gitroom/frontend/components/third-parties/slider.component';
+import {
+  formatPreviewMetric,
+  usePostPreviewMetrics,
+} from '@gitroom/frontend/components/launches/statistics';
 
 export const InstagramPreview: FC<{
   maximumCharacters?: number;
+  previewPostId?: string;
 }> = (props) => {
   const { value: topValue, integration } = useIntegration();
   const current = useLaunchStore((state) => state.current);
   const mediaDir = useMediaDirectory();
+  const metrics = usePostPreviewMetrics(props.previewPostId);
 
   const renderContent = topValue.map((p) => {
     const newContent = stripHtmlValidation(
@@ -104,7 +110,9 @@ export const InstagramPreview: FC<{
               strokeLinejoin="round"
             />
           </svg>
-          <div>121</div>
+          {typeof metrics.likes === 'number' && (
+            <div>{formatPreviewMetric(metrics.likes)}</div>
+          )}
         </div>
         <div className="flex gap-[4px] items-center">
           <svg
@@ -122,7 +130,9 @@ export const InstagramPreview: FC<{
               strokeLinejoin="round"
             />
           </svg>
-          <div>32</div>
+          {typeof metrics.comments === 'number' && (
+            <div>{formatPreviewMetric(metrics.comments)}</div>
+          )}
         </div>
         <div className="flex gap-[4px] items-center flex-1">
           <svg

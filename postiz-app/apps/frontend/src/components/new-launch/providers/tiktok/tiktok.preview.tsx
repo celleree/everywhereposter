@@ -6,22 +6,36 @@ import { textSlicer } from '@gitroom/helpers/utils/count.length';
 import { FC, ReactNode } from 'react';
 import { SliderComponent } from '@gitroom/frontend/components/third-parties/slider.component';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
+import {
+  formatPreviewMetric,
+  usePostPreviewMetrics,
+} from '@gitroom/frontend/components/launches/statistics';
 
-const TikTokItem: FC<{ icon: ReactNode }> = ({ icon }) => {
+const TikTokItem: FC<{ icon: ReactNode; count?: number }> = ({
+  icon,
+  count,
+}) => {
   return (
     <div className="flex items-center flex-col">
       <div className="w-[29px] h-[29px] rounded-full bg-bgTiktokItem flex justify-center items-center text-bgTiktokItemIcon">
         {icon}
       </div>
+      {typeof count === 'number' && (
+        <div className="text-[8px] font-[700] text-bgTiktokItemIcon">
+          {formatPreviewMetric(count)}
+        </div>
+      )}
     </div>
   );
 };
 export const TiktokPreview: FC<{
   maximumCharacters?: number;
+  previewPostId?: string;
 }> = (props) => {
   const { value: topValue, integration } = useIntegration();
   const current = useLaunchStore((state) => state.current);
   const mediaDir = useMediaDirectory();
+  const metrics = usePostPreviewMetrics(props.previewPostId);
 
   const renderContent = topValue.map((p) => {
     const newContent = stripHtmlValidation(
@@ -102,6 +116,7 @@ export const TiktokPreview: FC<{
           </div>
         </div>
         <TikTokItem
+          count={metrics.likes}
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -118,6 +133,7 @@ export const TiktokPreview: FC<{
           }
         />
         <TikTokItem
+          count={metrics.comments}
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -134,6 +150,7 @@ export const TiktokPreview: FC<{
           }
         />
         <TikTokItem
+          count={metrics.saves}
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -150,6 +167,7 @@ export const TiktokPreview: FC<{
           }
         />
         <TikTokItem
+          count={metrics.shares}
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"

@@ -16,6 +16,103 @@ interface AnalyticsData {
   average?: boolean;
 }
 
+export interface PreviewPostMetrics {
+  likes?: number;
+  reactions?: number;
+  comments?: number;
+  views?: number;
+  shares?: number;
+  saves?: number;
+  reach?: number;
+}
+
+const previewMetricLabels: Record<string, keyof PreviewPostMetrics> = {
+  likes: 'likes',
+  likecount: 'likes',
+  comments: 'comments',
+  commentcount: 'comments',
+  views: 'views',
+  viewcount: 'views',
+  shares: 'shares',
+  sharecount: 'shares',
+  saves: 'saves',
+  saved: 'saves',
+  savecount: 'saves',
+  reach: 'reach',
+  reactions: 'reactions',
+  reactioncount: 'reactions',
+  totalreactions: 'reactions',
+  postreactions: 'reactions',
+};
+
+const normalizePreviewMetricLabel = (label: string) =>
+  label.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const getPreviewMetricValue = (metric: AnalyticsData) => {
+  const values = (metric.data || [])
+    .map((item) => Number(item.total))
+    .filter((value) => Number.isFinite(value));
+
+  if (!values.length) {
+    return undefined;
+  }
+
+  const total = values.reduce((acc, value) => acc + value, 0);
+  return Math.round(metric.average ? total / values.length : total);
+};
+
+const normalizePreviewPostMetrics = (
+  data?: AnalyticsData[] | { missing?: true }
+): PreviewPostMetrics => {
+  if (!Array.isArray(data)) {
+    return {};
+  }
+
+  return data.reduce<PreviewPostMetrics>((acc, metric) => {
+    const key = previewMetricLabels[normalizePreviewMetricLabel(metric.label)];
+    const value = getPreviewMetricValue(metric);
+
+    if (!key || typeof value !== 'number' || typeof acc[key] === 'number') {
+      return acc;
+    }
+
+    acc[key] = value;
+    return acc;
+  }, {});
+};
+
+export const formatPreviewMetric = (value: number) =>
+  new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value);
+
+export const usePostPreviewMetrics = (postId?: string): PreviewPostMetrics => {
+  const fetch = useFetch();
+  const loadPostAnalytics = useCallback(async () => {
+    if (!postId) {
+      return [];
+    }
+
+    return (await fetch(`/analytics/post/${postId}?date=7`)).json();
+  }, [postId, fetch]);
+
+  const { data } = useSWR<AnalyticsData[] | { missing?: true }>(
+    postId ? `/analytics/post/${postId}?date=7` : null,
+    loadPostAnalytics,
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+      revalidateOnMount: true,
+      refreshWhenHidden: false,
+      refreshWhenOffline: false,
+    }
+  );
+
+  return useMemo(() => normalizePreviewPostMetrics(data), [data]);
+};
+
 interface PublishedComment {
   id: string;
   message: string;
