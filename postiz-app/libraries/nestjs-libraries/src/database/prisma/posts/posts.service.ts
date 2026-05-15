@@ -325,6 +325,156 @@ export class PostsService {
     }
   }
 
+  async replyToPublishedComment(
+    orgId: string,
+    postId: string,
+    commentId: string,
+    message: string,
+    forceRefresh = false
+  ) {
+    const trimmedMessage = (message || '').trim();
+    if (!trimmedMessage) {
+      throw new BadRequestException('Reply message is required.');
+    }
+
+    const { post, integration, integrationProvider } =
+      await this.getPublishedCommentActionTarget(
+        orgId,
+        postId,
+        'replyToComment',
+        'replying to',
+        forceRefresh
+      );
+
+    try {
+      const result = await integrationProvider.replyToComment!(
+        integration.internalId,
+        integration.token,
+        post.releaseId!,
+        commentId,
+        trimmedMessage,
+        integration
+      );
+
+      return {
+        ...result,
+        success: true,
+      };
+    } catch (error) {
+      if (error instanceof RefreshToken) {
+        return this.replyToPublishedComment(
+          orgId,
+          postId,
+          commentId,
+          trimmedMessage,
+          true
+        );
+      }
+
+      if (error instanceof BadBody) {
+        throw new BadRequestException(
+          error.message || 'Failed to reply to the published comment.'
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  async hidePublishedComment(
+    orgId: string,
+    postId: string,
+    commentId: string,
+    hide: boolean,
+    forceRefresh = false
+  ) {
+    const { post, integration, integrationProvider } =
+      await this.getPublishedCommentActionTarget(
+        orgId,
+        postId,
+        'hideComment',
+        hide ? 'hiding' : 'unhiding',
+        forceRefresh
+      );
+
+    try {
+      const result = await integrationProvider.hideComment!(
+        integration.internalId,
+        integration.token,
+        post.releaseId!,
+        commentId,
+        hide,
+        integration
+      );
+
+      return {
+        ...result,
+        success: true,
+      };
+    } catch (error) {
+      if (error instanceof RefreshToken) {
+        return this.hidePublishedComment(
+          orgId,
+          postId,
+          commentId,
+          hide,
+          true
+        );
+      }
+
+      if (error instanceof BadBody) {
+        throw new BadRequestException(
+          error.message || 'Failed to update the published comment.'
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  async deletePublishedComment(
+    orgId: string,
+    postId: string,
+    commentId: string,
+    forceRefresh = false
+  ) {
+    const { post, integration, integrationProvider } =
+      await this.getPublishedCommentActionTarget(
+        orgId,
+        postId,
+        'deleteComment',
+        'deleting',
+        forceRefresh
+      );
+
+    try {
+      const result = await integrationProvider.deleteComment!(
+        integration.internalId,
+        integration.token,
+        post.releaseId!,
+        commentId,
+        integration
+      );
+
+      return {
+        ...result,
+        success: true,
+      };
+    } catch (error) {
+      if (error instanceof RefreshToken) {
+        return this.deletePublishedComment(orgId, postId, commentId, true);
+      }
+
+      if (error instanceof BadBody) {
+        throw new BadRequestException(
+          error.message || 'Failed to delete the published comment.'
+        );
+      }
+
+      throw error;
+    }
+  }
+
   async getStatistics(orgId: string, id: string) {
     const getPost = await this.getPostsRecursively(id, true, orgId, true);
     const content = getPost.map((p) => p.content);
@@ -1119,6 +1269,55 @@ export class PostsService {
           .catch(() => undefined)
       )
     );
+  }
+
+  private async getPublishedCommentActionTarget(
+    orgId: string,
+    postId: string,
+    providerMethod: 'replyToComment' | 'hideComment' | 'deleteComment',
+    action: string,
+    forceRefresh = false
+  ): Promise<{
+    post: Post & { integration: Integration };
+    integration: Integration;
+    integrationProvider: SocialProvider;
+  }> {
+    const post = await this._postRepository.getPostById(postId, orgId);
+    if (!post?.integration) {
+      throw new BadRequestException(
+        'The published post integration could not be found.'
+      );
+    }
+
+    if (!post.releaseId || post.releaseId === 'missing') {
+      throw new BadRequestException(
+        `This published post is missing its platform ID, so comments cannot be managed.`
+      );
+    }
+
+    const integrationProvider = this._integrationManager.getSocialIntegration(
+      post.integration.providerIdentifier
+    );
+
+    if (!integrationProvider[providerMethod]) {
+      throw new BadRequestException(
+        `${integrationProvider.name} does not support ${action} published comments yet.`
+      );
+    }
+
+    await this.ensurePublishedIntegrationAccess(
+      orgId,
+      post.integration,
+      integrationProvider,
+      undefined,
+      forceRefresh
+    );
+
+    return {
+      post: post as Post & { integration: Integration },
+      integration: post.integration,
+      integrationProvider,
+    };
   }
 
   private async ensurePublishedIntegrationAccess(

@@ -121,6 +121,10 @@ interface PublishedComment {
   likeCount: number;
   replyCount: number;
   permalinkUrl: string;
+  hidden?: boolean;
+  canReply?: boolean;
+  canHide?: boolean;
+  canDelete?: boolean;
 }
 
 interface PublishedCommentsResponse {
@@ -146,6 +150,14 @@ export const PostStatisticsPanel: FC<{
   const t = useT();
   const fetch = useFetch();
   const [dateRange, setDateRange] = useState(7);
+  const [commentReplies, setCommentReplies] = useState<Record<string, string>>(
+    {}
+  );
+  const [commentAction, setCommentAction] = useState<{
+    commentId: string;
+    action: 'reply' | 'hide' | 'delete';
+  } | null>(null);
+  const [commentsError, setCommentsError] = useState('');
 
   const loadStatistics = useCallback(async () => {
     return (await fetch(`/posts/${postId}/statistics`)).json();
@@ -177,7 +189,11 @@ export const PostStatisticsPanel: FC<{
     refreshWhenOffline: false,
   });
 
-  const { data: commentsData, isLoading: isLoadingComments } =
+  const {
+    data: commentsData,
+    isLoading: isLoadingComments,
+    mutate: mutateComments,
+  } =
     useSWR<PublishedCommentsResponse>(
       `/analytics/post/${postId}/comments`,
       loadPostComments,
@@ -190,6 +206,71 @@ export const PostStatisticsPanel: FC<{
         refreshWhenOffline: false,
       }
     );
+
+  const runCommentAction = useCallback(
+    async (comment: PublishedComment, action: 'reply' | 'hide' | 'delete') => {
+      const replyMessage = (commentReplies[comment.id] || '').trim();
+
+      if (action === 'reply' && !replyMessage) {
+        setCommentsError(
+          t('reply_message_required', 'Reply message is required.')
+        );
+        return;
+      }
+
+      setCommentAction({ commentId: comment.id, action });
+      setCommentsError('');
+
+      try {
+        const response = await fetch(
+          `/analytics/post/${postId}/comments/${comment.id}${
+            action === 'reply' ? '/reply' : action === 'hide' ? '/hide' : ''
+          }`,
+          {
+            method: action === 'delete' ? 'DELETE' : 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body:
+              action === 'reply'
+                ? JSON.stringify({ message: replyMessage })
+                : action === 'hide'
+                ? JSON.stringify({ hide: !comment.hidden })
+                : undefined,
+          }
+        );
+
+        if (!response.ok) {
+          let message = t('comment_action_failed', 'Comment action failed.');
+
+          try {
+            const body = await response.json();
+            message = body?.message || message;
+          } catch (err) {}
+
+          throw new Error(message);
+        }
+
+        if (action === 'reply') {
+          setCommentReplies((current) => ({
+            ...current,
+            [comment.id]: '',
+          }));
+        }
+
+        await mutateComments();
+      } catch (err) {
+        setCommentsError(
+          err instanceof Error
+            ? err.message
+            : t('comment_action_failed', 'Comment action failed.')
+        );
+      } finally {
+        setCommentAction(null);
+      }
+    },
+    [commentReplies, fetch, mutateComments, postId, t]
+  );
 
   const isMissing =
     analyticsData && !Array.isArray(analyticsData) && analyticsData.missing;
@@ -340,7 +421,7 @@ export const PostStatisticsPanel: FC<{
           {showCommentsSection && (
             <div className="flex flex-col gap-[14px]">
               <h3 className="text-[18px] font-[500]">
-                {t('recent_platform_comments', 'Recent platform comments')}
+                {t('recent_comments', 'Recent comments')}
               </h3>
               {commentsData?.reconnectRequired || commentsData?.message ? (
                 <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">
@@ -353,45 +434,146 @@ export const PostStatisticsPanel: FC<{
                 </div>
               ) : commentsData?.comments?.length ? (
                 <div className="flex flex-col gap-[12px]">
-                  {commentsData?.comments?.map((comment: PublishedComment) => (
-                    <div
-                      key={comment.id}
-                      className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px]"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-[8px]">
-                        <div className="text-[15px] font-medium text-newTableText">
-                          {comment.authorName}
+                  {!!commentsError && (
+                    <div className="rounded-[8px] border border-red-500/40 bg-red-500/10 px-[12px] py-[10px] text-[13px] text-red-200">
+                      {commentsError}
+                    </div>
+                  )}
+                  {commentsData?.comments?.map((comment: PublishedComment) => {
+                    const canReply = comment.canReply === true;
+                    const canHide = comment.canHide === true;
+                    const canDelete = comment.canDelete === true;
+                    const isReplying =
+                      commentAction?.commentId === comment.id &&
+                      commentAction.action === 'reply';
+                    const isHiding =
+                      commentAction?.commentId === comment.id &&
+                      commentAction.action === 'hide';
+                    const isDeleting =
+                      commentAction?.commentId === comment.id &&
+                      commentAction.action === 'delete';
+                    const hasManagementControls =
+                      canReply || canHide || canDelete;
+
+                    return (
+                      <div
+                        key={comment.id}
+                        className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px]"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-[8px]">
+                          <div className="text-[15px] font-medium text-newTableText">
+                            {comment.authorName}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-[8px] text-[12px] text-gray-400">
+                            {typeof comment.hidden === 'boolean' && (
+                              <span>
+                                {comment.hidden
+                                  ? t('hidden', 'Hidden')
+                                  : t('visible', 'Visible')}
+                              </span>
+                            )}
+                            <span>
+                              {comment.createdTime
+                                ? new Date(comment.createdTime).toLocaleString()
+                                : ''}
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-[12px] text-gray-400">
-                          {comment.createdTime
-                            ? new Date(comment.createdTime).toLocaleString()
-                            : ''}
+                        <div className="mt-[10px] whitespace-pre-wrap text-[14px] text-gray-200">
+                          {comment.message ||
+                            t('no_comment_text', 'No comment text')}
                         </div>
-                      </div>
-                      <div className="mt-[10px] whitespace-pre-wrap text-[14px] text-gray-200">
-                        {comment.message ||
-                          t('no_comment_text', 'No comment text')}
-                      </div>
-                      <div className="mt-[12px] flex flex-wrap items-center gap-[12px] text-[12px] text-gray-400">
-                        <span>
-                          {t('likes', 'Likes')}: {comment.likeCount}
-                        </span>
-                        <span>
-                          {t('replies', 'Replies')}: {comment.replyCount}
-                        </span>
-                        {!!comment.permalinkUrl && (
-                          <a
-                            href={comment.permalinkUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[#7aa2ff] hover:text-[#9db9ff]"
-                          >
-                            {t('open_comment', 'Open comment')}
-                          </a>
+                        <div className="mt-[12px] flex flex-wrap items-center gap-[12px] text-[12px] text-gray-400">
+                          <span>
+                            {t('likes', 'Likes')}: {comment.likeCount}
+                          </span>
+                          <span>
+                            {t('replies', 'Replies')}: {comment.replyCount}
+                          </span>
+                          {!!comment.permalinkUrl && (
+                            <a
+                              href={comment.permalinkUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[#7aa2ff] hover:text-[#9db9ff]"
+                            >
+                              {t('open_comment', 'Open comment')}
+                            </a>
+                          )}
+                        </div>
+                        {hasManagementControls && (
+                          <div className="mt-[14px] flex flex-col gap-[10px]">
+                            {canReply && (
+                              <div className="flex flex-col gap-[8px] sm:flex-row">
+                                <input
+                                  value={commentReplies[comment.id] || ''}
+                                  onChange={(event) =>
+                                    setCommentReplies((current) => ({
+                                      ...current,
+                                      [comment.id]: event.target.value,
+                                    }))
+                                  }
+                                  disabled={!!commentAction}
+                                  placeholder={t(
+                                    'write_a_reply',
+                                    'Write a reply'
+                                  )}
+                                  className="min-h-[38px] flex-1 rounded-[8px] border border-newTableBorder bg-customColor6 px-[12px] text-[14px] text-newTableText outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={
+                                    !!commentAction ||
+                                    !(commentReplies[comment.id] || '').trim()
+                                  }
+                                  onClick={() =>
+                                    runCommentAction(comment, 'reply')
+                                  }
+                                  className="min-h-[38px] rounded-[8px] bg-[#612bd3] px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {isReplying
+                                    ? t('replying', 'Replying...')
+                                    : t('reply', 'Reply')}
+                                </button>
+                              </div>
+                            )}
+                            <div className="flex flex-wrap gap-[8px]">
+                              {canHide && (
+                                <button
+                                  type="button"
+                                  disabled={!!commentAction}
+                                  onClick={() =>
+                                    runCommentAction(comment, 'hide')
+                                  }
+                                  className="min-h-[34px] rounded-[8px] border border-newTableBorder px-[12px] text-[13px] text-newTableText disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {isHiding
+                                    ? t('saving', 'Saving...')
+                                    : comment.hidden
+                                    ? t('unhide', 'Unhide')
+                                    : t('hide', 'Hide')}
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  type="button"
+                                  disabled={!!commentAction}
+                                  onClick={() =>
+                                    runCommentAction(comment, 'delete')
+                                  }
+                                  className="min-h-[34px] rounded-[8px] border border-red-500/50 px-[12px] text-[13px] text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {isDeleting
+                                    ? t('deleting', 'Deleting...')
+                                    : t('delete', 'Delete')}
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-gray-400">

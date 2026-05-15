@@ -3,6 +3,7 @@ export const COPY_PLATFORMS = [
   'x',
   'threads',
   'facebook',
+  'instagram',
   'bluesky',
 ] as const;
 
@@ -103,6 +104,21 @@ export const PLATFORM_RULES: Record<CopyPlatform, PlatformRule> = {
     tone: 'context-forward, approachable, story-driven',
     nativeFeel:
       'Write like a real update to a community or audience, not a repackaged thread.',
+  },
+  instagram: {
+    hardCap: 2200,
+    targetCharacters: {
+      short: 120,
+      medium: 220,
+      long: 350,
+    },
+    defaultTargetLength: 'medium',
+    lineBreaks: 'moderate',
+    hashtags: 'sparse',
+    ctaStyle: 'invite',
+    tone: 'visual, concrete, warm, caption-native',
+    nativeFeel:
+      'Write as an Instagram caption grounded in the media, with a clear first line and no generic creator filler.',
   },
   bluesky: {
     hardCap: 300,

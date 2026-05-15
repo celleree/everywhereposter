@@ -92,6 +92,17 @@ export type PublishedComment = {
   likeCount: number;
   replyCount: number;
   permalinkUrl: string;
+  hidden?: boolean;
+  canReply?: boolean;
+  canHide?: boolean;
+  canDelete?: boolean;
+};
+
+export type PublishedCommentActionResponse = {
+  success: boolean;
+  commentId?: string;
+  replyId?: string;
+  hidden?: boolean;
 };
 
 export type GenerateAuthUrlResponse = {
@@ -156,6 +167,32 @@ export interface ISocialMediaIntegration {
     postId: string,
     integration: Integration
   ): Promise<PublishedComment[]>;
+
+  replyToComment?(
+    id: string,
+    accessToken: string,
+    postId: string,
+    commentId: string,
+    message: string,
+    integration: Integration
+  ): Promise<PublishedCommentActionResponse>;
+
+  hideComment?(
+    id: string,
+    accessToken: string,
+    postId: string,
+    commentId: string,
+    hide: boolean,
+    integration: Integration
+  ): Promise<PublishedCommentActionResponse>;
+
+  deleteComment?(
+    id: string,
+    accessToken: string,
+    postId: string,
+    commentId: string,
+    integration: Integration
+  ): Promise<PublishedCommentActionResponse>;
 }
 
 export type PostResponse = {

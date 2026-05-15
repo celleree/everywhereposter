@@ -2,6 +2,8 @@ import {
   AnalyticsData,
   AuthTokenDetails,
   HistoricalMediaPage,
+  PublishedComment,
+  PublishedCommentActionResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -9,7 +11,11 @@ import {
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  BadBody,
+  RefreshToken,
+  SocialAbstract,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
@@ -332,6 +338,21 @@ export class InstagramProvider
       };
     }
 
+    const graphError = this.getGraphApiError(body);
+    if (graphError?.message) {
+      const code = [graphError.code, graphError.subcode]
+        .filter(Boolean)
+        .join('/');
+      const message = `Instagram Graph API error${
+        code ? ` (${code})` : ''
+      }: ${graphError.message}`;
+
+      return {
+        type: status === 401 ? ('refresh-token' as const) : ('bad-body' as const),
+        value: message,
+      };
+    }
+
     return undefined;
   }
 
@@ -550,77 +571,94 @@ export class InstagramProvider
     type = 'graph.facebook.com'
   ): Promise<PostResponse[]> {
     const [firstPost] = postDetails;
-    console.log('in progress', id);
+    if (!firstPost?.media?.length) {
+      throw new BadBody(
+        'instagram',
+        '{}',
+        '{}',
+        'Instagram publishing requires at least one image or video.'
+      );
+    }
+
     const isStory = firstPost.settings.post_type === 'story';
     const isTrialReel = !!firstPost.settings.is_trial_reel;
     const medias = await Promise.all(
       firstPost?.media?.map(async (m) => {
-        const caption =
-          firstPost.media?.length === 1
-            ? `&caption=${encodeURIComponent(firstPost.message)}`
-            : ``;
-        const isCarousel =
-          (firstPost?.media?.length || 0) > 1 && !isStory
-            ? `&is_carousel_item=true`
-            : ``;
-        const mediaType =
-          m.path.indexOf('.mp4') > -1
-            ? firstPost?.media?.length === 1
+        const params = new URLSearchParams({
+          access_token: accessToken,
+        });
+
+        const mediaUrl = this.getPublicMediaUrl(m);
+        const isVideo = this.isVideoMedia(m, mediaUrl);
+
+        if (isVideo) {
+          params.set('video_url', mediaUrl);
+          params.set(
+            'media_type',
+            firstPost?.media?.length === 1
               ? isStory
-                ? `video_url=${m.path}&media_type=STORIES`
-                : `video_url=${m.path}&media_type=REELS&thumb_offset=${
-                    m?.thumbnailTimestamp || 0
-                  }`
+                ? 'STORIES'
+                : 'REELS'
               : isStory
-              ? `video_url=${m.path}&media_type=STORIES`
-              : `video_url=${m.path}&media_type=VIDEO&thumb_offset=${
-                  m?.thumbnailTimestamp || 0
-                }`
-            : isStory
-            ? `image_url=${m.path}&media_type=STORIES`
-            : `image_url=${m.path}`;
-
-        const trialParams = isTrialReel
-          ? `&trial_params=${encodeURIComponent(
-              JSON.stringify({
-                graduation_strategy:
-                  firstPost.settings.graduation_strategy || 'MANUAL',
-              })
-            )}`
-          : ``;
-
-        const collaborators =
-          firstPost?.settings?.collaborators?.length && !isStory
-            ? `&collaborators=${JSON.stringify(
-                firstPost?.settings?.collaborators.map((p) => p.label)
-              )}`
-            : ``;
-
-        const { id: photoId } = await (
-          await this.fetch(
-            `https://${type}/v20.0/${id}/media?${mediaType}${isCarousel}${collaborators}${trialParams}&access_token=${accessToken}${caption}`,
-            {
-              method: 'POST',
-            }
-          )
-        ).json();
-        console.log('in progress2', id);
-
-        let status = 'IN_PROGRESS';
-        while (status === 'IN_PROGRESS') {
-          const { status_code } = await (
-            await this.fetch(
-              `https://${type}/v20.0/${photoId}?access_token=${accessToken}&fields=status_code`,
-              undefined,
-              '',
-              0,
-              true
-            )
-          ).json();
-          await timer(30000);
-          status = status_code;
+              ? 'STORIES'
+              : 'VIDEO'
+          );
+          params.set('thumb_offset', String(m?.thumbnailTimestamp || 0));
+        } else {
+          params.set('image_url', mediaUrl);
+          if (isStory) {
+            params.set('media_type', 'STORIES');
+          }
         }
-        console.log('in progress3', id);
+
+        if (firstPost.media?.length === 1) {
+          params.set('caption', firstPost.message);
+        }
+
+        if ((firstPost?.media?.length || 0) > 1 && !isStory) {
+          params.set('is_carousel_item', 'true');
+        }
+
+        if (isTrialReel) {
+          params.set(
+            'trial_params',
+            JSON.stringify({
+              graduation_strategy:
+                firstPost.settings.graduation_strategy || 'MANUAL',
+            })
+          );
+        }
+
+        if (firstPost?.settings?.collaborators?.length && !isStory) {
+          params.set(
+            'collaborators',
+            JSON.stringify(firstPost?.settings?.collaborators.map((p) => p.label))
+          );
+        }
+
+        const { id: photoId } = await this.fetchInstagramJson<{ id?: string }>(
+          `https://${type}/v20.0/${id}/media?${params.toString()}`,
+          {
+            method: 'POST',
+          },
+          'instagram_media_create'
+        );
+
+        if (!photoId) {
+          throw new BadBody(
+            'instagram_media_create',
+            '{}',
+            '{}',
+            'Instagram did not return a media container id.'
+          );
+        }
+
+        await this.waitForMediaContainer(
+          photoId,
+          accessToken,
+          type,
+          'instagram_media_create'
+        );
 
         return photoId;
       }) || []
@@ -631,22 +669,14 @@ export class InstagramProvider
       let lastMediaId = '';
       let lastPermalink = '';
       for (const mediaCreationId of medias) {
-        const { id: mediaId } = await (
-          await this.fetch(
-            `https://${type}/v20.0/${id}/media_publish?creation_id=${mediaCreationId}&access_token=${accessToken}&field=id`,
-            {
-              method: 'POST',
-            }
-          )
-        ).json();
+        const mediaId = await this.publishMediaContainer(
+          id,
+          accessToken,
+          mediaCreationId,
+          type
+        );
         lastMediaId = mediaId;
-
-        const { permalink } = await (
-          await this.fetch(
-            `https://${type}/v20.0/${mediaId}?fields=permalink&access_token=${accessToken}`
-          )
-        ).json();
-        lastPermalink = permalink;
+        lastPermalink = await this.getPermalink(mediaId, accessToken, type);
       }
 
       return [
@@ -658,20 +688,13 @@ export class InstagramProvider
         },
       ];
     } else if (medias.length === 1) {
-      const { id: mediaId } = await (
-        await this.fetch(
-          `https://${type}/v20.0/${id}/media_publish?creation_id=${medias[0]}&access_token=${accessToken}&field=id`,
-          {
-            method: 'POST',
-          }
-        )
-      ).json();
-
-      const { permalink } = await (
-        await this.fetch(
-          `https://${type}/v20.0/${mediaId}?fields=permalink&access_token=${accessToken}`
-        )
-      ).json();
+      const mediaId = await this.publishMediaContainer(
+        id,
+        accessToken,
+        medias[0],
+        type
+      );
+      const permalink = await this.getPermalink(mediaId, accessToken, type);
 
       return [
         {
@@ -682,48 +705,43 @@ export class InstagramProvider
         },
       ];
     } else {
-      const { id: containerId, ...all3 } = await (
-        await this.fetch(
-          `https://${type}/v20.0/${id}/media?caption=${encodeURIComponent(
-            firstPost?.message
-          )}&media_type=CAROUSEL&children=${encodeURIComponent(
-            medias.join(',')
-          )}&access_token=${accessToken}`,
-          {
-            method: 'POST',
-          }
-        )
-      ).json();
+      const params = new URLSearchParams({
+        caption: firstPost?.message,
+        media_type: 'CAROUSEL',
+        children: medias.join(','),
+        access_token: accessToken,
+      });
+      const { id: containerId } = await this.fetchInstagramJson<{ id?: string }>(
+        `https://${type}/v20.0/${id}/media?${params.toString()}`,
+        {
+          method: 'POST',
+        },
+        'instagram_carousel_create'
+      );
 
-      let status = 'IN_PROGRESS';
-      while (status === 'IN_PROGRESS') {
-        const { status_code } = await (
-          await this.fetch(
-            `https://${type}/v20.0/${containerId}?fields=status_code&access_token=${accessToken}`,
-            undefined,
-            '',
-            0,
-            true
-          )
-        ).json();
-        await timer(30000);
-        status = status_code;
+      if (!containerId) {
+        throw new BadBody(
+          'instagram_carousel_create',
+          '{}',
+          '{}',
+          'Instagram did not return a carousel container id.'
+        );
       }
 
-      const { id: mediaId, ...all4 } = await (
-        await this.fetch(
-          `https://${type}/v20.0/${id}/media_publish?creation_id=${containerId}&access_token=${accessToken}&field=id`,
-          {
-            method: 'POST',
-          }
-        )
-      ).json();
+      await this.waitForMediaContainer(
+        containerId,
+        accessToken,
+        type,
+        'instagram_carousel_create'
+      );
 
-      const { permalink } = await (
-        await this.fetch(
-          `https://${type}/v20.0/${mediaId}?fields=permalink&access_token=${accessToken}`
-        )
-      ).json();
+      const mediaId = await this.publishMediaContainer(
+        id,
+        accessToken,
+        containerId,
+        type
+      );
+      const permalink = await this.getPermalink(mediaId, accessToken, type);
 
       return [
         {
@@ -734,6 +752,307 @@ export class InstagramProvider
         },
       ];
     }
+  }
+
+  private getGraphApiError(body: string) {
+    try {
+      const parsed = JSON.parse(body || '{}');
+      const error = parsed?.error;
+      if (!error) {
+        return undefined;
+      }
+
+      return {
+        message:
+          error.error_user_msg ||
+          error.message ||
+          error.error_user_title ||
+          'Instagram Graph API returned an error.',
+        code: error.code ? String(error.code) : '',
+        subcode: error.error_subcode ? String(error.error_subcode) : '',
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async fetchInstagramJson<T>(
+    url: string,
+    options: RequestInit = {},
+    identifier = 'instagram',
+    totalRetries = 0
+  ): Promise<T> {
+    const response = await this.fetch(url, options, identifier, totalRetries);
+    let body = '';
+
+    try {
+      body = await response.text();
+    } catch {
+      body = '';
+    }
+
+    const bodyForError = body || '{}';
+    const handleError = this.handleErrors(bodyForError, response.status);
+
+    if (
+      response.status === 429 ||
+      (response.status === 500 && !handleError) ||
+      body.includes('rate_limit_exceeded') ||
+      body.includes('Rate limit') ||
+      handleError?.type === 'retry'
+    ) {
+      if (totalRetries > 2) {
+        throw new BadBody(
+          identifier,
+          bodyForError,
+          options.body || '{}',
+          handleError?.value ||
+            `Instagram Graph API request failed after retries (${response.status}).`
+        );
+      }
+
+      await timer(5000);
+      return this.fetchInstagramJson<T>(
+        url,
+        options,
+        identifier,
+        totalRetries + 1
+      );
+    }
+
+    if (
+      (response.status === 401 &&
+        (handleError?.type === 'refresh-token' || !handleError)) ||
+      handleError?.type === 'refresh-token'
+    ) {
+      throw new RefreshToken(
+        identifier,
+        bodyForError,
+        options.body || '{}',
+        handleError?.value
+      );
+    }
+
+    if (!body.trim()) {
+      throw new BadBody(
+        identifier,
+        bodyForError,
+        options.body || '{}',
+        `Instagram Graph API returned an empty response (${response.status}).`
+      );
+    }
+
+    let payload: any;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      throw new BadBody(
+        identifier,
+        bodyForError,
+        options.body || '{}',
+        `Instagram Graph API returned a non-JSON response (${response.status}).`
+      );
+    }
+
+    if (!response.ok) {
+      const json = JSON.stringify(payload);
+      const graphError = this.getGraphApiError(json);
+      throw new BadBody(
+        identifier,
+        json,
+        options.body || '{}',
+        handleError?.value ||
+          graphError?.message ||
+          `Instagram Graph API request failed (${response.status}).`
+      );
+    }
+
+    if (payload?.error) {
+      const json = JSON.stringify(payload);
+      throw new BadBody(
+        identifier,
+        json,
+        options.body || '{}',
+        this.handleErrors(json, response.status)?.value ||
+          'Instagram Graph API returned an error.'
+      );
+    }
+
+    return payload;
+  }
+
+  private getPublicMediaUrl(media: NonNullable<PostDetails['media']>[number]) {
+    const mediaUrl = String((media as any).url || media.path || '').trim();
+
+    if (!mediaUrl) {
+      throw new BadBody(
+        'instagram_media_url',
+        '{}',
+        '{}',
+        'Instagram media is missing a public URL.'
+      );
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(mediaUrl);
+    } catch {
+      throw new BadBody(
+        'instagram_media_url',
+        '{}',
+        '{}',
+        `Instagram media URL is invalid or not a public HTTPS URL: ${mediaUrl}`
+      );
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== 'https:' || this.isLocalOrPrivateHost(hostname)) {
+      throw new BadBody(
+        'instagram_media_url',
+        '{}',
+        '{}',
+        `Instagram media URL must be a publicly reachable HTTPS URL for Meta: ${mediaUrl}`
+      );
+    }
+
+    return mediaUrl;
+  }
+
+  private isVideoMedia(
+    media: NonNullable<PostDetails['media']>[number],
+    mediaUrl: string
+  ) {
+    return (
+      media.type === 'video' ||
+      mediaUrl.toLowerCase().split('?')[0].includes('.mp4')
+    );
+  }
+
+  private isLocalOrPrivateHost(hostname: string) {
+    if (
+      hostname === 'localhost' ||
+      hostname === '0.0.0.0' ||
+      hostname === '::1' ||
+      hostname === 'host.docker.internal' ||
+      hostname.endsWith('.local')
+    ) {
+      return true;
+    }
+
+    const parts = hostname.split('.').map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) {
+      return false;
+    }
+
+    const [first, second] = parts;
+    return (
+      first === 10 ||
+      first === 127 ||
+      first === 0 ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 169 && second === 254)
+    );
+  }
+
+  private async waitForMediaContainer(
+    containerId: string,
+    accessToken: string,
+    type: string,
+    identifier: string
+  ) {
+    const maxAttempts = 60;
+    const delayMs = 5000;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const { status_code } = await this.fetchInstagramJson<{
+        status_code?: string;
+      }>(
+        `https://${type}/v20.0/${containerId}?fields=status_code&access_token=${accessToken}`,
+        undefined,
+        identifier
+      );
+
+      if (status_code === 'FINISHED') {
+        return;
+      }
+
+      if (status_code === 'ERROR') {
+        throw new BadBody(
+          identifier,
+          '{}',
+          '{}',
+          `Instagram media container ${containerId} failed.`
+        );
+      }
+
+      if (!status_code) {
+        throw new BadBody(
+          identifier,
+          '{}',
+          '{}',
+          `Instagram media container ${containerId} did not return status_code.`
+        );
+      }
+
+      if (status_code !== 'IN_PROGRESS') {
+        throw new BadBody(
+          identifier,
+          '{}',
+          '{}',
+          `Instagram media container ${containerId} returned unexpected status ${status_code}.`
+        );
+      }
+
+      await timer(delayMs);
+    }
+
+    throw new BadBody(
+      identifier,
+      '{}',
+      '{}',
+      `Timed out waiting for Instagram media container ${containerId} to finish.`
+    );
+  }
+
+  private async publishMediaContainer(
+    id: string,
+    accessToken: string,
+    creationId: string,
+    type: string
+  ) {
+    const params = new URLSearchParams({
+      creation_id: creationId,
+      access_token: accessToken,
+    });
+    const { id: mediaId } = await this.fetchInstagramJson<{ id?: string }>(
+      `https://${type}/v20.0/${id}/media_publish?${params.toString()}`,
+      {
+        method: 'POST',
+      },
+      'instagram_media_publish'
+    );
+
+    if (!mediaId) {
+      throw new BadBody(
+        'instagram_media_publish',
+        '{}',
+        '{}',
+        'Instagram did not return a published media id.'
+      );
+    }
+
+    return mediaId;
+  }
+
+  private async getPermalink(mediaId: string, accessToken: string, type: string) {
+    const { permalink } = await this.fetchInstagramJson<{ permalink?: string }>(
+      `https://${type}/v20.0/${mediaId}?fields=permalink&access_token=${accessToken}`,
+      undefined,
+      'instagram_permalink'
+    );
+
+    return permalink || '';
   }
 
   async comment(
@@ -773,6 +1092,111 @@ export class InstagramProvider
         status: 'success',
       },
     ];
+  }
+
+  async readComments(
+    id: string,
+    accessToken: string,
+    postId: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<PublishedComment[]> {
+    const fields = encodeURIComponent(
+      'id,text,username,timestamp,like_count,hidden'
+    );
+    const { data } = await (
+      await this.fetch(
+        `https://${type}/v20.0/${postId}/comments?fields=${fields}&limit=50&access_token=${accessToken}`
+      )
+    ).json();
+
+    return (data || []).map((comment: any) => ({
+      id: String(comment.id),
+      message: comment.text || '',
+      authorName: comment.username || '',
+      createdTime: comment.timestamp || '',
+      likeCount: Number(comment.like_count || 0),
+      replyCount: Number(comment.reply_count || 0),
+      permalinkUrl: comment.permalink || comment.permalink_url || '',
+      hidden:
+        typeof comment.hidden === 'boolean' ? comment.hidden : undefined,
+      canReply: true,
+      canHide: true,
+      canDelete: true,
+    }));
+  }
+
+  async replyToComment(
+    id: string,
+    accessToken: string,
+    postId: string,
+    commentId: string,
+    message: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<PublishedCommentActionResponse> {
+    const { id: replyId } = await (
+      await this.fetch(
+        `https://${type}/v20.0/${commentId}/replies?message=${encodeURIComponent(
+          message
+        )}&access_token=${accessToken}`,
+        {
+          method: 'POST',
+        }
+      )
+    ).json();
+
+    return {
+      success: true,
+      commentId,
+      replyId,
+    };
+  }
+
+  async hideComment(
+    id: string,
+    accessToken: string,
+    postId: string,
+    commentId: string,
+    hide: boolean,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<PublishedCommentActionResponse> {
+    await this.fetch(
+      `https://${type}/v20.0/${commentId}?hide=${
+        hide ? 'true' : 'false'
+      }&access_token=${accessToken}`,
+      {
+        method: 'POST',
+      }
+    );
+
+    return {
+      success: true,
+      commentId,
+      hidden: hide,
+    };
+  }
+
+  async deleteComment(
+    id: string,
+    accessToken: string,
+    postId: string,
+    commentId: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<PublishedCommentActionResponse> {
+    await this.fetch(
+      `https://${type}/v20.0/${commentId}?access_token=${accessToken}`,
+      {
+        method: 'DELETE',
+      }
+    );
+
+    return {
+      success: true,
+      commentId,
+    };
   }
 
   private setTitle(name: string) {
@@ -881,30 +1305,43 @@ export class InstagramProvider
     const pageSize = 12;
 
     try {
+      const fields = encodeURIComponent(
+        'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,children{media_type,media_url,thumbnail_url}'
+      );
       const { data: media } = await (
         await this.fetch(
-          `https://${type}/v21.0/${id}/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp&limit=50&access_token=${accessToken}`
+          `https://${type}/v21.0/${id}/media?fields=${fields}&limit=50&access_token=${accessToken}`
         )
       ).json();
 
-      const videos = (media || [])
-        .filter((item: any) =>
-          ['VIDEO', 'REELS'].includes(String(item.media_type || '').toUpperCase())
-        )
-        .map((item: any) => ({
+      const results = (media || []).map((item: any) => {
+        const mediaType = String(item.media_type || '').toUpperCase();
+        const isVideo = ['VIDEO', 'REELS'].includes(mediaType);
+        const firstChild = item.children?.data?.[0];
+        const thumbnail =
+          item.thumbnail_url ||
+          item.media_url ||
+          firstChild?.thumbnail_url ||
+          firstChild?.media_url ||
+          '';
+
+        return {
           id: String(item.id),
-          url: item.permalink || '',
-          thumbnail: item.thumbnail_url || item.media_url || '',
-          name: item.caption || 'Instagram video',
-          type: 'video' as const,
+          url: item.permalink || item.media_url || '',
+          thumbnail,
+          name:
+            item.caption ||
+            (isVideo ? 'Instagram video' : 'Instagram image'),
+          type: isVideo ? ('video' as const) : ('image' as const),
           publishedAt: item.timestamp || undefined,
-        }));
+        };
+      });
 
       const start = (page - 1) * pageSize;
 
       return {
-        results: videos.slice(start, start + pageSize),
-        pages: Math.max(1, Math.ceil(videos.length / pageSize)),
+        results: results.slice(start, start + pageSize),
+        pages: Math.max(1, Math.ceil(results.length / pageSize)),
       };
     } catch (err) {
       console.error(

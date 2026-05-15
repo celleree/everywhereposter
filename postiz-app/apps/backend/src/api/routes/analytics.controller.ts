@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { Organization } from '@prisma/client';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
 import { ApiTags } from '@nestjs/swagger';
@@ -28,6 +36,49 @@ export class AnalyticsController {
     @Param('postId') postId: string
   ) {
     return this._postsService.getPublishedComments(org.id, postId);
+  }
+
+  @Post('/post/:postId/comments/:commentId/reply')
+  async replyToComment(
+    @GetOrgFromRequest() org: Organization,
+    @Param('postId') postId: string,
+    @Param('commentId') commentId: string,
+    @Body('message') message: string
+  ) {
+    return this._postsService.replyToPublishedComment(
+      org.id,
+      postId,
+      commentId,
+      message
+    );
+  }
+
+  @Post('/post/:postId/comments/:commentId/hide')
+  async hideComment(
+    @GetOrgFromRequest() org: Organization,
+    @Param('postId') postId: string,
+    @Param('commentId') commentId: string,
+    @Body('hide') hide: boolean
+  ) {
+    return this._postsService.hidePublishedComment(
+      org.id,
+      postId,
+      commentId,
+      !!hide
+    );
+  }
+
+  @Delete('/post/:postId/comments/:commentId')
+  async deleteComment(
+    @GetOrgFromRequest() org: Organization,
+    @Param('postId') postId: string,
+    @Param('commentId') commentId: string
+  ) {
+    return this._postsService.deletePublishedComment(
+      org.id,
+      postId,
+      commentId
+    );
   }
 
   @Get('/:integration')

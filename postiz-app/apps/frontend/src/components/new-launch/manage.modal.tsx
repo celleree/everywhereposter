@@ -49,12 +49,18 @@ import { useUppyUploader } from '@gitroom/frontend/components/media/new.uploader
 import { Dashboard } from '@uppy/react';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
+import {
+  CopyPlatform,
+  mapIntegrationIdentifierToCopyPlatform,
+} from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
+import { GenerateMediaCopyResponse } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
 const AI_PRESETS = [
   {
     id: 'rewrite-linkedin',
+    platform: 'linkedin',
     title: 'Generate LinkedIn post',
     helper: 'Professional and useful.',
     buildMessage: (platformText: string) =>
@@ -62,6 +68,7 @@ const AI_PRESETS = [
   },
   {
     id: 'rewrite-x',
+    platform: 'x',
     title: 'Generate X post',
     helper: 'Short and feed-native.',
     buildMessage: (platformText: string) =>
@@ -69,13 +76,23 @@ const AI_PRESETS = [
   },
   {
     id: 'generate-facebook',
+    platform: 'facebook',
     title: 'Generate Facebook post',
     helper: 'Friendly and readable.',
     buildMessage: (platformText: string) =>
       `Generate a Facebook post using the uploaded media context, current draft, and selected accounts: ${platformText}. Make it warm, readable, and easy to engage with. Apply the result with the setPosts action.`,
   },
   {
+    id: 'generate-instagram',
+    platform: 'instagram',
+    title: 'Generate Instagram caption',
+    helper: 'Visual and caption-native.',
+    buildMessage: (platformText: string) =>
+      `Generate an Instagram caption using the uploaded media context, current draft, and selected accounts: ${platformText}. Make the first line clear, keep it grounded in the media, and apply the result with the setPosts action.`,
+  },
+  {
     id: 'generate-bluesky',
+    platform: 'bluesky',
     title: 'Generate Bluesky post',
     helper: 'Conversational and direct.',
     buildMessage: (platformText: string) =>
@@ -102,7 +119,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   const [activeAiPreset, setActiveAiPreset] = useState<string>(
     AI_PRESETS[0].id
   );
-  const [copilotSeed, setCopilotSeed] = useState(0);
+  const [copilotSeed] = useState(0);
+  const [queuedAiPreset, setQueuedAiPreset] = useState('');
+  const [copyGenerationLoading, setCopyGenerationLoading] = useState(false);
+  const [copyGenerationStatus, setCopyGenerationStatus] = useState('');
   const { data: shortlinkPreferenceData } = useShortlinkPreference();
 
   const { addEditSets, mutate, customClose, dummy } = props;
@@ -118,6 +138,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     setTags,
     integrations,
     setSelectedIntegrations,
+    setGlobalValueText,
+    upsertInternalValueText,
     locked,
     current,
     activateExitButton,
@@ -138,6 +160,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
       selectedIntegrations: state.selectedIntegrations,
       integrations: state.integrations,
       setSelectedIntegrations: state.setSelectedIntegrations,
+      setGlobalValueText: state.setGlobalValueText,
+      upsertInternalValueText: state.upsertInternalValueText,
       locked: state.locked,
       activateExitButton: state.activateExitButton,
       global: state.global,
@@ -240,6 +264,24 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     !!existingData?.integration &&
     (!existingRootPost?.releaseId || existingRootPost?.releaseId === 'missing');
   const globalMedia = global?.[0]?.media || [];
+  const selectedCopyPlatforms = useMemo(
+    () =>
+      new Set(
+        selectedIntegrations
+          .map(({ integration }) =>
+            mapIntegrationIdentifierToCopyPlatform(integration.identifier)
+          )
+          .filter((platform): platform is CopyPlatform => !!platform)
+      ),
+    [selectedIntegrations]
+  );
+  const availableAiPresets = useMemo(
+    () =>
+      AI_PRESETS.filter((preset) =>
+        selectedCopyPlatforms.has(preset.platform as CopyPlatform)
+      ),
+    [selectedCopyPlatforms]
+  );
   const selectedPlatformText = useMemo(() => {
     if (!selectedIntegrations.length) {
       return 'the selected platforms';
@@ -274,19 +316,34 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     }
   }, [current, isPublishedManagementView]);
 
+  useEffect(() => {
+    if (!availableAiPresets.length) {
+      setQueuedAiPreset('');
+      return;
+    }
+
+    if (!availableAiPresets.some((preset) => preset.id === activeAiPreset)) {
+      setActiveAiPreset(availableAiPresets[0].id);
+    }
+  }, [activeAiPreset, availableAiPresets]);
+
   const copilotSuggestions = useMemo(() => {
+    if (!availableAiPresets.length) {
+      return [];
+    }
+
     const active =
-      AI_PRESETS.find((preset) => preset.id === activeAiPreset) || AI_PRESETS[0];
-    const rest = AI_PRESETS.filter((preset) => preset.id !== active.id).slice(
-      0,
-      5
-    );
+      availableAiPresets.find((preset) => preset.id === activeAiPreset) ||
+      availableAiPresets[0];
+    const rest = availableAiPresets
+      .filter((preset) => preset.id !== active.id)
+      .slice(0, 5);
 
     return [active, ...rest].map((preset) => ({
       title: preset.title,
       message: preset.buildMessage(selectedPlatformText),
     }));
-  }, [activeAiPreset, selectedPlatformText]);
+  }, [activeAiPreset, availableAiPresets, selectedPlatformText]);
 
   const updatePublishedDisabledReason = useMemo(() => {
     if (!showPublishedActions) {
@@ -542,10 +599,182 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     toaster,
   ]);
 
-  const openAiPreset = useCallback((presetId: string) => {
-    setActiveAiPreset(presetId);
-    setCopilotSeed((prev) => prev + 1);
-  }, []);
+  const applyGeneratedCopy = useCallback(
+    (response: GenerateMediaCopyResponse) => {
+      let appliedToChannel = false;
+
+      for (const result of response.results) {
+        const matches = selectedIntegrations.filter(
+          ({ integration }) =>
+            mapIntegrationIdentifierToCopyPlatform(integration.identifier) ===
+            result.platform
+        );
+
+        if (!matches.length) {
+          continue;
+        }
+
+        appliedToChannel = true;
+        for (const { integration } of matches) {
+          upsertInternalValueText(integration.id, 0, result.draft);
+        }
+      }
+
+      if (!appliedToChannel && response.results[0]?.draft) {
+        setGlobalValueText(0, response.results[0].draft);
+      }
+
+      toaster.show(
+        appliedToChannel
+          ? t(
+              'generated_copy_applied_to_selected_channels',
+              'Generated copy applied to selected channels.'
+            )
+          : t('generated_copy_applied', 'Generated copy applied.'),
+        'success'
+      );
+    },
+    [
+      selectedIntegrations,
+      setGlobalValueText,
+      t,
+      toaster,
+      upsertInternalValueText,
+    ]
+  );
+
+  const generateCopyForPreset = useCallback(
+    async (presetId: string, media?: { id?: string; path?: string }) => {
+      const preset = AI_PRESETS.find((item) => item.id === presetId);
+      const sourceMedia = media || globalMedia[0];
+
+      if (!preset) {
+        return;
+      }
+
+      setActiveAiPreset(preset.id);
+
+      if (!sourceMedia?.id) {
+        setQueuedAiPreset(preset.id);
+        setCopyGenerationStatus(
+          t(
+            'copy_generation_waiting_for_upload',
+            'Copy will generate automatically after upload.'
+          )
+        );
+        return;
+      }
+
+      setQueuedAiPreset('');
+      setCopyGenerationLoading(true);
+      setCopyGenerationStatus(t('generating_copy', 'Generating copy...'));
+
+      try {
+        const request = await fetch('/posts/copy/generate', {
+          method: 'POST',
+          body: JSON.stringify({
+            mediaId: sourceMedia.id,
+            platforms: [preset.platform],
+            goal: 'position',
+            ctaPreference: {
+              strength: 'soft',
+            },
+          }),
+        });
+
+        if (!request.ok) {
+          let message = t('failed_to_generate_copy', 'Failed to generate copy.');
+
+          try {
+            const raw = await request.text();
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              message = Array.isArray(parsed?.message)
+                ? parsed.message.join(', ')
+                : parsed?.message || parsed?.error || raw;
+            }
+          } catch {
+            // Keep the fallback message when the response is not JSON.
+          }
+
+          throw new Error(message);
+        }
+
+        if (!request.body) {
+          throw new Error(
+            t(
+              'copy_generation_missing_response',
+              'Copy generation returned no response.'
+            )
+          );
+        }
+
+        const reader = request.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let finalResponse: GenerateMediaCopyResponse | null = null;
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+
+          const chunk = decoder.decode(value, { stream: true });
+          for (const line of chunk.split('\n').filter(Boolean)) {
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.name === 'completed') {
+                finalResponse = parsed.data as GenerateMediaCopyResponse;
+              }
+            } catch {
+              // Ignore incomplete streaming chunks.
+            }
+          }
+        }
+
+        if (!finalResponse) {
+          throw new Error(
+            t(
+              'copy_generation_missing_final_payload',
+              'Copy generation did not return a final payload.'
+            )
+          );
+        }
+
+        applyGeneratedCopy(finalResponse);
+      } catch (error) {
+        toaster.show(
+          error instanceof Error
+            ? error.message
+            : t('failed_to_generate_copy', 'Failed to generate copy.'),
+          'warning'
+        );
+      } finally {
+        setCopyGenerationLoading(false);
+        setCopyGenerationStatus('');
+      }
+    },
+    [applyGeneratedCopy, fetch, globalMedia, t, toaster]
+  );
+
+  const handleAiPreset = useCallback(
+    (presetId: string) => {
+      generateCopyForPreset(presetId);
+    },
+    [generateCopyForPreset]
+  );
+
+  const handleUpload = useCallback(
+    (media: any[]) => {
+      appendGlobalValueMedia(0, media);
+
+      if (queuedAiPreset && media?.[0]?.id) {
+        generateCopyForPreset(queuedAiPreset, media[0]);
+      }
+    },
+    [appendGlobalValueMedia, generateCopyForPreset, queuedAiPreset]
+  );
 
   const schedule = useCallback(
     (type: 'draft' | 'now' | 'schedule' | 'update') => async () => {
@@ -874,7 +1103,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       <ComposerUploadCard
                         disabled={locked}
                         media={globalMedia}
-                        onUpload={(media) => appendGlobalValueMedia(0, media)}
+                        onUpload={handleUpload}
                       />
                     </ComposerSection>
 
@@ -909,14 +1138,16 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       description="Create captions from your uploaded media."
                     >
                       <div className="grid min-w-0 max-w-full grid-cols-1 gap-[10px] md:grid-cols-2 mobile:gap-[8px]">
-                        {AI_PRESETS.map((preset) => (
+                        {availableAiPresets.map((preset) => (
                           <button
                             key={preset.id}
                             type="button"
-                            onClick={() => openAiPreset(preset.id)}
+                            disabled={copyGenerationLoading}
+                            onClick={() => handleAiPreset(preset.id)}
                             className={clsx(
-                              'min-w-0 max-w-full rounded-[12px] border px-[14px] py-[12px] text-start transition-all mobile:px-[12px] mobile:py-[12px]',
-                              activeAiPreset === preset.id
+                              'min-w-0 max-w-full rounded-[12px] border px-[14px] py-[12px] text-start transition-all disabled:cursor-not-allowed disabled:opacity-70 mobile:px-[12px] mobile:py-[12px]',
+                              activeAiPreset === preset.id ||
+                                queuedAiPreset === preset.id
                                 ? 'border-[#7C4DFF] bg-[#22163B]'
                                 : 'border-newBorder bg-newBgColor [@media(hover:hover)]:hover:border-[#7C4DFF] [@media(hover:hover)]:hover:bg-newBgLineColor/70'
                             )}
@@ -930,6 +1161,19 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                           </button>
                         ))}
                       </div>
+                      {!availableAiPresets.length && (
+                        <div className="rounded-[12px] border border-newBorder bg-newBgColor px-[14px] py-[12px] text-[13px] text-textColor/65">
+                          {t(
+                            'select_supported_platform_for_copy_generation',
+                            'Select a supported platform to generate platform-specific copy.'
+                          )}
+                        </div>
+                      )}
+                      {!!copyGenerationStatus && (
+                        <div className="mt-[10px] text-[13px] text-textColor/65">
+                          {copyGenerationStatus}
+                        </div>
+                      )}
                     </ComposerSection>
 
                     <ComposerSection

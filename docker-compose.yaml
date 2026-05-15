@@ -175,6 +175,7 @@ services:
       - ./site/data-deletion.html:/usr/share/nginx/html/data-deletion.html:ro
       - ./tiktokue6AnjOZKCYFEu1KyerrdZASM9Gtd8mF.txt:/usr/share/nginx/html/tiktokue6AnjOZKCYFEu1KyerrdZASM9Gtd8mF.txt:ro
       - ./site/branding:/usr/share/nginx/html/branding:ro
+      - postiz-uploads:/uploads:ro
     networks:
       - postiz-network
 
