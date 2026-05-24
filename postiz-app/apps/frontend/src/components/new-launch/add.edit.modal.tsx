@@ -23,6 +23,7 @@ export interface AddEditModalProps {
   mutate: () => void;
   padding?: string;
   customClose?: () => void;
+  standaloneCreate?: boolean;
   onlyValues?: Array<{
     content: string;
     id?: string;

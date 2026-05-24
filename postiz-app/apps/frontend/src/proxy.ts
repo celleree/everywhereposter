@@ -10,6 +10,47 @@ import {
 } from '@gitroom/react/translation/i18n.config';
 acceptLanguage.languages(languages);
 
+const PUBLIC_FRONTEND_FALLBACK_URL =
+  'https://publisheverywhere.halowebsites.com';
+
+const getFirstHeaderValue = (value: string | null) =>
+  value?.split(',')?.[0]?.trim();
+
+const isLoopbackHost = (host?: string) => {
+  const hostname = host
+    ?.replace(/^\[([^\]]+)\](?::\d+)?$/, '$1')
+    .replace(/:\d+$/, '')
+    .toLowerCase();
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1'
+  );
+};
+
+const getFrontendBaseUrl = (request: NextRequest) => {
+  const forwardedHost = getFirstHeaderValue(
+    request.headers.get('x-forwarded-host')
+  );
+  const host = forwardedHost || getFirstHeaderValue(request.headers.get('host'));
+
+  if (host && !isLoopbackHost(host)) {
+    return `https://${host}`.replace(/\/$/, '');
+  }
+
+  return (
+    process.env.FRONTEND_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    process.env.MAIN_URL ||
+    PUBLIC_FRONTEND_FALLBACK_URL
+  ).replace(/\/$/, '');
+};
+
+const getPublicReturnUrl = (request: NextRequest) => {
+  const nextUrl = request.nextUrl;
+  return `${nextUrl.pathname}${nextUrl.search}`;
+};
+
 // This function can be marked `async` if using `await` inside
 export async function proxy(request: NextRequest) {
   const nextUrl = request.nextUrl;
@@ -100,9 +141,9 @@ export async function proxy(request: NextRequest) {
             : 'github'
           : findIndex
         ).toUpperCase()}`;
-    const authUrl = new URL(`/auth${url}${additional}`, nextUrl.href);
+    const authUrl = new URL(`/auth${url}${additional}`, getFrontendBaseUrl(request));
     if (nextUrl.pathname !== '/') {
-      authUrl.searchParams.set('returnUrl', nextUrl.href);
+      authUrl.searchParams.set('returnUrl', getPublicReturnUrl(request));
     }
     return NextResponse.redirect(authUrl);
   }

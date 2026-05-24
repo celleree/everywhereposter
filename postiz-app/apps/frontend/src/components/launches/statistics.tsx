@@ -135,6 +135,26 @@ interface PublishedCommentsResponse {
   message?: string;
 }
 
+const getResponseErrorMessage = async (
+  response: Response,
+  fallback: string
+) => {
+  try {
+    const body = await response.json();
+    const message = body?.message || body?.error;
+
+    if (Array.isArray(message)) {
+      return message.join(' ');
+    }
+
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+  } catch (err) {}
+
+  return fallback;
+};
+
 export const PostStatisticsPanel: FC<{
   postId: string;
   isPublished?: boolean;
@@ -168,8 +188,19 @@ export const PostStatisticsPanel: FC<{
   }, [postId, dateRange, fetch]);
 
   const loadPostComments = useCallback(async () => {
-    return (await fetch(`/analytics/post/${postId}/comments`)).json();
-  }, [postId, fetch]);
+    const response = await fetch(`/analytics/post/${postId}/comments`);
+
+    if (!response.ok) {
+      throw new Error(
+        await getResponseErrorMessage(
+          response,
+          t('failed_to_load_comments', 'Failed to load comments.')
+        )
+      );
+    }
+
+    return response.json();
+  }, [postId, fetch, t]);
 
   const { data: statisticsData, isLoading: isLoadingStatistics } = useSWR(
     `/posts/${postId}/statistics`,
@@ -192,6 +223,7 @@ export const PostStatisticsPanel: FC<{
   const {
     data: commentsData,
     isLoading: isLoadingComments,
+    error: commentsLoadError,
     mutate: mutateComments,
   } =
     useSWR<PublishedCommentsResponse>(
@@ -243,10 +275,7 @@ export const PostStatisticsPanel: FC<{
         if (!response.ok) {
           let message = t('comment_action_failed', 'Comment action failed.');
 
-          try {
-            const body = await response.json();
-            message = body?.message || message;
-          } catch (err) {}
+          message = await getResponseErrorMessage(response, message);
 
           throw new Error(message);
         }
@@ -274,6 +303,12 @@ export const PostStatisticsPanel: FC<{
 
   const isMissing =
     analyticsData && !Array.isArray(analyticsData) && analyticsData.missing;
+  const commentsLoadErrorMessage =
+    commentsLoadError instanceof Error
+      ? commentsLoadError.message
+      : commentsLoadError
+      ? t('failed_to_load_comments', 'Failed to load comments.')
+      : '';
   const hasAnalytics =
     analyticsData && Array.isArray(analyticsData) && analyticsData.length > 0;
   const hasShortLinks = !!statisticsData?.clicks?.length;
@@ -281,14 +316,16 @@ export const PostStatisticsPanel: FC<{
   const hasCommentsStatus =
     !!commentsData?.supported ||
     !!commentsData?.reconnectRequired ||
-    !!commentsData?.message;
+    !!commentsData?.message ||
+    !!commentsLoadErrorMessage;
   const hasAnyInsights =
     !!hasAnalytics ||
     hasShortLinks ||
     hasPlatformComments ||
     !!isMissing ||
     !!commentsData?.reconnectRequired ||
-    !!commentsData?.message;
+    !!commentsData?.message ||
+    !!commentsLoadErrorMessage;
   const showAnalyticsSection = !!hasAnalytics || isPublished || !hideWhenEmpty;
   const showCommentsSection =
     hasCommentsStatus || isPublished || !hideWhenEmpty;
@@ -317,8 +354,7 @@ export const PostStatisticsPanel: FC<{
     });
   }, [analyticsData]);
 
-  const isLoading =
-    isLoadingStatistics || isLoadingAnalytics || isLoadingComments;
+  const isLoading = isLoadingStatistics || isLoadingAnalytics;
 
   if (hideWhenEmpty && !isPublished && !hasAnyInsights) {
     return null;
@@ -423,10 +459,20 @@ export const PostStatisticsPanel: FC<{
               <h3 className="text-[18px] font-[500]">
                 {t('recent_comments', 'Recent comments')}
               </h3>
-              {commentsData?.reconnectRequired || commentsData?.message ? (
+              {isLoadingComments ? (
+                <div className="flex items-center gap-[12px] rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">
+                  <LoadingComponent />
+                  <span>{t('loading_comments', 'Loading comments...')}</span>
+                </div>
+              ) : commentsLoadErrorMessage ? (
+                <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-[16px] py-[14px] text-red-200">
+                  {commentsLoadErrorMessage}
+                </div>
+              ) : commentsData?.reconnectRequired || commentsData?.message ? (
                 <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">
                   {commentsData?.reconnectRequired
-                    ? t(
+                    ? commentsData?.message ||
+                      t(
                         'reconnect_this_channel_to_load_comments',
                         'Reconnect this channel to load comments'
                       )

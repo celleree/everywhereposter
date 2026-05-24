@@ -1,6 +1,6 @@
 'use client';
 
-import React, { FC, useCallback, useMemo, useState } from 'react';
+import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { Button } from '@gitroom/react/form/button';
 import { Textarea } from '@gitroom/react/form/textarea';
@@ -78,14 +78,18 @@ const MediaCopyModal: FC<{
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
   const [response, setResponse] = useState<GenerateMediaCopyResponse | null>(null);
-  const defaultPlatforms = useMemo(
+  const selectedPlatforms = useMemo(
     () => loadDefaultPlatforms(selectedIntegrations.map((item) => item.integration)),
     [selectedIntegrations]
   );
-  const [platforms, setPlatforms] = useState<CopyPlatform[]>(defaultPlatforms);
+  const [platforms, setPlatforms] = useState<CopyPlatform[]>(selectedPlatforms);
   const [editedDrafts, setEditedDrafts] = useState<Record<CopyPlatform, string>>(
     {} as Record<CopyPlatform, string>
   );
+
+  useEffect(() => {
+    setPlatforms(selectedPlatforms);
+  }, [selectedPlatforms]);
 
   const togglePlatform = useCallback(
     (platform: CopyPlatform) => {
@@ -297,7 +301,7 @@ const MediaCopyModal: FC<{
           <div className="flex flex-col gap-[8px]">
             <div className="text-[13px] font-[600]">Platforms</div>
             <div className="grid grid-cols-3 gap-[8px]">
-              {defaultPlatforms.map((platform) => (
+              {selectedPlatforms.map((platform) => (
                 <label
                   key={platform}
                   className="bg-newBgColorInner rounded-[8px] px-[12px] py-[8px] flex items-center gap-[8px]"
@@ -311,7 +315,7 @@ const MediaCopyModal: FC<{
                 </label>
               ))}
             </div>
-            {!defaultPlatforms.length && (
+            {!selectedPlatforms.length && (
               <div className="text-[13px] text-gray-400">
                 {t(
                   'select_supported_platform_for_copy_generation',

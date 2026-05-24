@@ -77,6 +77,33 @@ i18next.on('languageChanged', () => {
 // Initial setup
 updateDayjsLocale();
 
+const getResponseErrorMessage = async (
+  response: Response,
+  fallback: string
+) => {
+  try {
+    const raw = await response.text();
+    if (!raw) {
+      return fallback;
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      const message = parsed?.message || parsed?.error;
+
+      if (Array.isArray(message)) {
+        return message.join(', ');
+      }
+
+      return message || raw;
+    } catch {
+      return raw;
+    }
+  } catch {
+    return fallback;
+  }
+};
+
 const convertTimeFormatBasedOnLocality = (time: number) => {
   if (isUSCitizen()) {
     return `${time === 12 ? 12 : time % 12}:00 ${time >= 12 ? 'PM' : 'AM'}`;
@@ -195,14 +222,19 @@ const usePostActions = (onMutate?: () => void) => {
 
   const deletePost = useCallback(
     (post: any) => async () => {
-      const isPublishedPost =
-        post.state === 'PUBLISHED' || post.state === 'DELETED_REMOTE';
+      const isPublishedPost = post.state === 'PUBLISHED';
+      const isRemoteDeletedPost = post.state === 'DELETED_REMOTE';
       if (
         !(await deleteDialog(
           isPublishedPost
             ? t(
+                'are_you_sure_you_want_to_delete_this_post_on_the_platform',
+                'Are you sure you want to delete this post on the live platform?'
+              )
+            : isRemoteDeletedPost
+            ? t(
                 'are_you_sure_you_want_to_remove_this_post_from_publish_everywhere',
-                'Are you sure you want to remove this post from Publish Everywhere? This does not change the live platform post.'
+                'Are you sure you want to remove this post from Publish Everywhere?'
               )
             : t(
                 'are_you_sure_you_want_to_delete_post',
@@ -213,12 +245,38 @@ const usePostActions = (onMutate?: () => void) => {
         return;
       }
 
-      await fetch(`/posts/${post.group}`, {
-        method: 'DELETE',
-      });
+      const response = await fetch(
+        isPublishedPost
+          ? `/posts/${post.group}/published`
+          : `/posts/${post.group}`,
+        {
+          method: 'DELETE',
+        }
+      );
+
+      if (!response.ok) {
+        toaster.show(
+          await getResponseErrorMessage(
+            response,
+            isPublishedPost
+              ? t(
+                  'failed_to_delete_the_published_post',
+                  'Failed to delete the published post.'
+                )
+              : t('failed_to_delete_post', 'Failed to delete post.')
+          ),
+          'warning'
+        );
+        return;
+      }
 
       toaster.show(
         isPublishedPost
+          ? t(
+              'published_post_deleted_on_platform',
+              'Published post deleted on platform'
+            )
+          : isRemoteDeletedPost
           ? t(
               'post_removed_successfully',
               'Post removed from Publish Everywhere successfully'
@@ -1140,7 +1198,9 @@ const CalendarItem: FC<{
         >
           <DeletePost
             label={
-              isRemoteDeleted || post.state === 'PUBLISHED'
+              post.state === 'PUBLISHED'
+                ? t('delete_on_platform', 'Delete on platform')
+                : isRemoteDeleted
                 ? t('remove_from_app', 'Remove from app')
                 : t('delete_post', 'Delete Post')
             }

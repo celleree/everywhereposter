@@ -9,7 +9,13 @@ export class MediaRepository {
     private _post: PrismaRepository<'post'>
   ) {}
 
-  saveFile(org: string, fileName: string, filePath: string, originalName?: string) {
+  saveFile(
+    org: string,
+    fileName: string,
+    filePath: string,
+    originalName?: string,
+    mimeType?: string
+  ) {
     return this._media.model.media.create({
       data: {
         organization: {
@@ -20,12 +26,14 @@ export class MediaRepository {
         name: fileName,
         path: filePath,
         originalName: originalName || null,
+        type: this.getMediaType(filePath, fileName, originalName, mimeType),
       },
       select: {
         id: true,
         name: true,
         originalName: true,
         path: true,
+        type: true,
         thumbnail: true,
         alt: true,
       },
@@ -80,6 +88,7 @@ export class MediaRepository {
         alt: true,
         thumbnail: true,
         path: true,
+        type: true,
         thumbnailTimestamp: true,
       },
     });
@@ -108,6 +117,7 @@ export class MediaRepository {
         name: true,
         originalName: true,
         path: true,
+        type: true,
         thumbnail: true,
         alt: true,
         thumbnailTimestamp: true,
@@ -201,8 +211,38 @@ export class MediaRepository {
         typeof image.thumbnailTimestamp === 'number'
           ? image.thumbnailTimestamp
           : null,
+      type: this.getMediaType(path, name, image.originalName, image.mimetype),
       postedMedia: true,
     };
+  }
+
+  private getMediaType(
+    filePath: string,
+    fileName?: string | null,
+    originalName?: string | null,
+    mimeType?: string | null
+  ) {
+    const normalizedMimeType = (mimeType || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+
+    if (normalizedMimeType.startsWith('video/')) {
+      return 'video';
+    }
+
+    if (normalizedMimeType.startsWith('image/')) {
+      return 'image';
+    }
+
+    const fileIdentity = [filePath, fileName, originalName]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return /\.(mp4|mov|m4v)(?:$|[?#\s])/i.test(fileIdentity)
+      ? 'video'
+      : 'image';
   }
 
   private isLocalPostAttachedPath(path: string) {

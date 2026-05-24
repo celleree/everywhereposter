@@ -68,6 +68,8 @@ type PublishedCommentsResult =
 
 const FACEBOOK_COMMENT_RECONNECT_MESSAGE =
   'Reconnect this Facebook Page to grant pages_read_user_content and load Page comments.';
+const INSTAGRAM_COMMENT_RECONNECT_MESSAGE =
+  'Reconnect Instagram and grant instagram_manage_comments.';
 
 @Injectable()
 export class PostsService {
@@ -252,7 +254,8 @@ export class PostsService {
 
   async getPublishedComments(
     orgId: string,
-    postId: string
+    postId: string,
+    forceRefresh = false
   ): Promise<PublishedCommentsResult> {
     const post = await this._postRepository.getPostById(postId, orgId);
     if (!post?.integration) {
@@ -287,7 +290,9 @@ export class PostsService {
       await this.ensurePublishedIntegrationAccess(
         orgId,
         getIntegration,
-        integrationProvider
+        integrationProvider,
+        undefined,
+        forceRefresh
       );
 
       return {
@@ -300,7 +305,13 @@ export class PostsService {
         ),
       };
     } catch (error) {
-      console.log(error);
+      this.logPublishedCommentFailure(
+        'loading',
+        integrationProvider,
+        post,
+        undefined,
+        error
+      );
 
       if (
         integrationProvider.identifier === 'facebook' &&
@@ -312,12 +323,41 @@ export class PostsService {
         );
       }
 
+      if (integrationProvider.identifier === 'instagram') {
+        if (error instanceof RefreshToken && !forceRefresh) {
+          return this.getPublishedComments(orgId, postId, true);
+        }
+
+        if (
+          error instanceof RefreshToken ||
+          error instanceof BadRequestException
+        ) {
+          await this._integrationService.refreshNeeded(orgId, getIntegration.id);
+          return this.getInstagramCommentReconnectResponse(
+            error.message || INSTAGRAM_COMMENT_RECONNECT_MESSAGE
+          );
+        }
+      }
+
       if (error instanceof BadBody) {
+        const message =
+          error.message ||
+          (integrationProvider.identifier === 'instagram'
+            ? 'Could not load Instagram comments right now.'
+            : 'Could not load Facebook Page comments right now.');
+
+        if (
+          integrationProvider.identifier === 'instagram' &&
+          this.isInstagramCommentReconnectMessage(message)
+        ) {
+          await this._integrationService.refreshNeeded(orgId, getIntegration.id);
+          return this.getInstagramCommentReconnectResponse(message);
+        }
+
         return {
           supported: true,
           comments: [],
-          message:
-            error.message || 'Could not load Facebook Page comments right now.',
+          message,
         };
       }
 
@@ -361,13 +401,28 @@ export class PostsService {
         success: true,
       };
     } catch (error) {
-      if (error instanceof RefreshToken) {
+      this.logPublishedCommentFailure(
+        'replying',
+        integrationProvider,
+        post,
+        commentId,
+        error
+      );
+
+      if (error instanceof RefreshToken && !forceRefresh) {
         return this.replyToPublishedComment(
           orgId,
           postId,
           commentId,
           trimmedMessage,
           true
+        );
+      }
+
+      if (error instanceof RefreshToken) {
+        await this._integrationService.refreshNeeded(orgId, integration.id);
+        throw new BadRequestException(
+          error.message || this.getCommentReconnectMessage(integrationProvider)
         );
       }
 
@@ -412,13 +467,28 @@ export class PostsService {
         success: true,
       };
     } catch (error) {
-      if (error instanceof RefreshToken) {
+      this.logPublishedCommentFailure(
+        hide ? 'hiding' : 'unhiding',
+        integrationProvider,
+        post,
+        commentId,
+        error
+      );
+
+      if (error instanceof RefreshToken && !forceRefresh) {
         return this.hidePublishedComment(
           orgId,
           postId,
           commentId,
           hide,
           true
+        );
+      }
+
+      if (error instanceof RefreshToken) {
+        await this._integrationService.refreshNeeded(orgId, integration.id);
+        throw new BadRequestException(
+          error.message || this.getCommentReconnectMessage(integrationProvider)
         );
       }
 
@@ -461,8 +531,23 @@ export class PostsService {
         success: true,
       };
     } catch (error) {
-      if (error instanceof RefreshToken) {
+      this.logPublishedCommentFailure(
+        'deleting',
+        integrationProvider,
+        post,
+        commentId,
+        error
+      );
+
+      if (error instanceof RefreshToken && !forceRefresh) {
         return this.deletePublishedComment(orgId, postId, commentId, true);
+      }
+
+      if (error instanceof RefreshToken) {
+        await this._integrationService.refreshNeeded(orgId, integration.id);
+        throw new BadRequestException(
+          error.message || this.getCommentReconnectMessage(integrationProvider)
+        );
       }
 
       if (error instanceof BadBody) {
@@ -591,9 +676,19 @@ export class PostsService {
         (
           await Promise.all(
             (imagesList || []).map(async (p: any) => {
-              if (!p.path && p.id) {
+              if ((!p.path || !p.type) && p.id) {
                 imageUpdateNeeded = true;
-                return this._mediaService.getMediaById(p.id);
+                const media = await this._mediaService.getMediaById(p.id);
+
+                if (!p.path) {
+                  return media;
+                }
+
+                return {
+                  ...(media || {}),
+                  ...p,
+                  type: p.type || media?.type,
+                };
               }
 
               return p;
@@ -601,6 +696,7 @@ export class PostsService {
           )
         )
           .map((m) => {
+            const mediaType = this.getMediaType(m);
             return {
               ...m,
               url:
@@ -610,7 +706,7 @@ export class PostsService {
                     process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY +
                     m.path
                   : m.path,
-              type: 'image',
+              type: mediaType,
               path:
                 m.path.indexOf('http') === -1
                   ? process.env.UPLOAD_DIRECTORY + m.path
@@ -622,17 +718,23 @@ export class PostsService {
               return m;
             }
 
-            if (m.path.indexOf('.png') > -1) {
-              imageUpdateNeeded = true;
+            if (m.type === 'image') {
               const response = await axios.get(m.url, {
                 responseType: 'arraybuffer',
               });
 
               const imageBuffer = Buffer.from(response.data);
-
-              // Use sharp to get the metadata of the image
-              const buffer = await sharp(imageBuffer)
-                .jpeg({ quality: 100 })
+              imageUpdateNeeded = true;
+              const buffer = await sharp(imageBuffer, { failOn: 'error' })
+                .rotate()
+                .flatten({ background: '#ffffff' })
+                .toColorspace('srgb')
+                .withMetadata({ density: 72 })
+                .jpeg({
+                  quality: 90,
+                  progressive: false,
+                  mozjpeg: false,
+                })
                 .toBuffer();
 
               const { path, originalname } = await this.storage.uploadFile({
@@ -681,6 +783,39 @@ export class PostsService {
     } catch (err: any) {
       return imagesList;
     }
+  }
+
+  private getMediaType(media: any) {
+    if (media?.type === 'video') {
+      return 'video';
+    }
+
+    const mimeType = (media?.mimetype || media?.mimeType || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+
+    if (mimeType.startsWith('video/')) {
+      return 'video';
+    }
+
+    if (mimeType.startsWith('image/')) {
+      return 'image';
+    }
+
+    const fileIdentity = [
+      media?.path,
+      media?.url,
+      media?.name,
+      media?.originalName,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return /\.(mp4|mov|m4v)(?:$|[?#\s])/i.test(fileIdentity)
+      ? 'video'
+      : 'image';
   }
 
   async getPostGroupDebugExport(orgId: string, group: string) {
@@ -965,8 +1100,19 @@ export class PostsService {
         status: finalResult.status,
       };
     } catch (error) {
-      if (error instanceof RefreshToken) {
+      if (error instanceof RefreshToken && !forceRefresh) {
         return this.deletePublishedPost(orgId, group, true);
+      }
+
+      if (error instanceof RefreshToken) {
+        await this._integrationService.refreshNeeded(
+          orgId,
+          previousPost.integration.id
+        );
+        throw new BadRequestException(
+          error.message ||
+            'Token expired or invalid, please reconnect this channel.'
+        );
       }
 
       if (error instanceof BadBody) {
@@ -1359,6 +1505,56 @@ export class PostsService {
       message,
       comments: [],
     };
+  }
+
+  private getInstagramCommentReconnectResponse(
+    message = INSTAGRAM_COMMENT_RECONNECT_MESSAGE
+  ): PublishedCommentsResult {
+    return {
+      supported: true,
+      reconnectRequired: true,
+      message,
+      comments: [],
+    };
+  }
+
+  private isInstagramCommentReconnectMessage(message: string) {
+    const lowerMessage = message.toLowerCase();
+    return (
+      lowerMessage.includes('reconnect instagram') ||
+      lowerMessage.includes('token expired') ||
+      lowerMessage.includes('token expired or invalid') ||
+      lowerMessage.includes('session has been invalidated')
+    );
+  }
+
+  private getCommentReconnectMessage(integrationProvider: SocialProvider) {
+    if (integrationProvider.identifier === 'instagram') {
+      return 'Token expired or invalid. Reconnect Instagram.';
+    }
+
+    if (integrationProvider.identifier === 'facebook') {
+      return FACEBOOK_COMMENT_RECONNECT_MESSAGE;
+    }
+
+    return 'Token expired or invalid, please reconnect this channel.';
+  }
+
+  private logPublishedCommentFailure(
+    action: string,
+    integrationProvider: SocialProvider,
+    post: (Post & { integration?: Integration }) | null | undefined,
+    commentId: string | undefined,
+    error: unknown
+  ) {
+    console.error('Published comment management failed', {
+      action,
+      provider: integrationProvider.identifier,
+      localPostId: post?.id,
+      platformMediaId: post?.releaseId,
+      platformCommentId: commentId,
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 
   private async updatePublishedPost(

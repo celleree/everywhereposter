@@ -4,6 +4,7 @@ import {
   HistoricalMediaPage,
   PublishedComment,
   PublishedCommentActionResponse,
+  PublishedDeleteResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -19,6 +20,55 @@ import {
 import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import sharp from 'sharp';
+
+type InstagramMediaCreateDiagnostics = {
+  mediaUrl?: string;
+  mediaType?: string;
+  isVideo: boolean;
+  selectedMediaType?: string;
+  postType?: string;
+  post_type?: string;
+  resolvedPostType?: string;
+  postTypeWasExplicit?: boolean;
+  thumbOffset?: string;
+  isStory: boolean;
+  isReel: boolean;
+  isCarousel: boolean;
+  isCarouselItem: boolean;
+  isTrialReel: boolean;
+  createParams?: Record<string, string>;
+  publicUrlPreflight?: InstagramPublicUrlPreflight;
+  imageFile?: InstagramImageFileDiagnostics;
+  httpStatus?: number | string;
+  graphResponse?: any;
+  graphError?: string;
+};
+
+type InstagramPublicUrlPreflight = {
+  method: 'HEAD' | 'GET';
+  status: number;
+  finalUrl: string;
+  contentType: string;
+  contentLength: string;
+  cfCacheStatus: string;
+  redirected: boolean;
+};
+
+type InstagramImageFileDiagnostics = {
+  format?: string;
+  width?: number;
+  height?: number;
+  aspectRatio?: number;
+  space?: string;
+  channels?: number;
+  depth?: string;
+  hasAlpha?: boolean;
+  isProgressive?: boolean;
+  hasProfile?: boolean;
+  orientation?: number;
+  size: number;
+};
 
 @Rules(
   "Instagram should have at least one attachment, if it's a story, it can have only one picture"
@@ -43,6 +93,7 @@ export class InstagramProvider
   override maxConcurrentJob = 400;
   editor = 'normal' as const;
   dto = InstagramDto;
+  convertToJPEG = true;
   private getAccountLabel(name?: string, username?: string) {
     return username || name || '';
   }
@@ -53,12 +104,7 @@ export class InstagramProvider
   override getPublishedCapabilities(integration?: Integration) {
     return this.buildPublishedCapabilities(integration, {
       editMode: 'none',
-      canDeletePublished: false,
-      reason:
-        'Instagram published post editing and deletion are still disabled until we verify stable support for the exact media types this app publishes.',
-      constraints: [
-        'Use native Instagram tools for live post changes until this capability is implemented here.',
-      ],
+      canDeletePublished: true,
     });
   }
 
@@ -340,15 +386,13 @@ export class InstagramProvider
 
     const graphError = this.getGraphApiError(body);
     if (graphError?.message) {
-      const code = [graphError.code, graphError.subcode]
-        .filter(Boolean)
-        .join('/');
-      const message = `Instagram Graph API error${
-        code ? ` (${code})` : ''
-      }: ${graphError.message}`;
+      const message = this.formatGraphApiErrorMessage(graphError);
 
       return {
-        type: status === 401 ? ('refresh-token' as const) : ('bad-body' as const),
+        type:
+          status === 401 || graphError.code === '190'
+            ? ('refresh-token' as const)
+            : ('bad-body' as const),
         value: message,
       };
     }
@@ -580,8 +624,50 @@ export class InstagramProvider
       );
     }
 
-    const isStory = firstPost.settings.post_type === 'story';
     const isTrialReel = !!firstPost.settings.is_trial_reel;
+    const mediaCount = firstPost.media.length;
+    const hasVideo = firstPost.media.some((media) =>
+      this.isVideoMedia(media, this.getPublicMediaUrl(media))
+    );
+    const validPostTypes = ['post', 'reel', 'story'];
+    const rawPostType = firstPost.settings.post_type;
+    const hasValidPostType = validPostTypes.includes(String(rawPostType));
+    const rawPostTypeExplicit = (firstPost.settings as any).post_type_explicit;
+    const postTypeExplicit =
+      rawPostTypeExplicit === true || rawPostTypeExplicit === 'true';
+    const isStandaloneVideo = mediaCount === 1 && hasVideo;
+    const resolvedPostType = hasValidPostType
+      ? rawPostType
+      : isStandaloneVideo
+      ? 'reel'
+      : 'post';
+    const postTypeWasExplicit =
+      rawPostTypeExplicit === false || rawPostTypeExplicit === 'false'
+        ? false
+        : hasValidPostType || postTypeExplicit;
+    const isStory = resolvedPostType === 'story';
+    const isCarousel = mediaCount > 1 && !isStory;
+    const isExplicitReel =
+      !isStory && (resolvedPostType === 'reel' || isTrialReel);
+
+    if (isTrialReel && isStory) {
+      throw new BadBody(
+        'instagram_reel_validation',
+        '{}',
+        '{}',
+        'Instagram Trial Reels must use Reel as the post type, not Story.'
+      );
+    }
+
+    if (isExplicitReel && (mediaCount !== 1 || !hasVideo)) {
+      throw new BadBody(
+        'instagram_reel_validation',
+        '{}',
+        '{}',
+        'Instagram Reels require exactly one video.'
+      );
+    }
+
     const medias = await Promise.all(
       firstPost?.media?.map(async (m) => {
         const params = new URLSearchParams({
@@ -590,32 +676,31 @@ export class InstagramProvider
 
         const mediaUrl = this.getPublicMediaUrl(m);
         const isVideo = this.isVideoMedia(m, mediaUrl);
+        const thumbOffset = String(m?.thumbnailTimestamp || 0);
+        let selectedMediaType = '';
 
         if (isVideo) {
           params.set('video_url', mediaUrl);
-          params.set(
-            'media_type',
-            firstPost?.media?.length === 1
-              ? isStory
-                ? 'STORIES'
-                : 'REELS'
-              : isStory
-              ? 'STORIES'
-              : 'VIDEO'
-          );
-          params.set('thumb_offset', String(m?.thumbnailTimestamp || 0));
+          selectedMediaType = isStory
+            ? 'STORIES'
+            : isExplicitReel
+            ? 'REELS'
+            : 'VIDEO';
+          params.set('media_type', selectedMediaType);
+          params.set('thumb_offset', thumbOffset);
         } else {
           params.set('image_url', mediaUrl);
           if (isStory) {
+            selectedMediaType = 'STORIES';
             params.set('media_type', 'STORIES');
           }
         }
 
-        if (firstPost.media?.length === 1) {
+        if (mediaCount === 1) {
           params.set('caption', firstPost.message);
         }
 
-        if ((firstPost?.media?.length || 0) > 1 && !isStory) {
+        if (isCarousel) {
           params.set('is_carousel_item', 'true');
         }
 
@@ -636,31 +721,65 @@ export class InstagramProvider
           );
         }
 
-        const { id: photoId } = await this.fetchInstagramJson<{ id?: string }>(
-          `https://${type}/v20.0/${id}/media?${params.toString()}`,
-          {
-            method: 'POST',
-          },
-          'instagram_media_create'
-        );
+        const diagnostics: InstagramMediaCreateDiagnostics = {
+          mediaUrl,
+          mediaType: m.type,
+          isVideo,
+          selectedMediaType,
+          postType: rawPostType,
+          post_type: rawPostType,
+          resolvedPostType,
+          postTypeWasExplicit,
+          thumbOffset: isVideo ? thumbOffset : undefined,
+          isStory,
+          isReel: selectedMediaType === 'REELS',
+          isCarousel,
+          isCarouselItem: isCarousel,
+          isTrialReel,
+          createParams: this.getSafeInstagramParams(params),
+        };
 
-        if (!photoId) {
-          throw new BadBody(
-            'instagram_media_create',
-            '{}',
-            '{}',
-            'Instagram did not return a media container id.'
+        try {
+          if (isVideo) {
+            await this.validatePublicVideoUrl(mediaUrl, diagnostics);
+          } else {
+            await this.validatePublicImageUrl(mediaUrl, diagnostics);
+          }
+
+          const { id: photoId } = await this.fetchInstagramJson<{ id?: string }>(
+            `https://${type}/v20.0/${id}/media?${params.toString()}`,
+            {
+              method: 'POST',
+            },
+            'instagram_media_create'
           );
+
+          if (!photoId) {
+            throw new BadBody(
+              'instagram_media_create',
+              '{}',
+              '{}',
+              'Instagram did not return a media container id.'
+            );
+          }
+
+          await this.waitForMediaContainer(
+            photoId,
+            accessToken,
+            type,
+            'instagram_media_create',
+            diagnostics
+          );
+
+          return photoId;
+        } catch (error) {
+          if (!isVideo) {
+            this.throwInstagramImageMediaCreateFailure(diagnostics, error);
+          }
+
+          this.logInstagramMediaCreateFailure(diagnostics, error);
+          throw error;
         }
-
-        await this.waitForMediaContainer(
-          photoId,
-          accessToken,
-          type,
-          'instagram_media_create'
-        );
-
-        return photoId;
       }) || []
     );
 
@@ -732,7 +851,22 @@ export class InstagramProvider
         containerId,
         accessToken,
         type,
-        'instagram_carousel_create'
+        'instagram_carousel_create',
+        {
+          isVideo: medias.some(Boolean) && firstPost.media.some((media) =>
+            this.isVideoMedia(media, this.getPublicMediaUrl(media))
+          ),
+          postType: rawPostType,
+          post_type: rawPostType,
+          resolvedPostType,
+          postTypeWasExplicit,
+          isStory,
+          isReel: false,
+          isCarousel: true,
+          isCarouselItem: false,
+          isTrialReel,
+          createParams: this.getSafeInstagramParams(params),
+        }
       );
 
       const mediaId = await this.publishMediaContainer(
@@ -774,6 +908,60 @@ export class InstagramProvider
     } catch {
       return undefined;
     }
+  }
+
+  private formatGraphApiErrorMessage(graphError: {
+    message: string;
+    code: string;
+    subcode: string;
+  }) {
+    const code = [graphError.code, graphError.subcode]
+      .filter(Boolean)
+      .join('/');
+    const messageWithCode = `Instagram Graph API error${
+      code ? ` (${code})` : ''
+    }: ${graphError.message}`;
+    const lowerMessage = graphError.message.toLowerCase();
+
+    if (graphError.code === '190' || lowerMessage.includes('access token')) {
+      return `Token expired or invalid. Reconnect Instagram. Meta said: ${messageWithCode}`;
+    }
+
+    if (
+      lowerMessage.includes('instagram_manage_comments') ||
+      lowerMessage.includes('manage_comments')
+    ) {
+      return `Reconnect Instagram and grant instagram_manage_comments. Meta said: ${messageWithCode}`;
+    }
+
+    if (
+      lowerMessage.includes('unsupported') ||
+      lowerMessage.includes('does not exist') ||
+      lowerMessage.includes('cannot be loaded')
+    ) {
+      return `Instagram media/comment is not accessible. Confirm the saved platform media ID and selected Instagram comment ID are correct for this connected account. Meta said: ${messageWithCode}`;
+    }
+
+    if (
+      lowerMessage.includes('permission') ||
+      graphError.code === '10' ||
+      graphError.code === '200'
+    ) {
+      return `Meta blocked this Instagram Graph call. Confirm the Meta user is an app Admin, Developer, or Tester, manages the connected Facebook Page, and granted the required Instagram permissions. Meta said: ${messageWithCode}`;
+    }
+
+    return messageWithCode;
+  }
+
+  private isAlreadyDeletedInstagramDeleteError(error: unknown) {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    const details = JSON.stringify((error as any)?.details || '').toLowerCase();
+
+    return (
+      message.includes('already deleted') ||
+      details.includes('already deleted') ||
+      details.includes('already_deleted')
+    );
   }
 
   private async fetchInstagramJson<T>(
@@ -928,6 +1116,559 @@ export class InstagramProvider
     );
   }
 
+  private getSafeInstagramParams(params: URLSearchParams) {
+    return Array.from(params.entries()).reduce<Record<string, string>>(
+      (acc, [key, value]) => {
+        if (key.toLowerCase().includes('token')) {
+          return acc;
+        }
+
+        acc[key] = value;
+        return acc;
+      },
+      {}
+    );
+  }
+
+  private safeStringifyDiagnostics(value: any) {
+    return JSON.stringify(value, (key, item) => {
+      if (key.toLowerCase().includes('token')) {
+        return '[redacted]';
+      }
+
+      return item;
+    });
+  }
+
+  private parseDiagnosticJson(value: any) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return undefined;
+    }
+
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+
+  private getInstagramFailureDetails(error: unknown) {
+    const failure = error as any;
+    const details = Array.isArray(failure?.details)
+      ? failure.details[0]
+      : undefined;
+    const graphResponse = this.parseDiagnosticJson(details?.json);
+
+    return {
+      identifier:
+        typeof details?.identifier === 'string' ? details.identifier : '',
+      message:
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+          ? error
+          : 'Unknown Instagram media create error',
+      graphResponse,
+      body: details?.body,
+    };
+  }
+
+  private throwInstagramImageMediaCreateFailure(
+    diagnostics: InstagramMediaCreateDiagnostics,
+    error: unknown
+  ): never {
+    const failure = this.getInstagramFailureDetails(error);
+    const imageDiagnostics: InstagramMediaCreateDiagnostics = {
+      ...diagnostics,
+      httpStatus:
+        diagnostics.httpStatus ||
+        diagnostics.publicUrlPreflight?.status ||
+        'unavailable from Instagram fetch wrapper',
+      graphResponse: failure.graphResponse,
+      graphError: failure.message,
+    };
+
+    throw new BadBody(
+      failure.identifier || 'instagram_media_create',
+      this.safeStringifyDiagnostics(failure.graphResponse || {}) || '{}',
+      failure.body || '{}',
+      `Instagram image media create failed. ${
+        failure.message
+      }. Diagnostics: ${this.safeStringifyDiagnostics(imageDiagnostics)}`
+    );
+  }
+
+  private logInstagramMediaCreateFailure(
+    diagnostics: InstagramMediaCreateDiagnostics,
+    error: unknown
+  ) {
+    if (!diagnostics.isVideo) {
+      return;
+    }
+
+    console.error('Instagram video media create failed', {
+      ...diagnostics,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  private buildPublicUrlPreflight(
+    response: Response,
+    method: 'HEAD' | 'GET'
+  ): InstagramPublicUrlPreflight {
+    return {
+      method,
+      status: response.status,
+      finalUrl: response.url,
+      contentType: response.headers.get('content-type') || '',
+      contentLength: response.headers.get('content-length') || '',
+      cfCacheStatus: response.headers.get('cf-cache-status') || '',
+      redirected: response.redirected,
+    };
+  }
+
+  private hasAuthRedirectUrl(url: string) {
+    try {
+      const parsed = new URL(url);
+      return (
+        this.isLocalOrPrivateHost(parsed.hostname.toLowerCase()) ||
+        parsed.pathname.startsWith('/auth') ||
+        parsed.pathname.startsWith('/login')
+      );
+    } catch {
+      return true;
+    }
+  }
+
+  private async fetchPublicImageUrl(
+    mediaUrl: string,
+    method: 'HEAD' | 'GET'
+  ) {
+    return fetch(mediaUrl, { method });
+  }
+
+  private getInstagramImageAspectBounds(
+    diagnostics: InstagramMediaCreateDiagnostics
+  ) {
+    return diagnostics.isStory
+      ? { min: 9 / 16, max: 1.91 }
+      : { min: 4 / 5, max: 1.91 };
+  }
+
+  private async validateInstagramImageFile(
+    mediaUrl: string,
+    diagnostics: InstagramMediaCreateDiagnostics
+  ) {
+    let response: Response;
+
+    try {
+      response = await this.fetchPublicImageUrl(mediaUrl, 'GET');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new BadBody(
+        'instagram_image_preflight',
+        '{}',
+        '{}',
+        `Instagram image validation failed before calling Meta. Could not download ${mediaUrl}: ${message}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    if (
+      !response.ok ||
+      response.redirected ||
+      response.url !== mediaUrl ||
+      this.hasAuthRedirectUrl(response.url)
+    ) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(
+          this.buildPublicUrlPreflight(response, 'GET')
+        ),
+        '{}',
+        `Instagram image validation failed before calling Meta. Public image GET did not return a direct HTTP 200 response. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        '{}',
+        '{}',
+        `Instagram image validation failed before calling Meta. Public image body was empty for ${mediaUrl}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    let metadata: sharp.Metadata;
+    try {
+      metadata = await sharp(buffer, { failOn: 'error' }).metadata();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new BadBody(
+        'instagram_image_preflight',
+        '{}',
+        '{}',
+        `Instagram image validation failed before calling Meta. Image is corrupt or unsupported: ${message}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    const width = metadata.width || 0;
+    const height = metadata.height || 0;
+    const aspectRatio =
+      width && height ? Number((width / height).toFixed(4)) : undefined;
+    diagnostics.imageFile = {
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      aspectRatio,
+      space: metadata.space,
+      channels: metadata.channels,
+      depth: metadata.depth,
+      hasAlpha: metadata.hasAlpha,
+      isProgressive: metadata.isProgressive,
+      hasProfile: metadata.hasProfile,
+      orientation: metadata.orientation,
+      size: buffer.length,
+    };
+
+    if (metadata.format !== 'jpeg') {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(diagnostics.imageFile),
+        '{}',
+        `Instagram image validation failed before calling Meta. Expected normalized JPEG, got "${
+          metadata.format || 'unknown'
+        }". Diagnostics: ${this.safeStringifyDiagnostics(diagnostics)}`
+      );
+    }
+
+    if (!width || !height) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(diagnostics.imageFile),
+        '{}',
+        `Instagram image validation failed before calling Meta. Could not read image dimensions. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    if (width < 320 || height < 320) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(diagnostics.imageFile),
+        '{}',
+        `Instagram image validation failed before calling Meta. Image dimensions ${width}x${height} are below Instagram's 320px minimum. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    const aspectBounds = this.getInstagramImageAspectBounds(diagnostics);
+    if (
+      !aspectRatio ||
+      aspectRatio < aspectBounds.min ||
+      aspectRatio > aspectBounds.max
+    ) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(diagnostics.imageFile),
+        '{}',
+        `Instagram image validation failed before calling Meta. Image aspect ratio ${
+          aspectRatio || 'unknown'
+        } is outside Instagram's supported range ${aspectBounds.min.toFixed(
+          4
+        )}-${aspectBounds.max}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    if (metadata.hasAlpha || metadata.channels !== 3) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(diagnostics.imageFile),
+        '{}',
+        `Instagram image validation failed before calling Meta. Image must be flattened RGB without alpha. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    if (metadata.space !== 'srgb') {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(diagnostics.imageFile),
+        '{}',
+        `Instagram image validation failed before calling Meta. Image color space must be sRGB, got "${
+          metadata.space || 'unknown'
+        }". Diagnostics: ${this.safeStringifyDiagnostics(diagnostics)}`
+      );
+    }
+
+    if (metadata.isProgressive || !metadata.hasProfile) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(diagnostics.imageFile),
+        '{}',
+        `Instagram image validation failed before calling Meta. Image must be a baseline JPEG with an sRGB profile. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+  }
+
+  private async fetchPublicVideoUrl(
+    mediaUrl: string,
+    method: 'HEAD' | 'GET'
+  ) {
+    return fetch(mediaUrl, {
+      method,
+      ...(method === 'GET' ? { headers: { Range: 'bytes=0-0' } } : {}),
+    });
+  }
+
+  private async validatePublicImageUrl(
+    mediaUrl: string,
+    diagnostics: InstagramMediaCreateDiagnostics
+  ) {
+    let response: Response | undefined;
+    let method: 'HEAD' | 'GET' = 'HEAD';
+    let headError = '';
+
+    try {
+      response = await this.fetchPublicImageUrl(mediaUrl, 'HEAD');
+    } catch (error) {
+      headError = error instanceof Error ? error.message : String(error);
+    }
+
+    const allowedContentTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    const shouldRetryWithGet = (current?: Response) => {
+      if (!current?.ok || current.status !== 200) {
+        return true;
+      }
+
+      const preflight = this.buildPublicUrlPreflight(current, method);
+      const contentType = preflight.contentType
+        .split(';')[0]
+        .trim()
+        .toLowerCase();
+
+      return (
+        current.redirected ||
+        current.url !== mediaUrl ||
+        this.hasAuthRedirectUrl(current.url) ||
+        !allowedContentTypes.includes(contentType) ||
+        !preflight.contentLength
+      );
+    };
+
+    if (shouldRetryWithGet(response)) {
+      method = 'GET';
+      try {
+        response = await this.fetchPublicImageUrl(mediaUrl, 'GET');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new BadBody(
+          'instagram_image_preflight',
+          '{}',
+          '{}',
+          `Instagram image URL preflight failed before calling Meta. Public URL is unreachable: ${mediaUrl}. HEAD error: ${
+            headError || 'none'
+          }. GET error: ${message}. Diagnostics: ${this.safeStringifyDiagnostics(
+            diagnostics
+          )}`
+        );
+      }
+    }
+
+    if (!response) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        '{}',
+        '{}',
+        `Instagram image URL preflight failed before calling Meta. No response returned for ${mediaUrl}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    const preflight = this.buildPublicUrlPreflight(response, method);
+    diagnostics.publicUrlPreflight = preflight;
+    diagnostics.httpStatus = preflight.status;
+
+    if (!response.ok || response.status !== 200) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(preflight),
+        '{}',
+        `Instagram image URL preflight failed before calling Meta. Public URL returned HTTP ${response.status} for ${method}: ${mediaUrl}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    if (
+      response.redirected ||
+      preflight.finalUrl !== mediaUrl ||
+      this.hasAuthRedirectUrl(preflight.finalUrl)
+    ) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(preflight),
+        '{}',
+        `Instagram image URL preflight failed before calling Meta. Public URL redirected to ${preflight.finalUrl}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    const contentType = preflight.contentType
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    if (!allowedContentTypes.includes(contentType)) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(preflight),
+        '{}',
+        `Instagram image URL preflight failed before calling Meta. Expected content-type image/jpeg or image/png, got "${
+          contentType || 'missing'
+        }" from ${mediaUrl}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    const parsedLength = Number(preflight.contentLength);
+    if (
+      !preflight.contentLength ||
+      !Number.isFinite(parsedLength) ||
+      parsedLength <= 0
+    ) {
+      throw new BadBody(
+        'instagram_image_preflight',
+        this.safeStringifyDiagnostics(preflight),
+        '{}',
+        `Instagram image URL preflight failed before calling Meta. Invalid content-length "${
+          preflight.contentLength || 'missing'
+        }" from ${mediaUrl}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    await this.validateInstagramImageFile(mediaUrl, diagnostics);
+  }
+
+  private async validatePublicVideoUrl(
+    mediaUrl: string,
+    diagnostics: InstagramMediaCreateDiagnostics
+  ) {
+    let response: Response | undefined;
+    let method: 'HEAD' | 'GET' = 'HEAD';
+    let headError = '';
+
+    try {
+      response = await this.fetchPublicVideoUrl(mediaUrl, 'HEAD');
+    } catch (error) {
+      headError = error instanceof Error ? error.message : String(error);
+    }
+
+    if (!response?.ok) {
+      method = 'GET';
+      try {
+        response = await this.fetchPublicVideoUrl(mediaUrl, 'GET');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new BadBody(
+          'instagram_video_preflight',
+          '{}',
+          '{}',
+          `Instagram video URL preflight failed before calling Meta. Public URL is unreachable: ${mediaUrl}. HEAD error: ${
+            headError || 'none'
+          }. GET error: ${message}. Diagnostics: ${this.safeStringifyDiagnostics(
+            diagnostics
+          )}`
+        );
+      }
+    }
+
+    if (!response.ok) {
+      throw new BadBody(
+        'instagram_video_preflight',
+        '{}',
+        '{}',
+        `Instagram video URL preflight failed before calling Meta. Public URL returned HTTP ${response.status} for ${method}: ${mediaUrl}. Diagnostics: ${this.safeStringifyDiagnostics(
+          diagnostics
+        )}`
+      );
+    }
+
+    const allowedContentTypes = ['video/mp4', 'application/octet-stream'];
+    let contentType = (response.headers.get('content-type') || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    let contentLength = response.headers.get('content-length') || '';
+
+    if (!allowedContentTypes.includes(contentType) && method === 'HEAD') {
+      try {
+        const getResponse = await this.fetchPublicVideoUrl(mediaUrl, 'GET');
+        if (getResponse.ok) {
+          response = getResponse;
+          method = 'GET';
+          contentType = (response.headers.get('content-type') || '')
+            .split(';')[0]
+            .trim()
+            .toLowerCase();
+          contentLength = response.headers.get('content-length') || '';
+        }
+      } catch {}
+    }
+
+    if (!allowedContentTypes.includes(contentType)) {
+      throw new BadBody(
+        'instagram_video_preflight',
+        '{}',
+        '{}',
+        `Instagram video URL preflight failed before calling Meta. Expected content-type video/mp4 or application/octet-stream, got "${
+          contentType || 'missing'
+        }" from ${mediaUrl}. Diagnostics: ${this.safeStringifyDiagnostics({
+          ...diagnostics,
+          preflight: {
+            method,
+            status: response.status,
+            contentType,
+            contentLength: contentLength || 'missing',
+          },
+        })}`
+      );
+    }
+
+    if (contentLength) {
+      const parsedLength = Number(contentLength);
+      if (!Number.isFinite(parsedLength) || parsedLength <= 0) {
+        throw new BadBody(
+          'instagram_video_preflight',
+          '{}',
+          '{}',
+          `Instagram video URL preflight failed before calling Meta. Invalid content-length "${contentLength}" from ${mediaUrl}. Diagnostics: ${this.safeStringifyDiagnostics(
+            diagnostics
+          )}`
+        );
+      }
+    }
+  }
+
   private isLocalOrPrivateHost(hostname: string) {
     if (
       hostname === 'localhost' ||
@@ -959,7 +1700,8 @@ export class InstagramProvider
     containerId: string,
     accessToken: string,
     type: string,
-    identifier: string
+    identifier: string,
+    diagnostics?: InstagramMediaCreateDiagnostics
   ) {
     const maxAttempts = 60;
     const delayMs = 5000;
@@ -978,11 +1720,29 @@ export class InstagramProvider
       }
 
       if (status_code === 'ERROR') {
+        const containerDiagnostics = await this.fetchMediaContainerDiagnostics(
+          containerId,
+          accessToken,
+          type,
+          identifier
+        );
+        const message = this.formatMediaContainerFailureMessage(
+          containerId,
+          containerDiagnostics,
+          diagnostics
+        );
+
+        console.error('Instagram media container failed', {
+          containerId,
+          mediaCreate: diagnostics,
+          container: containerDiagnostics,
+        });
+
         throw new BadBody(
           identifier,
+          this.safeStringifyDiagnostics(containerDiagnostics),
           '{}',
-          '{}',
-          `Instagram media container ${containerId} failed.`
+          message
         );
       }
 
@@ -1013,6 +1773,56 @@ export class InstagramProvider
       '{}',
       `Timed out waiting for Instagram media container ${containerId} to finish.`
     );
+  }
+
+  private async fetchMediaContainerDiagnostics(
+    containerId: string,
+    accessToken: string,
+    type: string,
+    identifier: string
+  ) {
+    const fieldSets = [
+      'status_code,status,error,error_message,id',
+      'status_code,status,error_message,id',
+      'status_code,status,id',
+    ];
+    let lastError = '';
+
+    for (const fields of fieldSets) {
+      try {
+        const result = await this.fetchInstagramJson<Record<string, any>>(
+          `https://${type}/v20.0/${containerId}?fields=${encodeURIComponent(
+            fields
+          )}&access_token=${accessToken}`,
+          undefined,
+          `${identifier}_diagnostics`
+        );
+
+        return {
+          requestedFields: fields,
+          response: result,
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    return {
+      requestedFields: fieldSets.join(' | '),
+      diagnosticFetchError: lastError || 'Unknown diagnostic fetch failure.',
+    };
+  }
+
+  private formatMediaContainerFailureMessage(
+    containerId: string,
+    containerDiagnostics: Record<string, any>,
+    mediaDiagnostics?: InstagramMediaCreateDiagnostics
+  ) {
+    return `Instagram media container ${containerId} failed. Meta container response: ${this.safeStringifyDiagnostics(
+      containerDiagnostics
+    )}. Media create diagnostics: ${this.safeStringifyDiagnostics(
+      mediaDiagnostics || {}
+    )}`;
   }
 
   private async publishMediaContainer(
@@ -1094,6 +1904,45 @@ export class InstagramProvider
     ];
   }
 
+  async deletePublished(
+    id: string,
+    accessToken: string,
+    releaseId: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<PublishedDeleteResponse> {
+    try {
+      const result = await this.fetchInstagramJson<{ success?: boolean }>(
+        `https://${type}/v20.0/${releaseId}?access_token=${accessToken}`,
+        {
+          method: 'DELETE',
+        },
+        'instagram_delete_published'
+      );
+
+      if (result?.success === false) {
+        throw new BadBody(
+          'instagram_delete_published',
+          JSON.stringify(result),
+          '{}',
+          'Instagram rejected the published post delete request.'
+        );
+      }
+
+      return {
+        status: 'deleted',
+      };
+    } catch (error) {
+      if (this.isAlreadyDeletedInstagramDeleteError(error)) {
+        return {
+          status: 'already_deleted',
+        };
+      }
+
+      throw error;
+    }
+  }
+
   async readComments(
     id: string,
     accessToken: string,
@@ -1102,21 +1951,28 @@ export class InstagramProvider
     type = 'graph.facebook.com'
   ): Promise<PublishedComment[]> {
     const fields = encodeURIComponent(
-      'id,text,username,timestamp,like_count,hidden'
+      'id,text,username,timestamp,like_count,hidden,replies{id}'
     );
-    const { data } = await (
-      await this.fetch(
-        `https://${type}/v20.0/${postId}/comments?fields=${fields}&limit=50&access_token=${accessToken}`
-      )
-    ).json();
+    const { data } = await this.fetchInstagramJson<{ data?: any[] }>(
+      `https://${type}/v20.0/${postId}/comments?fields=${fields}&limit=50&access_token=${accessToken}`,
+      undefined,
+      'instagram_comments'
+    );
 
     return (data || []).map((comment: any) => ({
       id: String(comment.id),
       message: comment.text || '',
-      authorName: comment.username || '',
+      authorName:
+        comment.username || comment.from?.username || comment.user?.username || '',
       createdTime: comment.timestamp || '',
       likeCount: Number(comment.like_count || 0),
-      replyCount: Number(comment.reply_count || 0),
+      replyCount: Number(
+        comment.reply_count ||
+          comment.replies_count ||
+          comment.replies?.summary?.total_count ||
+          comment.replies?.data?.length ||
+          0
+      ),
       permalinkUrl: comment.permalink || comment.permalink_url || '',
       hidden:
         typeof comment.hidden === 'boolean' ? comment.hidden : undefined,
@@ -1135,16 +1991,24 @@ export class InstagramProvider
     integration: Integration,
     type = 'graph.facebook.com'
   ): Promise<PublishedCommentActionResponse> {
-    const { id: replyId } = await (
-      await this.fetch(
-        `https://${type}/v20.0/${commentId}/replies?message=${encodeURIComponent(
-          message
-        )}&access_token=${accessToken}`,
-        {
-          method: 'POST',
-        }
-      )
-    ).json();
+    const { id: replyId } = await this.fetchInstagramJson<{ id?: string }>(
+      `https://${type}/v20.0/${commentId}/replies?message=${encodeURIComponent(
+        message
+      )}&access_token=${accessToken}`,
+      {
+        method: 'POST',
+      },
+      'instagram_comment_reply'
+    );
+
+    if (!replyId) {
+      throw new BadBody(
+        'instagram_comment_reply',
+        '{}',
+        '{}',
+        'Instagram did not return a reply comment ID.'
+      );
+    }
 
     return {
       success: true,
@@ -1162,14 +2026,24 @@ export class InstagramProvider
     integration: Integration,
     type = 'graph.facebook.com'
   ): Promise<PublishedCommentActionResponse> {
-    await this.fetch(
+    const result = await this.fetchInstagramJson<{ success?: boolean }>(
       `https://${type}/v20.0/${commentId}?hide=${
         hide ? 'true' : 'false'
       }&access_token=${accessToken}`,
       {
         method: 'POST',
-      }
+      },
+      'instagram_comment_hide'
     );
+
+    if (result?.success === false) {
+      throw new BadBody(
+        'instagram_comment_hide',
+        JSON.stringify(result),
+        '{}',
+        'Instagram rejected the hide/unhide comment request.'
+      );
+    }
 
     return {
       success: true,
@@ -1186,12 +2060,22 @@ export class InstagramProvider
     integration: Integration,
     type = 'graph.facebook.com'
   ): Promise<PublishedCommentActionResponse> {
-    await this.fetch(
+    const result = await this.fetchInstagramJson<{ success?: boolean }>(
       `https://${type}/v20.0/${commentId}?access_token=${accessToken}`,
       {
         method: 'DELETE',
-      }
+      },
+      'instagram_comment_delete'
     );
+
+    if (result?.success === false) {
+      throw new BadBody(
+        'instagram_comment_delete',
+        JSON.stringify(result),
+        '{}',
+        'Instagram rejected the delete comment request.'
+      );
+    }
 
     return {
       success: true,

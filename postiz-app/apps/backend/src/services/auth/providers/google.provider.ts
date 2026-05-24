@@ -9,7 +9,7 @@ const clientAndYoutube = () => {
   const client = new google.auth.OAuth2({
     clientId: process.env.YOUTUBE_CLIENT_ID,
     clientSecret: process.env.YOUTUBE_CLIENT_SECRET,
-    redirectUri: `${process.env.FRONTEND_URL}/integrations/social/youtube`,
+    redirectUri: `${process.env.FRONTEND_URL}/auth?provider=GOOGLE`,
   });
 
   const youtube = (newClient: OAuth2Client) =>
@@ -42,7 +42,7 @@ export class GoogleProvider extends AuthProviderAbstract {
       access_type: 'online',
       prompt: 'consent',
       state,
-      redirect_uri: `${process.env.FRONTEND_URL}/integrations/social/youtube`,
+      redirect_uri: `${process.env.FRONTEND_URL}/auth?provider=GOOGLE`,
       scope: [
         'https://www.googleapis.com/auth/userinfo.profile',
         'https://www.googleapis.com/auth/userinfo.email',

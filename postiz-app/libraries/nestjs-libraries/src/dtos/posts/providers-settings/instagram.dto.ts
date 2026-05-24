@@ -14,9 +14,12 @@ export class Collaborators {
   label: string;
 }
 export class InstagramDto {
-  @IsIn(['post', 'story'])
-  @IsDefined()
-  post_type: 'post' | 'story';
+  @IsIn(['post', 'reel', 'story'])
+  @IsOptional()
+  post_type?: 'post' | 'reel' | 'story';
+
+  @IsOptional()
+  post_type_explicit?: boolean;
 
   @IsOptional()
   is_trial_reel?: boolean;

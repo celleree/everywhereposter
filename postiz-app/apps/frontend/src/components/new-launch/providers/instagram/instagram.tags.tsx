@@ -73,6 +73,7 @@ export const InstagramCollaboratorsTags: FC<{
       <div>
         <div className={clsx(`text-[14px] mb-[6px]`)}>{label}</div>
         <ReactTags
+          allowResize={false}
           placeholderText={t('add_a_tag', 'Add a tag')}
           suggestions={suggestionsArray}
           selected={tagValue}

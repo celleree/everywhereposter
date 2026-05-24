@@ -125,7 +125,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   const [copyGenerationStatus, setCopyGenerationStatus] = useState('');
   const { data: shortlinkPreferenceData } = useShortlinkPreference();
 
-  const { addEditSets, mutate, customClose, dummy } = props;
+  const { addEditSets, mutate, customClose, dummy, standaloneCreate } = props;
 
   const {
     selectedIntegrations,
@@ -322,10 +322,17 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
       return;
     }
 
+    if (
+      queuedAiPreset &&
+      !availableAiPresets.some((preset) => preset.id === queuedAiPreset)
+    ) {
+      setQueuedAiPreset('');
+    }
+
     if (!availableAiPresets.some((preset) => preset.id === activeAiPreset)) {
       setActiveAiPreset(availableAiPresets[0].id);
     }
-  }, [activeAiPreset, availableAiPresets]);
+  }, [activeAiPreset, availableAiPresets, queuedAiPreset]);
 
   const copilotSuggestions = useMemo(() => {
     if (!availableAiPresets.length) {
@@ -645,10 +652,11 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
   const generateCopyForPreset = useCallback(
     async (presetId: string, media?: { id?: string; path?: string }) => {
-      const preset = AI_PRESETS.find((item) => item.id === presetId);
+      const preset = availableAiPresets.find((item) => item.id === presetId);
       const sourceMedia = media || globalMedia[0];
 
       if (!preset) {
+        setQueuedAiPreset('');
         return;
       }
 
@@ -755,7 +763,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
         setCopyGenerationStatus('');
       }
     },
-    [applyGeneratedCopy, fetch, globalMedia, t, toaster]
+    [applyGeneratedCopy, availableAiPresets, fetch, globalMedia, t, toaster]
   );
 
   const handleAiPreset = useCallback(
@@ -1372,6 +1380,24 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   Save Set
                 </button>
               )}
+              {!addEditSets && standaloneCreate && !dummy && !isPublishedPost && (
+                <button
+                  disabled={
+                    selectedIntegrations.length === 0 || loading || locked
+                  }
+                  onClick={schedule('now')}
+                  className="relative flex h-[44px] cursor-pointer items-center justify-center rounded-[8px] bg-[#D82D7E] px-[20px] text-[15px] font-[600] text-white disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full"
+                >
+                  {loading && (
+                    <div className="absolute left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
+                      <div className="h-[20px] w-[20px] animate-spin rounded-full border-4 border-white border-t-transparent" />
+                    </div>
+                  )}
+                  <div className={clsx(loading && 'invisible')}>
+                    {t('post_now', 'Post Now')}
+                  </div>
+                </button>
+              )}
               {!addEditSets && (
                 <div className="group relative min-w-0 cursor-pointer mobile:w-full">
                   <button
@@ -1418,7 +1444,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     )}
                   </button>
 
-                  {!dummy && !isPublishedPost && (
+                  {!dummy && !isPublishedPost && !standaloneCreate && (
                     <button
                       onClick={schedule('now')}
                       disabled={

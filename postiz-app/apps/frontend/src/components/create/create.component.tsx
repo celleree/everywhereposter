@@ -10,7 +10,6 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
-import { useRouter } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
 import useSWR from 'swr';
 
@@ -31,9 +30,9 @@ const swrOptions = {
 
 export const CreateComponent = () => {
   const fetch = useFetch();
-  const router = useRouter();
   const t = useT();
   const [selectedSetId, setSelectedSetId] = useState('');
+  const [composerKey, setComposerKey] = useState(0);
 
   const {
     data: integrations = [],
@@ -87,8 +86,9 @@ export const CreateComponent = () => {
   );
 
   const onComposerComplete = useCallback(() => {
-    router.push('/launches');
-  }, [router]);
+    setSelectedSetId('');
+    setComposerKey((key) => key + 1);
+  }, []);
 
   if (integrationsLoading || dateLoading) {
     return (
@@ -157,7 +157,7 @@ export const CreateComponent = () => {
       </div>
       <div className="flex min-h-0 flex-1 mobile:block mobile:flex-none">
         <AddEditModal
-          key={`${selectedSetId || 'blank'}-${nextSlot}`}
+          key={`${selectedSetId || 'blank'}-${nextSlot}-${composerKey}`}
           allIntegrations={integrations.map((integration: any) => ({
             ...integration,
           }))}
@@ -165,6 +165,7 @@ export const CreateComponent = () => {
           reopenModal={() => {}}
           mutate={() => {}}
           customClose={onComposerComplete}
+          standaloneCreate={true}
           integrations={integrations}
           date={dayjs.utc(nextSlot).local()}
         />

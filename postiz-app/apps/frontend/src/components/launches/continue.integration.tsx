@@ -126,6 +126,19 @@ export const ContinueIntegration: FC<{
 
   useEffect(() => {
     (async () => {
+      if (
+        provider === 'youtube' &&
+        firstValue(modifiedParams.state) === 'login' &&
+        firstValue(modifiedParams.code)
+      ) {
+        push(
+          `/auth?provider=GOOGLE&code=${encodeURIComponent(
+            firstValue(modifiedParams.code)
+          )}`
+        );
+        return;
+      }
+
       const providerErrorMessage = getProviderErrorMessage(modifiedParams);
       if (providerErrorMessage) {
         setErrorMessage(providerErrorMessage);

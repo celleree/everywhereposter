@@ -2,12 +2,35 @@
 
 import { useSearchParams } from 'next/navigation';
 import { FC, useCallback, useEffect } from 'react';
+
+const getSafeReturnUrl = (url: string) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const path = `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+
+    if (parsed.origin === window.location.origin) {
+      return path;
+    }
+
+    if (['localhost', '127.0.0.1'].includes(parsed.hostname)) {
+      return path;
+    }
+  } catch {}
+};
+
 const ReturnUrlComponent: FC = () => {
   const params = useSearchParams();
   const url = params.get('returnUrl');
   useEffect(() => {
-    if (url?.indexOf?.('http')! > -1) {
-      localStorage.setItem('returnUrl', url!);
+    if (url) {
+      const safeReturnUrl = getSafeReturnUrl(url);
+      if (safeReturnUrl) {
+        localStorage.setItem('returnUrl', safeReturnUrl);
+      }
     }
   }, [url]);
   return null;

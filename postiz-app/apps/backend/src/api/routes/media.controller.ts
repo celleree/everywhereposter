@@ -97,7 +97,8 @@ export class MediaController {
       org.id,
       uploadedFile.originalname,
       uploadedFile.path,
-      originalName
+      originalName,
+      uploadedFile.mimetype
     );
   }
 
@@ -147,7 +148,8 @@ export class MediaController {
       org.id,
       getFile.originalname,
       getFile.path,
-      originalName
+      originalName,
+      getFile.mimetype
     );
   }
 

@@ -11,9 +11,7 @@ const ImageWithFallback: FC<ImageSrc> = (props) => {
   const { src, fallbackSrc, ...rest } = props;
   const [imgSrc, setImgSrc] = useState(src);
   useEffect(() => {
-    if (src !== imgSrc) {
-      setImgSrc(src);
-    }
+    setImgSrc(src);
   }, [src]);
   return (
     <SafeImage
@@ -21,7 +19,9 @@ const ImageWithFallback: FC<ImageSrc> = (props) => {
       {...rest}
       src={imgSrc}
       onError={() => {
-        setImgSrc(fallbackSrc);
+        if (imgSrc !== fallbackSrc) {
+          setImgSrc(fallbackSrc);
+        }
       }}
     />
   );
