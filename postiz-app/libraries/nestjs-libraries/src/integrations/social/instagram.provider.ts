@@ -1946,9 +1946,13 @@ export class InstagramProvider
       access_token: accessToken,
     });
     const { id: mediaId } = await this.fetchInstagramJson<{ id?: string }>(
-      `https://${type}/v20.0/${id}/media_publish?${params.toString()}`,
+      `https://${type}/v20.0/${id}/media_publish`,
       {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params,
       },
       'instagram_media_publish'
     );
