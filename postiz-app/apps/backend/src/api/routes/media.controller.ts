@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  InternalServerErrorException,
+  Logger,
   Param,
   Post,
   Query,
@@ -13,6 +15,8 @@ import {
   UsePipes,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { existsSync, statSync } from 'fs';
+import { resolve, sep } from 'path';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
 import { Organization } from '@prisma/client';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
@@ -30,6 +34,8 @@ import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.fu
 @Controller('/media')
 export class MediaController {
   private storage = UploadFactory.createStorage();
+  private readonly logger = new Logger(MediaController.name);
+
   constructor(
     private _mediaService: MediaService,
     private _subscriptionService: SubscriptionService
@@ -93,13 +99,31 @@ export class MediaController {
   ) {
     const originalName = file?.originalname || '';
     const uploadedFile = await this.storage.uploadFile(file);
-    return this._mediaService.saveFile(
+    const diskPath = this.assertLocalUploadExists(uploadedFile.path);
+    const savedMedia = await this._mediaService.saveFile(
       org.id,
       uploadedFile.originalname,
       uploadedFile.path,
       originalName,
       uploadedFile.mimetype
     );
+
+    if (!savedMedia?.id || savedMedia.path !== uploadedFile.path) {
+      throw new InternalServerErrorException('Upload media record was not saved.');
+    }
+
+    this.logger.log(
+      [
+        'upload-server saved',
+        `originalName="${originalName}"`,
+        `detectedType="${uploadedFile.mimetype || file?.mimetype || 'unknown'}"`,
+        `diskPath="${diskPath || 'n/a'}"`,
+        `publicUrl="${uploadedFile.path}"`,
+        `mediaId="${savedMedia.id}"`,
+      ].join(' ')
+    );
+
+    return savedMedia;
   }
 
   @Post('/save-media')
@@ -214,5 +238,60 @@ export class MediaController {
     @Param('type') type: string
   ) {
     return this._mediaService.generateVideoAllowed(org, type);
+  }
+
+  private assertLocalUploadExists(publicPath: string) {
+    if (process.env.STORAGE_PROVIDER !== 'local') {
+      return undefined;
+    }
+
+    const diskPath = this.getLocalUploadDiskPath(publicPath);
+    if (!diskPath) {
+      throw new InternalServerErrorException('Local upload path is invalid.');
+    }
+
+    if (!existsSync(diskPath) || !statSync(diskPath).isFile()) {
+      throw new InternalServerErrorException('Local upload was not written to disk.');
+    }
+
+    return diskPath;
+  }
+
+  private getLocalUploadDiskPath(publicPath: string) {
+    const uploadDirectory = process.env.UPLOAD_DIRECTORY;
+    if (!uploadDirectory || !publicPath) {
+      return undefined;
+    }
+
+    let pathname = publicPath;
+    try {
+      pathname = new URL(publicPath).pathname;
+    } catch {}
+
+    const uploadPrefix = this.getUploadStaticDirectory();
+    if (pathname.startsWith(`${uploadPrefix}/`)) {
+      pathname = pathname.slice(uploadPrefix.length);
+    }
+
+    const relativePath = pathname.replace(/^\/+/, '');
+    if (!relativePath || relativePath.includes('\0')) {
+      return undefined;
+    }
+
+    const uploadRoot = resolve(uploadDirectory);
+    const diskPath = resolve(uploadRoot, relativePath);
+    if (diskPath !== uploadRoot && !diskPath.startsWith(`${uploadRoot}${sep}`)) {
+      return undefined;
+    }
+
+    return diskPath;
+  }
+
+  private getUploadStaticDirectory() {
+    const directory =
+      process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY ||
+      process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY ||
+      '/uploads';
+    return `/${directory.replace(/^\/+|\/+$/g, '')}`;
   }
 }

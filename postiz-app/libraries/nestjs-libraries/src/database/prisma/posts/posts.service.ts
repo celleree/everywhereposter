@@ -24,6 +24,8 @@ import sharp from 'sharp';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { Readable } from 'stream';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
+import { existsSync, statSync } from 'fs';
+import { resolve, sep } from 'path';
 dayjs.extend(utc);
 import * as Sentry from '@sentry/nestjs';
 import { TemporalService } from 'nestjs-temporal-core';
@@ -70,6 +72,8 @@ const FACEBOOK_COMMENT_RECONNECT_MESSAGE =
   'Reconnect this Facebook Page to grant pages_read_user_content and load Page comments.';
 const INSTAGRAM_COMMENT_RECONNECT_MESSAGE =
   'Reconnect Instagram and grant instagram_manage_comments.';
+const MISSING_LOCAL_UPLOAD_MESSAGE =
+  'Upload file is missing on server. Please re-upload the media.';
 
 @Injectable()
 export class PostsService {
@@ -697,23 +701,30 @@ export class PostsService {
         )
           .map((m) => {
             const mediaType = this.getMediaType(m);
+            const isRemotePath = /^https?:\/\//i.test(m.path || '');
+            const localPublicPath = this.getLocalUploadPublicPath(m.path);
+            const localDiskPath = this.getLocalUploadDiskPath(m.path);
             return {
               ...m,
               url:
-                m.path.indexOf('http') === -1
-                  ? process.env.FRONTEND_URL +
-                    '/' +
-                    process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY +
-                    m.path
+                !isRemotePath && localPublicPath
+                  ? this.joinPublicUrl(
+                      process.env.FRONTEND_URL || '',
+                      localPublicPath
+                    )
                   : m.path,
               type: mediaType,
               path:
-                m.path.indexOf('http') === -1
-                  ? process.env.UPLOAD_DIRECTORY + m.path
+                !isRemotePath
+                  ? localDiskPath || process.env.UPLOAD_DIRECTORY + m.path
                   : m.path,
             };
           })
           .map(async (m) => {
+            if (convertToJPEG) {
+              this.assertLocalUploadExists(m);
+            }
+
             if (!convertToJPEG) {
               return m;
             }
@@ -750,22 +761,27 @@ export class PostsService {
                 encoding: '',
               });
 
-              return {
+              const isConvertedRemotePath = /^https?:\/\//i.test(path || '');
+              const convertedPublicPath = this.getLocalUploadPublicPath(path);
+              const convertedMedia = {
                 ...m,
                 name: originalname,
                 url:
-                  path.indexOf('http') === -1
-                    ? process.env.FRONTEND_URL +
-                      '/' +
-                      process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY +
-                      path
+                  !isConvertedRemotePath && convertedPublicPath
+                    ? this.joinPublicUrl(
+                        process.env.FRONTEND_URL || '',
+                        convertedPublicPath
+                      )
                     : path,
                 type: 'image',
                 path:
-                  path.indexOf('http') === -1
-                    ? process.env.UPLOAD_DIRECTORY + path
+                  !isConvertedRemotePath
+                    ? this.getLocalUploadDiskPath(path) ||
+                      process.env.UPLOAD_DIRECTORY + path
                     : path,
               };
+              this.assertLocalUploadExists(convertedMedia);
+              return convertedMedia;
             }
 
             return m;
@@ -781,8 +797,82 @@ export class PostsService {
 
       return getImageList;
     } catch (err: any) {
+      if (err instanceof BadRequestException) {
+        throw err;
+      }
+
       return imagesList;
     }
+  }
+
+  private assertLocalUploadExists(media: any) {
+    const diskPath = this.getLocalUploadDiskPath(media?.url || media?.path || '');
+    if (!diskPath) {
+      return;
+    }
+
+    if (!existsSync(diskPath) || !statSync(diskPath).isFile()) {
+      throw new BadRequestException(MISSING_LOCAL_UPLOAD_MESSAGE);
+    }
+  }
+
+  private getLocalUploadPublicPath(mediaPath: string) {
+    if (!mediaPath || /^https?:\/\//i.test(mediaPath)) {
+      return undefined;
+    }
+
+    const uploadPrefix = this.getUploadStaticDirectory();
+    const pathWithSlash = mediaPath.startsWith('/') ? mediaPath : `/${mediaPath}`;
+
+    if (pathWithSlash.startsWith(`${uploadPrefix}/`)) {
+      return pathWithSlash;
+    }
+
+    return `${uploadPrefix}${pathWithSlash}`;
+  }
+
+  private getLocalUploadDiskPath(mediaPath: string) {
+    const uploadDirectory = process.env.UPLOAD_DIRECTORY;
+    if (!uploadDirectory || !mediaPath) {
+      return undefined;
+    }
+
+    let pathname = mediaPath;
+    try {
+      pathname = new URL(mediaPath).pathname;
+    } catch {}
+
+    const uploadPrefix = this.getUploadStaticDirectory();
+    if (pathname.startsWith(`${uploadPrefix}/`)) {
+      pathname = pathname.slice(uploadPrefix.length);
+    } else if (/^https?:\/\//i.test(mediaPath)) {
+      return undefined;
+    }
+
+    const relativePath = pathname.replace(/^\/+/, '');
+    if (!relativePath || relativePath.includes('\0')) {
+      return undefined;
+    }
+
+    const uploadRoot = resolve(uploadDirectory);
+    const diskPath = resolve(uploadRoot, relativePath);
+    if (diskPath !== uploadRoot && !diskPath.startsWith(`${uploadRoot}${sep}`)) {
+      return undefined;
+    }
+
+    return diskPath;
+  }
+
+  private getUploadStaticDirectory() {
+    const directory =
+      process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY ||
+      process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY ||
+      '/uploads';
+    return `/${directory.replace(/^\/+|\/+$/g, '')}`;
+  }
+
+  private joinPublicUrl(frontendUrl: string, mediaPath: string) {
+    return `${frontendUrl.replace(/\/+$/g, '')}/${mediaPath.replace(/^\/+/, '')}`;
   }
 
   private getMediaType(media: any) {

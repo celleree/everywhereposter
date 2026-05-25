@@ -155,6 +155,51 @@ const publishedIntegration = {
 };
 
 describe('PostsService published post management', () => {
+  it('blocks Instagram media preparation when a local upload file is missing', async () => {
+    const previousEnv = {
+      FRONTEND_URL: process.env.FRONTEND_URL,
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY,
+      NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY:
+        process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY,
+      UPLOAD_DIRECTORY: process.env.UPLOAD_DIRECTORY,
+    };
+
+    process.env.FRONTEND_URL = 'https://publish.example';
+    process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY = '/uploads';
+    delete process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY;
+    process.env.UPLOAD_DIRECTORY = '/tmp/postiz-missing-upload-test';
+
+    try {
+      const { service } = createService();
+
+      await expect(
+        service.updateMedia(
+          'post-1',
+          [
+            {
+              id: 'media-1',
+              path: 'https://publish.example/uploads/2026/05/25/missing.jpg',
+              type: 'image',
+            },
+          ],
+          true
+        )
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Upload file is missing on server. Please re-upload the media.'
+        )
+      );
+    } finally {
+      for (const [key, value] of Object.entries(previousEnv)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
   it('updates a published post through the provider when edit support is enabled', async () => {
     const { service, provider, postRepository } = createService();
 
