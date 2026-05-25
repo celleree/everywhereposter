@@ -26,3 +26,12 @@ Work in credit-saving mode.
 - Do not improve unrelated code.
 - Do not explore unrelated folders.
 - Do not run long commands without explaining why.
+
+## Operational rules for this repo
+
+- Work one step at a time, especially for server and dev tasks.
+- For Post Everywhere, the usual live working environment is Hetzner SSH at `/home/arund/publish-everywhere-git`, not local WSL.
+- Do not start Docker Desktop, the local WSL Postiz stack, or local cloudflared unless local work is intentional.
+- Before coding sessions, run `git status --short` and `git log -5 --oneline`.
+- The current active branch is `snapshot/local-working-state-2026-04-29`.
+- Use VS Code SSH for editing and the Hetzner console for heavy Docker builds.
