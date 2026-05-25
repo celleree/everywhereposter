@@ -747,9 +747,13 @@ export class InstagramProvider
           }
 
           const { id: photoId } = await this.fetchInstagramJson<{ id?: string }>(
-            `https://${type}/v20.0/${id}/media?${params.toString()}`,
+            `https://${type}/v20.0/${id}/media`,
             {
               method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: params,
             },
             'instagram_media_create'
           );
@@ -831,9 +835,13 @@ export class InstagramProvider
         access_token: accessToken,
       });
       const { id: containerId } = await this.fetchInstagramJson<{ id?: string }>(
-        `https://${type}/v20.0/${id}/media?${params.toString()}`,
+        `https://${type}/v20.0/${id}/media`,
         {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: params,
         },
         'instagram_carousel_create'
       );
@@ -970,7 +978,10 @@ export class InstagramProvider
     identifier = 'instagram',
     totalRetries = 0
   ): Promise<T> {
-    const response = await this.fetch(url, options, identifier, totalRetries);
+    const requestBodyForDiagnostics = this.getSafeInstagramRequestBody(
+      options.body
+    );
+    const response = await fetch(url, options);
     let body = '';
 
     try {
@@ -993,7 +1004,7 @@ export class InstagramProvider
         throw new BadBody(
           identifier,
           bodyForError,
-          options.body || '{}',
+          requestBodyForDiagnostics,
           handleError?.value ||
             `Instagram Graph API request failed after retries (${response.status}).`
         );
@@ -1016,7 +1027,7 @@ export class InstagramProvider
       throw new RefreshToken(
         identifier,
         bodyForError,
-        options.body || '{}',
+        requestBodyForDiagnostics,
         handleError?.value
       );
     }
@@ -1025,7 +1036,7 @@ export class InstagramProvider
       throw new BadBody(
         identifier,
         bodyForError,
-        options.body || '{}',
+        requestBodyForDiagnostics,
         `Instagram Graph API returned an empty response (${response.status}).`
       );
     }
@@ -1037,7 +1048,7 @@ export class InstagramProvider
       throw new BadBody(
         identifier,
         bodyForError,
-        options.body || '{}',
+        requestBodyForDiagnostics,
         `Instagram Graph API returned a non-JSON response (${response.status}).`
       );
     }
@@ -1048,7 +1059,7 @@ export class InstagramProvider
       throw new BadBody(
         identifier,
         json,
-        options.body || '{}',
+        requestBodyForDiagnostics,
         handleError?.value ||
           graphError?.message ||
           `Instagram Graph API request failed (${response.status}).`
@@ -1060,7 +1071,7 @@ export class InstagramProvider
       throw new BadBody(
         identifier,
         json,
-        options.body || '{}',
+        requestBodyForDiagnostics,
         this.handleErrors(json, response.status)?.value ||
           'Instagram Graph API returned an error.'
       );
@@ -1128,6 +1139,43 @@ export class InstagramProvider
       },
       {}
     );
+  }
+
+  private getSafeInstagramRequestBody(body?: BodyInit | null): BodyInit {
+    if (!body) {
+      return '{}';
+    }
+
+    if (body instanceof URLSearchParams) {
+      return (
+        this.safeStringifyDiagnostics(this.getSafeInstagramParams(body)) || '{}'
+      );
+    }
+
+    if (typeof body === 'string') {
+      const trimmed = body.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          return this.safeStringifyDiagnostics(JSON.parse(trimmed)) || '{}';
+        } catch {}
+      }
+
+      try {
+        const params = new URLSearchParams(body);
+        if (body.includes('=') || body.includes('&')) {
+          return (
+            this.safeStringifyDiagnostics(this.getSafeInstagramParams(params)) ||
+            '{}'
+          );
+        }
+      } catch {}
+
+      return body
+        .replace(/(access_token=)[^&\s]+/gi, '$1[redacted]')
+        .replace(/("access_token"\s*:\s*")[^"]+/gi, '$1[redacted]');
+    }
+
+    return this.safeStringifyDiagnostics(body) || '{}';
   }
 
   private safeStringifyDiagnostics(value: any) {
