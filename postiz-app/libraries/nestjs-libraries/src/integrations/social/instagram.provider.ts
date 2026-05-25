@@ -1755,13 +1755,32 @@ export class InstagramProvider
     const delayMs = 5000;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const { status_code } = await this.fetchInstagramJson<{
-        status_code?: string;
-      }>(
-        `https://${type}/v20.0/${containerId}?fields=status_code&access_token=${accessToken}`,
-        undefined,
-        identifier
-      );
+      let status_code: string | undefined;
+      try {
+        ({ status_code } = await this.fetchInstagramJson<{
+          status_code?: string;
+        }>(
+          `https://${type}/v20.0/${containerId}?fields=status_code&access_token=${accessToken}`,
+          undefined,
+          identifier
+        ));
+      } catch (error) {
+        if (
+          this.canContinueAfterContainerStatusAuthorizationError(
+            diagnostics,
+            error
+          )
+        ) {
+          this.warnContainerStatusAuthorizationError(
+            containerId,
+            diagnostics,
+            error
+          );
+          return;
+        }
+
+        throw error;
+      }
 
       if (status_code === 'FINISHED') {
         return;
@@ -1820,6 +1839,49 @@ export class InstagramProvider
       '{}',
       '{}',
       `Timed out waiting for Instagram media container ${containerId} to finish.`
+    );
+  }
+
+  private canContinueAfterContainerStatusAuthorizationError(
+    diagnostics: InstagramMediaCreateDiagnostics | undefined,
+    error: unknown
+  ) {
+    if (
+      !diagnostics ||
+      diagnostics.isVideo ||
+      diagnostics.isStory ||
+      diagnostics.isReel ||
+      diagnostics.isCarousel ||
+      diagnostics.isCarouselItem
+    ) {
+      return false;
+    }
+
+    const failure = this.getInstagramFailureDetails(error);
+    const graphError = this.getGraphApiError(
+      this.safeStringifyDiagnostics(failure.graphResponse || {}) || '{}'
+    );
+
+    return graphError?.code === '100' && graphError?.subcode === '33';
+  }
+
+  private warnContainerStatusAuthorizationError(
+    containerId: string,
+    diagnostics: InstagramMediaCreateDiagnostics | undefined,
+    error: unknown
+  ) {
+    const failure = this.getInstagramFailureDetails(error);
+
+    console.warn(
+      'Instagram media container status lookup returned Graph API 100/33; continuing to media_publish for single-image post',
+      this.parseDiagnosticJson(
+        this.safeStringifyDiagnostics({
+          containerId,
+          mediaCreate: diagnostics,
+          graphResponse: failure.graphResponse,
+          graphError: failure.message,
+        })
+      )
     );
   }
 
