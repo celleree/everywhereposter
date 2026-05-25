@@ -799,7 +799,11 @@ export class InstagramProvider
           type
         );
         lastMediaId = mediaId;
-        lastPermalink = await this.getPermalink(mediaId, accessToken, type);
+        lastPermalink = await this.getPermalinkAfterPublish(
+          mediaId,
+          accessToken,
+          type
+        );
       }
 
       return [
@@ -817,7 +821,11 @@ export class InstagramProvider
         medias[0],
         type
       );
-      const permalink = await this.getPermalink(mediaId, accessToken, type);
+      const permalink = await this.getPermalinkAfterPublish(
+        mediaId,
+        accessToken,
+        type
+      );
 
       return [
         {
@@ -883,7 +891,11 @@ export class InstagramProvider
         containerId,
         type
       );
-      const permalink = await this.getPermalink(mediaId, accessToken, type);
+      const permalink = await this.getPermalinkAfterPublish(
+        mediaId,
+        accessToken,
+        type
+      );
 
       return [
         {
@@ -1977,6 +1989,52 @@ export class InstagramProvider
     );
 
     return permalink || '';
+  }
+
+  private isGraphApiPermissionError10(error: unknown) {
+    const failure = this.getInstagramFailureDetails(error);
+    const graphError = this.getGraphApiError(
+      this.safeStringifyDiagnostics(failure.graphResponse || {}) || '{}'
+    );
+    const message = failure.message.toLowerCase();
+
+    return (
+      graphError?.code === '10' ||
+      message.includes('graph api error (10)') ||
+      message.includes('(#10)')
+    );
+  }
+
+  private warnPermalinkPermissionError(mediaId: string, error: unknown) {
+    const failure = this.getInstagramFailureDetails(error);
+
+    console.warn(
+      'Instagram permalink lookup returned Graph API permission error 10; treating media_publish as successful',
+      this.parseDiagnosticJson(
+        this.safeStringifyDiagnostics({
+          mediaId,
+          graphResponse: failure.graphResponse,
+          graphError: failure.message,
+        })
+      )
+    );
+  }
+
+  private async getPermalinkAfterPublish(
+    mediaId: string,
+    accessToken: string,
+    type: string
+  ) {
+    try {
+      return await this.getPermalink(mediaId, accessToken, type);
+    } catch (error) {
+      if (!this.isGraphApiPermissionError10(error)) {
+        throw error;
+      }
+
+      this.warnPermalinkPermissionError(mediaId, error);
+      return '';
+    }
   }
 
   async comment(
