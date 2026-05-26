@@ -38,6 +38,15 @@ export class AnalyticsController {
     return this._postsService.getPublishedComments(org.id, postId);
   }
 
+  @Post('/post/:postId/comments')
+  async addComment(
+    @GetOrgFromRequest() org: Organization,
+    @Param('postId') postId: string,
+    @Body('message') message: string
+  ) {
+    return this._postsService.addPublishedComment(org.id, postId, message);
+  }
+
   @Post('/post/:postId/comments/:commentId/reply')
   async replyToComment(
     @GetOrgFromRequest() org: Organization,

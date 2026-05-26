@@ -122,14 +122,19 @@ interface PublishedComment {
   replyCount: number;
   permalinkUrl: string;
   hidden?: boolean;
+  replies?: PublishedComment[];
   canReply?: boolean;
   canHide?: boolean;
   canDelete?: boolean;
+  canLike?: boolean;
+  canUnlike?: boolean;
+  likedByViewer?: boolean;
 }
 
 interface PublishedCommentsResponse {
   supported: boolean;
   comments: PublishedComment[];
+  canComment?: boolean;
   missing?: boolean;
   reconnectRequired?: boolean;
   message?: string;
@@ -166,6 +171,14 @@ const getResponseErrorMessage = async (
   return fallback;
 };
 
+const getResponseJson = async (response: Response) => {
+  try {
+    return await response.json();
+  } catch (err) {
+    return {};
+  }
+};
+
 export const PostStatisticsPanel: FC<{
   postId: string;
   isPublished?: boolean;
@@ -186,6 +199,14 @@ export const PostStatisticsPanel: FC<{
   const [commentReplies, setCommentReplies] = useState<Record<string, string>>(
     {}
   );
+  const [newComment, setNewComment] = useState('');
+  const [optimisticComments, setOptimisticComments] = useState<
+    PublishedComment[]
+  >([]);
+  const [optimisticReplies, setOptimisticReplies] = useState<
+    Record<string, PublishedComment[]>
+  >({});
+  const [isAddingComment, setIsAddingComment] = useState(false);
   const [commentAction, setCommentAction] = useState<{
     commentId: string;
     action: 'reply' | 'hide' | 'delete';
@@ -260,6 +281,60 @@ export const PostStatisticsPanel: FC<{
       }
     );
 
+  const runAddPlatformComment = useCallback(async () => {
+    const message = newComment.trim();
+
+    if (!message) {
+      setCommentsError(
+        t('comment_message_required', 'Comment message is required.')
+      );
+      return;
+    }
+
+    setIsAddingComment(true);
+    setCommentsError('');
+
+    try {
+      const response = await fetch(`/analytics/post/${postId}/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message }),
+      });
+
+      if (!response.ok) {
+        let errorMessage = t('comment_action_failed', 'Comment action failed.');
+
+        errorMessage = await getResponseErrorMessage(response, errorMessage);
+
+        throw new Error(errorMessage);
+      }
+
+      const result = await getResponseJson(response);
+      const createdComment = result?.comment as PublishedComment | undefined;
+
+      if (createdComment?.id) {
+        setOptimisticComments((current) =>
+          current.some((comment) => comment.id === createdComment.id)
+            ? current
+            : [createdComment, ...current]
+        );
+      }
+
+      setNewComment('');
+      await mutateComments();
+    } catch (err) {
+      setCommentsError(
+        err instanceof Error
+          ? err.message
+          : t('comment_action_failed', 'Comment action failed.')
+      );
+    } finally {
+      setIsAddingComment(false);
+    }
+  }, [fetch, mutateComments, newComment, postId, t]);
+
   const runCommentAction = useCallback(
     async (comment: PublishedComment, action: 'reply' | 'hide' | 'delete') => {
       const replyMessage = (commentReplies[comment.id] || '').trim();
@@ -301,11 +376,44 @@ export const PostStatisticsPanel: FC<{
           throw new Error(message);
         }
 
+        const result = await getResponseJson(response);
+
         if (action === 'reply') {
+          const reply = result?.reply as PublishedComment | undefined;
+
+          if (reply?.id) {
+            setOptimisticReplies((current) => ({
+              ...current,
+              [comment.id]: [
+                ...((current[comment.id] || []).filter(
+                  (currentReply) => currentReply.id !== reply.id
+                )),
+                reply,
+              ],
+            }));
+          }
+
           setCommentReplies((current) => ({
             ...current,
             [comment.id]: '',
           }));
+        } else if (action === 'delete') {
+          setOptimisticComments((current) =>
+            current.filter((item) => item.id !== comment.id)
+          );
+          setOptimisticReplies((current) =>
+            Object.keys(current).reduce((all, key) => {
+              const replies = current[key].filter(
+                (reply) => reply.id !== comment.id
+              );
+
+              if (replies.length) {
+                all[key] = replies;
+              }
+
+              return all;
+            }, {} as Record<string, PublishedComment[]>)
+          );
         }
 
         await mutateComments();
@@ -332,10 +440,24 @@ export const PostStatisticsPanel: FC<{
       : '';
   const commentsUnsupported = commentsData?.supported === false;
   const commentsMissing = commentsData?.missing === true;
+  const canAddComment = commentsData?.canComment === true;
+  const visibleComments = useMemo(() => {
+    const providerComments = commentsData?.comments || [];
+    const providerCommentIds = new Set(
+      providerComments.map((comment) => comment.id)
+    );
+
+    return [
+      ...optimisticComments.filter(
+        (comment) => !providerCommentIds.has(comment.id)
+      ),
+      ...providerComments,
+    ];
+  }, [commentsData?.comments, optimisticComments]);
   const hasAnalytics =
     analyticsData && Array.isArray(analyticsData) && analyticsData.length > 0;
   const hasShortLinks = !!statisticsData?.clicks?.length;
-  const hasPlatformComments = !!commentsData?.comments?.length;
+  const hasPlatformComments = !!visibleComments.length;
   const hasCommentsStatus =
     commentsUnsupported ||
     commentsMissing ||
@@ -475,7 +597,7 @@ export const PostStatisticsPanel: FC<{
                         </div>
                       </div>
                     );
-                  })}
+                    })}
                 </div>
               ) : (
                 <div className="text-gray-400">
@@ -526,14 +648,45 @@ export const PostStatisticsPanel: FC<{
                       )
                     : commentsData?.message}
                 </div>
-              ) : commentsData?.comments?.length ? (
+              ) : commentsData?.supported ? (
                 <div className="flex flex-col gap-[12px]">
                   {!!commentsError && (
                     <div className="rounded-[8px] border border-red-500/40 bg-red-500/10 px-[12px] py-[10px] text-[13px] text-red-200">
                       {commentsError}
                     </div>
                   )}
-                  {commentsData?.comments?.map((comment: PublishedComment) => {
+                  {canAddComment && (
+                    <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px]">
+                      <textarea
+                        value={newComment}
+                        onChange={(event) => setNewComment(event.target.value)}
+                        disabled={!!commentAction || isAddingComment}
+                        placeholder={t(
+                          'add_platform_comment',
+                          'Add platform comment'
+                        )}
+                        className="min-h-[74px] w-full resize-none rounded-[8px] border border-newTableBorder bg-customColor6 px-[12px] py-[10px] text-[14px] text-newTableText outline-none placeholder:text-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <div className="mt-[10px] flex justify-end">
+                        <button
+                          type="button"
+                          disabled={
+                            !!commentAction ||
+                            isAddingComment ||
+                            !newComment.trim()
+                          }
+                          onClick={runAddPlatformComment}
+                          className="min-h-[38px] rounded-[8px] bg-[#612bd3] px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isAddingComment
+                            ? t('adding', 'Adding...')
+                            : t('add_platform_comment', 'Add platform comment')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {visibleComments.length ? (
+                    visibleComments.map((comment: PublishedComment) => {
                     const canReply = comment.canReply === true;
                     const canHide = comment.canHide === true;
                     const canDelete = comment.canDelete === true;
@@ -546,6 +699,16 @@ export const PostStatisticsPanel: FC<{
                     const isDeleting =
                       commentAction?.commentId === comment.id &&
                       commentAction.action === 'delete';
+                    const providerReplies = comment.replies || [];
+                    const visibleReplies = [
+                      ...providerReplies,
+                      ...((optimisticReplies[comment.id] || []).filter(
+                        (reply) =>
+                          !providerReplies.some(
+                            (providerReply) => providerReply.id === reply.id
+                          )
+                      )),
+                    ];
                     const hasManagementControls =
                       canReply || canHide || canDelete;
 
@@ -595,6 +758,33 @@ export const PostStatisticsPanel: FC<{
                             </a>
                           )}
                         </div>
+                        {!!visibleReplies.length && (
+                          <div className="mt-[12px] flex flex-col gap-[8px] border-s border-newTableBorder ps-[12px]">
+                            {visibleReplies.map((reply) => (
+                              <div
+                                key={reply.id}
+                                className="rounded-[8px] bg-customColor6 px-[12px] py-[10px]"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-[8px] text-[12px] text-gray-400">
+                                  <span className="font-medium text-newTableText">
+                                    {reply.authorName}
+                                  </span>
+                                  <span>
+                                    {reply.createdTime
+                                      ? new Date(
+                                          reply.createdTime
+                                        ).toLocaleString()
+                                      : ''}
+                                  </span>
+                                </div>
+                                <div className="mt-[6px] whitespace-pre-wrap text-[13px] text-gray-200">
+                                  {reply.message ||
+                                    t('no_comment_text', 'No comment text')}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {hasManagementControls && (
                           <div className="mt-[14px] flex flex-col gap-[10px]">
                             {canReply && (
@@ -607,7 +797,7 @@ export const PostStatisticsPanel: FC<{
                                       [comment.id]: event.target.value,
                                     }))
                                   }
-                                  disabled={!!commentAction}
+                                  disabled={!!commentAction || isAddingComment}
                                   placeholder={t(
                                     'write_a_reply',
                                     'Write a reply'
@@ -618,6 +808,7 @@ export const PostStatisticsPanel: FC<{
                                   type="button"
                                   disabled={
                                     !!commentAction ||
+                                    isAddingComment ||
                                     !(commentReplies[comment.id] || '').trim()
                                   }
                                   onClick={() =>
@@ -635,7 +826,7 @@ export const PostStatisticsPanel: FC<{
                               {canHide && (
                                 <button
                                   type="button"
-                                  disabled={!!commentAction}
+                                  disabled={!!commentAction || isAddingComment}
                                   onClick={() =>
                                     runCommentAction(comment, 'hide')
                                   }
@@ -651,7 +842,7 @@ export const PostStatisticsPanel: FC<{
                               {canDelete && (
                                 <button
                                   type="button"
-                                  disabled={!!commentAction}
+                                  disabled={!!commentAction || isAddingComment}
                                   onClick={() =>
                                     runCommentAction(comment, 'delete')
                                   }
@@ -667,7 +858,15 @@ export const PostStatisticsPanel: FC<{
                         )}
                       </div>
                     );
-                  })}
+                  })
+                  ) : (
+                    <div className="text-gray-400">
+                      {t(
+                        'no_platform_comments_yet',
+                        'No platform comments yet.'
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-gray-400">

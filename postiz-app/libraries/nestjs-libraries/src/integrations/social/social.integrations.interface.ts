@@ -93,15 +93,21 @@ export type PublishedComment = {
   replyCount: number;
   permalinkUrl: string;
   hidden?: boolean;
+  replies?: PublishedComment[];
   canReply?: boolean;
   canHide?: boolean;
   canDelete?: boolean;
+  canLike?: boolean;
+  canUnlike?: boolean;
+  likedByViewer?: boolean;
 };
 
 export type PublishedCommentActionResponse = {
   success: boolean;
   commentId?: string;
   replyId?: string;
+  comment?: PublishedComment;
+  reply?: PublishedComment;
   hidden?: boolean;
 };
 

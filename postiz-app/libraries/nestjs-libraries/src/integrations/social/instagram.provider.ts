@@ -2187,7 +2187,7 @@ export class InstagramProvider
     type = 'graph.facebook.com'
   ): Promise<PublishedComment[]> {
     const fields = encodeURIComponent(
-      'id,text,username,timestamp,like_count,hidden,replies{id}'
+      'id,text,username,timestamp,like_count,hidden,replies{id,text,username,timestamp,like_count,hidden}'
     );
     const { data } = await this.fetchInstagramJson<{ data?: any[] }>(
       `https://${type}/v20.0/${postId}/comments?fields=${fields}&limit=50&access_token=${accessToken}`,
@@ -2195,27 +2195,36 @@ export class InstagramProvider
       'instagram_comments'
     );
 
-    return (data || []).map((comment: any) => ({
+    const mapComment = (comment: any, isReply = false): PublishedComment => ({
       id: String(comment.id),
       message: comment.text || '',
       authorName:
         comment.username || comment.from?.username || comment.user?.username || '',
       createdTime: comment.timestamp || '',
       likeCount: Number(comment.like_count || 0),
-      replyCount: Number(
-        comment.reply_count ||
-          comment.replies_count ||
-          comment.replies?.summary?.total_count ||
-          comment.replies?.data?.length ||
-          0
-      ),
+      replyCount: isReply
+        ? 0
+        : Number(
+            comment.reply_count ||
+              comment.replies_count ||
+              comment.replies?.summary?.total_count ||
+              comment.replies?.data?.length ||
+              0
+          ),
       permalinkUrl: comment.permalink || comment.permalink_url || '',
       hidden:
         typeof comment.hidden === 'boolean' ? comment.hidden : undefined,
-      canReply: true,
+      replies: isReply
+        ? undefined
+        : (comment.replies?.data || []).map((reply: any) =>
+            mapComment(reply, true)
+          ),
+      canReply: !isReply,
       canHide: true,
       canDelete: true,
-    }));
+    });
+
+    return (data || []).map((comment: any) => mapComment(comment));
   }
 
   async replyToComment(
@@ -2250,6 +2259,17 @@ export class InstagramProvider
       success: true,
       commentId,
       replyId,
+      reply: {
+        id: replyId,
+        message,
+        authorName: integration.name || 'Instagram user',
+        createdTime: new Date().toISOString(),
+        likeCount: 0,
+        replyCount: 0,
+        permalinkUrl: '',
+        canHide: true,
+        canDelete: true,
+      },
     };
   }
 

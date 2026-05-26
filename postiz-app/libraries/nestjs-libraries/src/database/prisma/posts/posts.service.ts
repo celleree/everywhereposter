@@ -63,6 +63,7 @@ type PublishedCommentsResult =
   | {
       supported: true;
       comments: PublishedComment[];
+      canComment?: boolean;
       missing?: boolean;
       reconnectRequired?: boolean;
       message?: string;
@@ -301,6 +302,7 @@ export class PostsService {
 
       return {
         supported: true,
+        canComment: this.canAddPublishedComment(integrationProvider),
         comments: await integrationProvider.readComments(
           getIntegration.internalId,
           getIntegration.token,
@@ -363,6 +365,102 @@ export class PostsService {
           comments: [],
           message,
         };
+      }
+
+      throw error;
+    }
+  }
+
+  async addPublishedComment(
+    orgId: string,
+    postId: string,
+    message: string,
+    forceRefresh = false
+  ) {
+    const trimmedMessage = (message || '').trim();
+    if (!trimmedMessage) {
+      throw new BadRequestException('Comment message is required.');
+    }
+
+    const { post, integration, integrationProvider } =
+      await this.getPublishedCommentActionTarget(
+        orgId,
+        postId,
+        'comment',
+        'adding',
+        forceRefresh
+      );
+
+    if (!this.canAddPublishedComment(integrationProvider)) {
+      throw new BadRequestException(
+        `${integrationProvider.name} does not support adding published comments yet.`
+      );
+    }
+
+    try {
+      const [result] = await integrationProvider.comment!(
+        integration.internalId,
+        post.releaseId!,
+        undefined,
+        integration.token,
+        [
+          {
+            id: makeId(10),
+            message: trimmedMessage,
+            settings: {},
+          },
+        ],
+        integration
+      );
+      const commentId = result?.postId ? String(result.postId) : undefined;
+
+      return {
+        success: true,
+        commentId,
+        comment: commentId
+          ? {
+              id: commentId,
+              message: trimmedMessage,
+              authorName: integration.name || integrationProvider.name,
+              createdTime: new Date().toISOString(),
+              likeCount: 0,
+              replyCount: 0,
+              permalinkUrl: result?.releaseURL || '',
+              canReply: !!integrationProvider.replyToComment,
+              canHide: !!integrationProvider.hideComment,
+              canDelete: !!integrationProvider.deleteComment,
+            }
+          : undefined,
+      };
+    } catch (error) {
+      this.logPublishedCommentFailure(
+        'adding',
+        integrationProvider,
+        post,
+        undefined,
+        error
+      );
+
+      if (error instanceof RefreshToken && !forceRefresh) {
+        return this.addPublishedComment(
+          orgId,
+          postId,
+          trimmedMessage,
+          true
+        );
+      }
+
+      if (error instanceof RefreshToken) {
+        await this._integrationService.refreshNeeded(orgId, integration.id);
+        throw new BadRequestException(
+          error.message || this.getCommentReconnectMessage(integrationProvider)
+        );
+      }
+
+      if (error instanceof BadBody) {
+        throw new BadRequestException(
+          error.message || 'Failed to add the published comment.'
+        );
       }
 
       throw error;
@@ -1510,7 +1608,7 @@ export class PostsService {
   private async getPublishedCommentActionTarget(
     orgId: string,
     postId: string,
-    providerMethod: 'replyToComment' | 'hideComment' | 'deleteComment',
+    providerMethod: 'comment' | 'replyToComment' | 'hideComment' | 'deleteComment',
     action: string,
     forceRefresh = false
   ): Promise<{
@@ -1554,6 +1652,13 @@ export class PostsService {
       integration: post.integration,
       integrationProvider,
     };
+  }
+
+  private canAddPublishedComment(integrationProvider: SocialProvider) {
+    return (
+      !!integrationProvider.comment &&
+      ['facebook', 'instagram'].includes(integrationProvider.identifier)
+    );
   }
 
   private async ensurePublishedIntegrationAccess(
