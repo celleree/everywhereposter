@@ -1953,32 +1953,96 @@ export class InstagramProvider
     creationId: string,
     type: string
   ) {
+    const maxAttempts = 5;
+    const retryDelayMs = 5000;
     const params = new URLSearchParams({
       creation_id: creationId,
       access_token: accessToken,
     });
-    const { id: mediaId } = await this.fetchInstagramJson<{ id?: string }>(
-      `https://${type}/v20.0/${id}/media_publish`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params,
-      },
-      'instagram_media_publish'
-    );
 
-    if (!mediaId) {
-      throw new BadBody(
-        'instagram_media_publish',
-        '{}',
-        '{}',
-        'Instagram did not return a published media id.'
-      );
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const { id: mediaId } = await this.fetchInstagramJson<{ id?: string }>(
+          `https://${type}/v20.0/${id}/media_publish`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params,
+          },
+          'instagram_media_publish'
+        );
+
+        if (!mediaId) {
+          throw new BadBody(
+            'instagram_media_publish',
+            '{}',
+            '{}',
+            'Instagram did not return a published media id.'
+          );
+        }
+
+        return mediaId;
+      } catch (error) {
+        if (
+          attempt >= maxAttempts ||
+          !this.isMediaPublishMediaIdUnavailable(error)
+        ) {
+          throw error;
+        }
+
+        this.warnMediaPublishContainerNotReady(creationId, error, attempt);
+        await timer(retryDelayMs);
+      }
     }
 
-    return mediaId;
+    throw new BadBody(
+      'instagram_media_publish',
+      '{}',
+      '{}',
+      'Instagram did not return a published media id.'
+    );
+  }
+
+  private isMediaPublishMediaIdUnavailable(error: unknown) {
+    const failure = this.getInstagramFailureDetails(error);
+    const graphError = this.getGraphApiError(
+      this.safeStringifyDiagnostics(failure.graphResponse || {}) || '{}'
+    );
+    const message = `${graphError?.message || ''} ${
+      failure.message || ''
+    }`.toLowerCase();
+
+    return (
+      graphError?.code === '9007' &&
+      graphError?.subcode === '2207027' &&
+      message.includes('media id is not available')
+    );
+  }
+
+  private warnMediaPublishContainerNotReady(
+    creationId: string,
+    error: unknown,
+    attempt: number
+  ) {
+    const failure = this.getInstagramFailureDetails(error);
+    const graphError = this.getGraphApiError(
+      this.safeStringifyDiagnostics(failure.graphResponse || {}) || '{}'
+    );
+
+    console.warn(
+      'Instagram media_publish container is not ready; retrying media_publish',
+      this.parseDiagnosticJson(
+        this.safeStringifyDiagnostics({
+          creationId,
+          attempt,
+          nextAttempt: attempt + 1,
+          maxAttempts: 5,
+          graphError,
+        })
+      )
+    );
   }
 
   private async getPermalink(mediaId: string, accessToken: string, type: string) {
