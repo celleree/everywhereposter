@@ -34,6 +34,34 @@ export enum PostComment {
   COMMENT,
 }
 
+const providerSupportsCommentRows = (postComment: PostComment) =>
+  postComment === PostComment.ALL || postComment === PostComment.COMMENT;
+
+const resolveProviderValues = <T extends { media?: any[] }>(
+  internalValues: T[] | undefined,
+  globalValues: T[],
+  postComment: PostComment,
+  comments?: boolean | 'no-media'
+) => {
+  if (!internalValues?.length) {
+    return globalValues;
+  }
+
+  if (
+    comments === false ||
+    !providerSupportsCommentRows(postComment) ||
+    internalValues.length >= globalValues.length
+  ) {
+    return internalValues;
+  }
+
+  const inheritedGlobalComments = globalValues
+    .slice(internalValues.length)
+    .map((value) => (comments === 'no-media' ? { ...value, media: [] } : value));
+
+  return [...internalValues, ...inheritedGlobalComments];
+};
+
 interface CharacterCondition {
   format: 'no-pictures' | 'with-pictures';
   type: 'post' | 'comment';
@@ -71,6 +99,7 @@ export const withProvider = function <T extends object>(params: {
     dto,
     checkValidity,
     maximumCharacters,
+    comments,
   } = params;
 
   return forwardRef((props: { id: string; previewPostId?: string }, ref) => {
@@ -144,7 +173,7 @@ export const withProvider = function <T extends object>(params: {
 
       if (current) {
         setComments(
-          typeof params.comments === 'undefined' ? true : params.comments
+          typeof comments === 'undefined' ? true : comments
         );
         setEditor(selectedIntegration?.integration.editor);
         setPostComment(postComment);
@@ -176,12 +205,13 @@ export const withProvider = function <T extends object>(params: {
     );
 
     const value = useMemo(() => {
-      if (internal?.integrationValue?.length) {
-        return internal.integrationValue;
-      }
-
-      return global;
-    }, [internal, global, isGlobal]);
+      return resolveProviderValues(
+        internal?.integrationValue,
+        global,
+        postComment,
+        comments
+      );
+    }, [internal?.integrationValue, global, postComment, comments]);
     const hasPreviewContent = !!value?.[0]?.content?.length;
     const hasPreviewMedia = !!value?.[0]?.media?.length;
 
