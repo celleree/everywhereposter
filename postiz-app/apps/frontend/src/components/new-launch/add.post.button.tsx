@@ -11,6 +11,15 @@ export const AddPostButton: FC<{
 }> = (props) => {
   const { onClick, num } = props;
   const t = useT();
+  const label =
+    props.postComment === PostComment.ALL
+      ? t(
+          'add_platform_comment_or_post',
+          'Add platform comment or post'
+        )
+      : props.postComment === PostComment.POST
+      ? t('add_post', 'Add post')
+      : t('add_platform_comment', 'Add platform comment');
 
   return (
     <div className="flex">
@@ -36,13 +45,7 @@ export const AddPostButton: FC<{
           </svg>
         </div>
         <div className="!text-white">
-          {t(
-            ...(props.postComment === PostComment.ALL
-              ? ['add_comment_or_post', 'Add comment or post']
-              : props.postComment === PostComment.POST
-              ? ['add_post', 'Add post']
-              : ['add_comment', 'Add comment'])
-          )}
+          {label}
         </div>
       </div>
     </div>

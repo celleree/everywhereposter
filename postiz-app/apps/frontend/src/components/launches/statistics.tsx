@@ -457,7 +457,7 @@ export const PostStatisticsPanel: FC<{
           {showCommentsSection && (
             <div className="flex flex-col gap-[14px]">
               <h3 className="text-[18px] font-[500]">
-                {t('recent_comments', 'Recent comments')}
+                {t('recent_platform_comments', 'Recent platform comments')}
               </h3>
               {isLoadingComments ? (
                 <div className="flex items-center gap-[12px] rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">

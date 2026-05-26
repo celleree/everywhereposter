@@ -50,12 +50,21 @@ export const RenderComponents: FC<{
     <>
       <div className="mb-6 flex space-x-3">
         <form className="flex-1 space-y-2" onSubmit={handleSubmit(submit)}>
+          <p className="text-sm text-gray-400">
+            {t(
+              'internal_team_comments_do_not_publish',
+              'Internal team comments stay in Publish Everywhere and do not publish to Instagram or other social platforms.'
+            )}
+          </p>
           <textarea
             {...register('comment', {
               required: true,
             })}
             className="flex w-full px-3 py-2 h-[98px] text-sm ring-offset-background placeholder:text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-[80px] resize-none text-white bg-third border border-tableBorder placeholder-gray-500 focus:ring-0"
-            placeholder="Add a comment..."
+            placeholder={t(
+              'add_internal_team_comment',
+              'Add an internal team comment...'
+            )}
             defaultValue={''}
           />
           <div className="flex justify-end">
@@ -75,14 +84,16 @@ export const RenderComponents: FC<{
                 <path d="m22 2-7 20-4-9-9-4Z" />
                 <path d="M22 2 11 13" />
               </svg>
-              {t('post', 'Post')}
+              {t('add_internal_comment', 'Add internal comment')}
             </Button>
           </div>
         </form>
       </div>
       <div className="space-y-4">
         {!!data.comments.length && (
-          <h3 className="text-lg font-semibold">{t('comments', 'Comments')}</h3>
+          <h3 className="text-lg font-semibold">
+            {t('team_comments', 'Team comments')}
+          </h3>
         )}
         {data.comments.map((comment: any) => (
           <div
@@ -118,8 +129,8 @@ export const CommentsComponents: FC<{
     return (
       <Button onClick={goToComments}>
         {t(
-          'login_register_to_add_comments',
-          'Login / Register to add comments'
+          'login_register_to_add_internal_comments',
+          'Login / Register to add internal comments'
         )}
       </Button>
     );
