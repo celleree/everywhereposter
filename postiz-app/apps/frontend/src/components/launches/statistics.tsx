@@ -135,6 +135,17 @@ interface PublishedCommentsResponse {
   message?: string;
 }
 
+export type PostStatisticsPanelSection =
+  | 'analytics'
+  | 'platformComments'
+  | 'shortLinks';
+
+const defaultPostStatisticsPanelSections: PostStatisticsPanelSection[] = [
+  'analytics',
+  'platformComments',
+  'shortLinks',
+];
+
 const getResponseErrorMessage = async (
   response: Response,
   fallback: string
@@ -160,12 +171,14 @@ export const PostStatisticsPanel: FC<{
   isPublished?: boolean;
   hideWhenEmpty?: boolean;
   compact?: boolean;
+  sections?: PostStatisticsPanelSection[];
 }> = (props) => {
   const {
     postId,
     isPublished = true,
     hideWhenEmpty = false,
     compact = false,
+    sections = defaultPostStatisticsPanelSections,
   } = props;
   const t = useT();
   const fetch = useFetch();
@@ -203,7 +216,7 @@ export const PostStatisticsPanel: FC<{
   }, [postId, fetch, t]);
 
   const { data: statisticsData, isLoading: isLoadingStatistics } = useSWR(
-    `/posts/${postId}/statistics`,
+    sections.includes('shortLinks') ? `/posts/${postId}/statistics` : null,
     loadStatistics
   );
 
@@ -211,14 +224,20 @@ export const PostStatisticsPanel: FC<{
     data: analyticsData,
     isLoading: isLoadingAnalytics,
     mutate: mutateAnalytics,
-  } = useSWR(`/analytics/post/${postId}?date=${dateRange}`, loadPostAnalytics, {
-    revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    revalidateIfStale: false,
-    revalidateOnMount: true,
-    refreshWhenHidden: false,
-    refreshWhenOffline: false,
-  });
+  } = useSWR(
+    sections.includes('analytics')
+      ? `/analytics/post/${postId}?date=${dateRange}`
+      : null,
+    loadPostAnalytics,
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+      revalidateOnMount: true,
+      refreshWhenHidden: false,
+      refreshWhenOffline: false,
+    }
+  );
 
   const {
     data: commentsData,
@@ -227,7 +246,9 @@ export const PostStatisticsPanel: FC<{
     mutate: mutateComments,
   } =
     useSWR<PublishedCommentsResponse>(
-      `/analytics/post/${postId}/comments`,
+      sections.includes('platformComments')
+        ? `/analytics/post/${postId}/comments`
+        : null,
       loadPostComments,
       {
         revalidateOnFocus: false,
@@ -309,27 +330,38 @@ export const PostStatisticsPanel: FC<{
       : commentsLoadError
       ? t('failed_to_load_comments', 'Failed to load comments.')
       : '';
+  const commentsUnsupported = commentsData?.supported === false;
+  const commentsMissing = commentsData?.missing === true;
   const hasAnalytics =
     analyticsData && Array.isArray(analyticsData) && analyticsData.length > 0;
   const hasShortLinks = !!statisticsData?.clicks?.length;
   const hasPlatformComments = !!commentsData?.comments?.length;
   const hasCommentsStatus =
+    commentsUnsupported ||
+    commentsMissing ||
     !!commentsData?.supported ||
     !!commentsData?.reconnectRequired ||
     !!commentsData?.message ||
     !!commentsLoadErrorMessage;
   const hasAnyInsights =
-    !!hasAnalytics ||
-    hasShortLinks ||
-    hasPlatformComments ||
-    !!isMissing ||
-    !!commentsData?.reconnectRequired ||
-    !!commentsData?.message ||
-    !!commentsLoadErrorMessage;
-  const showAnalyticsSection = !!hasAnalytics || isPublished || !hideWhenEmpty;
+    (sections.includes('analytics') && (!!hasAnalytics || !!isMissing)) ||
+    (sections.includes('shortLinks') && hasShortLinks) ||
+    (sections.includes('platformComments') &&
+      (hasPlatformComments ||
+        commentsUnsupported ||
+        commentsMissing ||
+        !!commentsData?.reconnectRequired ||
+        !!commentsData?.message ||
+        !!commentsLoadErrorMessage));
+  const showAnalyticsSection =
+    sections.includes('analytics') &&
+    (!!hasAnalytics || isPublished || !hideWhenEmpty);
   const showCommentsSection =
-    hasCommentsStatus || isPublished || !hideWhenEmpty;
-  const showShortLinksSection = hasShortLinks || isPublished || !hideWhenEmpty;
+    sections.includes('platformComments') &&
+    (hasCommentsStatus || isPublished || !hideWhenEmpty);
+  const showShortLinksSection =
+    sections.includes('shortLinks') &&
+    (hasShortLinks || isPublished || !hideWhenEmpty);
 
   const dateOptions = useMemo(() => {
     return [
@@ -354,7 +386,9 @@ export const PostStatisticsPanel: FC<{
     });
   }, [analyticsData]);
 
-  const isLoading = isLoadingStatistics || isLoadingAnalytics;
+  const isLoading =
+    (sections.includes('shortLinks') && isLoadingStatistics) ||
+    (sections.includes('analytics') && isLoadingAnalytics);
 
   if (hideWhenEmpty && !isPublished && !hasAnyInsights) {
     return null;
@@ -377,7 +411,7 @@ export const PostStatisticsPanel: FC<{
             <div className="flex flex-col gap-[14px]">
               <div className="flex items-center justify-between gap-[12px]">
                 <h3 className="text-[18px] font-[500]">
-                  {t('post_analytics', 'Post analytics')}
+                  {t('post_analytics', 'Post Analytics')}
                 </h3>
                 <div className="max-w-[150px]">
                   <Select
@@ -447,7 +481,7 @@ export const PostStatisticsPanel: FC<{
                 <div className="text-gray-400">
                   {t(
                     'no_post_analytics_available_yet',
-                    'No post analytics available yet.'
+                    'No post analytics available for this post or channel yet.'
                   )}
                 </div>
               )}
@@ -467,6 +501,20 @@ export const PostStatisticsPanel: FC<{
               ) : commentsLoadErrorMessage ? (
                 <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-[16px] py-[14px] text-red-200">
                   {commentsLoadErrorMessage}
+                </div>
+              ) : commentsUnsupported ? (
+                <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">
+                  {t(
+                    'platform_comments_not_available_for_channel',
+                    'Platform comments are not available for this channel.'
+                  )}
+                </div>
+              ) : commentsMissing ? (
+                <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">
+                  {t(
+                    'platform_comments_missing_post_id',
+                    'Platform comments are unavailable until this post is connected to its platform post ID.'
+                  )}
                 </div>
               ) : commentsData?.reconnectRequired || commentsData?.message ? (
                 <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader px-[16px] py-[14px] text-gray-300">

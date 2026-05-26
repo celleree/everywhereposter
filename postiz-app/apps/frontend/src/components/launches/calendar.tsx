@@ -48,6 +48,7 @@ import { isUSCitizen } from './helpers/isuscitizen.utils';
 import { useInterval } from '@mantine/hooks';
 import { StatisticsModal } from '@gitroom/frontend/components/launches/statistics';
 import { MissingReleaseModal } from '@gitroom/frontend/components/launches/missing-release.modal';
+import { CalendarPostDetailModal } from '@gitroom/frontend/components/launches/calendar-post-detail.modal';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import i18next from 'i18next';
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
@@ -307,6 +308,32 @@ const usePostActions = (onMutate?: () => void) => {
     [modal, t]
   );
 
+  const openPostDetails = useCallback(
+    (post: any) => () => {
+      modal.openModal({
+        title: t('post_details', 'Post Details'),
+        closeOnClickOutside: true,
+        closeOnEscape: true,
+        withCloseButton: true,
+        classNames: {
+          modal: 'w-[100%] max-w-[1400px]',
+        },
+        children: (close) => (
+          <CalendarPostDetailModal
+            post={post}
+            onEdit={() => {
+              close();
+              void editPost(post, false)();
+            }}
+          />
+        ),
+        size: '90%',
+        height: '85vh',
+      });
+    },
+    [modal, t, editPost]
+  );
+
   const openMissingRelease = useCallback(
     (id: string) => () => {
       modal.openModal({
@@ -326,7 +353,14 @@ const usePostActions = (onMutate?: () => void) => {
     [modal, t, mutate]
   );
 
-  return { editPost, deletePost, copyDebugJson, openStatistics, openMissingRelease };
+  return {
+    editPost,
+    deletePost,
+    copyDebugJson,
+    openStatistics,
+    openMissingRelease,
+    openPostDetails,
+  };
 };
 
 export const DayView = () => {
@@ -565,7 +599,14 @@ export const ListView = () => {
   const { integrations, loading, listPosts } = useCalendar();
 
   // Use shared post actions hook
-  const { editPost, deletePost, copyDebugJson, openStatistics, openMissingRelease } = usePostActions();
+  const {
+    editPost,
+    deletePost,
+    copyDebugJson,
+    openStatistics,
+    openMissingRelease,
+    openPostDetails,
+  } = usePostActions();
 
   // Group posts by date
   const groupedPosts = useMemo(() => {
@@ -614,9 +655,9 @@ export const ListView = () => {
                   isBeforeNow={false}
                   date={newDayjs(post.publishDate)}
                   state={post.state}
+                  openDetails={openPostDetails(post)}
                   statistics={openStatistics(post.id)}
                   missingRelease={openMissingRelease(post.id)}
-                  editPost={editPost(post, false)}
                   duplicatePost={editPost(post, true)}
                   copyDebugJson={user?.isSuperAdmin ? copyDebugJson(post) : undefined}
                   post={post}
@@ -672,7 +713,14 @@ export const CalendarColumn: FC<{
   const fetch = useFetch();
 
   // Use shared post actions hook
-  const { editPost, deletePost, copyDebugJson, openStatistics, openMissingRelease } = usePostActions();
+  const {
+    editPost,
+    deletePost,
+    copyDebugJson,
+    openStatistics,
+    openMissingRelease,
+    openPostDetails,
+  } = usePostActions();
   const postList = useMemo(() => {
     return posts.filter((post) => {
       const pList = dayjs.utc(post.publishDate).local();
@@ -934,9 +982,9 @@ export const CalendarColumn: FC<{
                   isBeforeNow={isBeforeNow}
                   date={getDate}
                   state={post.state}
+                  openDetails={openPostDetails(post)}
                   statistics={openStatistics(post.id)}
                   missingRelease={openMissingRelease(post.id)}
-                  editPost={editPost(post, false)}
                   duplicatePost={editPost(post, true)}
                   copyDebugJson={user?.isSuperAdmin ? copyDebugJson(post) : undefined}
                   post={post}
@@ -1042,7 +1090,7 @@ export const CalendarColumn: FC<{
 const CalendarItem: FC<{
   date: dayjs.Dayjs;
   isBeforeNow: boolean;
-  editPost: () => void;
+  openDetails: () => void;
   duplicatePost: () => void;
   copyDebugJson?: () => void;
   deletePost: () => void;
@@ -1061,7 +1109,7 @@ const CalendarItem: FC<{
 }> = memo((props) => {
   const t = useT();
   const {
-    editPost,
+    openDetails,
     statistics,
     duplicatePost,
     copyDebugJson,
@@ -1208,12 +1256,11 @@ const CalendarItem: FC<{
         </div>
       </div>
       <div
-        onClick={isRemoteDeleted ? undefined : editPost}
+        onClick={openDetails}
         className={clsx(
-          'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor',
+          'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor cursor-pointer',
           'relative',
-          isBeforeNow && '!grayscale',
-          isRemoteDeleted && 'cursor-default'
+          isBeforeNow && '!grayscale'
         )}
       >
         <div className={clsx('relative min-w-[20px]')}>

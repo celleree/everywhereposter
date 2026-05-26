@@ -15,7 +15,10 @@ export const RenderComponents: FC<{
   const comments = useCallback(async () => {
     return (await fetch(`/public/posts/${postId}/comments`)).json();
   }, [postId]);
-  const { data, mutate, isLoading } = useSWR('comments', comments);
+  const { data, mutate, isLoading } = useSWR(
+    `/public/posts/${postId}/comments`,
+    comments
+  );
   const mapUsers = useMemo(() => {
     return (data?.comments || []).reduce(
       (all: any, current: any) => {
