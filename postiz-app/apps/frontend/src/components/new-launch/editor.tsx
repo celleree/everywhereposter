@@ -463,6 +463,7 @@ export const EditorWrapper: FC<{
                               num={index}
                               onClick={addValue(index)}
                               postComment={postComment}
+                              identifier={internalFromAll?.identifier}
                             />
                           )}
                         </div>

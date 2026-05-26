@@ -8,11 +8,17 @@ export const AddPostButton: FC<{
   onClick: () => void;
   num: number;
   postComment: PostComment;
+  identifier?: string;
 }> = (props) => {
   const { onClick, num } = props;
   const t = useT();
+  const isInstagram =
+    props.identifier === 'instagram' ||
+    props.identifier === 'instagram-standalone';
   const label =
-    props.postComment === PostComment.ALL
+    isInstagram && props.postComment === PostComment.COMMENT && num === 0
+      ? t('add_instagram_first_comment', 'Add Instagram first comment')
+      : props.postComment === PostComment.ALL
       ? t(
           'add_platform_comment_or_post',
           'Add platform comment or post'

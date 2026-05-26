@@ -9,20 +9,30 @@ import { GlobalIcon } from '@gitroom/frontend/components/ui/icons';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import { useDecisionModal } from '@gitroom/frontend/components/layout/new-modal';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 
 export const SelectCurrent: FC = () => {
   const modals = useDecisionModal();
+  const t = useT();
   const {
     selectedIntegrations,
     current,
+    global,
+    internal,
     setCurrent,
     locked,
     setHide,
+    addInternalValue,
+    setInternalValue,
     addOrRemoveSelectedIntegration,
   } = useLaunchStore(
     useShallow((state) => ({
       selectedIntegrations: state.selectedIntegrations,
       addOrRemoveSelectedIntegration: state.addOrRemoveSelectedIntegration,
+      addInternalValue: state.addInternalValue,
+      setInternalValue: state.setInternalValue,
+      global: state.global,
+      internal: state.internal,
       current: state.current,
       setCurrent: state.setCurrent,
       locked: state.locked,
@@ -47,6 +57,63 @@ export const SelectCurrent: FC = () => {
       addOrRemoveSelectedIntegration(sIntegration, {});
     },
     [addOrRemoveSelectedIntegration, modals]
+  );
+
+  const addInstagramFirstComment = useCallback(
+    (integration: Integrations) => (event: any) => {
+      event.stopPropagation();
+      event.preventDefault();
+
+      const existingInternal = internal.find(
+        (item) => item.integration.id === integration.id
+      );
+      const sourceValues = existingInternal?.integrationValue.length
+        ? existingInternal.integrationValue
+        : global;
+      const mainPost = sourceValues[0] || {
+        id: makeId(10),
+        delay: 0,
+        content: '',
+        media: [],
+      };
+      const sanitizedValues = sourceValues.length
+        ? sourceValues.map((value, index) => ({
+            ...value,
+            media: index > 0 ? [] : value.media || [],
+          }))
+        : [mainPost];
+
+      if (!existingInternal) {
+        addInternalValue(0, integration.id, [
+          ...sanitizedValues,
+          ...(sanitizedValues.length > 1
+            ? []
+            : [
+                {
+                  id: makeId(10),
+                  delay: 0,
+                  content: '',
+                  media: [],
+                },
+              ]),
+        ]);
+      } else if (sanitizedValues.length > 1) {
+        setInternalValue(integration.id, sanitizedValues);
+      } else {
+        addInternalValue(0, integration.id, [
+          {
+            id: makeId(10),
+            delay: 0,
+            content: '',
+            media: [],
+          },
+        ]);
+      }
+
+      setHide(true);
+      setCurrent(integration.id);
+    },
+    [addInternalValue, global, internal, setCurrent, setHide, setInternalValue]
   );
 
   return (
@@ -90,56 +157,66 @@ export const SelectCurrent: FC = () => {
             </div>
           </div>
         </button>
-        {selectedIntegrations.map(({ integration }) => (
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => {
-              setHide(true);
-              setCurrent(integration.id);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
+        {selectedIntegrations.map(({ integration }) => {
+          const isInstagram =
+            integration.identifier === 'instagram' ||
+            integration.identifier === 'instagram-standalone';
+          const existingInternal = internal.find(
+            (item) => item.integration.id === integration.id
+          );
+          const hasInstagramFirstComment =
+            (existingInternal?.integrationValue || global).length > 1;
+
+          return (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => {
                 setHide(true);
                 setCurrent(integration.id);
-              }
-            }}
-            key={integration.id}
-            className={clsx(
-              'group relative flex min-w-[250px] items-center gap-[12px] rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
-              current === integration.id
-                ? 'border-[#FC69FF] bg-[#24142F]'
-                : 'border-newBorder bg-newBgColor hover:border-[#FC69FF]/60'
-            )}
-          >
-            <div className="relative">
-              <SafeImage
-                src={integration.picture || '/no-picture.jpg'}
-                className="h-[44px] w-[44px] rounded-full object-cover"
-                alt={integration.identifier}
-                width={44}
-                height={44}
-                onError={(e) => {
-                  e.currentTarget.src = '/no-picture.jpg';
-                  e.currentTarget.srcset = '/no-picture.jpg';
-                }}
-              />
-              {integration.identifier === 'youtube' ? (
-                <img
-                  src="/icons/platforms/youtube.svg"
-                  className="absolute bottom-0 end-0 z-10 min-w-[14px]"
-                  width={14}
-                />
-              ) : (
-                <SafeImage
-                  src={`/icons/platforms/${integration.identifier}.png`}
-                  className="absolute bottom-0 end-0 z-10 h-[14px] w-[14px] rounded-[4px]"
-                  alt={integration.identifier}
-                  width={14}
-                  height={14}
-                />
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setHide(true);
+                  setCurrent(integration.id);
+                }
+              }}
+              key={integration.id}
+              className={clsx(
+                'group relative flex min-w-[250px] items-center gap-[12px] rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
+                current === integration.id
+                  ? 'border-[#FC69FF] bg-[#24142F]'
+                  : 'border-newBorder bg-newBgColor hover:border-[#FC69FF]/60'
               )}
+            >
+              <div className="relative">
+                <SafeImage
+                  src={integration.picture || '/no-picture.jpg'}
+                  className="h-[44px] w-[44px] rounded-full object-cover"
+                  alt={integration.identifier}
+                  width={44}
+                  height={44}
+                  onError={(e) => {
+                    e.currentTarget.src = '/no-picture.jpg';
+                    e.currentTarget.srcset = '/no-picture.jpg';
+                  }}
+                />
+                {integration.identifier === 'youtube' ? (
+                  <img
+                    src="/icons/platforms/youtube.svg"
+                    className="absolute bottom-0 end-0 z-10 min-w-[14px]"
+                    width={14}
+                  />
+                ) : (
+                  <SafeImage
+                    src={`/icons/platforms/${integration.identifier}.png`}
+                    className="absolute bottom-0 end-0 z-10 h-[14px] w-[14px] rounded-[4px]"
+                    alt={integration.identifier}
+                    width={14}
+                    height={14}
+                  />
+                )}
             </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-[15px] font-[700] text-white">
@@ -156,6 +233,23 @@ export const SelectCurrent: FC = () => {
                   </span>
                 )}
               </div>
+              {isInstagram && (
+                <button
+                  type="button"
+                  onClick={addInstagramFirstComment(integration)}
+                  className="mt-[10px] inline-flex max-w-full items-center rounded-[8px] border border-[#D82D7E]/70 bg-[#D82D7E]/15 px-[10px] py-[6px] text-[12px] font-[700] leading-[16px] text-white transition-colors hover:bg-[#D82D7E]/30"
+                >
+                  {hasInstagramFirstComment
+                    ? t(
+                        'edit_instagram_first_comment',
+                        'Edit Instagram first comment'
+                      )
+                    : t(
+                        'add_instagram_first_comment',
+                        'Add Instagram first comment'
+                      )}
+                </button>
+              )}
             </div>
             <button
               type="button"
@@ -165,7 +259,8 @@ export const SelectCurrent: FC = () => {
               X
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
