@@ -1,6 +1,13 @@
 'use client';
 
-import React, { FC, Fragment, useCallback, useMemo, useState } from 'react';
+import React, {
+  FC,
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -218,6 +225,29 @@ export const PostStatisticsPanel: FC<{
     string | null
   >(null);
   const [commentsError, setCommentsError] = useState('');
+
+  useEffect(() => {
+    if (!openCommentActionMenuId) {
+      return;
+    }
+
+    const closeCommentActionMenu = (event: MouseEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-comment-actions-menu]')
+      ) {
+        return;
+      }
+
+      setOpenCommentActionMenuId(null);
+    };
+
+    document.addEventListener('mousedown', closeCommentActionMenu);
+
+    return () => {
+      document.removeEventListener('mousedown', closeCommentActionMenu);
+    };
+  }, [openCommentActionMenuId]);
 
   const loadStatistics = useCallback(async () => {
     return (await fetch(`/posts/${postId}/statistics`)).json();
@@ -718,8 +748,7 @@ export const PostStatisticsPanel: FC<{
                           )
                       )),
                     ];
-                    const hasManagementControls =
-                      canReply || canHide || canDelete;
+                    const hasManagementControls = canHide || canDelete;
                     const showReplyComposer =
                       canReply && replyComposerCommentId === comment.id;
 
@@ -745,42 +774,49 @@ export const PostStatisticsPanel: FC<{
                                 ? new Date(comment.createdTime).toLocaleString()
                                 : ''}
                             </span>
-                            <div className="relative">
+                            {canReply && (
                               <button
                                 type="button"
-                                aria-label={t('comment_actions', 'Comment actions')}
                                 disabled={!!commentAction || isAddingComment}
-                                onClick={() =>
-                                  setOpenCommentActionMenuId((current) =>
-                                    current === menuId ? null : menuId
-                                  )
-                                }
-                                className="flex h-[28px] w-[28px] items-center justify-center rounded-[6px] border border-newTableBorder text-[16px] leading-none text-newTableText disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={() => {
+                                  setReplyComposerCommentId(comment.id);
+                                  setOpenCommentActionMenuId(null);
+                                }}
+                                className="cursor-pointer text-[12px] font-medium text-[#7aa2ff] hover:text-[#9db9ff] disabled:cursor-not-allowed disabled:opacity-50"
                               >
-                                ...
+                                {t('reply', 'Reply')}
                               </button>
-                              {openCommentActionMenuId === menuId &&
-                                hasManagementControls && (
+                            )}
+                            {hasManagementControls && (
+                              <div
+                                className="relative"
+                                data-comment-actions-menu
+                              >
+                                <button
+                                  type="button"
+                                  aria-label={t(
+                                    'comment_actions',
+                                    'Comment actions'
+                                  )}
+                                  disabled={!!commentAction || isAddingComment}
+                                  onClick={() =>
+                                    setOpenCommentActionMenuId((current) =>
+                                      current === menuId ? null : menuId
+                                    )
+                                  }
+                                  className="flex h-[28px] w-[28px] cursor-pointer items-center justify-center rounded-[6px] border border-newTableBorder text-[16px] leading-none text-newTableText hover:bg-customColor6 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  ...
+                                </button>
+                                {openCommentActionMenuId === menuId && (
                                   <div className="absolute end-0 top-[32px] z-10 min-w-[128px] rounded-[8px] border border-newTableBorder bg-customColor6 py-[6px] shadow-lg">
-                                    {canReply && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setReplyComposerCommentId(comment.id);
-                                          setOpenCommentActionMenuId(null);
-                                        }}
-                                        className="block w-full px-[12px] py-[8px] text-start text-[13px] text-newTableText hover:bg-newTableHeader"
-                                      >
-                                        {t('reply', 'Reply')}
-                                      </button>
-                                    )}
                                     {canHide && (
                                       <button
                                         type="button"
                                         onClick={() =>
                                           runCommentAction(comment, 'hide')
                                         }
-                                        className="block w-full px-[12px] py-[8px] text-start text-[13px] text-newTableText hover:bg-newTableHeader"
+                                        className="block w-full cursor-pointer px-[12px] py-[8px] text-start text-[13px] text-gray-100 hover:bg-newTableHeader hover:text-white"
                                       >
                                         {isHiding
                                           ? t('saving', 'Saving...')
@@ -795,7 +831,7 @@ export const PostStatisticsPanel: FC<{
                                         onClick={() =>
                                           runCommentAction(comment, 'delete')
                                         }
-                                        className="block w-full px-[12px] py-[8px] text-start text-[13px] text-red-200 hover:bg-newTableHeader"
+                                        className="block w-full cursor-pointer px-[12px] py-[8px] text-start text-[13px] text-red-300 hover:bg-newTableHeader hover:text-red-100"
                                       >
                                         {isDeleting
                                           ? t('deleting', 'Deleting...')
@@ -804,7 +840,8 @@ export const PostStatisticsPanel: FC<{
                                     )}
                                   </div>
                                 )}
-                            </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="mt-[10px] whitespace-pre-wrap text-[14px] text-gray-200">
@@ -861,31 +898,34 @@ export const PostStatisticsPanel: FC<{
                                             ).toLocaleString()
                                           : ''}
                                       </span>
-                                      <div className="relative">
-                                        <button
-                                          type="button"
-                                          aria-label={t(
-                                            'comment_actions',
-                                            'Comment actions'
-                                          )}
-                                          disabled={
-                                            !!commentAction || isAddingComment
-                                          }
-                                          onClick={() =>
-                                            setOpenCommentActionMenuId(
-                                              (current) =>
-                                                current === replyMenuId
-                                                  ? null
-                                                  : replyMenuId
-                                            )
-                                          }
-                                          className="flex h-[28px] w-[28px] items-center justify-center rounded-[6px] border border-newTableBorder text-[16px] leading-none text-newTableText disabled:cursor-not-allowed disabled:opacity-50"
+                                      {hasReplyManagementControls && (
+                                        <div
+                                          className="relative"
+                                          data-comment-actions-menu
                                         >
-                                          ...
-                                        </button>
-                                        {openCommentActionMenuId ===
-                                          replyMenuId &&
-                                          hasReplyManagementControls && (
+                                          <button
+                                            type="button"
+                                            aria-label={t(
+                                              'comment_actions',
+                                              'Comment actions'
+                                            )}
+                                            disabled={
+                                              !!commentAction || isAddingComment
+                                            }
+                                            onClick={() =>
+                                              setOpenCommentActionMenuId(
+                                                (current) =>
+                                                  current === replyMenuId
+                                                    ? null
+                                                    : replyMenuId
+                                              )
+                                            }
+                                            className="flex h-[28px] w-[28px] cursor-pointer items-center justify-center rounded-[6px] border border-newTableBorder text-[16px] leading-none text-newTableText hover:bg-newTableHeader disabled:cursor-not-allowed disabled:opacity-50"
+                                          >
+                                            ...
+                                          </button>
+                                          {openCommentActionMenuId ===
+                                            replyMenuId && (
                                             <div className="absolute end-0 top-[32px] z-10 min-w-[128px] rounded-[8px] border border-newTableBorder bg-newTableHeader py-[6px] shadow-lg">
                                               {replyCanHide && (
                                                 <button
@@ -896,7 +936,7 @@ export const PostStatisticsPanel: FC<{
                                                       'hide'
                                                     )
                                                   }
-                                                  className="block w-full px-[12px] py-[8px] text-start text-[13px] text-newTableText hover:bg-customColor6"
+                                                  className="block w-full cursor-pointer px-[12px] py-[8px] text-start text-[13px] text-gray-100 hover:bg-customColor6 hover:text-white"
                                                 >
                                                   {isReplyHiding
                                                     ? t('saving', 'Saving...')
@@ -914,7 +954,7 @@ export const PostStatisticsPanel: FC<{
                                                       'delete'
                                                     )
                                                   }
-                                                  className="block w-full px-[12px] py-[8px] text-start text-[13px] text-red-200 hover:bg-customColor6"
+                                                  className="block w-full cursor-pointer px-[12px] py-[8px] text-start text-[13px] text-red-300 hover:bg-customColor6 hover:text-red-100"
                                                 >
                                                   {isReplyDeleting
                                                     ? t(
@@ -926,7 +966,8 @@ export const PostStatisticsPanel: FC<{
                                               )}
                                             </div>
                                           )}
-                                      </div>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                   <div className="mt-[6px] whitespace-pre-wrap text-[13px] text-gray-200">
@@ -949,6 +990,22 @@ export const PostStatisticsPanel: FC<{
                                     [comment.id]: event.target.value,
                                   }))
                                 }
+                                onKeyDown={(event) => {
+                                  if (event.key !== 'Enter' || event.shiftKey) {
+                                    return;
+                                  }
+
+                                  if (
+                                    !!commentAction ||
+                                    isAddingComment ||
+                                    !(commentReplies[comment.id] || '').trim()
+                                  ) {
+                                    return;
+                                  }
+
+                                  event.preventDefault();
+                                  runCommentAction(comment, 'reply');
+                                }}
                                 disabled={!!commentAction || isAddingComment}
                                 placeholder={t(
                                   'write_a_reply',
