@@ -211,6 +211,12 @@ export const PostStatisticsPanel: FC<{
     commentId: string;
     action: 'reply' | 'hide' | 'delete';
   } | null>(null);
+  const [openCommentActionMenuId, setOpenCommentActionMenuId] = useState<
+    string | null
+  >(null);
+  const [replyComposerCommentId, setReplyComposerCommentId] = useState<
+    string | null
+  >(null);
   const [commentsError, setCommentsError] = useState('');
 
   const loadStatistics = useCallback(async () => {
@@ -397,6 +403,7 @@ export const PostStatisticsPanel: FC<{
             ...current,
             [comment.id]: '',
           }));
+          setReplyComposerCommentId(null);
         } else if (action === 'delete') {
           setOptimisticComments((current) =>
             current.filter((item) => item.id !== comment.id)
@@ -424,6 +431,7 @@ export const PostStatisticsPanel: FC<{
             : t('comment_action_failed', 'Comment action failed.')
         );
       } finally {
+        setOpenCommentActionMenuId(null);
         setCommentAction(null);
       }
     },
@@ -690,6 +698,7 @@ export const PostStatisticsPanel: FC<{
                     const canReply = comment.canReply === true;
                     const canHide = comment.canHide === true;
                     const canDelete = comment.canDelete === true;
+                    const menuId = `comment-${comment.id}`;
                     const isReplying =
                       commentAction?.commentId === comment.id &&
                       commentAction.action === 'reply';
@@ -711,6 +720,8 @@ export const PostStatisticsPanel: FC<{
                     ];
                     const hasManagementControls =
                       canReply || canHide || canDelete;
+                    const showReplyComposer =
+                      canReply && replyComposerCommentId === comment.id;
 
                     return (
                       <div
@@ -734,6 +745,66 @@ export const PostStatisticsPanel: FC<{
                                 ? new Date(comment.createdTime).toLocaleString()
                                 : ''}
                             </span>
+                            <div className="relative">
+                              <button
+                                type="button"
+                                aria-label={t('comment_actions', 'Comment actions')}
+                                disabled={!!commentAction || isAddingComment}
+                                onClick={() =>
+                                  setOpenCommentActionMenuId((current) =>
+                                    current === menuId ? null : menuId
+                                  )
+                                }
+                                className="flex h-[28px] w-[28px] items-center justify-center rounded-[6px] border border-newTableBorder text-[16px] leading-none text-newTableText disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                ...
+                              </button>
+                              {openCommentActionMenuId === menuId &&
+                                hasManagementControls && (
+                                  <div className="absolute end-0 top-[32px] z-10 min-w-[128px] rounded-[8px] border border-newTableBorder bg-customColor6 py-[6px] shadow-lg">
+                                    {canReply && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setReplyComposerCommentId(comment.id);
+                                          setOpenCommentActionMenuId(null);
+                                        }}
+                                        className="block w-full px-[12px] py-[8px] text-start text-[13px] text-newTableText hover:bg-newTableHeader"
+                                      >
+                                        {t('reply', 'Reply')}
+                                      </button>
+                                    )}
+                                    {canHide && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          runCommentAction(comment, 'hide')
+                                        }
+                                        className="block w-full px-[12px] py-[8px] text-start text-[13px] text-newTableText hover:bg-newTableHeader"
+                                      >
+                                        {isHiding
+                                          ? t('saving', 'Saving...')
+                                          : comment.hidden
+                                          ? t('unhide', 'Unhide')
+                                          : t('hide', 'Hide')}
+                                      </button>
+                                    )}
+                                    {canDelete && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          runCommentAction(comment, 'delete')
+                                        }
+                                        className="block w-full px-[12px] py-[8px] text-start text-[13px] text-red-200 hover:bg-newTableHeader"
+                                      >
+                                        {isDeleting
+                                          ? t('deleting', 'Deleting...')
+                                          : t('delete', 'Delete')}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                            </div>
                           </div>
                         </div>
                         <div className="mt-[10px] whitespace-pre-wrap text-[14px] text-gray-200">
@@ -760,99 +831,147 @@ export const PostStatisticsPanel: FC<{
                         </div>
                         {!!visibleReplies.length && (
                           <div className="mt-[12px] flex flex-col gap-[8px] border-s border-newTableBorder ps-[12px]">
-                            {visibleReplies.map((reply) => (
-                              <div
-                                key={reply.id}
-                                className="rounded-[8px] bg-customColor6 px-[12px] py-[10px]"
-                              >
-                                <div className="flex flex-wrap items-center justify-between gap-[8px] text-[12px] text-gray-400">
-                                  <span className="font-medium text-newTableText">
-                                    {reply.authorName}
-                                  </span>
-                                  <span>
-                                    {reply.createdTime
-                                      ? new Date(
-                                          reply.createdTime
-                                        ).toLocaleString()
-                                      : ''}
-                                  </span>
+                            {visibleReplies.map((reply) => {
+                              const replyCanHide = reply.canHide === true;
+                              const replyCanDelete = reply.canDelete === true;
+                              const replyMenuId = `reply-${reply.id}`;
+                              const isReplyHiding =
+                                commentAction?.commentId === reply.id &&
+                                commentAction.action === 'hide';
+                              const isReplyDeleting =
+                                commentAction?.commentId === reply.id &&
+                                commentAction.action === 'delete';
+                              const hasReplyManagementControls =
+                                replyCanHide || replyCanDelete;
+
+                              return (
+                                <div
+                                  key={reply.id}
+                                  className="rounded-[8px] bg-customColor6 px-[12px] py-[10px]"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-[8px] text-[12px] text-gray-400">
+                                    <span className="font-medium text-newTableText">
+                                      {reply.authorName}
+                                    </span>
+                                    <div className="flex flex-wrap items-center gap-[8px]">
+                                      <span>
+                                        {reply.createdTime
+                                          ? new Date(
+                                              reply.createdTime
+                                            ).toLocaleString()
+                                          : ''}
+                                      </span>
+                                      <div className="relative">
+                                        <button
+                                          type="button"
+                                          aria-label={t(
+                                            'comment_actions',
+                                            'Comment actions'
+                                          )}
+                                          disabled={
+                                            !!commentAction || isAddingComment
+                                          }
+                                          onClick={() =>
+                                            setOpenCommentActionMenuId(
+                                              (current) =>
+                                                current === replyMenuId
+                                                  ? null
+                                                  : replyMenuId
+                                            )
+                                          }
+                                          className="flex h-[28px] w-[28px] items-center justify-center rounded-[6px] border border-newTableBorder text-[16px] leading-none text-newTableText disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          ...
+                                        </button>
+                                        {openCommentActionMenuId ===
+                                          replyMenuId &&
+                                          hasReplyManagementControls && (
+                                            <div className="absolute end-0 top-[32px] z-10 min-w-[128px] rounded-[8px] border border-newTableBorder bg-newTableHeader py-[6px] shadow-lg">
+                                              {replyCanHide && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    runCommentAction(
+                                                      reply,
+                                                      'hide'
+                                                    )
+                                                  }
+                                                  className="block w-full px-[12px] py-[8px] text-start text-[13px] text-newTableText hover:bg-customColor6"
+                                                >
+                                                  {isReplyHiding
+                                                    ? t('saving', 'Saving...')
+                                                    : reply.hidden
+                                                    ? t('unhide', 'Unhide')
+                                                    : t('hide', 'Hide')}
+                                                </button>
+                                              )}
+                                              {replyCanDelete && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    runCommentAction(
+                                                      reply,
+                                                      'delete'
+                                                    )
+                                                  }
+                                                  className="block w-full px-[12px] py-[8px] text-start text-[13px] text-red-200 hover:bg-customColor6"
+                                                >
+                                                  {isReplyDeleting
+                                                    ? t(
+                                                        'deleting',
+                                                        'Deleting...'
+                                                      )
+                                                    : t('delete', 'Delete')}
+                                                </button>
+                                              )}
+                                            </div>
+                                          )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-[6px] whitespace-pre-wrap text-[13px] text-gray-200">
+                                    {reply.message ||
+                                      t('no_comment_text', 'No comment text')}
+                                  </div>
                                 </div>
-                                <div className="mt-[6px] whitespace-pre-wrap text-[13px] text-gray-200">
-                                  {reply.message ||
-                                    t('no_comment_text', 'No comment text')}
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
-                        {hasManagementControls && (
+                        {showReplyComposer && (
                           <div className="mt-[14px] flex flex-col gap-[10px]">
-                            {canReply && (
-                              <div className="flex flex-col gap-[8px] sm:flex-row">
-                                <input
-                                  value={commentReplies[comment.id] || ''}
-                                  onChange={(event) =>
-                                    setCommentReplies((current) => ({
-                                      ...current,
-                                      [comment.id]: event.target.value,
-                                    }))
-                                  }
-                                  disabled={!!commentAction || isAddingComment}
-                                  placeholder={t(
-                                    'write_a_reply',
-                                    'Write a reply'
-                                  )}
-                                  className="min-h-[38px] flex-1 rounded-[8px] border border-newTableBorder bg-customColor6 px-[12px] text-[14px] text-newTableText outline-none"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={
-                                    !!commentAction ||
-                                    isAddingComment ||
-                                    !(commentReplies[comment.id] || '').trim()
-                                  }
-                                  onClick={() =>
-                                    runCommentAction(comment, 'reply')
-                                  }
-                                  className="min-h-[38px] rounded-[8px] bg-[#612bd3] px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {isReplying
-                                    ? t('replying', 'Replying...')
-                                    : t('reply', 'Reply')}
-                                </button>
-                              </div>
-                            )}
-                            <div className="flex flex-wrap gap-[8px]">
-                              {canHide && (
-                                <button
-                                  type="button"
-                                  disabled={!!commentAction || isAddingComment}
-                                  onClick={() =>
-                                    runCommentAction(comment, 'hide')
-                                  }
-                                  className="min-h-[34px] rounded-[8px] border border-newTableBorder px-[12px] text-[13px] text-newTableText disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {isHiding
-                                    ? t('saving', 'Saving...')
-                                    : comment.hidden
-                                    ? t('unhide', 'Unhide')
-                                    : t('hide', 'Hide')}
-                                </button>
-                              )}
-                              {canDelete && (
-                                <button
-                                  type="button"
-                                  disabled={!!commentAction || isAddingComment}
-                                  onClick={() =>
-                                    runCommentAction(comment, 'delete')
-                                  }
-                                  className="min-h-[34px] rounded-[8px] border border-red-500/50 px-[12px] text-[13px] text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {isDeleting
-                                    ? t('deleting', 'Deleting...')
-                                    : t('delete', 'Delete')}
-                                </button>
-                              )}
+                            <div className="flex flex-col gap-[8px] sm:flex-row">
+                              <input
+                                value={commentReplies[comment.id] || ''}
+                                onChange={(event) =>
+                                  setCommentReplies((current) => ({
+                                    ...current,
+                                    [comment.id]: event.target.value,
+                                  }))
+                                }
+                                disabled={!!commentAction || isAddingComment}
+                                placeholder={t(
+                                  'write_a_reply',
+                                  'Write a reply'
+                                )}
+                                className="min-h-[38px] flex-1 rounded-[8px] border border-newTableBorder bg-customColor6 px-[12px] text-[14px] text-newTableText outline-none"
+                              />
+                              <button
+                                type="button"
+                                disabled={
+                                  !!commentAction ||
+                                  isAddingComment ||
+                                  !(commentReplies[comment.id] || '').trim()
+                                }
+                                onClick={() =>
+                                  runCommentAction(comment, 'reply')
+                                }
+                                className="min-h-[38px] rounded-[8px] bg-[#612bd3] px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {isReplying
+                                  ? t('replying', 'Replying...')
+                                  : t('reply', 'Reply')}
+                              </button>
                             </div>
                           </div>
                         )}
