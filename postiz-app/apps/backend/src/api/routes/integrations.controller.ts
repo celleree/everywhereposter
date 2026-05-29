@@ -32,6 +32,7 @@ import {
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { uniqBy } from 'lodash';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
+import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.service';
 
 @ApiTags('Integrations')
 @Controller('/integrations')
@@ -40,7 +41,8 @@ export class IntegrationsController {
     private _integrationManager: IntegrationManager,
     private _integrationService: IntegrationService,
     private _postService: PostsService,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _historicalImportService: HistoricalImportService
   ) {}
 
   @Post('/provider/:id/connect')
@@ -258,6 +260,46 @@ export class IntegrationsController {
     @Body() body: IntegrationTimeDto
   ) {
     return this._integrationService.setTimes(org.id, id, body);
+  }
+
+  @Post('/:id/historical-import/backfill')
+  async backfillInstagramHistoricalImport(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Param('id') id: string,
+    @Body() body?: { maxPages?: number }
+  ) {
+    const integration = await this._integrationService.getIntegrationById(
+      org.id,
+      id
+    );
+    if (!integration) {
+      throw new Error('Invalid integration');
+    }
+
+    if (integration.providerIdentifier !== 'instagram') {
+      throw new Error('Historical import is only supported for Instagram');
+    }
+
+    const provider = this._integrationManager.getSocialIntegration(
+      integration.providerIdentifier
+    );
+    if (!provider?.listMedia) {
+      throw new Error('Instagram provider does not support media listing');
+    }
+
+    const requestedMaxPages = Number(body?.maxPages || 1);
+    const maxPages = Number.isFinite(requestedMaxPages)
+      ? Math.min(5, Math.max(1, Math.floor(requestedMaxPages)))
+      : 1;
+
+    return this._historicalImportService.importInstagramBackfill({
+      organizationId: org.id,
+      requestedByUserId: user.id,
+      integration,
+      provider,
+      maxPages,
+    });
   }
 
   @Post('/mentions')

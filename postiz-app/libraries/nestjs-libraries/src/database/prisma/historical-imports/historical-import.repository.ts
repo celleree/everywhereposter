@@ -41,6 +41,27 @@ export type HistoricalImportJobCreateInput = {
   retryCount?: number;
 };
 
+export type HistoricalImportJobUpdateInput = {
+  id: string;
+  status?: string;
+  finishedAt?: Date;
+  cursorAfter?: Prisma.InputJsonValue;
+  postsSeenCount?: number;
+  postsCreatedCount?: number;
+  postsUpdatedCount?: number;
+  postsSkippedCount?: number;
+  metricsUpdatedCount?: number;
+  errorCode?: string;
+  errorMessage?: string;
+};
+
+export type HistoricalPostPlatformIdentityInput = {
+  organizationId: string;
+  platform: string;
+  platformAccountId: string;
+  platformPostId: string;
+};
+
 export type HistoricalPostUpsertInput = {
   organizationId: string;
   sourceId: string;
@@ -146,6 +167,39 @@ export class HistoricalImportRepository {
         errorCode: input.errorCode,
         errorMessage: input.errorMessage,
         retryCount: input.retryCount,
+      },
+    });
+  }
+
+  updateJobRecord(input: HistoricalImportJobUpdateInput) {
+    return this._jobs.model.historicalImportJob.update({
+      where: { id: input.id },
+      data: {
+        status: input.status,
+        finishedAt: input.finishedAt,
+        cursorAfter: input.cursorAfter,
+        postsSeenCount: input.postsSeenCount,
+        postsCreatedCount: input.postsCreatedCount,
+        postsUpdatedCount: input.postsUpdatedCount,
+        postsSkippedCount: input.postsSkippedCount,
+        metricsUpdatedCount: input.metricsUpdatedCount,
+        errorCode: input.errorCode,
+        errorMessage: input.errorMessage,
+      },
+    });
+  }
+
+  getHistoricalPostByPlatformIdentity(
+    input: HistoricalPostPlatformIdentityInput
+  ) {
+    return this._posts.model.historicalPost.findUnique({
+      where: {
+        organizationId_platform_platformAccountId_platformPostId: {
+          organizationId: input.organizationId,
+          platform: input.platform,
+          platformAccountId: input.platformAccountId,
+          platformPostId: input.platformPostId,
+        },
       },
     });
   }
