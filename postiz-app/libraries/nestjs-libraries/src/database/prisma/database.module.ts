@@ -46,6 +46,8 @@ import { AntiGenericService } from '@gitroom/nestjs-libraries/copy-generation/an
 import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
 import { KnowledgeBaseRepository } from '@gitroom/nestjs-libraries/database/prisma/knowledge-base/knowledge-base.repository';
 import { KnowledgeBaseService } from '@gitroom/nestjs-libraries/database/prisma/knowledge-base/knowledge-base.service';
+import { HistoricalImportRepository } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.repository';
+import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.service';
 
 @Global()
 @Module({
@@ -101,6 +103,8 @@ import { KnowledgeBaseService } from '@gitroom/nestjs-libraries/database/prisma/
     CopyGenerationService,
     KnowledgeBaseRepository,
     KnowledgeBaseService,
+    HistoricalImportRepository,
+    HistoricalImportService,
   ],
   get exports() {
     return this.providers;

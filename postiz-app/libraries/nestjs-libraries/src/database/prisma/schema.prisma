@@ -45,6 +45,10 @@ model Organization {
   oauthAuthorizations OAuthAuthorization[]
   knowledgeDocuments  KnowledgeDocument[]
   voiceProfiles       VoiceProfile[]
+  historicalImportSources HistoricalImportSource[]
+  historicalImportJobs    HistoricalImportJob[]
+  historicalPosts         HistoricalPost[]
+  historicalPostMetrics   HistoricalPostMetric[]
 
   @@index([apiKey])
   @@index([streakSince])
@@ -506,6 +510,128 @@ model Post {
   @@index([updatedAt])
   @@index([releaseURL])
   @@index([integrationId])
+}
+
+model HistoricalImportSource {
+  id                         String                @id @default(cuid())
+  organizationId             String
+  ownerUserId                String?
+  platform                   String
+  connectedAccountId         String?
+  platformAccountId          String
+  platformAccountName        String?
+  status                     String                @default("active")
+  lastSuccessfulSyncAt       DateTime?
+  lastAttemptedSyncAt        DateTime?
+  initialBackfillCompletedAt DateTime?
+  syncCursor                 Json?
+  oldestImportedPublishedAt  DateTime?
+  newestImportedPublishedAt  DateTime?
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  organization               Organization          @relation(fields: [organizationId], references: [id])
+  jobs                       HistoricalImportJob[]
+  posts                      HistoricalPost[]
+
+  @@unique([organizationId, platform, platformAccountId])
+  @@index([organizationId])
+  @@index([platform])
+  @@index([connectedAccountId])
+  @@index([status])
+  @@index([lastSuccessfulSyncAt])
+}
+
+model HistoricalImportJob {
+  id                  String                 @id @default(cuid())
+  sourceId            String
+  organizationId      String
+  platform            String
+  jobType             String
+  status              String                 @default("queued")
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  requestedByUserId   String?
+  cursorBefore        Json?
+  cursorAfter         Json?
+  windowStart         DateTime?
+  windowEnd           DateTime?
+  postsSeenCount      Int                    @default(0)
+  postsCreatedCount   Int                    @default(0)
+  postsUpdatedCount   Int                    @default(0)
+  postsSkippedCount   Int                    @default(0)
+  metricsUpdatedCount Int                    @default(0)
+  errorCode           String?
+  errorMessage        String?
+  retryCount          Int                    @default(0)
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  source              HistoricalImportSource @relation(fields: [sourceId], references: [id])
+  organization        Organization           @relation(fields: [organizationId], references: [id])
+
+  @@index([sourceId, createdAt])
+  @@index([organizationId, status])
+  @@index([platform, status])
+  @@index([jobType])
+  @@index([createdAt])
+}
+
+model HistoricalPost {
+  id                     String                 @id @default(cuid())
+  organizationId         String
+  sourceId               String
+  platform               String
+  connectedAccountId     String?
+  platformAccountId      String
+  platformPostId         String
+  platformPermalink      String?
+  canonicalUrl           String?
+  postType               String                 @default("unknown")
+  caption                String?
+  mediaPreviewUrl        String?
+  thumbnailUrl           String?
+  publishedAt            DateTime
+  importedAt             DateTime               @default(now())
+  lastSyncedAt           DateTime?
+  deletedOrUnavailableAt DateTime?
+  visibility             String                 @default("unknown")
+  language               String?
+  isHistoricalImport     Boolean                @default(true)
+  readOnly               Boolean                @default(true)
+  rawPlatformData        Json?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  source                 HistoricalImportSource @relation(fields: [sourceId], references: [id])
+  organization           Organization           @relation(fields: [organizationId], references: [id])
+  metrics                HistoricalPostMetric[]
+
+  @@unique([organizationId, platform, platformAccountId, platformPostId])
+  @@index([organizationId, publishedAt])
+  @@index([sourceId, publishedAt])
+  @@index([platform, platformPostId])
+  @@index([connectedAccountId])
+  @@index([publishedAt])
+}
+
+model HistoricalPostMetric {
+  id               String         @id @default(cuid())
+  historicalPostId String
+  organizationId   String
+  platform         String
+  metricName       String
+  metricValue      Float
+  metricUnit       String         @default("count")
+  metricPeriod     String         @default("lifetime")
+  periodStart      DateTime?
+  periodEnd        DateTime?
+  observedAt       DateTime       @default(now())
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  historicalPost   HistoricalPost @relation(fields: [historicalPostId], references: [id])
+  organization     Organization   @relation(fields: [organizationId], references: [id])
+
+  @@index([historicalPostId, metricName, observedAt])
+  @@index([organizationId, platform, metricName])
+  @@index([observedAt])
 }
 
 model Notifications {
