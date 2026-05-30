@@ -25,6 +25,13 @@ const POST_ITEM_KEYS: Record<string, string> = {
   integration: 'n',
   intervalInDays: 'iv',
   actualDate: 'ad',
+  source: 'src',
+  isHistoricalImport: 'hi',
+  readOnly: 'ro',
+  platformPostId: 'ppi',
+  postType: 'pt',
+  mediaPreviewUrl: 'mp',
+  thumbnailUrl: 'th',
 };
 
 const INTEGRATION_KEYS: Record<string, string> = {

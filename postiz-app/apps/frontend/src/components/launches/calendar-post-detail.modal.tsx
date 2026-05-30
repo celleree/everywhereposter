@@ -2,11 +2,14 @@
 
 import React, { FC, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Integration, Post, Tags } from '@prisma/client';
 import { Button } from '@gitroom/react/form/button';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
+import {
+  isHistoricalCalendarPost,
+  type CalendarPost,
+} from '@gitroom/frontend/components/launches/calendar.context';
 import {
   PostStatisticsPanel,
   type PostStatisticsPanelSection,
@@ -19,12 +22,7 @@ type CalendarPostDetailTab =
   | 'platformComments'
   | 'internalComments';
 
-type CalendarPostDetailPost = Post & {
-  integration: Integration;
-  tags: {
-    tag: Tags;
-  }[];
-};
+type CalendarPostDetailPost = CalendarPost;
 
 const analyticsSections: PostStatisticsPanelSection[] = [
   'analytics',
@@ -53,10 +51,11 @@ const DetailRow: FC<{
 
 export const CalendarPostDetailModal: FC<{
   post: CalendarPostDetailPost;
-  onEdit: () => void;
+  onEdit?: () => void;
 }> = ({ post, onEdit }) => {
   const t = useT();
   const [tab, setTab] = useState<CalendarPostDetailTab>('overview');
+  const isHistoricalPost = isHistoricalCalendarPost(post);
   const isRemoteDeleted = post.state === 'DELETED_REMOTE';
   const isPublished = post.state === 'PUBLISHED';
   const plainContent = useMemo(() => {
@@ -78,20 +77,24 @@ export const CalendarPostDetailModal: FC<{
   const tabs = useMemo(
     () => [
       { key: 'overview' as const, label: t('overview', 'Overview') },
-      { key: 'analytics' as const, label: t('analytics', 'Analytics') },
-      {
-        key: 'platformComments' as const,
-        label: t('platform_comments', 'Platform Comments'),
-      },
-      {
-        key: 'internalComments' as const,
-        label: t(
-          'internal_notes_team_comments',
-          'Internal Notes / Team Comments'
-        ),
-      },
+      ...(isHistoricalPost
+        ? []
+        : [
+            { key: 'analytics' as const, label: t('analytics', 'Analytics') },
+            {
+              key: 'platformComments' as const,
+              label: t('platform_comments', 'Platform Comments'),
+            },
+            {
+              key: 'internalComments' as const,
+              label: t(
+                'internal_notes_team_comments',
+                'Internal Notes / Team Comments'
+              ),
+            },
+          ]),
     ],
-    [t]
+    [isHistoricalPost, t]
   );
 
   return (
@@ -119,28 +122,32 @@ export const CalendarPostDetailModal: FC<{
             </div>
           </div>
         </div>
-        <Button type="button" onClick={onEdit} disabled={isRemoteDeleted}>
-          {t('edit_post', 'Edit Post')}
-        </Button>
+        {!isHistoricalPost && onEdit && (
+          <Button type="button" onClick={onEdit} disabled={isRemoteDeleted}>
+            {t('edit_post', 'Edit Post')}
+          </Button>
+        )}
       </div>
 
-      <div className="flex flex-wrap gap-[8px] border-b border-newTableBorder pb-[10px]">
-        {tabs.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => setTab(item.key)}
-            className={clsx(
-              'rounded-[8px] px-[12px] py-[8px] text-[14px] transition-colors',
-              tab === item.key
-                ? 'bg-btnPrimary text-white'
-                : 'bg-newTableHeader text-gray-300 hover:bg-tableBorder'
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      {!isHistoricalPost && (
+        <div className="flex flex-wrap gap-[8px] border-b border-newTableBorder pb-[10px]">
+          {tabs.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setTab(item.key)}
+              className={clsx(
+                'rounded-[8px] px-[12px] py-[8px] text-[14px] transition-colors',
+                tab === item.key
+                  ? 'bg-btnPrimary text-white'
+                  : 'bg-newTableHeader text-gray-300 hover:bg-tableBorder'
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto pe-[4px] scrollbar scrollbar-thumb-tableBorder scrollbar-track-secondary">
         {tab === 'overview' && (
@@ -148,7 +155,11 @@ export const CalendarPostDetailModal: FC<{
             <div className="grid grid-cols-1 gap-[14px] md:grid-cols-2">
               <DetailRow
                 label={t('status', 'Status')}
-                value={formatState(post.state)}
+                value={
+                  isHistoricalPost
+                    ? t('imported', 'Imported')
+                    : formatState(post.state)
+                }
               />
               <DetailRow
                 label={t('channel', 'Channel')}
@@ -161,17 +172,29 @@ export const CalendarPostDetailModal: FC<{
               <DetailRow label={t('tags', 'Tags')} value={tags} />
               <DetailRow
                 label={t('platform_post_id', 'Platform Post ID')}
-                value={
-                  post.releaseId && post.releaseId !== 'missing'
-                    ? post.releaseId
-                    : t('not_connected', 'Not connected')
-                }
+                value={post.platformPostId || post.releaseId || t('not_connected', 'Not connected')}
               />
+              {isHistoricalPost && post.postType && (
+                <DetailRow label={t('post_type', 'Post Type')} value={post.postType} />
+              )}
               <DetailRow
                 label={t('post_id', 'Post ID')}
                 value={post.id}
               />
             </div>
+
+            {isHistoricalPost && (post.thumbnailUrl || post.mediaPreviewUrl) && (
+              <div className="flex flex-col gap-[8px]">
+                <div className="text-[14px] font-[500] text-newTableText">
+                  {t('media_preview', 'Media Preview')}
+                </div>
+                <img
+                  className="max-h-[260px] max-w-full rounded-[8px] border border-newTableBorder object-contain"
+                  src={post.thumbnailUrl || post.mediaPreviewUrl || ''}
+                  alt={t('media_preview', 'Media Preview')}
+                />
+              </div>
+            )}
 
             <div className="flex flex-col gap-[8px]">
               <div className="text-[14px] font-[500] text-newTableText">
@@ -184,7 +207,7 @@ export const CalendarPostDetailModal: FC<{
           </div>
         )}
 
-        {tab === 'analytics' && (
+        {!isHistoricalPost && tab === 'analytics' && (
           <PostStatisticsPanel
             postId={post.id}
             isPublished={isPublished}
@@ -192,7 +215,7 @@ export const CalendarPostDetailModal: FC<{
           />
         )}
 
-        {tab === 'platformComments' && (
+        {!isHistoricalPost && tab === 'platformComments' && (
           <PostStatisticsPanel
             postId={post.id}
             isPublished={isPublished}
@@ -200,7 +223,7 @@ export const CalendarPostDetailModal: FC<{
           />
         )}
 
-        {tab === 'internalComments' && (
+        {!isHistoricalPost && tab === 'internalComments' && (
           <div className="flex flex-col gap-[14px]">
             <h3 className="text-[18px] font-[500]">
               {t(

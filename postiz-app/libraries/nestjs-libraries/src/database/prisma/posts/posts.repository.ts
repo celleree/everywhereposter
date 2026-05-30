@@ -20,7 +20,7 @@ dayjs.extend(utc);
 @Injectable()
 export class PostsRepository {
   constructor(
-    private _post: PrismaRepository<'post'>,
+    private _post: PrismaRepository<'post' | 'integration' | 'historicalPost'>,
     private _popularPosts: PrismaRepository<'popularPosts'>,
     private _comments: PrismaRepository<'comments'>,
     private _tags: PrismaRepository<'tags'>,
@@ -125,71 +125,74 @@ export class PostsRepository {
     const startDate = dayjs.utc(query.startDate).toDate();
     const endDate = dayjs.utc(query.endDate).toDate();
 
-    const list = await this._post.model.post.findMany({
-      where: {
-        AND: [
-          {
-            OR: [
-              {
-                organizationId: orgId,
-              }
-            ],
-          },
-          {
-            OR: [
-              {
-                publishDate: {
-                  gte: startDate,
-                  lte: endDate,
+    const [list, historicalPosts] = await Promise.all([
+      this._post.model.post.findMany({
+        where: {
+          AND: [
+            {
+              OR: [
+                {
+                  organizationId: orgId,
+                }
+              ],
+            },
+            {
+              OR: [
+                {
+                  publishDate: {
+                    gte: startDate,
+                    lte: endDate,
+                  },
                 },
-              },
-              {
-                intervalInDays: {
-                  not: null,
+                {
+                  intervalInDays: {
+                    not: null,
+                  },
                 },
-              },
-            ],
+              ],
+            },
+          ],
+          integration: {
+            deletedAt: null,
           },
-        ],
-        integration: {
           deletedAt: null,
+          parentPostId: null,
+          ...(query.customer
+            ? {
+                integration: {
+                  customerId: query.customer,
+                },
+              }
+            : {}),
         },
-        deletedAt: null,
-        parentPostId: null,
-        ...(query.customer
-          ? {
-              integration: {
-                customerId: query.customer,
-              },
-            }
-          : {}),
-      },
-      select: {
-        id: true,
-        content: true,
-        publishDate: true,
-        releaseURL: true,
-        releaseId: true,
-        state: true,
-        intervalInDays: true,
-        group: true,
-        tags: {
-          select: {
-            tag: true,
+        select: {
+          id: true,
+          content: true,
+          publishDate: true,
+          releaseURL: true,
+          releaseId: true,
+          state: true,
+          intervalInDays: true,
+          group: true,
+          tags: {
+            select: {
+              tag: true,
+            },
+          },
+          integration: {
+            select: {
+              id: true,
+              providerIdentifier: true,
+              name: true,
+              picture: true,
+            },
           },
         },
-        integration: {
-          select: {
-            id: true,
-            providerIdentifier: true,
-            name: true,
-            picture: true,
-          },
-        },
-      },
-    });
+      }),
+      this.getHistoricalCalendarPosts(orgId, query, startDate, endDate),
+    ]);
 
-    return list.reduce((all, post) => {
+    const posts = list.reduce((all, post) => {
       if (!post.intervalInDays) {
         return [...all, post];
       }
@@ -210,6 +213,130 @@ export class PostsRepository {
 
       return [...all, ...addMorePosts];
     }, [] as any[]);
+
+    return [...posts, ...historicalPosts];
+  }
+
+  private async getHistoricalCalendarPosts(
+    orgId: string,
+    query: GetPostsDto,
+    startDate: Date,
+    endDate: Date
+  ) {
+    let customerIntegrationIds: string[] | undefined;
+
+    if (query.customer) {
+      const customerIntegrations = await this._post.model.integration.findMany({
+        where: {
+          organizationId: orgId,
+          customerId: query.customer,
+          providerIdentifier: 'instagram',
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      customerIntegrationIds = customerIntegrations.map(({ id }) => id);
+      if (customerIntegrationIds.length === 0) {
+        return [];
+      }
+    }
+
+    const historicalPosts = await this._post.model.historicalPost.findMany({
+      where: {
+        organizationId: orgId,
+        platform: 'instagram',
+        publishedAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+        deletedOrUnavailableAt: null,
+        isHistoricalImport: true,
+        readOnly: true,
+        ...(customerIntegrationIds
+          ? {
+              connectedAccountId: {
+                in: customerIntegrationIds,
+              },
+            }
+          : {}),
+      },
+      orderBy: {
+        publishedAt: 'asc',
+      },
+      select: {
+        id: true,
+        connectedAccountId: true,
+        platformPostId: true,
+        platformPermalink: true,
+        canonicalUrl: true,
+        postType: true,
+        caption: true,
+        mediaPreviewUrl: true,
+        thumbnailUrl: true,
+        publishedAt: true,
+      },
+    });
+
+    const connectedAccountIds = [
+      ...new Set(
+        historicalPosts
+          .map((post) => post.connectedAccountId)
+          .filter((id): id is string => !!id)
+      ),
+    ];
+    const integrations = connectedAccountIds.length
+      ? await this._post.model.integration.findMany({
+          where: {
+            organizationId: orgId,
+            id: {
+              in: connectedAccountIds,
+            },
+          },
+          select: {
+            id: true,
+            providerIdentifier: true,
+            name: true,
+            picture: true,
+          },
+        })
+      : [];
+    const integrationsById = new Map(
+      integrations.map((integration) => [integration.id, integration])
+    );
+
+    return historicalPosts.map((post) => {
+      const integration = post.connectedAccountId
+        ? integrationsById.get(post.connectedAccountId)
+        : undefined;
+
+      return {
+        id: post.id,
+        content: post.caption || '',
+        publishDate: post.publishedAt,
+        releaseURL: post.platformPermalink || post.canonicalUrl,
+        releaseId: post.platformPostId,
+        state: 'PUBLISHED',
+        intervalInDays: null,
+        group: `historical:${post.id}`,
+        tags: [],
+        integration: {
+          id: integration?.id || post.connectedAccountId || `historical:${post.id}`,
+          providerIdentifier: 'instagram',
+          name: integration?.name || 'Instagram',
+          picture: integration?.picture || '',
+        },
+        source: 'historical',
+        isHistoricalImport: true,
+        readOnly: true,
+        platformPostId: post.platformPostId,
+        postType: post.postType,
+        mediaPreviewUrl: post.mediaPreviewUrl,
+        thumbnailUrl: post.thumbnailUrl,
+      };
+    });
   }
 
   async getPostsList(orgId: string, query: GetPostsListDto) {

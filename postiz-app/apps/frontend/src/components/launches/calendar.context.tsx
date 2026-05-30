@@ -26,6 +26,25 @@ import { expandPostsList, expandPosts } from '@gitroom/helpers/utils/posts.list.
 extend(isoWeek);
 extend(weekOfYear);
 
+export type CalendarPost = Post & {
+  integration: Integration;
+  tags: {
+    tag: Tags;
+  }[];
+  source?: 'historical';
+  isHistoricalImport?: boolean;
+  readOnly?: boolean;
+  platformPostId?: string | null;
+  postType?: string | null;
+  mediaPreviewUrl?: string | null;
+  thumbnailUrl?: string | null;
+};
+
+export const isHistoricalCalendarPost = (post?: Partial<CalendarPost> | null) =>
+  post?.source === 'historical' ||
+  post?.isHistoricalImport === true ||
+  post?.readOnly === true;
+
 export const CalendarContext = createContext({
   startDate: newDayjs().startOf('isoWeek').format('YYYY-MM-DD'),
   endDate: newDayjs().endOf('isoWeek').format('YYYY-MM-DD'),
@@ -41,14 +60,7 @@ export const CalendarContext = createContext({
     refreshNeeded?: boolean;
   })[],
   trendings: [] as string[],
-  posts: [] as Array<
-    Post & {
-      integration: Integration;
-      tags: {
-        tag: Tags;
-      }[];
-    }
-  >,
+  posts: [] as CalendarPost[],
   reloadCalendarView: () => {
     /** empty **/
   },
@@ -65,14 +77,7 @@ export const CalendarContext = createContext({
     /** empty **/
   },
   // List view specific
-  listPosts: [] as Array<
-    Post & {
-      integration: Integration;
-      tags: {
-        tag: Tags;
-      }[];
-    }
-  >,
+  listPosts: [] as CalendarPost[],
   listPage: 0,
   listTotalPages: 0,
   setListPage: (page: number) => {

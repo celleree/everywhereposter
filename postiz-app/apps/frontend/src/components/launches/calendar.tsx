@@ -12,6 +12,8 @@ import React, {
 import {
   CalendarContext,
   Integrations,
+  isHistoricalCalendarPost,
+  type CalendarPost,
   useCalendar,
 } from '@gitroom/frontend/components/launches/calendar.context';
 import dayjs from 'dayjs';
@@ -35,7 +37,7 @@ import clsx from 'clsx';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { ExistingDataContextProvider } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
 import { useDrag, useDrop } from 'react-dnd';
-import { Integration, Post, State, Tags } from '@prisma/client';
+import { Post, State } from '@prisma/client';
 import { useAddProvider } from '@gitroom/frontend/components/launches/add.provider.component';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
@@ -321,10 +323,14 @@ const usePostActions = (onMutate?: () => void) => {
         children: (close) => (
           <CalendarPostDetailModal
             post={post}
-            onEdit={() => {
-              close();
-              void editPost(post, false)();
-            }}
+            {...(!isHistoricalCalendarPost(post)
+              ? {
+                  onEdit: () => {
+                    close();
+                    void editPost(post, false)();
+                  },
+                }
+              : {})}
           />
         ),
         size: '90%',
@@ -779,6 +785,10 @@ export const CalendarColumn: FC<{
 
       // Find the post to check its state
       const post = posts.find((p) => p.id === item.id);
+      if (post && isHistoricalCalendarPost(post)) {
+        return;
+      }
+
       let action: 'schedule' | 'update' = 'schedule';
 
       // Check if post is already published or queued in the past
@@ -1100,12 +1110,7 @@ const CalendarItem: FC<{
   state: State;
   display: 'day' | 'week' | 'month';
   showTime?: boolean;
-  post: Post & {
-    integration: Integration;
-    tags: {
-      tag: Tags;
-    }[];
-  };
+  post: CalendarPost;
 }> = memo((props) => {
   const t = useT();
   const {
@@ -1123,6 +1128,7 @@ const CalendarItem: FC<{
     missingRelease,
   } = props;
   const { disableXAnalytics } = useVariables();
+  const isHistoricalPost = isHistoricalCalendarPost(post);
   const isRemoteDeleted = post.state === 'DELETED_REMOTE';
   const preview = useCallback(() => {
     window.open(`/p/` + post.id, '_blank');
@@ -1130,7 +1136,7 @@ const CalendarItem: FC<{
   const [{ opacity }, dragRef] = useDrag(
     () => ({
       type: 'post',
-      canDrag: !isBeforeNow && !isRemoteDeleted,
+      canDrag: !isHistoricalPost && !isBeforeNow && !isRemoteDeleted,
       item: {
         id: post.id,
         interval: !!post.intervalInDays,
@@ -1140,7 +1146,7 @@ const CalendarItem: FC<{
         opacity: monitor.isDragging() ? 0 : 1,
       }),
     }),
-    []
+    [date, isBeforeNow, isHistoricalPost, isRemoteDeleted, post.id, post.intervalInDays]
   );
   return (
     <div
@@ -1170,18 +1176,22 @@ const CalendarItem: FC<{
           'text-white text-[11px] max-h-[24px] h-[24px] min-h-[24px] w-full rounded-tr-[10px] rounded-tl-[10px] flex items-center justify-center gap-[10px] px-[5px] bg-btnPrimary'
         )}
         style={{
-          backgroundColor: post?.tags?.[0]?.tag?.color,
+          backgroundColor: isHistoricalPost
+            ? '#4B5563'
+            : post?.tags?.[0]?.tag?.color,
         }}
       >
         <div
           className={clsx(
             post?.tags?.[0]?.tag?.color ? 'mix-blend-difference' : '',
-            'group-hover:hidden cursor-pointer'
+            !isHistoricalPost && 'group-hover:hidden cursor-pointer'
           )}
         >
-          {post.tags.map((p) => p.tag.name).join(', ')}
+          {isHistoricalPost
+            ? t('imported', 'Imported')
+            : post.tags.map((p) => p.tag.name).join(', ')}
         </div>
-        {copyDebugJson && (
+        {!isHistoricalPost && copyDebugJson && (
           <div
             className={clsx(
               'hidden group-hover:block hover:underline cursor-pointer',
@@ -1192,29 +1202,34 @@ const CalendarItem: FC<{
             <CopyDebug />
           </div>
         )}
-        <div
-          className={clsx(
-            'hidden group-hover:block hover:underline cursor-pointer',
-            post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
-          )}
-          onClick={duplicatePost}
-        >
-          <Duplicate />
-        </div>
-        <div
-          className={clsx(
-            'hidden group-hover:block hover:underline cursor-pointer',
-            post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
-          )}
-          onClick={preview}
-        >
-          <Preview />
-        </div>{' '}
-        {isRemoteDeleted ||
+        {!isHistoricalPost && (
+          <div
+            className={clsx(
+              'hidden group-hover:block hover:underline cursor-pointer',
+              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+            )}
+            onClick={duplicatePost}
+          >
+            <Duplicate />
+          </div>
+        )}
+        {!isHistoricalPost && (
+          <div
+            className={clsx(
+              'hidden group-hover:block hover:underline cursor-pointer',
+              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+            )}
+            onClick={preview}
+          >
+            <Preview />
+          </div>
+        )}{' '}
+        {!isHistoricalPost &&
+        (isRemoteDeleted ||
         (post.integration.providerIdentifier === 'x' && disableXAnalytics) ||
-        !post.releaseId ? (
+        !post.releaseId) ? (
           <></>
-        ) : post.releaseId === 'missing' && missingRelease ? (
+        ) : !isHistoricalPost && post.releaseId === 'missing' && missingRelease ? (
           <div
             className={clsx(
               'hidden group-hover:block hover:underline cursor-pointer',
@@ -1224,7 +1239,7 @@ const CalendarItem: FC<{
           >
             <Statistics />
           </div>
-        ) : post.releaseId !== 'missing' ? (
+        ) : !isHistoricalPost && post.releaseId !== 'missing' ? (
           <div
             className={clsx(
               'hidden group-hover:block hover:underline cursor-pointer',
@@ -1237,23 +1252,25 @@ const CalendarItem: FC<{
         ) : (
           <></>
         )}{' '}
-        <div
-          className={clsx(
-            'hidden group-hover:block hover:underline cursor-pointer',
-            post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
-          )}
-          onClick={deletePost}
-        >
-          <DeletePost
-            label={
-              post.state === 'PUBLISHED'
-                ? t('delete_on_platform', 'Delete on platform')
-                : isRemoteDeleted
-                ? t('remove_from_app', 'Remove from app')
-                : t('delete_post', 'Delete Post')
-            }
-          />
-        </div>
+        {!isHistoricalPost && (
+          <div
+            className={clsx(
+              'hidden group-hover:block hover:underline cursor-pointer',
+              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+            )}
+            onClick={deletePost}
+          >
+            <DeletePost
+              label={
+                post.state === 'PUBLISHED'
+                  ? t('delete_on_platform', 'Delete on platform')
+                  : isRemoteDeleted
+                  ? t('remove_from_app', 'Remove from app')
+                  : t('delete_post', 'Delete Post')
+              }
+            />
+          </div>
+        )}
       </div>
       <div
         onClick={openDetails}
@@ -1275,6 +1292,7 @@ const CalendarItem: FC<{
         </div>
         <div className="w-full flex-1 flex flex-col min-h-[40px]">
           <div className="text-start">
+            {isHistoricalPost ? t('imported', 'Imported') + ': ' : ''}
             {state === 'DRAFT' ? t('draft', 'Draft') + ': ' : ''}
             {isRemoteDeleted
               ? t('deleted_on_platform', 'Deleted on platform') + ': '
