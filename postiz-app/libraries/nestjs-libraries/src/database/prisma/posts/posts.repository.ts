@@ -332,6 +332,7 @@ export class PostsRepository {
         isHistoricalImport: true,
         readOnly: true,
         platformPostId: post.platformPostId,
+        platformPermalink: post.platformPermalink,
         postType: post.postType,
         mediaPreviewUrl: post.mediaPreviewUrl,
         thumbnailUrl: post.thumbnailUrl,

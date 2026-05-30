@@ -69,8 +69,8 @@ export type HistoricalPostUpsertInput = {
   platformAccountId: string;
   platformPostId: string;
   connectedAccountId?: string;
-  platformPermalink?: string;
-  canonicalUrl?: string;
+  platformPermalink?: string | null;
+  canonicalUrl?: string | null;
   postType?: string;
   caption?: string;
   mediaPreviewUrl?: string;

@@ -40,6 +40,7 @@ export type CalendarPost = Post & {
   isHistoricalImport?: boolean;
   readOnly?: boolean;
   platformPostId?: string | null;
+  platformPermalink?: string | null;
   postType?: string | null;
   mediaPreviewUrl?: string | null;
   thumbnailUrl?: string | null;

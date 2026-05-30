@@ -2468,6 +2468,7 @@ export class InstagramProvider
         return {
           id: String(item.id),
           url: item.permalink || item.media_url || '',
+          platformPermalink: item.permalink || '',
           thumbnail,
           name:
             item.caption ||

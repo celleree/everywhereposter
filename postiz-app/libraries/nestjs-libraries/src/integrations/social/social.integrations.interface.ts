@@ -59,6 +59,7 @@ export interface AnalyticsData {
 export interface HistoricalMediaItem {
   id: string;
   url: string;
+  platformPermalink?: string;
   thumbnail?: string;
   name: string;
   type: 'video' | 'image';

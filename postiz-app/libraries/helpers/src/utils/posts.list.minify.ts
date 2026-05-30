@@ -29,6 +29,7 @@ const POST_ITEM_KEYS: Record<string, string> = {
   isHistoricalImport: 'hi',
   readOnly: 'ro',
   platformPostId: 'ppi',
+  platformPermalink: 'ppl',
   postType: 'pt',
   mediaPreviewUrl: 'mp',
   thumbnailUrl: 'th',
