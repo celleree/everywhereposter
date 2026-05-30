@@ -23,6 +23,11 @@ import useCookie from 'react-use-cookie';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { expandPostsList, expandPosts } from '@gitroom/helpers/utils/posts.list.minify';
+import {
+  CALENDAR_SHOW_IMPORTED_POSTS_EVENT,
+  CALENDAR_SHOW_IMPORTED_POSTS_KEY,
+  getShowImportedPostsInCalendar,
+} from '@gitroom/frontend/components/launches/calendar-preferences';
 extend(isoWeek);
 extend(weekOfYear);
 
@@ -153,6 +158,8 @@ export const CalendarWeekProvider: FC<{
   const searchParams = useSearchParams();
   const [displaySaved, setDisplaySaved] = useCookie('calendar-display', 'week');
   const display = searchParams.get('display') || displaySaved;
+  const [showImportedPostsInCalendar, setShowImportedPostsInCalendarState] =
+    useState(getShowImportedPostsInCalendar);
 
   // List view state
   const [listPage, setListPage] = useState(0);
@@ -294,7 +301,46 @@ export const CalendarWeekProvider: FC<{
     []
   );
 
-  const posts = useMemo(() => calendarData?.posts || [], [calendarData?.posts]);
+  useEffect(() => {
+    const syncPreference = (event?: Event) => {
+      const showImportedPosts = (event as CustomEvent<{
+        showImportedPosts?: boolean;
+      }>)?.detail?.showImportedPosts;
+
+      setShowImportedPostsInCalendarState(
+        typeof showImportedPosts === 'boolean'
+          ? showImportedPosts
+          : getShowImportedPostsInCalendar()
+      );
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === CALENDAR_SHOW_IMPORTED_POSTS_KEY) {
+        syncPreference();
+      }
+    };
+
+    window.addEventListener(CALENDAR_SHOW_IMPORTED_POSTS_EVENT, syncPreference);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.removeEventListener(
+        CALENDAR_SHOW_IMPORTED_POSTS_EVENT,
+        syncPreference
+      );
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
+  const posts = useMemo(() => {
+    const allPosts = calendarData?.posts || [];
+
+    if (showImportedPostsInCalendar) {
+      return allPosts;
+    }
+
+    return allPosts.filter((post: CalendarPost) => !isHistoricalCalendarPost(post));
+  }, [calendarData?.posts, showImportedPostsInCalendar]);
   const comments = useMemo(() => calendarData?.comments || [], [calendarData?.comments]);
 
   // List view data
