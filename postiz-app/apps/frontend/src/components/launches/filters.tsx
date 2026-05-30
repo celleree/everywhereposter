@@ -1,43 +1,13 @@
 'use client';
 
 import { useCalendar } from '@gitroom/frontend/components/launches/calendar.context';
-import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback } from 'react';
 import { SelectCustomer } from '@gitroom/frontend/components/launches/select.customer';
-import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import i18next from 'i18next';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
-
-type HistoricalImportSummary = {
-  postsCreated?: number;
-  postsUpdated?: number;
-  postsSkipped?: number;
-};
-
-const getResponseErrorMessage = async (
-  response: Response,
-  fallback: string
-) => {
-  try {
-    const raw = await response.text();
-    if (!raw) {
-      return fallback;
-    }
-
-    try {
-      const parsed = JSON.parse(raw);
-      const message = parsed?.message || parsed?.error;
-      return Array.isArray(message) ? message.join(', ') : message || raw;
-    } catch {
-      return raw;
-    }
-  } catch {
-    return fallback;
-  }
-};
 
 // Helper function to get start and end dates based on display type
 function getDateRange(
@@ -72,11 +42,7 @@ function getDateRange(
 
 export const Filters = () => {
   const calendar = useCalendar();
-  const fetch = useFetch();
-  const toaster = useToaster();
   const t = useT();
-  const [isImportingHistoricalPosts, setIsImportingHistoricalPosts] =
-    useState(false);
 
   // Set dayjs locale based on current language
   const currentLanguage = i18next.resolvedLanguage || 'en';
@@ -293,98 +259,6 @@ export const Filters = () => {
 
   const isListView = calendar.display === 'list';
 
-  const eligibleInstagramIntegrations = useMemo(() => {
-    return calendar.integrations.filter((integration) => {
-      return (
-        integration.identifier === 'instagram' &&
-        integration.canListMedia &&
-        !integration.disabled &&
-        !integration.refreshNeeded &&
-        !integration.inBetweenSteps &&
-        (!calendar.customer || integration.customer?.id === calendar.customer)
-      );
-    });
-  }, [calendar.customer, calendar.integrations]);
-
-  const importInstagramPosts = useCallback(async () => {
-    if (
-      isImportingHistoricalPosts ||
-      eligibleInstagramIntegrations.length === 0
-    ) {
-      return;
-    }
-
-    setIsImportingHistoricalPosts(true);
-
-    try {
-      const summaries = await Promise.all(
-        eligibleInstagramIntegrations.map(async (integration) => {
-          const response = await fetch(
-            `/integrations/${integration.id}/historical-import/backfill`,
-            {
-              method: 'POST',
-              body: JSON.stringify({ maxPages: 1 }),
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error(
-              await getResponseErrorMessage(
-                response,
-                t(
-                  'failed_to_import_instagram_posts',
-                  'Failed to import Instagram posts'
-                )
-              )
-            );
-          }
-
-          return (await response.json()) as HistoricalImportSummary;
-        })
-      );
-
-      const totals = summaries.reduce(
-        (all, summary) => ({
-          postsCreated: all.postsCreated + (summary.postsCreated || 0),
-          postsUpdated: all.postsUpdated + (summary.postsUpdated || 0),
-          postsSkipped: all.postsSkipped + (summary.postsSkipped || 0),
-        }),
-        { postsCreated: 0, postsUpdated: 0, postsSkipped: 0 }
-      );
-
-      toaster.show(
-        t(
-          'instagram_import_complete_summary',
-          'Instagram import complete: {{created}} imported, {{updated}} updated, {{skipped}} skipped'
-        )
-          .replace('{{created}}', String(totals.postsCreated))
-          .replace('{{updated}}', String(totals.postsUpdated))
-          .replace('{{skipped}}', String(totals.postsSkipped)),
-        'success'
-      );
-      calendar.reloadCalendarView();
-    } catch (error) {
-      toaster.show(
-        error instanceof Error
-          ? error.message
-          : t(
-              'failed_to_import_instagram_posts',
-              'Failed to import Instagram posts'
-            ),
-        'warning'
-      );
-    } finally {
-      setIsImportingHistoricalPosts(false);
-    }
-  }, [
-    calendar,
-    eligibleInstagramIntegrations,
-    fetch,
-    isImportingHistoricalPosts,
-    t,
-    toaster,
-  ]);
-
   const previousPage = useCallback(() => {
     if (calendar.listPage > 0) {
       calendar.setListPage(calendar.listPage - 1);
@@ -527,23 +401,6 @@ export const Filters = () => {
         onChange={(customer: string) => setCustomer(customer)}
         integrations={calendar.integrations}
       />
-      {eligibleInstagramIntegrations.length > 0 && (
-        <button
-          type="button"
-          onClick={importInstagramPosts}
-          disabled={isImportingHistoricalPosts}
-          className={clsx(
-            'h-[42px] rounded-[8px] border border-newTableBorder bg-newBgColorInner px-[12px] text-[14px] font-[500] transition-all mobile:w-full',
-            isImportingHistoricalPosts
-              ? 'cursor-not-allowed opacity-60'
-              : 'cursor-pointer hover:bg-boxFocused hover:text-textItemFocused'
-          )}
-        >
-          {isImportingHistoricalPosts
-            ? t('importing', 'Importing...')
-            : t('import_instagram_posts', 'Import Instagram posts')}
-        </button>
-      )}
       {!isListView && (
         <div className="flex flex-row rounded-[8px] border border-newTableBorder p-[4px] text-[14px] font-[500] mobile:w-full">
           <div
