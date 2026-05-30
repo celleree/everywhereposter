@@ -293,6 +293,96 @@ const usePostActions = (onMutate?: () => void) => {
     [toaster, t, fetch, mutate]
   );
 
+  const duplicateHistoricalPost = useCallback(
+    (post: CalendarPost) => async () => {
+      const response = await fetch('/posts/find-slot');
+      const date = response.ok ? (await response.json()).date : undefined;
+      const publishDate = date
+        ? dayjs.utc(date).local()
+        : newDayjs().add(10, 'minute');
+      const selectedIntegration = integrations.find(
+        (integration) => integration.id === post.integration.id
+      );
+
+      modal.openModal({
+        id: 'add-edit-modal',
+        closeOnClickOutside: false,
+        removeLayout: true,
+        closeOnEscape: false,
+        withCloseButton: false,
+        askClose: true,
+        fullScreen: true,
+        classNames: {
+          modal: 'w-[100%] max-w-[1400px] text-textColor',
+        },
+        children: (
+          <AddEditModal
+            onlyValues={[
+              {
+                content: post.content || '',
+              },
+            ]}
+            allIntegrations={integrations.map((p) => ({ ...p }))}
+            integrations={integrations.slice(0).map((p) => ({ ...p }))}
+            selectedChannels={
+              selectedIntegration ? [selectedIntegration.id] : undefined
+            }
+            reopenModal={() => ({})}
+            mutate={mutate}
+            date={publishDate}
+          />
+        ),
+        size: '80%',
+        title: ``,
+      });
+    },
+    [fetch, integrations, modal, mutate]
+  );
+
+  const removeHistoricalPost = useCallback(
+    (post: CalendarPost) => async () => {
+      if (
+        !(await deleteDialog(
+          t(
+            'remove_imported_post_from_publish_everywhere_question',
+            'Remove imported post from Publish Everywhere?'
+          )
+        ))
+      ) {
+        return false;
+      }
+
+      const response = await fetch(`/posts/historical/${post.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        toaster.show(
+          await getResponseErrorMessage(
+            response,
+            t(
+              'failed_to_remove_imported_post',
+              'Failed to remove imported post.'
+            )
+          ),
+          'warning'
+        );
+        return false;
+      }
+
+      toaster.show(
+        t(
+          'imported_post_removed_successfully',
+          'Imported post removed from Publish Everywhere'
+        ),
+        'success'
+      );
+      mutate();
+      return true;
+    },
+    [fetch, mutate, t, toaster]
+  );
+
   const openStatistics = useCallback(
     (id: string) => () => {
       modal.openModal({
@@ -323,21 +413,32 @@ const usePostActions = (onMutate?: () => void) => {
         children: (close) => (
           <CalendarPostDetailModal
             post={post}
-            {...(!isHistoricalCalendarPost(post)
+            {...(isHistoricalCalendarPost(post)
               ? {
+                  onDuplicate: () => {
+                    close();
+                    void duplicateHistoricalPost(post)();
+                  },
+                  onRemoveHistoricalPost: async () => {
+                    const removed = await removeHistoricalPost(post)();
+                    if (removed) {
+                      close();
+                    }
+                  },
+                }
+              : {
                   onEdit: () => {
                     close();
                     void editPost(post, false)();
                   },
-                }
-              : {})}
+                })}
           />
         ),
         size: '90%',
         height: '85vh',
       });
     },
-    [modal, t, editPost]
+    [modal, t, editPost, duplicateHistoricalPost, removeHistoricalPost]
   );
 
   const openMissingRelease = useCallback(

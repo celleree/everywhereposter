@@ -279,4 +279,19 @@ export class HistoricalImportRepository {
       })),
     });
   }
+
+  removeHistoricalPost(organizationId: string, id: string) {
+    return this._posts.model.historicalPost.updateMany({
+      where: {
+        id,
+        organizationId,
+        isHistoricalImport: true,
+        readOnly: true,
+        deletedOrUnavailableAt: null,
+      },
+      data: {
+        deletedOrUnavailableAt: new Date(),
+      },
+    });
+  }
 }

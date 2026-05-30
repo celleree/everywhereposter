@@ -59,6 +59,15 @@ export class HistoricalImportService {
     return this._historicalImportRepository.insertHistoricalPostMetrics(metrics);
   }
 
+  async removeHistoricalPost(organizationId: string, id: string) {
+    await this._historicalImportRepository.removeHistoricalPost(
+      organizationId,
+      id
+    );
+
+    return { success: true };
+  }
+
   async importInstagramBackfill(
     input: InstagramHistoricalImportInput
   ): Promise<InstagramHistoricalImportSummary> {

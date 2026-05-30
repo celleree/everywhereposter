@@ -52,7 +52,9 @@ const DetailRow: FC<{
 export const CalendarPostDetailModal: FC<{
   post: CalendarPostDetailPost;
   onEdit?: () => void;
-}> = ({ post, onEdit }) => {
+  onDuplicate?: () => void;
+  onRemoveHistoricalPost?: () => void;
+}> = ({ post, onEdit, onDuplicate, onRemoveHistoricalPost }) => {
   const t = useT();
   const [tab, setTab] = useState<CalendarPostDetailTab>('overview');
   const isHistoricalPost = isHistoricalCalendarPost(post);
@@ -127,19 +129,40 @@ export const CalendarPostDetailModal: FC<{
             {t('edit_post', 'Edit Post')}
           </Button>
         )}
-        {isHistoricalPost && post.platformPermalink && (
-          <a
-            href={post.platformPermalink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-[8px] bg-btnPrimary px-[16px] py-[10px] text-[14px] font-[500] text-white transition-colors hover:bg-btnPrimary/90"
-          >
-            {post.integration.providerIdentifier === 'instagram'
-              ? t('view_on_instagram', 'View on Instagram')
-              : t('view_original_post', 'View original post')}
-          </a>
-        )}
       </div>
+
+      {isHistoricalPost && (
+        <div className="flex flex-wrap gap-[8px] border-b border-newTableBorder pb-[10px]">
+          {post.platformPermalink && (
+            <a
+              href={post.platformPermalink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-[8px] bg-newTableHeader px-[12px] py-[8px] text-[14px] font-[500] text-gray-200 transition-colors hover:bg-tableBorder"
+            >
+              {t('view_original_post', 'View original post')}
+            </a>
+          )}
+          {onDuplicate && (
+            <button
+              type="button"
+              onClick={onDuplicate}
+              className="rounded-[8px] bg-newTableHeader px-[12px] py-[8px] text-[14px] font-[500] text-gray-200 transition-colors hover:bg-tableBorder"
+            >
+              {t('duplicate_post', 'Duplicate Post')}
+            </button>
+          )}
+          {onRemoveHistoricalPost && (
+            <button
+              type="button"
+              onClick={onRemoveHistoricalPost}
+              className="rounded-[8px] bg-newTableHeader px-[12px] py-[8px] text-[14px] font-[500] text-gray-200 transition-colors hover:bg-tableBorder"
+            >
+              {t('remove_imported_post', 'Remove imported post')}
+            </button>
+          )}
+        </div>
+      )}
 
       {!isHistoricalPost && (
         <div className="flex flex-wrap gap-[8px] border-b border-newTableBorder pb-[10px]">

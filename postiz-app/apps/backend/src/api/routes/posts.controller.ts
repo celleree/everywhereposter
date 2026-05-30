@@ -30,6 +30,7 @@ import {
   Sections,
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
+import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.service';
 
 @ApiTags('Posts')
 @Controller('/posts')
@@ -38,7 +39,8 @@ export class PostsController {
     private _postsService: PostsService,
     private _agentGraphService: AgentGraphService,
     private _shortLinkService: ShortLinkService,
-    private _copyGenerationService: CopyGenerationService
+    private _copyGenerationService: CopyGenerationService,
+    private _historicalImportService: HistoricalImportService
   ) {}
 
   @Get('/:id/statistics')
@@ -217,6 +219,14 @@ export class PostsController {
     }
 
     res.end();
+  }
+
+  @Delete('/historical/:id')
+  removeHistoricalPost(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._historicalImportService.removeHistoricalPost(org.id, id);
   }
 
   @Delete('/:group/published')
