@@ -26,6 +26,8 @@ type HistoricalImportSummary = {
   postsSkipped?: number;
 };
 
+type ImportableHistoricalPlatform = 'instagram' | 'facebook';
+
 const getResponseErrorMessage = async (
   response: Response,
   fallback: string
@@ -55,8 +57,8 @@ const CalendarPreferencesComponent = () => {
   const [showImportedPosts, setShowImportedPosts] = useState(
     getShowImportedPostsInCalendar
   );
-  const [isImportingHistoricalPosts, setIsImportingHistoricalPosts] =
-    useState(false);
+  const [importingHistoricalPlatform, setImportingHistoricalPlatform] =
+    useState<ImportableHistoricalPlatform | null>(null);
 
   const loadIntegrations = useCallback(
     async (path: string) => {
@@ -92,6 +94,18 @@ const CalendarPreferencesComponent = () => {
     });
   }, [integrations]);
 
+  const eligibleFacebookIntegrations = useMemo(() => {
+    return integrations.filter((integration) => {
+      return (
+        integration.identifier === 'facebook' &&
+        integration.canListMedia &&
+        !integration.disabled &&
+        !integration.refreshNeeded &&
+        !integration.inBetweenSteps
+      );
+    });
+  }, [integrations]);
+
   const handleShowImportedPostsChange = useCallback(
     (value: 'on' | 'off') => {
       const enabled = value === 'on';
@@ -102,19 +116,21 @@ const CalendarPreferencesComponent = () => {
     [toaster, t]
   );
 
-  const importInstagramPosts = useCallback(async () => {
-    if (
-      isImportingHistoricalPosts ||
-      eligibleInstagramIntegrations.length === 0
-    ) {
+  const importHistoricalPosts = useCallback(async (
+    platform: ImportableHistoricalPlatform,
+    eligibleIntegrations: IntegrationListItem[],
+    failureMessage: string,
+    successMessage: string
+  ) => {
+    if (importingHistoricalPlatform || eligibleIntegrations.length === 0) {
       return;
     }
 
-    setIsImportingHistoricalPosts(true);
+    setImportingHistoricalPlatform(platform);
 
     try {
       const summaries = await Promise.all(
-        eligibleInstagramIntegrations.map(async (integration) => {
+        eligibleIntegrations.map(async (integration) => {
           const response = await fetch(
             `/integrations/${integration.id}/historical-import/backfill`,
             {
@@ -125,13 +141,7 @@ const CalendarPreferencesComponent = () => {
 
           if (!response.ok) {
             throw new Error(
-              await getResponseErrorMessage(
-                response,
-                t(
-                  'failed_to_import_instagram_posts',
-                  'Failed to import Instagram posts'
-                )
-              )
+              await getResponseErrorMessage(response, failureMessage)
             );
           }
 
@@ -149,10 +159,7 @@ const CalendarPreferencesComponent = () => {
       );
 
       toaster.show(
-        t(
-          'instagram_import_complete_settings_summary',
-          'Instagram import complete: {{created}} imported, {{updated}} updated, {{skipped}} skipped. Calendar will update after refresh or reopen.'
-        )
+        successMessage
           .replace('{{created}}', String(totals.postsCreated))
           .replace('{{updated}}', String(totals.postsUpdated))
           .replace('{{skipped}}', String(totals.postsSkipped)),
@@ -160,24 +167,47 @@ const CalendarPreferencesComponent = () => {
       );
     } catch (error) {
       toaster.show(
-        error instanceof Error
-          ? error.message
-          : t(
-              'failed_to_import_instagram_posts',
-              'Failed to import Instagram posts'
-            ),
+        error instanceof Error ? error.message : failureMessage,
         'warning'
       );
     } finally {
-      setIsImportingHistoricalPosts(false);
+      setImportingHistoricalPlatform(null);
     }
+  }, [fetch, importingHistoricalPlatform, toaster]);
+
+  const importInstagramPosts = useCallback(async () => {
+    return importHistoricalPosts(
+      'instagram',
+      eligibleInstagramIntegrations,
+      t('failed_to_import_instagram_posts', 'Failed to import Instagram posts'),
+      t(
+        'instagram_import_complete_settings_summary',
+        'Instagram import complete: {{created}} imported, {{updated}} updated, {{skipped}} skipped. Calendar will update after refresh or reopen.'
+      )
+    );
   }, [
     eligibleInstagramIntegrations,
-    fetch,
-    isImportingHistoricalPosts,
+    importHistoricalPosts,
     t,
-    toaster,
   ]);
+
+  const importFacebookPosts = useCallback(async () => {
+    return importHistoricalPosts(
+      'facebook',
+      eligibleFacebookIntegrations,
+      t('failed_to_import_facebook_posts', 'Failed to import Facebook posts'),
+      t(
+        'facebook_import_complete_settings_summary',
+        'Facebook import complete: {{created}} imported, {{updated}} updated, {{skipped}} skipped. Calendar will update after refresh or reopen.'
+      )
+    );
+  }, [
+    eligibleFacebookIntegrations,
+    importHistoricalPosts,
+    t,
+  ]);
+
+  const isImportingHistoricalPosts = !!importingHistoricalPlatform;
 
   return (
     <div className="my-[16px] mt-[16px] bg-sixth border-fifth border rounded-[4px] p-[24px] flex flex-col gap-[24px]">
@@ -216,9 +246,32 @@ const CalendarPreferencesComponent = () => {
                 : 'cursor-pointer hover:bg-boxFocused hover:text-textItemFocused'
             }`}
           >
-            {isImportingHistoricalPosts
+            {importingHistoricalPlatform === 'instagram'
               ? t('importing', 'Importing...')
               : t('import_instagram_posts', 'Import Instagram posts')}
+          </button>
+        </div>
+      )}
+      {eligibleFacebookIntegrations.length > 0 && (
+        <div className="flex items-center justify-between gap-[16px]">
+          <div className="flex flex-col">
+            <div className="text-[14px]">
+              {t('import_facebook_posts', 'Import Facebook posts')}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={importFacebookPosts}
+            disabled={isImportingHistoricalPosts}
+            className={`rounded-[8px] border border-newTableBorder bg-newBgColorInner px-[12px] py-[10px] text-[14px] font-[500] transition-all ${
+              isImportingHistoricalPosts
+                ? 'cursor-not-allowed opacity-60'
+                : 'cursor-pointer hover:bg-boxFocused hover:text-textItemFocused'
+            }`}
+          >
+            {importingHistoricalPlatform === 'facebook'
+              ? t('importing', 'Importing...')
+              : t('import_facebook_posts', 'Import Facebook posts')}
           </button>
         </div>
       )}

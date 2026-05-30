@@ -263,7 +263,7 @@ export class IntegrationsController {
   }
 
   @Post('/:id/historical-import/backfill')
-  async backfillInstagramHistoricalImport(
+  async backfillHistoricalImport(
     @GetOrgFromRequest() org: Organization,
     @GetUserFromRequest() user: User,
     @Param('id') id: string,
@@ -277,15 +277,19 @@ export class IntegrationsController {
       throw new Error('Invalid integration');
     }
 
-    if (integration.providerIdentifier !== 'instagram') {
-      throw new Error('Historical import is only supported for Instagram');
+    if (!['instagram', 'facebook'].includes(integration.providerIdentifier)) {
+      throw new Error(
+        `Historical import is not supported for ${integration.providerIdentifier}`
+      );
     }
 
     const provider = this._integrationManager.getSocialIntegration(
       integration.providerIdentifier
     );
     if (!provider?.listMedia) {
-      throw new Error('Instagram provider does not support media listing');
+      throw new Error(
+        `${integration.providerIdentifier} provider does not support media listing`
+      );
     }
 
     const requestedMaxPages = Number(body?.maxPages || 1);
@@ -293,7 +297,7 @@ export class IntegrationsController {
       ? Math.min(5, Math.max(1, Math.floor(requestedMaxPages)))
       : 1;
 
-    return this._historicalImportService.importInstagramBackfill({
+    return this._historicalImportService.importHistoricalBackfill({
       organizationId: org.id,
       requestedByUserId: user.id,
       integration,

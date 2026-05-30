@@ -62,7 +62,7 @@ export interface HistoricalMediaItem {
   platformPermalink?: string;
   thumbnail?: string;
   name: string;
-  type: 'video' | 'image';
+  type: 'video' | 'image' | 'link' | 'text' | 'unknown';
   publishedAt?: string;
 }
 

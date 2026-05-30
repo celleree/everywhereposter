@@ -1,6 +1,7 @@
 import {
   AnalyticsData,
   AuthTokenDetails,
+  HistoricalMediaItem,
   HistoricalMediaPage,
   PublishedComment,
   PostDetails,
@@ -668,20 +669,36 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     const pageSize = 12;
 
     try {
-      const { data: videos } = await (
+      const fields = encodeURIComponent(
+        'id,message,story,created_time,permalink_url,full_picture,status_type,attachments{media,type,title,description,url,subattachments{media,type,title,description,url}}'
+      );
+      const { data: posts } = await (
         await this.fetch(
-          `https://graph.facebook.com/v20.0/${id}/videos?fields=id,description,permalink_url,created_time,thumbnails&limit=50&access_token=${accessToken}`
+          `https://graph.facebook.com/v20.0/${id}/posts?fields=${fields}&limit=50&access_token=${accessToken}`
         )
       ).json();
 
-      const items = (videos || []).map((video: any) => ({
-        id: String(video.id),
-        url: video.permalink_url || '',
-        thumbnail: video.thumbnails?.data?.[0]?.uri || '',
-        name: video.description || 'Facebook video',
-        type: 'video' as const,
-        publishedAt: video.created_time || undefined,
-      }));
+      const items = (posts || []).map((post: any) => {
+        const attachment = this.getFacebookHistoricalAttachment(post);
+        const thumbnail =
+          post.full_picture || attachment?.media?.image?.src || '';
+        const url = post.permalink_url || attachment?.url || '';
+
+        return {
+          id: String(post.id),
+          url,
+          platformPermalink: post.permalink_url || '',
+          thumbnail,
+          name:
+            post.message ||
+            post.story ||
+            attachment?.title ||
+            attachment?.description ||
+            'Facebook post',
+          type: this.getFacebookHistoricalPostType(post, attachment),
+          publishedAt: post.created_time || undefined,
+        };
+      });
 
       const start = (page - 1) * pageSize;
 
@@ -696,6 +713,48 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         pages: 1,
       };
     }
+  }
+
+  private getFacebookHistoricalAttachment(post: any) {
+    const attachment = post.attachments?.data?.[0];
+    return attachment?.subattachments?.data?.[0] || attachment;
+  }
+
+  private getFacebookHistoricalPostType(
+    post: any,
+    attachment: any
+  ): HistoricalMediaItem['type'] {
+    const rawType = String(attachment?.type || post.status_type || '')
+      .toLowerCase();
+
+    if (rawType.includes('video')) {
+      return 'video';
+    }
+
+    if (
+      rawType.includes('photo') ||
+      rawType.includes('album')
+    ) {
+      return 'image';
+    }
+
+    if (
+      rawType.includes('link') ||
+      rawType.includes('share') ||
+      attachment?.url
+    ) {
+      return 'link';
+    }
+
+    if (post.full_picture || attachment?.media?.image?.src) {
+      return 'image';
+    }
+
+    if (post.message || post.story) {
+      return 'text';
+    }
+
+    return 'unknown';
   }
 
   async postAnalytics(

@@ -10,11 +10,17 @@ import {
 } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.repository';
 import { SocialProvider } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 
-const INSTAGRAM_PLATFORM = 'instagram';
-const DEFAULT_INSTAGRAM_BACKFILL_MAX_PAGES = 1;
-const MAX_INSTAGRAM_BACKFILL_PAGES = 5;
+const SUPPORTED_HISTORICAL_IMPORT_PLATFORMS = [
+  'instagram',
+  'facebook',
+] as const;
+const DEFAULT_HISTORICAL_BACKFILL_MAX_PAGES = 1;
+const MAX_HISTORICAL_BACKFILL_PAGES = 5;
 
-export type InstagramHistoricalImportSummary = {
+type HistoricalImportPlatform =
+  (typeof SUPPORTED_HISTORICAL_IMPORT_PLATFORMS)[number];
+
+export type HistoricalImportSummary = {
   sourceId: string;
   jobId: string;
   platform: string;
@@ -27,7 +33,7 @@ export type InstagramHistoricalImportSummary = {
   errors: string[];
 };
 
-export type InstagramHistoricalImportInput = {
+export type HistoricalImportInput = {
   organizationId: string;
   requestedByUserId?: string;
   integration: Integration;
@@ -68,15 +74,19 @@ export class HistoricalImportService {
     return { success: true };
   }
 
-  async importInstagramBackfill(
-    input: InstagramHistoricalImportInput
-  ): Promise<InstagramHistoricalImportSummary> {
-    if (input.integration.providerIdentifier !== INSTAGRAM_PLATFORM) {
-      throw new Error('Historical import is only supported for Instagram');
+  async importHistoricalBackfill(
+    input: HistoricalImportInput
+  ): Promise<HistoricalImportSummary> {
+    const platform = input.integration.providerIdentifier;
+
+    if (!this.isSupportedHistoricalImportPlatform(platform)) {
+      throw new Error(
+        `Historical import is not supported for ${platform || 'this provider'}`
+      );
     }
 
     if (!input.provider.listMedia) {
-      throw new Error('Instagram provider does not support media listing');
+      throw new Error(`${platform} provider does not support media listing`);
     }
 
     const maxPages = this.safeMaxPages(input.maxPages);
@@ -87,7 +97,7 @@ export class HistoricalImportService {
 
     const source = await this.createOrUpdateSource({
       organizationId: input.organizationId,
-      platform: INSTAGRAM_PLATFORM,
+      platform,
       platformAccountId,
       connectedAccountId: input.integration.id,
       platformAccountName,
@@ -98,7 +108,7 @@ export class HistoricalImportService {
     const job = await this.createJobRecord({
       sourceId: source.id,
       organizationId: input.organizationId,
-      platform: INSTAGRAM_PLATFORM,
+      platform,
       jobType: 'manual_backfill',
       status: 'running',
       startedAt: attemptedAt,
@@ -110,10 +120,10 @@ export class HistoricalImportService {
       metricsUpdatedCount: 0,
     });
 
-    const summary: InstagramHistoricalImportSummary = {
+    const summary: HistoricalImportSummary = {
       sourceId: source.id,
       jobId: job.id,
-      platform: INSTAGRAM_PLATFORM,
+      platform,
       platformAccountId,
       postsSeen: 0,
       postsCreated: 0,
@@ -145,7 +155,9 @@ export class HistoricalImportService {
           const platformPostId = item.id ? String(item.id) : '';
           if (!platformPostId) {
             summary.postsSkipped++;
-            summary.errors.push(`Skipped Instagram media on page ${page} without id`);
+            summary.errors.push(
+              `Skipped ${platform} media on page ${page} without id`
+            );
             continue;
           }
 
@@ -158,7 +170,7 @@ export class HistoricalImportService {
           if (!item.publishedAt) {
             summary.postsSkipped++;
             summary.errors.push(
-              `Skipped Instagram media ${platformPostId} without publishedAt`
+              `Skipped ${platform} media ${platformPostId} without publishedAt`
             );
             continue;
           }
@@ -167,7 +179,7 @@ export class HistoricalImportService {
           if (Number.isNaN(publishedAt.getTime())) {
             summary.postsSkipped++;
             summary.errors.push(
-              `Skipped Instagram media ${platformPostId} with invalid publishedAt`
+              `Skipped ${platform} media ${platformPostId} with invalid publishedAt`
             );
             continue;
           }
@@ -175,7 +187,7 @@ export class HistoricalImportService {
           const existing =
             await this._historicalImportRepository.getHistoricalPostByPlatformIdentity({
               organizationId: input.organizationId,
-              platform: INSTAGRAM_PLATFORM,
+              platform,
               platformAccountId,
               platformPostId,
             });
@@ -183,7 +195,7 @@ export class HistoricalImportService {
           await this.upsertHistoricalPost({
             organizationId: input.organizationId,
             sourceId: source.id,
-            platform: INSTAGRAM_PLATFORM,
+            platform,
             platformAccountId,
             platformPostId,
             connectedAccountId: input.integration.id,
@@ -238,7 +250,7 @@ export class HistoricalImportService {
 
       await this.createOrUpdateSource({
         organizationId: input.organizationId,
-        platform: INSTAGRAM_PLATFORM,
+        platform,
         platformAccountId,
         connectedAccountId: input.integration.id,
         platformAccountName,
@@ -265,13 +277,13 @@ export class HistoricalImportService {
         postsUpdatedCount: summary.postsUpdated,
         postsSkippedCount: summary.postsSkipped,
         metricsUpdatedCount: summary.metricsUpdated,
-        errorCode: 'instagram_historical_import_failed',
+        errorCode: `${platform}_historical_import_failed`,
         errorMessage: message,
       });
 
       await this.createOrUpdateSource({
         organizationId: input.organizationId,
-        platform: INSTAGRAM_PLATFORM,
+        platform,
         platformAccountId,
         connectedAccountId: input.integration.id,
         platformAccountName,
@@ -284,14 +296,22 @@ export class HistoricalImportService {
   }
 
   private safeMaxPages(maxPages?: number) {
-    const requested = Number(maxPages || DEFAULT_INSTAGRAM_BACKFILL_MAX_PAGES);
+    const requested = Number(maxPages || DEFAULT_HISTORICAL_BACKFILL_MAX_PAGES);
     if (!Number.isFinite(requested)) {
-      return DEFAULT_INSTAGRAM_BACKFILL_MAX_PAGES;
+      return DEFAULT_HISTORICAL_BACKFILL_MAX_PAGES;
     }
 
     return Math.min(
-      MAX_INSTAGRAM_BACKFILL_PAGES,
+      MAX_HISTORICAL_BACKFILL_PAGES,
       Math.max(1, Math.floor(requested))
+    );
+  }
+
+  private isSupportedHistoricalImportPlatform(
+    platform: string
+  ): platform is HistoricalImportPlatform {
+    return SUPPORTED_HISTORICAL_IMPORT_PLATFORMS.includes(
+      platform as HistoricalImportPlatform
     );
   }
 
