@@ -98,7 +98,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <html suppressHydrationWarning>
       <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" href="/branding/favicon.png" />
         <Script
           id="strip-extension-hydration-attributes"
           strategy="beforeInteractive"
