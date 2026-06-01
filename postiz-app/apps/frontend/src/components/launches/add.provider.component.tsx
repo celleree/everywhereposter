@@ -1,7 +1,7 @@
 'use client';
 
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
-import React, { FC, useCallback, useMemo } from 'react';
+import React, { FC, useCallback, useMemo, useState } from 'react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { Input } from '@gitroom/react/form/input';
 import { FieldValues, FormProvider, useForm } from 'react-hook-form';
@@ -20,6 +20,8 @@ import clsx from 'clsx';
 import copy from 'copy-to-clipboard';
 import { capitalize } from 'lodash';
 const resolver = classValidatorResolver(ApiKeyDto);
+const INSTAGRAM_STANDALONE_INSTRUCTIONS_DISMISSED_KEY =
+  'instagram-standalone-connect-instructions-dismissed';
 
 export const useAddProvider = (update?: () => void, invite?: boolean) => {
   const modal = useModals();
@@ -354,6 +356,71 @@ const ChromeExtensionWarning: FC<{
   );
 };
 
+const InstagramStandaloneInstructions: FC<{
+  onConfirm: () => void;
+  onCancel: () => void;
+}> = ({ onConfirm, onCancel }) => {
+  const modals = useModals();
+  const [dismiss, setDismiss] = useState(false);
+
+  return (
+    <div className="flex flex-col gap-[16px] pt-[8px]">
+      <div className="flex flex-col gap-[12px] text-[14px] leading-[22px] text-textColor/80">
+        <p>
+          Instagram Standalone connects the Instagram account currently logged
+          into Instagram in this browser.
+        </p>
+        <p>
+          To connect a different Instagram account, log out of Instagram first
+          or use a private/incognito browser window.
+        </p>
+        <p>
+          After switching accounts, return to Publish Everywhere and click
+          Instagram (Standalone) again.
+        </p>
+      </div>
+      <label className="flex items-center gap-[10px] text-[14px] text-textColor cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={dismiss}
+          onChange={(event) => setDismiss(event.target.checked)}
+        />
+        <span>Do not show again</span>
+      </label>
+      <div className="flex gap-[10px] mt-[8px]">
+        <Button
+          type="button"
+          className="flex-1"
+          onClick={() => {
+            if (dismiss) {
+              try {
+                localStorage.setItem(
+                  INSTAGRAM_STANDALONE_INSTRUCTIONS_DISMISSED_KEY,
+                  'true'
+                );
+              } catch {}
+            }
+            onConfirm();
+            modals.closeCurrent();
+          }}
+        >
+          Continue to Instagram
+        </Button>
+        <Button
+          type="button"
+          className="flex-1 !bg-transparent border border-tableBorder text-textColor"
+          onClick={() => {
+            onCancel();
+            modals.closeCurrent();
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 export const AddProviderComponent: FC<{
   social: Array<{
     identifier: string;
@@ -601,6 +668,35 @@ export const AddProviderComponent: FC<{
             ),
           });
           return;
+        }
+        if (identifier === 'instagram-standalone' && !invite) {
+          const dismissed = (() => {
+            try {
+              return !!localStorage.getItem(
+                INSTAGRAM_STANDALONE_INSTRUCTIONS_DISMISSED_KEY
+              );
+            } catch {
+              return false;
+            }
+          })();
+          if (!dismissed) {
+            const confirmed = await new Promise<boolean>((resolve) => {
+              modal.openModal({
+                title: 'Before connecting Instagram Standalone',
+                withCloseButton: true,
+                onClose: () => resolve(false),
+                children: (
+                  <InstagramStandaloneInstructions
+                    onConfirm={() => resolve(true)}
+                    onCancel={() => resolve(false)}
+                  />
+                ),
+              });
+            });
+            if (!confirmed) {
+              return;
+            }
+          }
         }
         await gotoIntegration();
       },
