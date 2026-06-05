@@ -133,27 +133,32 @@ export const CreateComponent = () => {
             )}
           </div>
         </div>
-        {!!sets.length && (
-          <label className="flex items-center gap-[10px] text-[13px] text-textColor/70 mobile:w-full mobile:flex-col mobile:items-start">
-            <span>{t('saved_set', 'Saved Set')}</span>
-            <select
-              value={selectedSetId}
-              onChange={(event) => setSelectedSetId(event.target.value)}
-              disabled={setsLoading}
-              className={clsx(
-                'h-[40px] min-w-[260px] rounded-[8px] border border-newBorder bg-newBgColor px-[12px] text-[14px] text-white outline-none mobile:w-full',
-                setsLoading && 'opacity-70'
-              )}
-            >
-              <option value="">{t('blank_post', 'Blank post')}</option>
-              {sets.map((set) => (
-                <option key={set.id} value={set.id}>
-                  {set.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
+        <div className="flex flex-wrap items-center justify-end gap-[12px] mobile:w-full mobile:flex-col mobile:items-stretch">
+          <div className="w-[260px] mobile:w-full">
+            <AddProviderButton update={() => mutateIntegrations()} />
+          </div>
+          {!!sets.length && (
+            <label className="flex items-center gap-[10px] text-[13px] text-textColor/70 mobile:w-full mobile:flex-col mobile:items-start">
+              <span>{t('saved_set', 'Saved Set')}</span>
+              <select
+                value={selectedSetId}
+                onChange={(event) => setSelectedSetId(event.target.value)}
+                disabled={setsLoading}
+                className={clsx(
+                  'h-[40px] min-w-[260px] rounded-[8px] border border-newBorder bg-newBgColor px-[12px] text-[14px] text-white outline-none mobile:w-full',
+                  setsLoading && 'opacity-70'
+                )}
+              >
+                <option value="">{t('blank_post', 'Blank post')}</option>
+                {sets.map((set) => (
+                  <option key={set.id} value={set.id}>
+                    {set.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
       </div>
       <div className="flex min-h-0 flex-1 mobile:block mobile:flex-none">
         <AddEditModal
