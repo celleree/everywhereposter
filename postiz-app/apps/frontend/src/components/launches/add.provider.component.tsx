@@ -19,6 +19,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import clsx from 'clsx';
 import copy from 'copy-to-clipboard';
 import { capitalize } from 'lodash';
+import { storeIntegrationReturnRoute } from '@gitroom/frontend/components/launches/helpers/integration.return-route';
 const resolver = classValidatorResolver(ApiKeyDto);
 const INSTAGRAM_STANDALONE_INSTRUCTIONS_DISMISSED_KEY =
   'instagram-standalone-connect-instructions-dismissed';
@@ -218,6 +219,7 @@ export const CustomVariables: FC<{
         )
       ).json();
       modals.closeAll();
+      storeIntegrationReturnRoute();
       gotoUrl(
         `/integrations/social/${identifier}?state=${url}&code=${Buffer.from(
           JSON.stringify(data)
@@ -491,6 +493,7 @@ export const AddProviderComponent: FC<{
             children: (
               <Web3Providers
                 onComplete={(code, newState) => {
+                  storeIntegrationReturnRoute();
                   window.location.href = `/integrations/social/${identifier}?code=${code}&state=${newState}${
                     onboarding ? '&onboarding=true' : ''
                   }`;
@@ -534,6 +537,7 @@ export const AddProviderComponent: FC<{
             return;
           }
 
+          storeIntegrationReturnRoute();
           window.location.href = url;
         };
         if (isWeb3) {
@@ -626,6 +630,7 @@ export const AddProviderComponent: FC<{
               )
             ).json();
             modal.closeAll();
+            storeIntegrationReturnRoute();
             window.location.href = `/integrations/social/${identifier}?state=${url}&code=${Buffer.from(
               JSON.stringify(cookieResponse.cookies)
             ).toString('base64')}${onboarding ? '&onboarding=true' : ''}`;

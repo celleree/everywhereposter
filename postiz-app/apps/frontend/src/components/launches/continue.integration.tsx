@@ -11,6 +11,10 @@ import { continueProviderList } from '@gitroom/frontend/components/new-launch/pr
 import { IntegrationContext } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
+import {
+  clearIntegrationReturnRoute,
+  getIntegrationReturnRoute,
+} from '@gitroom/frontend/components/launches/helpers/integration.return-route';
 
 interface TwoStepState {
   integrationId: string;
@@ -53,6 +57,19 @@ function getProviderErrorMessage(params: Record<string, unknown>) {
   return decodeProviderMessage(description || error);
 }
 
+function appendFailureParams(route: string, path: string) {
+  const params = path.includes('?') ? path.split('?')[1] : '';
+
+  if (!params) {
+    return route;
+  }
+
+  const [routeWithoutHash, hash] = route.split('#');
+  const separator = routeWithoutHash.includes('?') ? '&' : '?';
+
+  return `${routeWithoutHash}${separator}${params}${hash ? `#${hash}` : ''}`;
+}
+
 export const ContinueIntegration: FC<{
   provider: string;
   searchParams: any;
@@ -68,10 +85,34 @@ export const ContinueIntegration: FC<{
   const [twoStepState, setTwoStepState] = useState<TwoStepState | null>(null);
   const [successState, setSuccessState] = useState<SuccessState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [failureRedirectUrl, setFailureRedirectUrl] = useState('/launches');
+
+  const getFailureFallback = useCallback(
+    (onboarding?: boolean) =>
+      onboarding || searchParams.onboarding === 'true'
+        ? '/launches?onboarding=true'
+        : '/launches',
+    [searchParams.onboarding]
+  );
+
+  const completeFailure = useCallback(
+    (message: string | null, path = '', fallback?: string) => {
+      const returnRoute = getIntegrationReturnRoute(
+        fallback || getFailureFallback()
+      );
+      setFailureRedirectUrl(appendFailureParams(returnRoute, path));
+      clearIntegrationReturnRoute();
+      setErrorMessage(message);
+      setError(true);
+    },
+    [getFailureFallback]
+  );
 
   // Helper to handle navigation - redirects if logged or returnURL exists, otherwise shows inline
   const navigateOrShow = useCallback(
     (path: string, returnURL: string | undefined, successMessage: string) => {
+      clearIntegrationReturnRoute();
+
       if (returnURL) {
         // If returnURL exists, always redirect to it with the path params
         const params = path.includes('?') ? path.split('?')[1] : '';
@@ -141,8 +182,7 @@ export const ContinueIntegration: FC<{
 
       const providerErrorMessage = getProviderErrorMessage(modifiedParams);
       if (providerErrorMessage) {
-        setErrorMessage(providerErrorMessage);
-        setError(true);
+        completeFailure(providerErrorMessage);
         return;
       }
 
@@ -171,17 +211,21 @@ export const ContinueIntegration: FC<{
 
       if (data.status === HttpStatusCode.PreconditionFailed) {
         const { returnURL } = await data.json().catch(() => ({}));
-        navigateOrShow(
+        completeFailure(
+          'Precondition failed',
           `/launches?precondition=true`,
-          returnURL,
-          'Precondition failed'
+          returnURL || getFailureFallback()
         );
         return;
       }
 
       if (data.status === HttpStatusCode.NotAcceptable) {
         const { msg, returnURL } = await data.json();
-        navigateOrShow(`/launches?msg=${msg}`, returnURL, msg);
+        completeFailure(
+          msg,
+          `/launches?msg=${msg}`,
+          returnURL || getFailureFallback()
+        );
         return;
       }
 
@@ -190,10 +234,9 @@ export const ContinueIntegration: FC<{
         data.status !== HttpStatusCode.Created
       ) {
         const errorData = await data.json().catch(() => ({}));
-        setErrorMessage(
+        completeFailure(
           errorData.message || errorData.msg || 'Could not add provider'
         );
-        setError(true);
         return;
       }
 
@@ -274,10 +317,11 @@ export const ContinueIntegration: FC<{
           response.status !== HttpStatusCode.Created
         ) {
           const errorData = await response.json().catch(() => ({}));
-          setErrorMessage(
-            errorData.message || 'Failed to save channel configuration'
+          completeFailure(
+            errorData.message || 'Failed to save channel configuration',
+            '',
+            getFailureFallback(twoStepState.onboarding)
           );
-          setError(true);
           return;
         }
 
@@ -444,7 +488,7 @@ export const ContinueIntegration: FC<{
                 'An error occurred. Please try again.'
               )}
           </div>
-          {logged && <Redirect url="/launches" delay={3000} />}
+          {logged && <Redirect url={failureRedirectUrl} delay={3000} />}
         </div>
       </div>
     );

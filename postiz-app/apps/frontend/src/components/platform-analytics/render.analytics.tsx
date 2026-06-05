@@ -6,6 +6,7 @@ import { ChartSocial } from '@gitroom/frontend/components/analytics/chart-social
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { PlatformVideoGrid } from '@gitroom/frontend/components/platform-analytics/platform.video.grid';
+import { storeIntegrationReturnRoute } from '@gitroom/frontend/components/launches/helpers/integration.return-route';
 
 interface AnalyticsDataItem {
   label: string;
@@ -213,6 +214,7 @@ export const RenderAnalytics: FC<{
             }
           )
         ).json();
+        storeIntegrationReturnRoute();
         window.location.href = url;
       },
     [fetch]

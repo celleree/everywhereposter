@@ -26,6 +26,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import useCookie from 'react-use-cookie';
 import { Onboarding } from '@gitroom/frontend/components/onboarding/onboarding';
+import { storeIntegrationReturnRoute } from '@gitroom/frontend/components/launches/helpers/integration.return-route';
 
 export const SVGLine = () => {
   return (
@@ -469,6 +470,7 @@ export const LaunchesComponent = () => {
             }
           )
         ).json();
+        storeIntegrationReturnRoute();
         window.location.href = url;
       },
     []
