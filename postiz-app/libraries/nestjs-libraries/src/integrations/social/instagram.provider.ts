@@ -2423,6 +2423,10 @@ export class InstagramProvider
             total: d.total_value.value,
             date: dayjs().format('YYYY-MM-DD'),
           },
+          {
+            total: d.total_value.value,
+            date: dayjs().add(1, 'day').format('YYYY-MM-DD'),
+          },
         ],
       }))
     );
