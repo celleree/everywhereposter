@@ -61,7 +61,8 @@ const AnalyticsCard: FC<{
   item: AnalyticsDataItem;
   total: string | number;
   index: number;
-}> = ({ item, total, index }) => {
+  chartKey: string;
+}> = ({ item, total, index, chartKey }) => {
   const colorVariants = ['purple', 'green', 'blue'] as const;
   const color = colorVariants[index % colorVariants.length];
 
@@ -106,7 +107,11 @@ const AnalyticsCard: FC<{
             {/* Chart */}
             <div className="flex-1 px-[12px] py-[8px]">
               <div className="h-[120px] relative">
-                <ChartSocial data={item.data} color={color} key={`chart-${index}`} />
+                <ChartSocial
+                  data={item.data}
+                  color={color}
+                  key={chartKey}
+                />
               </div>
             </div>
 
@@ -254,6 +259,7 @@ export const RenderAnalytics: FC<{
             item={item}
             total={totals[index]}
             index={index}
+            chartKey={`chart-${integration.id}-${date}-${item.label}-${index}`}
           />
         ))}
       </div>
