@@ -121,7 +121,7 @@ export const ChartSocial: FC<{
             borderWidth: 2,
             label: 'Total',
             backgroundColor: gradient,
-            fill: true,
+            fill: false,
             data: list.map((row) => row.total),
             tension: 0.4,
             pointRadius: 0,
