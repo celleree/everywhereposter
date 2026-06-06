@@ -9,6 +9,7 @@ export const AddPostButton: FC<{
   num: number;
   postComment: PostComment;
   identifier?: string;
+  disabled?: boolean;
 }> = (props) => {
   const { onClick, num } = props;
   const t = useT();
@@ -28,12 +29,15 @@ export const AddPostButton: FC<{
       : t('add_platform_comment', 'Add platform comment');
 
   return (
-    <div className="flex">
+    <div className="flex max-w-full min-w-0">
       <div
-        onClick={onClick}
-        className="select-none cursor-pointer h-[34px] rounded-[6px] flex bg-[#D82D7E] gap-[8px] justify-center items-center pl-[16px] pr-[20px] text-[13px] font-[600] mt-[12px]"
+        onClick={props.disabled ? undefined : onClick}
+        aria-disabled={props.disabled}
+        className={`select-none h-[34px] max-w-full min-w-0 rounded-[6px] flex bg-[#D82D7E] gap-[8px] justify-center items-center pl-[16px] pr-[20px] text-[13px] font-[600] mt-[12px] ${
+          props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+        }`}
       >
-        <div>
+        <div className="shrink-0">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"
@@ -50,7 +54,7 @@ export const AddPostButton: FC<{
             />
           </svg>
         </div>
-        <div className="!text-white">
+        <div className="min-w-0 truncate !text-white">
           {label}
         </div>
       </div>

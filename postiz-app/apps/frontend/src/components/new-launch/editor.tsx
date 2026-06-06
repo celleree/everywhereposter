@@ -25,6 +25,7 @@ import {
 } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import { AddPostButton } from '@gitroom/frontend/components/new-launch/add.post.button';
+import { PostComment } from '@gitroom/frontend/components/new-launch/providers/high.order.provider';
 import { MultiMediaComponent } from '@gitroom/frontend/components/media/media.component';
 import { UpDownArrow } from '@gitroom/frontend/components/launches/up.down.arrow';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
@@ -298,8 +299,26 @@ export const EditorWrapper: FC<{
     }
   }, [addRemoveInternal, current, t]);
 
+  const isEmptyPlatformCommentRow = useCallback(
+    (index: number) => {
+      const item = items[index];
+
+      return (
+        postComment === PostComment.COMMENT &&
+        index > 0 &&
+        !stripHtmlValidation('normal', item?.content || '', true).trim() &&
+        !(item?.media || []).length
+      );
+    },
+    [items, postComment]
+  );
+
   const addValue = useCallback(
     (index: number) => () => {
+      if (isEmptyPlatformCommentRow(index)) {
+        return;
+      }
+
       setTimeout(() => {
         // scroll the the bottom
         document.querySelector('#social-content').scrollTo({
@@ -326,7 +345,7 @@ export const EditorWrapper: FC<{
         },
       ]);
     },
-    [current, global, internal]
+    [current, global, internal, isEmptyPlatformCommentRow]
   );
 
   const deletePost = useCallback(
@@ -464,6 +483,7 @@ export const EditorWrapper: FC<{
                               onClick={addValue(index)}
                               postComment={postComment}
                               identifier={internalFromAll?.identifier}
+                              disabled={isEmptyPlatformCommentRow(index)}
                             />
                           )}
                         </div>
