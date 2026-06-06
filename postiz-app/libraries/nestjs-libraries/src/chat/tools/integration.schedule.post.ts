@@ -20,6 +20,25 @@ function countCharacters(text: string, type: string): number {
   return weightedLength(text);
 }
 
+function normalizeScheduleType(post: {
+  type: 'draft' | 'schedule' | 'now';
+  date: string;
+}) {
+  if (post.type !== 'draft') {
+    return { type: post.type };
+  }
+
+  const scheduledDate = new Date(post.date);
+  if (!Number.isNaN(scheduledDate.getTime()) && scheduledDate.getTime() > Date.now()) {
+    return { type: 'schedule' as const };
+  }
+
+  return {
+    errors:
+      'schedulePostTool cannot create drafts. Please provide a valid future date to schedule the post, or use type "now" to post immediately.',
+  };
+}
+
 @Injectable()
 export class IntegrationSchedulePostTool implements AgentToolInterface {
   constructor(
@@ -189,42 +208,59 @@ If the tools return errors, you would need to rerun it with the right parameters
 
         for (const post of inputData.socialPost) {
           const integration = integrations[post.integrationId];
+          const normalizedType = normalizeScheduleType(post);
+
+          if ('errors' in normalizedType) {
+            return {
+              errors: normalizedType.errors,
+            };
+          }
 
           if (!integration) {
             throw new Error('Integration not found');
           }
 
-          const output = await this._postsService.createPost(organizationId, {
-            date: post.date,
-            type: post.type as 'draft' | 'schedule' | 'now',
-            shortLink: post.shortLink,
-            tags: [],
-            posts: [
-              {
-                integration,
-                group: makeId(10),
-                settings: post.settings.reduce(
-                  (acc: AllProvidersSettings, s: { key: string; value: any }) => ({
-                    ...acc,
-                    [s.key]: s.value,
-                  }),
-                  {
-                    __type: integration.providerIdentifier,
-                  } as AllProvidersSettings
-                ),
-                value: post.postsAndComments.map((p: any) => ({
-                  content: p.content,
-                  id: makeId(10),
-                  delay: 0,
-                  image: p.attachments.map((p: any) => ({
+          try {
+            const output = await this._postsService.createPost(organizationId, {
+              date: post.date,
+              type: normalizedType.type,
+              shortLink: post.shortLink,
+              tags: [],
+              posts: [
+                {
+                  integration,
+                  group: makeId(10),
+                  settings: post.settings.reduce(
+                    (acc: AllProvidersSettings, s: { key: string; value: any }) => ({
+                      ...acc,
+                      [s.key]: s.value,
+                    }),
+                    {
+                      __type: integration.providerIdentifier,
+                    } as AllProvidersSettings
+                  ),
+                  value: post.postsAndComments.map((p: any) => ({
+                    content: p.content,
                     id: makeId(10),
-                    path: p,
+                    delay: 0,
+                    image: p.attachments.map((p: any) => ({
+                      id: makeId(10),
+                      path: p,
+                    })),
                   })),
-                })),
-              },
-            ],
-          });
-          finalOutput.push(...output);
+                },
+              ],
+            });
+            finalOutput.push(...output);
+          } catch (error) {
+            console.error('schedulePostTool failed to create post', error);
+            return {
+              errors:
+                error instanceof Error
+                  ? error.message
+                  : 'Failed to schedule post. Please try again with valid scheduling details.',
+            };
+          }
         }
 
         return {
