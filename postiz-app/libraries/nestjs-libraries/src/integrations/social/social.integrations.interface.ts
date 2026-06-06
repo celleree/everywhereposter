@@ -52,8 +52,9 @@ export interface IAuthenticator {
 
 export interface AnalyticsData {
   label: string;
-  data: Array<{ total: string; date: string }>;
-  percentageChange: number;
+  data: Array<{ total: number | string; date: string }>;
+  percentageChange?: number;
+  average?: boolean;
 }
 
 export interface HistoricalMediaItem {

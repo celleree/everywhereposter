@@ -650,7 +650,6 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
             : d.name === 'page_video_views'
             ? 'Videos views'
             : 'Posts Impressions',
-        percentageChange: 5,
         data: d?.values?.map((v: any) => ({
           total: v.value,
           date: dayjs(v.end_time).format('YYYY-MM-DD'),

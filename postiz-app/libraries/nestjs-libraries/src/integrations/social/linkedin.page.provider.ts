@@ -383,7 +383,6 @@ export class LinkedinPageProvider
       data: analytics[
         key as 'Page Views' | 'Organic Followers' | 'Paid Followers'
       ],
-      percentageChange: 5,
     }));
   }
 

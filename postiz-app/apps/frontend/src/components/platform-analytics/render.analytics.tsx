@@ -9,7 +9,7 @@ import { PlatformVideoGrid } from '@gitroom/frontend/components/platform-analyti
 
 interface AnalyticsDataItem {
   label: string;
-  data: Array<{ total: number; date: string }>;
+  data: Array<{ total: number | string; date: string }>;
   average?: boolean;
   percentageChange?: number;
 }
@@ -105,7 +105,12 @@ const AnalyticsCard: FC<{
             {/* Chart */}
             <div className="flex-1 px-[12px] py-[8px]">
               <div className="h-[120px] relative">
-                <ChartSocial data={item.data} color={color} key={`chart-${index}`} />
+                <ChartSocial
+                  data={item.data}
+                  color={color}
+                  directPoints={true}
+                  key={`chart-${index}`}
+                />
               </div>
             </div>
 
@@ -121,6 +126,9 @@ const AnalyticsCard: FC<{
           <div className="flex-1 flex flex-col items-center justify-center py-[32px] px-[16px]">
             <div className="text-[48px] leading-[56px] font-semibold tracking-tight">
               {total}
+            </div>
+            <div className="mt-[6px] text-[13px] font-medium text-newTableText/70">
+              {item.average ? 'Average' : 'Total'}
             </div>
           </div>
         )}
@@ -223,7 +231,11 @@ export const RenderAnalytics: FC<{
   const totals = useMemo(() => {
     return data?.map((p: AnalyticsDataItem) => {
       const value =
-        (p?.data.reduce((acc: number, curr: { total: number }) => acc + curr.total, 0) || 0) /
+        (p?.data.reduce(
+          (acc: number, curr: { total: number | string }) =>
+            acc + Number(curr.total || 0),
+          0
+        ) || 0) /
         (p.average ? p.data.length : 1);
       if (p.average) {
         return value.toFixed(2) + '%';

@@ -565,7 +565,6 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     return (
       data?.map((d: any) => ({
         label: capitalize(d.name),
-        percentageChange: 5,
         data: d.total_value
           ? [{ total: d.total_value.value, date: dayjs().format('YYYY-MM-DD') }]
           : d.values.map((v: any) => ({
