@@ -62,11 +62,13 @@ const AnalyticsCard: FC<{
   total: string | number;
   index: number;
   chartKey: string;
-}> = ({ item, total, index, chartKey }) => {
+  isInstagram: boolean;
+}> = ({ item, total, index, chartKey, isInstagram }) => {
   const colorVariants = ['purple', 'green', 'blue'] as const;
   const color = colorVariants[index % colorVariants.length];
 
   const hasMultipleDataPoints = item.data.length > 1;
+  const isInstagramTotalOnly = isInstagram && !item.average;
 
   return (
     <div className="group relative">
@@ -130,8 +132,17 @@ const AnalyticsCard: FC<{
               {total}
             </div>
             <div className="mt-[6px] text-[13px] font-medium text-newTableText/70">
-              {item.average ? 'Average' : 'Total'}
+              {item.average
+                ? 'Average'
+                : isInstagram
+                  ? 'Total from Instagram'
+                  : 'Total'}
             </div>
+            {isInstagramTotalOnly && (
+              <div className="mt-[4px] text-[12px] text-newTableText/50 text-center">
+                Daily graph unavailable for past dates
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -230,6 +241,9 @@ export const RenderAnalytics: FC<{
   );
 
   const t = useT();
+  const isInstagram =
+    integration.identifier === 'instagram' ||
+    integration.identifier === 'instagram-standalone';
 
   const totals = useMemo(() => {
     return data?.map((p: AnalyticsDataItem) => {
@@ -268,6 +282,7 @@ export const RenderAnalytics: FC<{
             total={totals[index]}
             index={index}
             chartKey={`chart-${integration.id}-${date}-${item.label}-${index}`}
+            isInstagram={isInstagram}
           />
         ))}
       </div>
