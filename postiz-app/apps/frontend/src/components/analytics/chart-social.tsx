@@ -2,29 +2,35 @@
 
 import { FC, useEffect, useMemo, useRef } from 'react';
 import DrawChart from 'chart.js/auto';
-import { TotalList } from '@gitroom/frontend/components/analytics/stars.and.forks.interface';
 import { chunk } from 'lodash';
 import useCookie from 'react-use-cookie';
 
-function mergeDataPoints(data: TotalList[], numPoints: number): TotalList[] {
+type ChartPoint = { total: number | string; date: string };
+
+function mergeDataPoints(data: ChartPoint[], numPoints: number): ChartPoint[] {
   const res = chunk(data, Math.ceil(data.length / numPoints));
   return res.map((row) => {
     return {
       date: `${row[0].date} - ${row?.at(-1)?.date}`,
-      total: row.reduce((acc, curr) => acc + curr.total, 0),
+      total: row.reduce((acc, curr) => acc + Number(curr.total || 0), 0),
     };
   });
 }
 
 export const ChartSocial: FC<{
-  data: TotalList[];
+  data: ChartPoint[];
   color?: 'purple' | 'green' | 'blue';
+  directPoints?: boolean;
 }> = (props) => {
-  const { data, color = 'purple' } = props;
+  const { data, color = 'purple', directPoints = false } = props;
   const [mode] = useCookie('mode', 'dark');
   const list = useMemo(() => {
-    return mergeDataPoints(data, 7);
-  }, [data]);
+    const points = directPoints ? data : mergeDataPoints(data, 7);
+    return points.map((row) => ({
+      ...row,
+      total: Number(row.total || 0),
+    }));
+  }, [data, directPoints]);
   const ref = useRef<any>(null);
   const chart = useRef<null | DrawChart>(null);
 
