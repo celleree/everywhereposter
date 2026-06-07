@@ -128,8 +128,24 @@ const Message: FC<UserMessageProps> = (props) => {
       })
       .replace(
         /(\[--integrations--\][\s\S]*?\[--integrations--\])/g,
-        (match, p1) => {
-          return ``;
+        (match) => {
+          const availableChannels = match.match(
+            /Available channels:\n([\s\S]*?)\n\nWhen asking where to post,/
+          )?.[1];
+          const escapeHtml = (value: string) =>
+            value
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+
+          return availableChannels
+            ? `<br /><br />Available channels:<br />${availableChannels
+                .split('\n')
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .map(escapeHtml)
+                .join('<br />')}`
+            : ``;
         }
       );
   }, [props.message?.content]);
