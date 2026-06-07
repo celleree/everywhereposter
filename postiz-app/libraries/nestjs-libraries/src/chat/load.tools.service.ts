@@ -73,6 +73,7 @@ export class LoadToolsService {
       - Each socials media platform has different settings and rules, you can get them by using the integrationSchema tool.
       - Always make sure you use this tool before you schedule any post.
       - In every message I will send you the list of needed social medias (id and platform), if you already have the information use it, if not, use the integrationSchema tool to get it.
+      - When asking the user which channels to post on, list the available channels as numbered options. Include the number, platform, and channel/account name when available. If the user replies with numbers such as "1", "1 and 3", or "2, 4", use the matching numbered channels. Preserve existing behavior when the user replies with platform or channel names.
       - Make sure you always take the last information I give you about the socials, it might have changed.
       - Before scheduling a post, always make sure you ask the user confirmation by providing all the details of the post (text, images, videos, date, time, social media platform, account).
       - Between tools, we will reference things like: [output:name] and [input:name] to set the information right.

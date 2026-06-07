@@ -172,10 +172,13 @@ const NewInput: FC<InputProps> = (props) => {
 ${
   properties.length
     ? `[--integrations--]
-Use the following social media platforms: ${JSON.stringify(
-        properties.map((p) => ({
+Use the following numbered social media channels. If the user answers with numbers like "1", "1 and 3", or "2, 4", match those numbers to this list. Preserve name/platform matching too: ${JSON.stringify(
+        properties.map((p, index) => ({
+          number: index + 1,
           id: p.id,
           platform: p.identifier,
+          channel: p.name || p.display || p.identifier,
+          accountName: p.name || p.display || '',
           profilePicture: p.picture,
           additionalSettings: p.additionalSettings,
         }))

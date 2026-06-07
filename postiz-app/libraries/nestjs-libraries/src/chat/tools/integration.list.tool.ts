@@ -29,10 +29,12 @@ export class IntegrationListTool implements AgentToolInterface {
       outputSchema: z.object({
         output: z.array(
           z.object({
+            number: z.number(),
             id: z.string(),
             name: z.string(),
             picture: z.string(),
             platform: z.string(),
+            display: z.string().nullable(),
           })
         ),
       }),
@@ -45,13 +47,14 @@ export class IntegrationListTool implements AgentToolInterface {
         return {
           output: (
             await this._integrationService.getIntegrationsList(organizationId)
-          ).map((p) => ({
+          ).map((p, index) => ({
+            number: index + 1,
             name: p.name,
             id: p.id,
             disabled: p.disabled,
             picture: p.picture || '/no-picture.jpg',
             platform: p.providerIdentifier,
-            display: p.profile,
+            display: p.profile || null,
             type: p.type,
           })),
         };
