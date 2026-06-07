@@ -116,6 +116,52 @@ export const SelectCurrent: FC = () => {
     [addInternalValue, global, internal, setCurrent, setHide, setInternalValue]
   );
 
+  const selectIntegration = useCallback(
+    (integration: Integrations) => {
+      if (integration.identifier === 'youtube') {
+        const existingInternal = internal.find(
+          (item) => item.integration.id === integration.id
+        );
+        const globalValues = global.map((value) => ({
+          ...value,
+          media: (value.media || []).map((media) => ({ ...media })),
+        }));
+        const globalFirstMedia = globalValues[0]?.media || [];
+
+        if (!existingInternal) {
+          addInternalValue(
+            0,
+            integration.id,
+            globalValues.length
+              ? globalValues
+              : [
+                  {
+                    id: makeId(10),
+                    delay: 0,
+                    content: '',
+                    media: [],
+                  },
+                ]
+          );
+        } else if (
+          globalFirstMedia.length &&
+          !(existingInternal.integrationValue?.[0]?.media || []).length
+        ) {
+          setInternalValue(
+            integration.id,
+            existingInternal.integrationValue.map((value, index) =>
+              index === 0 ? { ...value, media: globalFirstMedia } : value
+            )
+          );
+        }
+      }
+
+      setHide(true);
+      setCurrent(integration.id);
+    },
+    [addInternalValue, global, internal, setCurrent, setHide, setInternalValue]
+  );
+
   return (
     <div
       className={clsx(
@@ -172,14 +218,12 @@ export const SelectCurrent: FC = () => {
               role="button"
               tabIndex={0}
               onClick={() => {
-                setHide(true);
-                setCurrent(integration.id);
+                selectIntegration(integration);
               }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
-                  setHide(true);
-                  setCurrent(integration.id);
+                  selectIntegration(integration);
                 }
               }}
               key={integration.id}
