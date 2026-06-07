@@ -1241,14 +1241,17 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                             className="text-white"
                           />
                         </button>
-                        {showSettings && (
-                          <div className="relative text-[14px] font-[500] text-textColor">
-                            <div
-                              id="social-settings"
-                              className="flex min-w-0 max-w-full flex-col gap-[20px] bg-newBgColor p-[12px] mobile:px-[2px]"
-                            />
-                          </div>
-                        )}
+                        <div
+                          className={clsx(
+                            'relative text-[14px] font-[500] text-textColor',
+                            !showSettings && 'hidden'
+                          )}
+                        >
+                          <div
+                            id="social-settings"
+                            className="flex min-w-0 max-w-full flex-col gap-[20px] bg-newBgColor p-[12px] mobile:px-[2px]"
+                          />
+                        </div>
                         <style>
                           {`#social-settings [data-id="${current}"] {display: block !important;}`}
                         </style>
