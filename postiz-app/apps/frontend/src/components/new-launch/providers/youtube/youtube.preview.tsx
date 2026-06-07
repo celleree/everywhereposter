@@ -47,7 +47,7 @@ export const YoutubePreview: FC<{
   });
 
   return (
-    <div className="absolute left-0 top-0 gap-[12px] w-full h-full flex flex-col p-[16px] bg-bgYoutube">
+    <div className="gap-[12px] w-full flex flex-col p-[16px] bg-bgYoutube">
       <div
         style={{ background: 'url(/no-video-youtube.png)' }}
         className="!bg-cover w-full aspect-[calc(16/9)] rounded-[4px] overflow-hidden"
