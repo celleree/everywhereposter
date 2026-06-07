@@ -155,6 +155,34 @@ const NewInput: FC<InputProps> = (props) => {
         {...props}
         onChange={setValue}
         onSend={(text) => {
+          const channels = properties.map((p, index) => {
+            const platform = String(p.identifier || p.platform || '');
+            const platformLabel = (platform.split('-')[0] || 'Channel')
+              .split(/[\s_]+/)
+              .filter(Boolean)
+              .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+              .join(' ');
+            const accountName = p.name || p.display || '';
+
+            return {
+              number: index + 1,
+              id: p.id,
+              platform,
+              platformLabel,
+              channel: accountName || platform,
+              accountName,
+              profilePicture: p.picture,
+              additionalSettings: p.additionalSettings,
+            };
+          });
+          const channelList = channels
+            .map(
+              (channel) =>
+                `${channel.number}. ${channel.platformLabel}${
+                  channel.accountName ? `: ${channel.accountName}` : ''
+                }`
+            )
+            .join('\n');
           const send = props.onSend(
             text +
               (media.length > 0
@@ -170,19 +198,14 @@ const NewInput: FC<InputProps> = (props) => {
                 : '') +
               `
 ${
-  properties.length
+  channels.length
     ? `[--integrations--]
-Use the following numbered social media channels. If the user answers with numbers like "1", "1 and 3", or "2, 4", match those numbers to this list. Preserve name/platform matching too: ${JSON.stringify(
-        properties.map((p, index) => ({
-          number: index + 1,
-          id: p.id,
-          platform: p.identifier,
-          channel: p.name || p.display || p.identifier,
-          accountName: p.name || p.display || '',
-          profilePicture: p.picture,
-          additionalSettings: p.additionalSettings,
-        }))
-      )}
+Available channels:
+${channelList}
+
+When asking where to post, copy/use the numbered list above. If the user answers with numbers like "1", "1 and 3", or "2, 4", match those numbers to this list. Preserve name/platform matching too.
+
+Structured channel data: ${JSON.stringify(channels)}
 [--integrations--]`
     : ``
 }`

@@ -30,10 +30,12 @@ export class IntegrationListTool implements AgentToolInterface {
         output: z.array(
           z.object({
             number: z.number(),
+            option: z.string(),
             id: z.string(),
             name: z.string(),
             picture: z.string(),
             platform: z.string(),
+            platformLabel: z.string(),
             display: z.string().nullable(),
           })
         ),
@@ -47,16 +49,33 @@ export class IntegrationListTool implements AgentToolInterface {
         return {
           output: (
             await this._integrationService.getIntegrationsList(organizationId)
-          ).map((p, index) => ({
-            number: index + 1,
-            name: p.name,
-            id: p.id,
-            disabled: p.disabled,
-            picture: p.picture || '/no-picture.jpg',
-            platform: p.providerIdentifier,
-            display: p.profile || null,
-            type: p.type,
-          })),
+          ).map((p, index) => {
+            const number = index + 1;
+            const platformLabel = (
+              p.providerIdentifier.split('-')[0] || 'Channel'
+            )
+              .split(/[\s_]+/)
+              .filter(Boolean)
+              .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+              .join(' ');
+            const display = p.profile || null;
+            const accountName = p.name || display || '';
+
+            return {
+              number,
+              option: `${number}. ${platformLabel}${
+                accountName ? `: ${accountName}` : ''
+              }`,
+              name: p.name,
+              id: p.id,
+              disabled: p.disabled,
+              picture: p.picture || '/no-picture.jpg',
+              platform: p.providerIdentifier,
+              platformLabel,
+              display,
+              type: p.type,
+            };
+          }),
         };
       },
     });
