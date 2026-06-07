@@ -235,8 +235,8 @@ export const MediaBox: FC<{
       type == 'image'
         ? 'image/*'
         : type == 'video'
-        ? 'video/mp4,video/quicktime'
-        : 'image/*,video/mp4,video/quicktime',
+        ? 'video/mp4,video/quicktime,video/mov'
+        : 'image/*,video/mp4,video/quicktime,video/mov',
     onUploadSuccess: async (arr) => {
       await mutate();
       if (standalone) {

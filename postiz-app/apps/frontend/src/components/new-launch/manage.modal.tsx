@@ -1580,7 +1580,7 @@ const ComposerUploadCard: FC<{
   const [loading, setLoading] = useState(false);
 
   const uppy = useUppyUploader({
-    allowedFileTypes: 'image/*,video/mp4',
+    allowedFileTypes: 'image/*,video/mp4,video/quicktime,video/mov',
     onUploadSuccess: (result: any) => {
       onUpload(result);
       uppy.clear();
