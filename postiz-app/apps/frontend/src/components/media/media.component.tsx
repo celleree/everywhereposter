@@ -198,6 +198,8 @@ export const showMediaBox = (
 };
 const CHUNK_SIZE = 1024 * 1024;
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
+const isVideoMedia = (media?: { path?: string; type?: string | null }) =>
+  media?.type === 'video' || /\.(mp4|mov)(?:$|[?#])/i.test(media?.path || '');
 export const MediaBox: FC<{
   setMedia: (params: { id: string; path: string }[]) => void;
   standalone?: boolean;
@@ -233,8 +235,8 @@ export const MediaBox: FC<{
       type == 'image'
         ? 'image/*'
         : type == 'video'
-        ? 'video/mp4'
-        : 'image/*,video/mp4',
+        ? 'video/mp4,video/quicktime'
+        : 'image/*,video/mp4,video/quicktime',
     onUploadSuccess: async (arr) => {
       await mutate();
       if (standalone) {
@@ -348,7 +350,7 @@ export const MediaBox: FC<{
         top: 10,
         children: (
           <div className="w-full h-full p-[50px]">
-            {media.path.indexOf('mp4') > -1 ? (
+            {isVideoMedia(media) ? (
               <VideoFrame
                 autoplay={true}
                 url={mediaDirectory.set(media.path)}
@@ -570,9 +572,9 @@ export const MediaBox: FC<{
             {data?.results
               ?.filter((f: any) => {
                 if (type === 'video') {
-                  return f.path.indexOf('mp4') > -1;
+                  return isVideoMedia(f);
                 } else if (type === 'image') {
-                  return f.path.indexOf('mp4') === -1;
+                  return !isVideoMedia(f);
                 }
                 return true;
               })
@@ -624,7 +626,7 @@ export const MediaBox: FC<{
                           </svg>
                         </div>
                       </div>
-                      {media.path.indexOf('mp4') > -1 ? (
+                      {isVideoMedia(media) ? (
                         <VideoFrame url={mediaDirectory.set(media.path)} />
                       ) : (
                         <img
@@ -848,7 +850,7 @@ export const MultiMediaComponent: FC<{
                       >
                         <MediaSettingsIcon className="cursor-pointer relative z-[200]" />
                       </div>
-                      {media?.path?.indexOf('mp4') > -1 ? (
+                      {isVideoMedia(media) ? (
                         <VideoFrame url={mediaDirectory.set(media?.path)} />
                       ) : (
                         <img

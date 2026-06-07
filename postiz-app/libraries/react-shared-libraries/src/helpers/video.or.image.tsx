@@ -8,7 +8,7 @@ export const VideoOrImage: FC<{
   videoClassName?: string;
 }> = (props) => {
   const { src, autoplay, isContain, imageClassName, videoClassName } = props;
-  if (src?.indexOf('mp4') > -1) {
+  if (/\.(mp4|mov)(?:$|[?#])/i.test(src || '')) {
     return (
       <video
         src={src}

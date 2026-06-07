@@ -15,6 +15,7 @@ const LOCAL_STORAGE_ALLOWED_MIME = new Set<string>([
   'image/bmp',
   'image/tiff',
   'video/mp4',
+  'video/quicktime',
 ]);
 export class LocalStorage implements IUploadProvider {
   constructor(private uploadDirectory: string) {}

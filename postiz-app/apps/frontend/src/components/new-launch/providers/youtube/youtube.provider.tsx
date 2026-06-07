@@ -57,6 +57,9 @@ const optionalYesNo = [
   ...yesNo,
 ];
 
+const isVideoMedia = (media?: { path?: string; type?: string | null }) =>
+  media?.type === 'video' || /\.(mp4|mov)(?:$|[?#])/i.test(media?.path || '');
+
 const license = [
   {
     label: 'Use YouTube default',
@@ -183,7 +186,7 @@ export default withProvider({
     if (items?.[0]?.length !== 1) {
       return 'You need one media';
     }
-    if ((firstItems?.[0]?.path?.indexOf?.('mp4') ?? -1) === -1) {
+    if (!isVideoMedia(firstItems?.[0])) {
       return 'Item must be a video';
     }
     return true;
