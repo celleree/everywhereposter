@@ -48,6 +48,18 @@ const clientAndYoutube = () => {
   return { client, youtube, oauth2, youtubeAnalytics };
 };
 
+const yesNoToBoolean = (value?: '' | 'no' | 'yes') => {
+  if (value === 'yes') {
+    return true;
+  }
+
+  if (value === 'no') {
+    return false;
+  }
+
+  return undefined;
+};
+
 @Rules('YouTube must have on video attachment, it cannot be empty')
 export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 200; // YouTube has strict upload quotas
@@ -311,6 +323,19 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     const youtubeClient = youtube(client);
 
     const { settings }: { settings: YoutubeSettingsDto } = firstPost;
+    const embeddable = yesNoToBoolean(settings.embeddable);
+    const publicStatsViewable = yesNoToBoolean(settings.publicStatsViewable);
+    const hasPaidProductPlacement = yesNoToBoolean(
+      settings.hasPaidProductPlacement
+    );
+    const parts = [
+      'id',
+      'snippet',
+      'status',
+      ...(typeof hasPaidProductPlacement === 'boolean'
+        ? ['paidProductPlacementDetails']
+        : []),
+    ];
 
     const response = await axios({
       url: firstPost?.media?.[0]?.path,
@@ -321,8 +346,8 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     const all: GaxiosResponse<Schema$Video> = await this.runInConcurrent(
       async () =>
         youtubeClient.videos.insert({
-          part: ['id', 'snippet', 'status'],
-          notifySubscribers: true,
+          part: parts,
+          notifySubscribers: settings.notifySubscribers !== 'no',
           requestBody: {
             snippet: {
               title: settings.title,
@@ -335,7 +360,19 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
               privacyStatus: settings.type,
               selfDeclaredMadeForKids:
                 settings.selfDeclaredMadeForKids === 'yes',
+              ...(settings.license ? { license: settings.license } : {}),
+              ...(typeof embeddable === 'boolean' ? { embeddable } : {}),
+              ...(typeof publicStatsViewable === 'boolean'
+                ? { publicStatsViewable }
+                : {}),
             },
+            ...(typeof hasPaidProductPlacement === 'boolean'
+              ? {
+                  paidProductPlacementDetails: {
+                    hasPaidProductPlacement,
+                  },
+                }
+              : {}),
           },
           media: {
             body: response.data,
@@ -384,6 +421,19 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     const youtubeClient = youtube(client);
 
     const { settings }: { settings: YoutubeSettingsDto } = firstPost;
+    const embeddable = yesNoToBoolean(settings.embeddable);
+    const publicStatsViewable = yesNoToBoolean(settings.publicStatsViewable);
+    const hasPaidProductPlacement = yesNoToBoolean(
+      settings.hasPaidProductPlacement
+    );
+    const parts = [
+      'id',
+      'snippet',
+      'status',
+      ...(typeof hasPaidProductPlacement === 'boolean'
+        ? ['paidProductPlacementDetails']
+        : []),
+    ];
 
     const existingVideo = await this.runInConcurrent(
       async () =>
@@ -406,7 +456,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     const updatedVideo = await this.runInConcurrent(
       async () =>
         youtubeClient.videos.update({
-          part: ['id', 'snippet', 'status'],
+          part: parts,
           requestBody: {
             id: releaseId,
             snippet: {
@@ -427,13 +477,21 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
               privacyStatus: settings.type,
               selfDeclaredMadeForKids:
                 settings.selfDeclaredMadeForKids === 'yes',
-              ...(typeof currentStatus?.embeddable === 'boolean'
+              ...(typeof embeddable === 'boolean'
+                ? { embeddable }
+                : typeof currentStatus?.embeddable === 'boolean'
                 ? { embeddable: currentStatus.embeddable }
                 : {}),
-              ...(currentStatus?.license
+              ...(settings.license
+                ? { license: settings.license }
+                : currentStatus?.license
                 ? { license: currentStatus.license }
                 : {}),
-              ...(typeof currentStatus?.publicStatsViewable === 'boolean'
+              ...(typeof publicStatsViewable === 'boolean'
+                ? {
+                    publicStatsViewable,
+                  }
+                : typeof currentStatus?.publicStatsViewable === 'boolean'
                 ? {
                     publicStatsViewable: currentStatus.publicStatsViewable,
                   }
@@ -442,6 +500,13 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
                 ? { publishAt: currentStatus.publishAt }
                 : {}),
             },
+            ...(typeof hasPaidProductPlacement === 'boolean'
+              ? {
+                  paidProductPlacementDetails: {
+                    hasPaidProductPlacement,
+                  },
+                }
+              : {}),
           },
         }),
       true

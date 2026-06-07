@@ -37,13 +37,63 @@ const madeForKids = [
     value: 'yes',
   },
 ];
+
+const yesNo = [
+  {
+    label: 'Yes',
+    value: 'yes',
+  },
+  {
+    label: 'No',
+    value: 'no',
+  },
+];
+
+const optionalYesNo = [
+  {
+    label: 'Use YouTube default',
+    value: '',
+  },
+  ...yesNo,
+];
+
+const license = [
+  {
+    label: 'Use YouTube default',
+    value: '',
+  },
+  {
+    label: 'Standard YouTube License',
+    value: 'youtube',
+  },
+  {
+    label: 'Creative Commons',
+    value: 'creativeCommon',
+  },
+];
+
 const YoutubeSettings: FC = () => {
   const { register, control } = useSettings();
   return (
     <div className="flex flex-col">
+      <div className="text-[14px] font-[600] mb-[10px]">Details</div>
       <Input label="Title" {...register('title')} maxLength={100} />
+      <MediumTags label="Tags" {...register('tags')} />
+      <div className="mt-[20px]">
+        <MediaComponent
+          type="image"
+          width={1280}
+          height={720}
+          label="Thumbnail"
+          description="Thumbnail picture (optional)"
+          {...register('thumbnail')}
+        />
+      </div>
+      <div className="text-[14px] font-[600] mt-[20px] mb-[10px]">
+        Visibility
+      </div>
       <Select
-        label="Type"
+        label="Visibility"
         {...register('type', {
           value: 'public',
         })}
@@ -54,6 +104,21 @@ const YoutubeSettings: FC = () => {
           </option>
         ))}
       </Select>
+      <Select
+        label="Notify subscribers"
+        {...register('notifySubscribers', {
+          value: 'yes',
+        })}
+      >
+        {yesNo.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+      </Select>
+      <div className="text-[14px] font-[600] mt-[20px] mb-[10px]">
+        Audience
+      </div>
       <Select
         label="Made for kids"
         {...register('selfDeclaredMadeForKids', {
@@ -66,17 +131,43 @@ const YoutubeSettings: FC = () => {
           </option>
         ))}
       </Select>
-      <MediumTags label="Tags" {...register('tags')} />
-      <div className="mt-[20px]">
-        <MediaComponent
-          type="image"
-          width={1280}
-          height={720}
-          label="Thumbnail"
-          description="Thumbnail picture (optional)"
-          {...register('thumbnail')}
-        />
+      <div className="text-[14px] font-[600] mt-[20px] mb-[10px]">
+        License & distribution
       </div>
+      <Select label="License" {...register('license')}>
+        {license.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+      </Select>
+      <Select label="Allow embedding" {...register('embeddable')}>
+        {optionalYesNo.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+      </Select>
+      <Select label="Show public stats" {...register('publicStatsViewable')}>
+        {optionalYesNo.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+      </Select>
+      <div className="text-[14px] font-[600] mt-[20px] mb-[10px]">
+        Paid promotion
+      </div>
+      <Select
+        label="Paid product placement"
+        {...register('hasPaidProductPlacement')}
+      >
+        {optionalYesNo.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+      </Select>
     </div>
   );
 };

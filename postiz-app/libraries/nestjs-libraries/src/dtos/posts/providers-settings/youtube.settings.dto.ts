@@ -37,4 +37,24 @@ export class YoutubeSettingsDto {
   @ValidateNested()
   @Type(() => YoutubeTagsSettings)
   tags: YoutubeTagsSettings[];
+
+  @IsIn(['yes', 'no'])
+  @IsOptional()
+  notifySubscribers?: 'no' | 'yes';
+
+  @IsIn(['', 'creativeCommon', 'youtube'])
+  @IsOptional()
+  license?: '' | 'creativeCommon' | 'youtube';
+
+  @IsIn(['', 'yes', 'no'])
+  @IsOptional()
+  embeddable?: '' | 'no' | 'yes';
+
+  @IsIn(['', 'yes', 'no'])
+  @IsOptional()
+  publicStatsViewable?: '' | 'no' | 'yes';
+
+  @IsIn(['', 'yes', 'no'])
+  @IsOptional()
+  hasPaidProductPlacement?: '' | 'no' | 'yes';
 }
