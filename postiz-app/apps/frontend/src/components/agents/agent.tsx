@@ -4,6 +4,7 @@ import React, {
   createContext,
   FC,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   ReactNode,
@@ -69,17 +70,8 @@ export const AgentList: FC<{
   const [selected, setSelected] = useState([]);
 
   const load = useCallback(async () => {
-    const integrations = (await (await fetch('/integrations/list')).json())
-      .integrations;
-    onLoad(
-      orderBy(
-        integrations || [],
-        ['type', 'disabled', 'identifier'],
-        ['desc', 'asc', 'asc']
-      )
-    );
-    return integrations;
-  }, [onLoad]);
+    return (await (await fetch('/integrations/list')).json()).integrations;
+  }, []);
 
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
 
@@ -113,6 +105,12 @@ export const AgentList: FC<{
       ['desc', 'asc', 'asc']
     );
   }, [data]);
+
+  useEffect(() => {
+    if (sortedIntegrations.length > 0) {
+      onLoad(sortedIntegrations);
+    }
+  }, [onLoad, sortedIntegrations]);
 
   return (
     <div
