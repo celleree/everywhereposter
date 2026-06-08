@@ -9,6 +9,10 @@ on:
       - .github/workflows/build-postiz-ghcr.yml
       - postiz-app/**
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
