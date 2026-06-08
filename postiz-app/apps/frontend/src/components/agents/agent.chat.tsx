@@ -159,7 +159,7 @@ const Message: FC<UserMessageProps> = (props) => {
 const NewInput: FC<InputProps> = (props) => {
   const [media, setMedia] = useState([] as { path: string; id: string }[]);
   const [value, setValue] = useState('');
-  const { properties } = useContext(PropertiesContext);
+  const { properties, allProperties } = useContext(PropertiesContext);
   return (
     <>
       <MediaPortal
@@ -171,7 +171,8 @@ const NewInput: FC<InputProps> = (props) => {
         {...props}
         onChange={setValue}
         onSend={(text) => {
-          const channels = properties.map((p, index) => {
+          const integrations = properties.length ? properties : allProperties;
+          const channels = integrations.map((p, index) => {
             const platform = String(p.identifier || p.platform || '');
             const platformLabel = (platform.split('-')[0] || 'Channel')
               .split(/[\s_]+/)

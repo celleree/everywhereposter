@@ -4,6 +4,7 @@ import React, {
   createContext,
   FC,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   ReactNode,
@@ -60,9 +61,10 @@ export const MediaPortal: FC<{
   );
 };
 
-export const AgentList: FC<{ onChange: (arr: any[]) => void }> = ({
-  onChange,
-}) => {
+export const AgentList: FC<{
+  onChange: (arr: any[]) => void;
+  onLoad: (arr: any[]) => void;
+}> = ({ onChange, onLoad }) => {
   const fetch = useFetch();
   const t = useT();
   const [selected, setSelected] = useState([]);
@@ -103,6 +105,10 @@ export const AgentList: FC<{ onChange: (arr: any[]) => void }> = ({
       ['desc', 'asc', 'asc']
     );
   }, [data]);
+
+  useEffect(() => {
+    onLoad(sortedIntegrations);
+  }, [onLoad, sortedIntegrations]);
 
   return (
     <div
@@ -196,13 +202,17 @@ export const AgentList: FC<{ onChange: (arr: any[]) => void }> = ({
   );
 };
 
-export const PropertiesContext = createContext({ properties: [] });
+export const PropertiesContext = createContext({
+  properties: [] as any[],
+  allProperties: [] as any[],
+});
 export const Agent: FC<{ children: ReactNode }> = ({ children }) => {
-  const [properties, setProperties] = useState([]);
+  const [properties, setProperties] = useState<any[]>([]);
+  const [allProperties, setAllProperties] = useState<any[]>([]);
 
   return (
-    <PropertiesContext.Provider value={{ properties }}>
-      <AgentList onChange={setProperties} />
+    <PropertiesContext.Provider value={{ properties, allProperties }}>
+      <AgentList onChange={setProperties} onLoad={setAllProperties} />
       <div className="bg-newBgColorInner flex flex-1">{children}</div>
       <Threads />
     </PropertiesContext.Provider>
