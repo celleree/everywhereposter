@@ -156,6 +156,8 @@ const NewInput: FC<InputProps> = (props) => {
         onChange={setValue}
         onSend={(text) => {
           const integrations = properties.length ? properties : allProperties;
+          const browserTimeZone =
+            Intl.DateTimeFormat().resolvedOptions().timeZone;
           const channels = integrations.map((p, index) => {
             const platform = String(p.identifier || p.platform || '');
             const platformLabel = (platform.split('-')[0] || 'Channel')
@@ -205,6 +207,9 @@ Available channels:
 ${channelList}
 
 When asking where to post, copy/use the numbered list above. If the user answers with numbers like "1", "1 and 3", or "2, 4", match those numbers to this list. Preserve name/platform matching too.
+
+Browser timezone: ${browserTimeZone}
+For this in-app browser chat, interpret relative/natural schedule times like "tomorrow at 9:00 AM" in the browser timezone above unless the user specifies another timezone. Convert the final scheduled date/time to UTC before using manualPosting.date. In confirmation text, show the local time and timezone used.
 
 Structured channel data: ${JSON.stringify(channels)}
 [--integrations--]`
