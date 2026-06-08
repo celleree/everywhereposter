@@ -713,6 +713,15 @@ html[dir='rtl'] [dir='ltr'] {
   color: var(--new-btn-text) !important;
 }
 
+.agent .copilotKitMessage ol {
+  list-style: decimal;
+  padding-inline-start: 24px;
+}
+
+.agent .copilotKitMessage li {
+  display: list-item;
+}
+
 @keyframes marquee-up {
   0% {
     transform: translateY(0);
