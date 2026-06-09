@@ -206,7 +206,7 @@ ${
 Available channels:
 ${channelList}
 
-When asking where to post, copy/use the numbered list above. If the user answers with numbers like "1", "1 and 3", or "2, 4", match those numbers to this list. Preserve name/platform matching too.
+Use the numbered list above as private channel lookup context. Show the full Available channels list only when asking the user to choose a channel or when the channel selection is missing or ambiguous. If the user selected valid number(s), platform(s), or account name(s), do not repeat the full list; confirmations should mention only the selected channel/account. If the user answers with numbers like "1", "1 and 3", or "2, 4", match those numbers to this list. Preserve name/platform matching too.
 
 Browser timezone: ${browserTimeZone}
 For this in-app browser chat, interpret relative/natural schedule times like "tomorrow at 9:00 AM" in the browser timezone above unless the user specifies another timezone. Convert the final scheduled date/time to UTC before using manualPosting.date. In confirmation text, show the local time and timezone used.
