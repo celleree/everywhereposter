@@ -46,6 +46,7 @@ import dayjs from 'dayjs';
 import { Button } from '@gitroom/react/form/button';
 import { useDropzone } from 'react-dropzone';
 import { useUppyUploader } from '@gitroom/frontend/components/media/new.uploader';
+import { MediaBox } from '@gitroom/frontend/components/media/media.component';
 import { Dashboard } from '@uppy/react';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
@@ -1576,6 +1577,7 @@ const ComposerUploadCard: FC<{
 }> = ({ disabled, media, onUpload }) => {
   const t = useT();
   const toaster = useToaster();
+  const modals = useModals();
   const mediaDirectory = useMediaDirectory();
   const [loading, setLoading] = useState(false);
 
@@ -1615,6 +1617,26 @@ const ComposerUploadCard: FC<{
     [toaster, t, uppy]
   );
 
+  const openMediaLibrary = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      modals.openModal({
+        title: t('media_library', 'Media Library'),
+        askClose: false,
+        closeOnEscape: true,
+        fullScreen: true,
+        size: 'calc(100% - 80px)',
+        height: 'calc(100% - 80px)',
+        children: (close) => (
+          <MediaBox setMedia={onUpload} closeModal={close} />
+        ),
+      });
+    },
+    [modals, onUpload, t]
+  );
+
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop: handleDrop,
     noClick: true,
@@ -1634,37 +1656,43 @@ const ComposerUploadCard: FC<{
     >
       <input {...getInputProps()} />
       <div className="flex min-w-0 flex-col items-center justify-center gap-[10px] text-center">
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            open();
-          }}
-          className="rounded-[12px] bg-[#612BD3] px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
-        >
-          Choose files
-        </button>
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-[10px] mobile:w-full mobile:flex-col">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              open();
+            }}
+            className="rounded-[12px] bg-[#612BD3] px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
+          >
+            Choose files
+          </button>
+          <button
+            type="button"
+            onClick={openMediaLibrary}
+            className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-[#7C4DFF] mobile:w-full"
+          >
+            {t('media_library', 'Media Library')}
+          </button>
+        </div>
         <div className="break-words text-[13px] leading-[1.4] text-textColor/65">
           Drop files here or browse from your device.
         </div>
       </div>
 
-      <div className="pointer-events-none relative mt-[16px]">
-        <div className="absolute left-0 h-[46px] w-full overflow-hidden bg-newBgColorInner uppyChange">
-          <Dashboard
-            height={46}
-            uppy={uppy}
-            id="composer-uploader-progress"
-            showProgressDetails={true}
-            hideUploadButton={true}
-            hideRetryButton={true}
-            hidePauseResumeButton={true}
-            hideCancelButton={true}
-            hideProgressAfterFinish={true}
-          />
-        </div>
-        <div className="h-[46px] w-full rounded-[12px] bg-newBgColorInner/70 uppyChange" />
+      <div className="pointer-events-none mt-[16px] min-h-[46px] w-full overflow-hidden rounded-[12px] bg-newBgColorInner uppyChange">
+        <Dashboard
+          height={46}
+          uppy={uppy}
+          id="composer-uploader-progress"
+          showProgressDetails={true}
+          hideUploadButton={true}
+          hideRetryButton={true}
+          hidePauseResumeButton={true}
+          hideCancelButton={true}
+          hideProgressAfterFinish={true}
+        />
       </div>
 
       <div
