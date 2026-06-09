@@ -307,7 +307,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
             process?.env?.FRONTEND_URL?.indexOf('https') === -1
               ? 'https://redirectmeto.com/'
               : ''
-          }${process?.env?.FRONTEND_URL}/integrations/social/tiktok`
+          }${process?.env?.FRONTEND_URL}/integrations/social/callback`
         )}` +
         `&state=${state}` +
         `&response_type=code` +
@@ -332,7 +332,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         process?.env?.FRONTEND_URL?.indexOf('https') === -1
           ? 'https://redirectmeto.com/'
           : ''
-      }${process?.env?.FRONTEND_URL}/integrations/social/tiktok`,
+      }${process?.env?.FRONTEND_URL}/integrations/social/callback`,
     };
 
     const { access_token, refresh_token, scope } = await (
