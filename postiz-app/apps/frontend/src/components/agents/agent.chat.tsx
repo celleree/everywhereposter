@@ -213,7 +213,7 @@ Use the numbered list above as private channel lookup context. Show the full Ava
 
 Browser timezone: ${browserTimeZone}
 Browser-local current date/time: ${browserCurrentDateTime} (${browserTimeZone})
-For this in-app browser chat, anchor relative/natural schedule dates like "today", "tomorrow", "next Tuesday", and "this Friday" to the browser-local current date/time above, not the server UTC date. Use the browser timezone above unless the user explicitly specifies another timezone. Convert the final scheduled date/time to UTC before using manualPosting.date. In confirmation text, show the local date/time and timezone used.
+For this in-app browser chat, anchor relative/natural schedule dates like "today", "tomorrow", "next Tuesday", and "this Friday" to the browser-local current date/time above, not the server UTC date. Use the browser timezone above unless the user explicitly specifies another timezone. Convert the final scheduled date/time to UTC before using manualPosting.date. In confirmation text, show the local date/time and timezone used. Prefer ISO-style local dates like "2026-06-09 at 9:00 AM America/Los_Angeles"; do not invent or guess weekday labels. If you include a weekday, it must match the final local calendar date.
 
 Structured channel data: ${JSON.stringify(channels)}
 [--integrations--]`
