@@ -42,6 +42,7 @@ export const AgentChat: FC = () => {
 
   return (
     <CopilotKit
+      key={params.id}
       {...(params.id === 'new' ? {} : { threadId: params.id })}
       credentials="include"
       runtimeUrl={backendUrl + '/copilot/agent'}
@@ -93,15 +94,17 @@ const LoadMessages: FC<{ id: string }> = ({ id }) => {
 
   const loadMessages = useCallback(async (idToSet: string) => {
     const data = await (await fetch(`/copilot/${idToSet}/list`)).json();
+    const messages = data?.uiMessages ?? data?.messages ?? [];
+    const safeMessages = Array.isArray(messages) ? messages : [];
     setMessages(
-      data.uiMessages.map((p: any) => {
+      safeMessages.map((p: any) => {
         return new TextMessage({
           content: p.content,
           role: p.role,
         });
       })
     );
-  }, []);
+  }, [setMessages]);
 
   useEffect(() => {
     if (id === 'new') {
@@ -109,7 +112,7 @@ const LoadMessages: FC<{ id: string }> = ({ id }) => {
       return;
     }
     loadMessages(id);
-  }, [id]);
+  }, [id, loadMessages, setMessages]);
 
   return null;
 };
