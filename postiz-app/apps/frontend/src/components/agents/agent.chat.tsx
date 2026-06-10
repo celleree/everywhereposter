@@ -138,6 +138,18 @@ const extractMessageText = (message: any): string | null => {
     return message.text;
   }
 
+  if (typeof message?.content?.content === 'string') {
+    return message.content.content;
+  }
+
+  if (Array.isArray(message?.content?.parts)) {
+    const textParts = message.content.parts
+      .map((part: any) => part?.text)
+      .filter((text: any) => typeof text === 'string');
+
+    return textParts.length > 0 ? textParts.join('\n') : null;
+  }
+
   if (Array.isArray(message?.content)) {
     const textParts = message.content
       .map((part: any) => part?.text)
