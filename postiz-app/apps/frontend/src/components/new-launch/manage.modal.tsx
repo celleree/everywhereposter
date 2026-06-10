@@ -1077,7 +1077,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
   return (
     <div className="relative flex h-full w-full flex-1 overflow-x-hidden overflow-y-auto p-[40px] mobile:h-auto mobile:min-h-full mobile:max-w-[100vw] mobile:min-w-0 mobile:overflow-y-visible mobile:p-0">
-      <div className="flex min-w-0 flex-1 flex-col rounded-[20px] bg-newBgColorInner mobile:w-full mobile:max-w-full mobile:overflow-x-hidden mobile:rounded-none">
+      <div className="flex h-fit min-h-full min-w-0 flex-1 flex-col rounded-[20px] bg-newBgColorInner mobile:w-full mobile:max-w-full mobile:overflow-x-hidden mobile:rounded-none">
         <div className="flex min-w-0 mobile:block mobile:w-full mobile:flex-none mobile:overflow-x-hidden">
           <div className="flex min-w-0 flex-1 flex-col border-e border-newBorder mobile:block mobile:w-full mobile:border-e-0 mobile:border-b">
             <div className="flex min-h-[65px] min-w-0 items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:min-h-0 mobile:w-full mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
