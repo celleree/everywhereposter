@@ -753,8 +753,16 @@ export const Editor: FC<{
                 editorRef?.current?.editor?.commands?.focus('end');
               }}
             />
-            <div className="w-full pointer-events-none">
-              <div className="w-full h-[46px] overflow-hidden absolute left-0 bg-newBgColorInner uppyChange">
+            <div
+              className="w-full min-h-[46px] overflow-hidden bg-newBgColorInner cursor-text uppyChange"
+              onClick={() => {
+                if (editorRef?.current?.editor?.isFocused) {
+                  return;
+                }
+                editorRef?.current?.editor?.commands?.focus('end');
+              }}
+            >
+              <div className="w-full pointer-events-none">
                 <Dashboard
                   height={46}
                   uppy={uppy}
@@ -768,15 +776,6 @@ export const Editor: FC<{
                 />
               </div>
             </div>
-            <div
-              className="w-full h-[46px] bg-newBgColorInner cursor-text"
-              onClick={() => {
-                if (editorRef?.current?.editor?.isFocused) {
-                  return;
-                }
-                editorRef?.current?.editor?.commands?.focus('end');
-              }}
-            />
             <div className="flex bg-newBgColorInner rounded-b-[6px] cursor-default">
               {setImages && (
                 <MultiMediaComponent
