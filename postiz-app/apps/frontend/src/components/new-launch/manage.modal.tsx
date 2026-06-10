@@ -1617,6 +1617,15 @@ const ComposerUploadCard: FC<{
     [toaster, t, uppy]
   );
 
+  const cancelUpload = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      uppy.cancelAll();
+    },
+    [uppy]
+  );
+
   const openMediaLibrary = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -1651,7 +1660,7 @@ const ComposerUploadCard: FC<{
         isDragActive
           ? 'border-[#7C4DFF] bg-[#22163B]'
           : 'border-newBorder bg-newBgColor',
-        disabled && 'pointer-events-none opacity-70'
+        disabled && 'opacity-70'
       )}
     >
       <input {...getInputProps()} />
@@ -1659,22 +1668,33 @@ const ComposerUploadCard: FC<{
         <div className="flex min-w-0 flex-wrap items-center justify-center gap-[10px] mobile:w-full mobile:flex-col">
           <button
             type="button"
+            disabled={disabled || loading}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
               open();
             }}
-            className="rounded-[12px] bg-[#612BD3] px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
+            className="rounded-[12px] bg-[#612BD3] px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
           >
             Choose files
           </button>
           <button
             type="button"
+            disabled={disabled || loading}
             onClick={openMediaLibrary}
-            className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-[#7C4DFF] mobile:w-full"
+            className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:border-[#7C4DFF] mobile:w-full"
           >
             {t('media_library', 'Media Library')}
           </button>
+          {loading && (
+            <button
+              type="button"
+              onClick={cancelUpload}
+              className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-[#7C4DFF] mobile:w-full"
+            >
+              {t('cancel_upload', 'Cancel upload')}
+            </button>
+          )}
         </div>
         <div className="break-words text-[13px] leading-[1.4] text-textColor/65">
           Drop files here or browse from your device.

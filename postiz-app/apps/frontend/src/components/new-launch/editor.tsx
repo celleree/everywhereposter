@@ -667,6 +667,15 @@ export const Editor: FC<{
     [uppy, num, comments, toaster, t]
   );
 
+  const cancelUpload = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      uppy.cancelAll();
+    },
+    [uppy]
+  );
+
   const { getRootProps, isDragActive } = useDropzone({
     onDrop: (files) => {
       if (loading) {
@@ -775,6 +784,17 @@ export const Editor: FC<{
                   hideProgressAfterFinish={true}
                 />
               </div>
+              {loading && (
+                <div className="flex justify-end px-[10px] pb-[8px]">
+                  <button
+                    type="button"
+                    onClick={cancelUpload}
+                    className="rounded-[10px] border border-newBorder bg-newBgColorInner px-[14px] py-[8px] text-[13px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-[#7C4DFF]"
+                  >
+                    {t('cancel_upload', 'Cancel upload')}
+                  </button>
+                </div>
+              )}
             </div>
             <div className="flex bg-newBgColorInner rounded-b-[6px] cursor-default">
               {setImages && (

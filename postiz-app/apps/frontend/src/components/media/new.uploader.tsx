@@ -38,8 +38,8 @@ export class CompressionWrapper<M = any, B = any> extends Compressor<any, any> {
 export function useUppyUploader(props: {
   // @ts-ignore
   onUploadSuccess: (result: UploadResult) => void;
-  onStart: () => void;
-  onEnd: () => void;
+  onStart?: () => void;
+  onEnd?: () => void;
   allowedFileTypes: string;
 }) {
   const setLocked = useLaunchStore((state) => state.setLocked);
@@ -183,6 +183,13 @@ export function useUppyUploader(props: {
         quality: 1,
       });
     }
+
+    const finishUpload = () => {
+      setLocked(false);
+      props.onEnd?.();
+      fileOrderIndex = 0;
+    };
+
     // Set additional metadata when a file is added
     uppy2.on('file-added', (file) => {
       setLocked(true);
@@ -194,12 +201,13 @@ export function useUppyUploader(props: {
     });
     uppy2.on('error', (result) => {
       uppy2.clear();
-      setLocked(false);
-      props.onEnd();
-      fileOrderIndex = 0;
+      finishUpload();
+    });
+    uppy2.on('cancel-all', () => {
+      finishUpload();
     });
     uppy2.on('upload-start', () => {
-      props.onStart();
+      props.onStart?.();
     });
     uppy2.on('complete', async (result) => {
       console.log(result);
@@ -207,13 +215,19 @@ export function useUppyUploader(props: {
         uppy2.removeFile(file.id);
       }
 
-      props.onEnd();
+      props.onEnd?.();
       // Sort results by original add order to maintain file sequence
       const sortedSuccessful = [...result.successful].sort((a, b) => {
         const orderA = +((a.meta as any)?.addedOrder ?? 0);
         const orderB = +((b.meta as any)?.addedOrder ?? 0);
         return orderA - orderB;
       });
+
+      if (sortedSuccessful.length === 0) {
+        setLocked(false);
+        fileOrderIndex = 0;
+        return;
+      }
 
       if (storageProvider === 'local') {
         setLocked(false);
