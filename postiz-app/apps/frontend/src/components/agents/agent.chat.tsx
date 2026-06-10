@@ -27,7 +27,7 @@ import {
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useParams } from 'next/navigation';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import { TextMessage } from '@copilotkit/runtime-client-gql';
+import { MessageRole, TextMessage } from '@copilotkit/runtime-client-gql';
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
 import dayjs from 'dayjs';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
@@ -94,26 +94,11 @@ const LoadMessages: FC<{ id: string }> = ({ id }) => {
 
   const loadMessages = useCallback(async (idToSet: string) => {
     const data = await (await fetch(`/copilot/${idToSet}/list`)).json();
-    const safeMessages = Array.isArray(data?.uiMessages) ? data.uiMessages : [];
+    const uiMessages = Array.isArray(data?.uiMessages) ? data.uiMessages : [];
+    const rawMessages = Array.isArray(data?.messages) ? data.messages : [];
+    const sourceMessages = uiMessages.length > 0 ? uiMessages : rawMessages;
 
-    setMessages(
-      safeMessages.flatMap((p: any) => {
-        if (p?.role !== 'user' && p?.role !== 'assistant') {
-          return [];
-        }
-
-        if (typeof p?.content !== 'string') {
-          return [];
-        }
-
-        return [
-          new TextMessage({
-            content: p.content,
-            role: p.role,
-          }),
-        ];
-      })
-    );
+    setMessages(toTextMessages(sourceMessages));
   }, []);
 
   useEffect(() => {
@@ -127,9 +112,71 @@ const LoadMessages: FC<{ id: string }> = ({ id }) => {
   return null;
 };
 
+const normalizeRole = (role: any): MessageRole | null => {
+  if (typeof role !== 'string') {
+    return null;
+  }
+
+  const normalizedRole = role.trim().toLowerCase();
+  if (normalizedRole === 'user') {
+    return MessageRole.User;
+  }
+
+  if (normalizedRole === 'assistant') {
+    return MessageRole.Assistant;
+  }
+
+  return null;
+};
+
+const extractMessageText = (message: any): string | null => {
+  if (typeof message?.content === 'string') {
+    return message.content;
+  }
+
+  if (typeof message?.text === 'string') {
+    return message.text;
+  }
+
+  if (Array.isArray(message?.content)) {
+    const textParts = message.content
+      .map((part: any) => part?.text)
+      .filter((text: any) => typeof text === 'string');
+
+    return textParts.length > 0 ? textParts.join('\n') : null;
+  }
+
+  if (typeof message?.content?.text === 'string') {
+    return message.content.text;
+  }
+
+  return null;
+};
+
+const toTextMessages = (messages: any[]): TextMessage[] => {
+  return messages.flatMap((message: any) => {
+    const role = normalizeRole(message?.role);
+    const content = extractMessageText(message);
+
+    if (!role || content === null) {
+      return [];
+    }
+
+    return [
+      new TextMessage({
+        content,
+        role,
+      }),
+    ];
+  });
+};
+
 const Message: FC<UserMessageProps> = (props) => {
   const convertContentToImagesAndVideo = useMemo(() => {
-    return (props.message?.content || '')
+    const content =
+      typeof props.message?.content === 'string' ? props.message.content : '';
+
+    return content
       .replace(/Video: (http.*mp4\n)/g, (match, p1) => {
         return `<video controls class="h-[150px] w-[150px] rounded-[8px] mb-[10px]"><source src="${p1.trim()}" type="video/mp4">Your browser does not support the video tag.</video>`;
       })
