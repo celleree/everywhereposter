@@ -45,7 +45,10 @@ import { useShortlinkPreference } from '@gitroom/frontend/components/settings/sh
 import dayjs from 'dayjs';
 import { Button } from '@gitroom/react/form/button';
 import { useDropzone } from 'react-dropzone';
-import { useUppyUploader } from '@gitroom/frontend/components/media/new.uploader';
+import {
+  cancelUppyUploads,
+  useUppyUploader,
+} from '@gitroom/frontend/components/media/new.uploader';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
 import { Dashboard } from '@uppy/react';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
@@ -1621,7 +1624,8 @@ const ComposerUploadCard: FC<{
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      uppy.cancelAll();
+      cancelUppyUploads(uppy);
+      setLoading(false);
     },
     [uppy]
   );

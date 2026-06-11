@@ -35,6 +35,24 @@ export class CompressionWrapper<M = any, B = any> extends Compressor<any, any> {
   }
 }
 
+export function cancelUppyUploads(uppy: Uppy<any, any>) {
+  const files = uppy.getFiles();
+
+  for (const file of files) {
+    try {
+      uppy.removeFile(file.id);
+    } catch (error) {
+      console.warn('Failed to remove Uppy file during cancel:', error);
+    }
+  }
+
+  try {
+    uppy.cancelAll?.();
+  } catch (error) {
+    console.warn('Failed to cancel Uppy uploads:', error);
+  }
+}
+
 export function useUppyUploader(props: {
   // @ts-ignore
   onUploadSuccess: (result: UploadResult) => void;
@@ -51,6 +69,8 @@ export function useUppyUploader(props: {
   return useMemo(() => {
     // Track file order to maintain original sequence after upload
     let fileOrderIndex = 0;
+    let uploadCancelled = false;
+    let removingCompletedFiles = false;
 
     const uppy2 = new Uppy({
       autoProceed: true,
@@ -192,6 +212,7 @@ export function useUppyUploader(props: {
 
     // Set additional metadata when a file is added
     uppy2.on('file-added', (file) => {
+      uploadCancelled = false;
       setLocked(true);
       uppy2.setFileMeta(file.id, {
         useCloudflare: storageProvider === 'cloudflare' ? 'true' : 'false', // Example of adding a custom field
@@ -199,11 +220,19 @@ export function useUppyUploader(props: {
         // Add more fields as needed
       });
     });
+    uppy2.on('file-removed', () => {
+      if (!removingCompletedFiles && uppy2.getFiles().length === 0) {
+        uploadCancelled = true;
+        finishUpload();
+      }
+    });
     uppy2.on('error', (result) => {
       uppy2.clear();
+      uploadCancelled = false;
       finishUpload();
     });
     uppy2.on('cancel-all', () => {
+      uploadCancelled = true;
       finishUpload();
     });
     uppy2.on('upload-start', () => {
@@ -211,8 +240,13 @@ export function useUppyUploader(props: {
     });
     uppy2.on('complete', async (result) => {
       console.log(result);
-      for (const file of [...result.successful]) {
-        uppy2.removeFile(file.id);
+      removingCompletedFiles = true;
+      try {
+        for (const file of [...result.successful]) {
+          uppy2.removeFile(file.id);
+        }
+      } finally {
+        removingCompletedFiles = false;
       }
 
       props.onEnd?.();
@@ -223,15 +257,17 @@ export function useUppyUploader(props: {
         return orderA - orderB;
       });
 
-      if (sortedSuccessful.length === 0) {
+      if (uploadCancelled || sortedSuccessful.length === 0) {
         setLocked(false);
         fileOrderIndex = 0;
+        uploadCancelled = false;
         return;
       }
 
       if (storageProvider === 'local') {
         setLocked(false);
         fileOrderIndex = 0;
+        uploadCancelled = false;
         onUploadSuccess(sortedSuccessful.map((p) => p.response.body));
         return;
       }
@@ -274,12 +310,14 @@ export function useUppyUploader(props: {
 
         setLocked(false);
         fileOrderIndex = 0;
+        uploadCancelled = false;
         onUploadSuccess(loadAllMedia);
         return;
       }
 
       setLocked(false);
       fileOrderIndex = 0;
+      uploadCancelled = false;
       onUploadSuccess(sortedSuccessful.map((p) => p.response.body.saved));
     });
     uppy2.on('upload-success', (file, response) => {
