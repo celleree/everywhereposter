@@ -1705,19 +1705,21 @@ const ComposerUploadCard: FC<{
         </div>
       </div>
 
-      <div className="pointer-events-none mt-[16px] min-h-[46px] w-full overflow-hidden rounded-[12px] bg-newBgColorInner uppyChange">
-        <Dashboard
-          height={46}
-          uppy={uppy}
-          id="composer-uploader-progress"
-          showProgressDetails={true}
-          hideUploadButton={true}
-          hideRetryButton={true}
-          hidePauseResumeButton={true}
-          hideCancelButton={true}
-          hideProgressAfterFinish={true}
-        />
-      </div>
+      {loading && (
+        <div className="pointer-events-none mt-[16px] min-h-[46px] w-full overflow-hidden rounded-[12px] bg-newBgColorInner uppyChange">
+          <Dashboard
+            height={46}
+            uppy={uppy}
+            id="composer-uploader-progress"
+            showProgressDetails={true}
+            hideUploadButton={true}
+            hideRetryButton={true}
+            hidePauseResumeButton={true}
+            hideCancelButton={true}
+            hideProgressAfterFinish={true}
+          />
+        </div>
+      )}
 
       <div
         className={clsx(

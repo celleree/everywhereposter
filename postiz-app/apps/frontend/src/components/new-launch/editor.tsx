@@ -766,29 +766,29 @@ export const Editor: FC<{
                 editorRef?.current?.editor?.commands?.focus('end');
               }}
             />
-            <div
-              className="w-full min-h-[46px] overflow-hidden bg-newBgColorInner cursor-text uppyChange"
-              onClick={() => {
-                if (editorRef?.current?.editor?.isFocused) {
-                  return;
-                }
-                editorRef?.current?.editor?.commands?.focus('end');
-              }}
-            >
-              <div className="w-full pointer-events-none">
-                <Dashboard
-                  height={46}
-                  uppy={uppy}
-                  id={`prog-${num}`}
-                  showProgressDetails={true}
-                  hideUploadButton={true}
-                  hideRetryButton={true}
-                  hidePauseResumeButton={true}
-                  hideCancelButton={true}
-                  hideProgressAfterFinish={true}
-                />
-              </div>
-              {loading && (
+            {loading && (
+              <div
+                className="w-full min-h-[46px] overflow-hidden bg-newBgColorInner cursor-text uppyChange"
+                onClick={() => {
+                  if (editorRef?.current?.editor?.isFocused) {
+                    return;
+                  }
+                  editorRef?.current?.editor?.commands?.focus('end');
+                }}
+              >
+                <div className="w-full pointer-events-none">
+                  <Dashboard
+                    height={46}
+                    uppy={uppy}
+                    id={`prog-${num}`}
+                    showProgressDetails={true}
+                    hideUploadButton={true}
+                    hideRetryButton={true}
+                    hidePauseResumeButton={true}
+                    hideCancelButton={true}
+                    hideProgressAfterFinish={true}
+                  />
+                </div>
                 <div className="flex justify-end px-[10px] pb-[8px]">
                   <button
                     type="button"
@@ -798,8 +798,8 @@ export const Editor: FC<{
                     {t('cancel_upload', 'Cancel upload')}
                   </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
             <div className="flex bg-newBgColorInner rounded-b-[6px] cursor-default">
               {setImages && (
                 <MultiMediaComponent
