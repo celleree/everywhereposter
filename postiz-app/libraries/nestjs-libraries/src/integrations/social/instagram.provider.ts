@@ -101,6 +101,56 @@ export class InstagramProvider
     return 2200;
   }
 
+  private normalizeCollaboratorHandle(value: unknown) {
+    return String(value || '')
+      .trim()
+      .replace(/^@+/, '')
+      .trim();
+  }
+
+  private getCollaboratorHandles(settings: InstagramDto) {
+    const collaborators = settings.collaborators || [];
+    const handles: string[] = [];
+    const seen = new Set<string>();
+
+    for (const collaborator of collaborators) {
+      const handle = this.normalizeCollaboratorHandle(collaborator?.label);
+
+      if (!handle) {
+        throw new BadBody(
+          'instagram_collaborators_validation',
+          '{}',
+          '{}',
+          'Instagram collaborator handles cannot be empty.'
+        );
+      }
+
+      const key = handle.toLowerCase();
+      if (seen.has(key)) {
+        throw new BadBody(
+          'instagram_collaborators_validation',
+          '{}',
+          '{}',
+          'Instagram collaborator handles must be unique.'
+        );
+      }
+
+      seen.add(key);
+      handles.push(handle);
+    }
+
+    if (handles.length > 3) {
+      throw new BadBody(
+        'instagram_collaborators_validation',
+        '{}',
+        '{}',
+        'Instagram supports up to 3 collaborators.'
+      );
+    }
+
+    return handles;
+  }
+
   override getPublishedCapabilities(integration?: Integration) {
     return this.buildPublishedCapabilities(integration, {
       editMode: 'none',
@@ -649,6 +699,9 @@ export class InstagramProvider
     const isCarousel = mediaCount > 1 && !isStory;
     const isExplicitReel =
       !isStory && (resolvedPostType === 'reel' || isTrialReel);
+    const collaboratorHandles = isStory
+      ? []
+      : this.getCollaboratorHandles(firstPost.settings);
 
     if (isTrialReel && isStory) {
       throw new BadBody(
@@ -714,10 +767,10 @@ export class InstagramProvider
           );
         }
 
-        if (firstPost?.settings?.collaborators?.length && !isStory) {
+        if (collaboratorHandles.length && !isStory && !isCarousel) {
           params.set(
             'collaborators',
-            JSON.stringify(firstPost?.settings?.collaborators.map((p) => p.label))
+            JSON.stringify(collaboratorHandles)
           );
         }
 
@@ -842,6 +895,10 @@ export class InstagramProvider
         children: medias.join(','),
         access_token: accessToken,
       });
+      if (collaboratorHandles.length) {
+        params.set('collaborators', JSON.stringify(collaboratorHandles));
+      }
+
       const { id: containerId } = await this.fetchInstagramJson<{ id?: string }>(
         `https://${type}/v20.0/${id}/media`,
         {

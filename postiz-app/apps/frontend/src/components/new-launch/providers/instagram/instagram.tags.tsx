@@ -7,6 +7,41 @@ import { useIntegration } from '@gitroom/frontend/components/launches/helpers/us
 import clsx from 'clsx';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
+const maxCollaborators = 3;
+
+const normalizeCollaboratorHandle = (value: unknown) =>
+  String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .trim();
+
+const normalizeCollaboratorTag = (tag: any) => {
+  const label = normalizeCollaboratorHandle(tag?.label ?? tag?.value ?? tag);
+
+  if (!label) {
+    return;
+  }
+
+  return {
+    ...tag,
+    label,
+    value: label,
+  };
+};
+
+const normalizeCollaboratorTags = (tags: any[]) =>
+  tags
+    .map(normalizeCollaboratorTag)
+    .filter(Boolean)
+    .filter((tag, index, list) => {
+      return (
+        list.findIndex(
+          (item) => item.label.toLowerCase() === tag.label.toLowerCase()
+        ) === index
+      );
+    })
+    .slice(0, maxCollaborators);
+
 export const InstagramCollaboratorsTags: FC<{
   name: string;
   label: string;
@@ -22,52 +57,84 @@ export const InstagramCollaboratorsTags: FC<{
   const { integration } = useIntegration();
   const [tagValue, setTagValue] = useState<any[]>([]);
   const [suggestions, setSuggestions] = useState<string>('');
+  const [error, setError] = useState('');
   const t = useT();
+
+  const updateTags = useCallback(
+    (tags: any[]) => {
+      setTagValue(tags);
+      onChange({
+        target: {
+          value: tags,
+          name,
+        },
+      });
+    },
+    [name, onChange]
+  );
 
   const onDelete = useCallback(
     (tagIndex: number) => {
       const modify = tagValue.filter((_, i) => i !== tagIndex);
-      setTagValue(modify);
-      onChange({
-        target: {
-          value: modify,
-          name,
-        },
-      });
+      setError('');
+      updateTags(modify);
     },
-    [tagValue]
+    [tagValue, updateTags]
   );
   const onAddition = useCallback(
     (newTag: any) => {
-      if (tagValue.length >= 3) {
+      const tag = normalizeCollaboratorTag(newTag);
+
+      if (!tag) {
+        setError(t('instagram_collaborator_empty', 'Enter an Instagram handle.'));
         return;
       }
-      const modify = [...tagValue, newTag];
-      setTagValue(modify);
-      onChange({
-        target: {
-          value: modify,
-          name,
-        },
-      });
+
+      if (
+        tagValue.some(
+          (item) => item.label.toLowerCase() === tag.label.toLowerCase()
+        )
+      ) {
+        setError(
+          t(
+            'instagram_collaborator_duplicate',
+            'This collaborator is already added.'
+          )
+        );
+        return;
+      }
+
+      if (tagValue.length >= maxCollaborators) {
+        setError(
+          t(
+            'instagram_collaborators_max',
+            'Instagram supports up to 3 collaborators.'
+          )
+        );
+        return;
+      }
+
+      setError('');
+      updateTags([...tagValue, tag]);
     },
-    [tagValue]
+    [tagValue, t, updateTags]
   );
   useEffect(() => {
     const settings = getValues()[props.name];
     if (settings) {
-      setTagValue(settings);
+      setTagValue(normalizeCollaboratorTags(settings));
     }
   }, []);
+  const currentSuggestion = normalizeCollaboratorHandle(suggestions);
   const suggestionsArray = useMemo(() => {
     return [
       ...tagValue,
       {
-        label: suggestions,
-        value: suggestions,
+        label: currentSuggestion,
+        value: currentSuggestion,
       },
     ].filter((f) => f.label);
-  }, [suggestions, tagValue]);
+  }, [currentSuggestion, tagValue]);
   return (
     <div>
       <div>
@@ -78,9 +145,15 @@ export const InstagramCollaboratorsTags: FC<{
           suggestions={suggestionsArray}
           selected={tagValue}
           onAdd={onAddition}
-          onInput={setSuggestions}
+          onInput={(value) => {
+            setSuggestions(value);
+            setError('');
+          }}
           onDelete={onDelete}
         />
+        {!!error && (
+          <div className="mt-[6px] text-[12px] text-red-500">{error}</div>
+        )}
       </div>
     </div>
   );

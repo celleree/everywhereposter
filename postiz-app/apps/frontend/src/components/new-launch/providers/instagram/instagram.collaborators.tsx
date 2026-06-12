@@ -41,6 +41,12 @@ const postTypesByMedia = {
 
 const videoPathRegex = /\.(mp4|mov|m4v)(?:$|[?#])/i;
 
+const normalizeCollaboratorHandle = (value: unknown) =>
+  String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .trim();
+
 const isVideoMedia = (media: any) => {
   if (media?.type === 'video') {
     return true;
@@ -195,6 +201,26 @@ export default withProvider<InstagramDto>({
     if (!firstPost?.length) {
       return 'Should have at least one media';
     }
+    const collaboratorHandles =
+      settings?.post_type === 'story'
+        ? []
+        : (settings?.collaborators || []).map((collaborator) =>
+            normalizeCollaboratorHandle(collaborator?.label)
+          );
+
+    if (collaboratorHandles.some((handle) => !handle)) {
+      return 'Enter a valid Instagram collaborator handle.';
+    }
+    if (collaboratorHandles.length > 3) {
+      return 'Instagram supports up to 3 collaborators.';
+    }
+    if (
+      new Set(collaboratorHandles.map((handle) => handle.toLowerCase())).size !==
+      collaboratorHandles.length
+    ) {
+      return 'Instagram collaborators must be unique.';
+    }
+
     const videoMedia = firstPost.filter(isVideoMedia);
     if (
       settings?.post_type === 'reel' &&
