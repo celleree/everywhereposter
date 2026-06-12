@@ -39,7 +39,7 @@ const postTypesByMedia = {
   default: [postType[0], postType[2]],
 };
 
-const videoPathRegex = /\.(mp4|mov|m4v)(?:$|[?#])/i;
+const videoPathRegex = /\.(mp4|mov|m4v)(?:$|[?#\s])/i;
 
 const normalizeCollaboratorHandle = (value: unknown) =>
   String(value || '')
@@ -48,11 +48,35 @@ const normalizeCollaboratorHandle = (value: unknown) =>
     .trim();
 
 const isVideoMedia = (media: any) => {
-  if (media?.type === 'video') {
+  if (String(media?.type || '').toLowerCase() === 'video') {
     return true;
   }
 
-  return videoPathRegex.test(String(media?.path || '').toLowerCase());
+  const mimeType = String(media?.mimetype || media?.mimeType || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+
+  if (mimeType.startsWith('video/')) {
+    return true;
+  }
+
+  if (mimeType.startsWith('image/')) {
+    return false;
+  }
+
+  const fileIdentity = [
+    media?.path,
+    media?.url,
+    media?.name,
+    media?.originalName,
+    media?.originalname,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return videoPathRegex.test(fileIdentity);
 };
 
 const graduationStrategies = [
@@ -156,7 +180,7 @@ const InstagramCollaborators: FC<{
 
       {postCurrentType !== 'story' && (
         <InstagramCollaboratorsTags
-          label="Collaborators (max 3) - accounts can't be private"
+          label="Collaborators (Instagram API max 3) - accounts can't be private"
           {...register('collaborators', {
             value: [],
           })}
@@ -212,7 +236,7 @@ export default withProvider<InstagramDto>({
       return 'Enter a valid Instagram collaborator handle.';
     }
     if (collaboratorHandles.length > 3) {
-      return 'Instagram supports up to 3 collaborators.';
+      return 'Instagram API publishing supports up to 3 collaborators.';
     }
     if (
       new Set(collaboratorHandles.map((handle) => handle.toLowerCase())).size !==

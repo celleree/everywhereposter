@@ -15,6 +15,9 @@ const normalizeCollaboratorHandle = (value: unknown) =>
     .replace(/^@+/, '')
     .trim();
 
+const getCollaboratorKey = (value: unknown) =>
+  normalizeCollaboratorHandle(value).toLowerCase();
+
 const normalizeCollaboratorTag = (tag: any) => {
   const label = normalizeCollaboratorHandle(tag?.label ?? tag?.value ?? tag);
 
@@ -36,7 +39,7 @@ const normalizeCollaboratorTags = (tags: any[]) =>
     .filter((tag, index, list) => {
       return (
         list.findIndex(
-          (item) => item.label.toLowerCase() === tag.label.toLowerCase()
+          (item) => getCollaboratorKey(item.label) === getCollaboratorKey(tag.label)
         ) === index
       );
     })
@@ -92,7 +95,7 @@ export const InstagramCollaboratorsTags: FC<{
 
       if (
         tagValue.some(
-          (item) => item.label.toLowerCase() === tag.label.toLowerCase()
+          (item) => getCollaboratorKey(item.label) === getCollaboratorKey(tag.label)
         )
       ) {
         setError(
@@ -108,13 +111,14 @@ export const InstagramCollaboratorsTags: FC<{
         setError(
           t(
             'instagram_collaborators_max',
-            'Instagram supports up to 3 collaborators.'
+            'Instagram API publishing supports up to 3 collaborators.'
           )
         );
         return;
       }
 
       setError('');
+      setSuggestions('');
       updateTags([...tagValue, tag]);
     },
     [tagValue, t, updateTags]
@@ -125,30 +129,46 @@ export const InstagramCollaboratorsTags: FC<{
       setTagValue(normalizeCollaboratorTags(settings));
     }
   }, []);
-  const currentSuggestion = normalizeCollaboratorHandle(suggestions);
-  const suggestionsArray = useMemo(() => {
-    return [
-      ...tagValue,
-      {
-        label: currentSuggestion,
-        value: currentSuggestion,
-      },
-    ].filter((f) => f.label);
-  }, [currentSuggestion, tagValue]);
+  const suggestionsArray = useMemo(() => tagValue.filter((f) => f.label), [tagValue]);
+  const suggestionsTransform = useCallback((value: string, options: any[]) => {
+    const normalizedValue = getCollaboratorKey(value);
+
+    if (!normalizedValue) {
+      return options;
+    }
+
+    return options.filter((option) =>
+      getCollaboratorKey(option?.label ?? option?.value).includes(normalizedValue)
+    );
+  }, []);
+  const reserveDropdownSpace = !!normalizeCollaboratorHandle(suggestions);
   return (
-    <div>
+    <div
+      className={clsx(
+        'instagram-collaborators-tags',
+        reserveDropdownSpace && 'pb-[220px]'
+      )}
+    >
       <div>
         <div className={clsx(`text-[14px] mb-[6px]`)}>{label}</div>
         <ReactTags
+          allowNew
           allowResize={false}
+          newOptionText={t(
+            'add_instagram_collaborator',
+            'Add %value%'
+          )}
+          onValidate={(value) => !!normalizeCollaboratorHandle(value)}
           placeholderText={t('add_a_tag', 'Add a tag')}
           suggestions={suggestionsArray}
+          suggestionsTransform={suggestionsTransform}
           selected={tagValue}
           onAdd={onAddition}
           onInput={(value) => {
             setSuggestions(value);
             setError('');
           }}
+          onCollapse={() => setSuggestions('')}
           onDelete={onDelete}
         />
         {!!error && (
