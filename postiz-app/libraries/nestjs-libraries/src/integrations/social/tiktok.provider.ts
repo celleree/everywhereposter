@@ -311,6 +311,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         )}` +
         `&state=${state}` +
         `&response_type=code` +
+        `&disable_auto_auth=1` +
         `&scope=${encodeURIComponent(this.scopes.join(','))}`,
       codeVerifier: state,
       state,
