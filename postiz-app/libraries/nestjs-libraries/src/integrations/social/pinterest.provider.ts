@@ -350,7 +350,7 @@ export class PinterestProvider
         return acc;
       },
       [
-        { label: 'Pin click rate', data: [] as any[] },
+        { label: 'Pin click rate', average: true, data: [] as any[] },
         { label: 'Impressions', data: [] as any[] },
         { label: 'Pin Clicks', data: [] as any[] },
         { label: 'Engagement', data: [] as any[] },
