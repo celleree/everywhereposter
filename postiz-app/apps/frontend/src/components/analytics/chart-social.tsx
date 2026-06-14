@@ -31,7 +31,7 @@ export const ChartSocial: FC<{
       total: Number(row.total || 0),
     }));
   }, [data, directPoints]);
-  const pointRadius = list.length === 1 ? 4 : 0;
+  const isSinglePoint = list.length === 1;
   const ref = useRef<any>(null);
   const chart = useRef<null | DrawChart>(null);
 
@@ -62,7 +62,7 @@ export const ChartSocial: FC<{
     gradient.addColorStop(1, colors.end);
 
     chart.current = new DrawChart(ref.current!, {
-      type: 'line',
+      type: isSinglePoint ? 'bar' : 'line',
       options: {
         maintainAspectRatio: false,
         responsive: true,
@@ -125,18 +125,26 @@ export const ChartSocial: FC<{
         datasets: [
           {
             borderColor: colors.border,
-            borderWidth: 2,
+            borderWidth: isSinglePoint ? 0 : 2,
             label: 'Total',
-            backgroundColor: gradient,
+            backgroundColor: isSinglePoint ? colors.border : gradient,
             fill: false,
             data: list.map((row) => row.total),
             tension: 0.4,
-            pointRadius,
+            pointRadius: 0,
             pointHoverRadius: 6,
             pointBackgroundColor: colors.border,
             pointHoverBackgroundColor: colors.border,
             pointHoverBorderColor: mode === 'dark' ? '#1e1d1d' : '#fff',
             pointHoverBorderWidth: 2,
+            ...(isSinglePoint
+              ? {
+                  borderRadius: 6,
+                  barPercentage: 0.5,
+                  categoryPercentage: 0.7,
+                  maxBarThickness: 34,
+                }
+              : {}),
           },
         ],
       },
