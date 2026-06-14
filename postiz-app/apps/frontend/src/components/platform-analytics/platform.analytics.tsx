@@ -29,6 +29,9 @@ const allowedIntegrations = [
   'threads',
   'x',
 ];
+
+type AnalyticsRange = number | 'totals';
+
 export const PlatformAnalytics = () => {
   const fetch = useFetch();
   const t = useT();
@@ -36,7 +39,7 @@ export const PlatformAnalytics = () => {
   const { disableXAnalytics } = useVariables();
 
   const [current, setCurrent] = useState(0);
-  const [key, setKey] = useState(7);
+  const [key, setKey] = useState<AnalyticsRange>(7);
   const [refresh, setRefresh] = useState(false);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
   const toaster = useToaster();
@@ -74,7 +77,7 @@ export const PlatformAnalytics = () => {
     if (!currentIntegration) {
       return [];
     }
-    const arr = [];
+    const arr: Array<{ key: AnalyticsRange; value: string }> = [];
     if (
       [
         'facebook',
@@ -123,17 +126,35 @@ export const PlatformAnalytics = () => {
         value: t('90_days', '90 Days'),
       });
     }
+    if (arr.length) {
+      arr.push({
+        key: 'totals',
+        value: t('totals', 'Totals'),
+      });
+    }
     return arr;
-  }, [currentIntegration]);
-  const keys = useMemo(() => {
+  }, [currentIntegration, t]);
+  const selectedRange = useMemo(() => {
     if (!currentIntegration) {
       return 7;
     }
     if (options.find((p) => p.key === key)) {
       return key;
     }
-    return options[0]?.key;
-  }, [key, currentIntegration]);
+    return options[0]?.key || 7;
+  }, [key, currentIntegration, options]);
+  const numericRanges = useMemo(
+    () =>
+      options
+        .map((option) => option.key)
+        .filter((optionKey): optionKey is number => typeof optionKey === 'number'),
+    [options]
+  );
+  const effectiveDate =
+    selectedRange === 'totals'
+      ? numericRanges[numericRanges.length - 1] || 7
+      : selectedRange;
+  const isTotalsMode = selectedRange === 'totals';
 
   if (isLoading) {
     return (
@@ -281,7 +302,12 @@ export const PlatformAnalytics = () => {
                 name="date"
                 disableForm={true}
                 hideErrors={true}
-                onChange={(e) => setKey(+e.target.value)}
+                value={selectedRange}
+                onChange={(e) =>
+                  setKey(
+                    e.target.value === 'totals' ? 'totals' : +e.target.value
+                  )
+                }
               >
                 {options.map((option) => (
                   <option key={option.key} value={option.key}>
@@ -291,8 +317,12 @@ export const PlatformAnalytics = () => {
               </Select>
             </div>
             <div className="flex-1">
-              {!!keys && !!currentIntegration && !refresh && (
-                <RenderAnalytics integration={currentIntegration} date={keys} />
+              {!!effectiveDate && !!currentIntegration && !refresh && (
+                <RenderAnalytics
+                  integration={currentIntegration}
+                  date={effectiveDate}
+                  isTotalsMode={isTotalsMode}
+                />
               )}
             </div>
           </div>

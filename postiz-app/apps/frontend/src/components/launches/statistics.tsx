@@ -158,6 +158,8 @@ const defaultPostStatisticsPanelSections: PostStatisticsPanelSection[] = [
   'shortLinks',
 ];
 
+type AnalyticsRange = number | 'totals';
+
 const getResponseErrorMessage = async (
   response: Response,
   fallback: string
@@ -202,7 +204,27 @@ export const PostStatisticsPanel: FC<{
   } = props;
   const t = useT();
   const fetch = useFetch();
-  const [dateRange, setDateRange] = useState(7);
+  const [dateRange, setDateRange] = useState<AnalyticsRange>(7);
+  const dateOptions = useMemo<Array<{ key: AnalyticsRange; value: string }>>(() => {
+    return [
+      { key: 7, value: t('7_days', '7 Days') },
+      { key: 30, value: t('30_days', '30 Days') },
+      { key: 90, value: t('90_days', '90 Days') },
+      { key: 'totals', value: t('totals', 'Totals') },
+    ];
+  }, [t]);
+  const numericDateOptions = useMemo(
+    () =>
+      dateOptions
+        .map((option) => option.key)
+        .filter((optionKey): optionKey is number => typeof optionKey === 'number'),
+    [dateOptions]
+  );
+  const effectiveDateRange =
+    dateRange === 'totals'
+      ? numericDateOptions[numericDateOptions.length - 1] || 90
+      : dateRange;
+  const isTotalsMode = dateRange === 'totals';
   const [commentReplies, setCommentReplies] = useState<Record<string, string>>(
     {}
   );
@@ -254,8 +276,10 @@ export const PostStatisticsPanel: FC<{
   }, [postId, fetch]);
 
   const loadPostAnalytics = useCallback(async () => {
-    return (await fetch(`/analytics/post/${postId}?date=${dateRange}`)).json();
-  }, [postId, dateRange, fetch]);
+    return (
+      await fetch(`/analytics/post/${postId}?date=${effectiveDateRange}`)
+    ).json();
+  }, [postId, effectiveDateRange, fetch]);
 
   const loadPostComments = useCallback(async () => {
     const response = await fetch(`/analytics/post/${postId}/comments`);
@@ -283,7 +307,7 @@ export const PostStatisticsPanel: FC<{
     mutate: mutateAnalytics,
   } = useSWR(
     sections.includes('analytics')
-      ? `/analytics/post/${postId}?date=${dateRange}`
+      ? `/analytics/post/${postId}?date=${effectiveDateRange}`
       : null,
     loadPostAnalytics,
     {
@@ -523,14 +547,6 @@ export const PostStatisticsPanel: FC<{
     sections.includes('shortLinks') &&
     (hasShortLinks || isPublished || !hideWhenEmpty);
 
-  const dateOptions = useMemo(() => {
-    return [
-      { key: 7, value: t('7_days', '7 Days') },
-      { key: 30, value: t('30_days', '30 Days') },
-      { key: 90, value: t('90_days', '90 Days') },
-    ];
-  }, [t]);
-
   const totals = useMemo(() => {
     if (!analyticsData || !Array.isArray(analyticsData)) return [];
     return analyticsData.map((p: AnalyticsData) => {
@@ -580,7 +596,13 @@ export const PostStatisticsPanel: FC<{
                     disableForm={true}
                     hideErrors={true}
                     value={dateRange}
-                    onChange={(e) => setDateRange(+e.target.value)}
+                    onChange={(e) =>
+                      setDateRange(
+                        e.target.value === 'totals'
+                          ? 'totals'
+                          : +e.target.value
+                      )
+                    }
                   >
                     {dateOptions.map((option) => (
                       <option key={option.key} value={option.key}>
@@ -618,20 +640,30 @@ export const PostStatisticsPanel: FC<{
                               </span>
                             </div>
                           </div>
-                          <div className="flex-1 px-[12px] py-[8px]">
-                            <div className="h-[120px] relative">
-                              <ChartSocial
-                                data={p.data}
-                                color={color}
-                                key={`chart-${index}`}
-                              />
+                          {isTotalsMode ? (
+                            <div className="flex-1 flex items-center px-[16px] py-[32px]">
+                              <div className="text-[48px] leading-[56px] font-semibold tracking-tight">
+                                {totals[index]}
+                              </div>
                             </div>
-                          </div>
-                          <div className="px-[16px] pb-[14px]">
-                            <div className="text-[36px] leading-[42px] font-semibold tracking-tight">
-                              {totals[index]}
-                            </div>
-                          </div>
+                          ) : (
+                            <>
+                              <div className="flex-1 px-[12px] py-[8px]">
+                                <div className="h-[120px] relative">
+                                  <ChartSocial
+                                    data={p.data}
+                                    color={color}
+                                    key={`chart-${index}`}
+                                  />
+                                </div>
+                              </div>
+                              <div className="px-[16px] pb-[14px]">
+                                <div className="text-[36px] leading-[42px] font-semibold tracking-tight">
+                                  {totals[index]}
+                                </div>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     );

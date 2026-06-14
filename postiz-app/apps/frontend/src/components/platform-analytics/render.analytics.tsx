@@ -63,7 +63,8 @@ const AnalyticsCard: FC<{
   index: number;
   chartKey: string;
   isInstagram: boolean;
-}> = ({ item, total, index, chartKey, isInstagram }) => {
+  isTotalsMode?: boolean;
+}> = ({ item, total, index, chartKey, isInstagram, isTotalsMode }) => {
   const colorVariants = ['purple', 'green', 'blue'] as const;
   const color = colorVariants[index % colorVariants.length];
 
@@ -98,13 +99,19 @@ const AnalyticsCard: FC<{
               {item.label}
             </span>
           </div>
-          {item.percentageChange !== undefined && (
+          {!isTotalsMode && item.percentageChange !== undefined && (
             <TrendIndicator value={item.percentageChange} average={item.average} />
           )}
         </div>
 
         {/* Content */}
-        {hasDataPoints ? (
+        {isTotalsMode ? (
+          <div className="flex-1 flex items-center px-[16px] py-[32px]">
+            <div className="text-[48px] leading-[56px] font-semibold tracking-tight">
+              {total}
+            </div>
+          </div>
+        ) : hasDataPoints ? (
           <>
             {/* Chart */}
             <div className="flex-1 px-[12px] py-[8px]">
@@ -199,8 +206,9 @@ const EmptyState: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
 export const RenderAnalytics: FC<{
   integration: AnalyticsIntegration;
   date: number;
+  isTotalsMode?: boolean;
 }> = (props) => {
-  const { integration, date } = props;
+  const { integration, date, isTotalsMode } = props;
   const [loading, setLoading] = useState(true);
   const fetch = useFetch();
 
@@ -283,6 +291,7 @@ export const RenderAnalytics: FC<{
             index={index}
             chartKey={`chart-${integration.id}-${date}-${item.label}-${index}`}
             isInstagram={isInstagram}
+            isTotalsMode={isTotalsMode}
           />
         ))}
       </div>
