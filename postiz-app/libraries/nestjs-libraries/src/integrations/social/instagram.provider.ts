@@ -2446,40 +2446,63 @@ export class InstagramProvider
   ): Promise<AnalyticsData[]> {
     const until = dayjs().endOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
+    const fetchInsights = async (
+      url: string,
+      metricGroup: string
+    ): Promise<any[]> => {
+      try {
+        const response = await (await fetch(url)).json();
 
-    const { data, ...all } = await (
-      await fetch(
-        `https://${type}/v21.0/${id}/insights?metric=follower_count,reach&access_token=${accessToken}&period=day&since=${since}&until=${until}`
-      )
-    ).json();
+        if (Array.isArray(response?.data)) {
+          return response.data;
+        }
 
-    const { data: data2, ...all2 } = await (
-      await fetch(
-        `https://${type}/v21.0/${id}/insights?metric_type=total_value&metric=likes,views,comments,shares,saves,replies&access_token=${accessToken}&period=day&since=${since}&until=${until}`
-      )
-    ).json();
-    const analytics = [];
+        console.log(
+          `Instagram analytics ${metricGroup} unavailable`,
+          response?.error || 'Invalid insights response'
+        );
+        return [];
+      } catch (err) {
+        console.log(`Instagram analytics ${metricGroup} failed`, err);
+        return [];
+      }
+    };
+
+    const data = await fetchInsights(
+      `https://${type}/v21.0/${id}/insights?metric=follower_count,reach&access_token=${accessToken}&period=day&since=${since}&until=${until}`,
+      'dated metrics'
+    );
+
+    const data2 = await fetchInsights(
+      `https://${type}/v21.0/${id}/insights?metric_type=total_value&metric=likes,views,comments,shares,saves,replies&access_token=${accessToken}&period=day&since=${since}&until=${until}`,
+      'total-value metrics'
+    );
+    const analytics: AnalyticsData[] = [];
 
     analytics.push(
-      ...(data?.map((d: any) => ({
-        label: this.setTitle(d.name),
-        data: d.values.map((v: any) => ({
-          total: v.value,
-          date: dayjs(v.end_time).format('YYYY-MM-DD'),
-        })),
-      })) || [])
+      ...data
+        .filter((d: any) => Array.isArray(d?.values))
+        .map((d: any) => ({
+          label: this.setTitle(d.name),
+          data: d.values.map((v: any) => ({
+            total: v.value,
+            date: dayjs(v.end_time).format('YYYY-MM-DD'),
+          })),
+        }))
     );
 
     analytics.push(
-      ...data2.map((d: any) => ({
-        label: this.setTitle(d.name),
-        data: [
-          {
-            total: d.total_value.value,
-            date: dayjs().format('YYYY-MM-DD'),
-          },
-        ],
-      }))
+      ...data2
+        .filter((d: any) => typeof d?.total_value?.value !== 'undefined')
+        .map((d: any) => ({
+          label: this.setTitle(d.name),
+          data: [
+            {
+              total: d.total_value.value,
+              date: dayjs().format('YYYY-MM-DD'),
+            },
+          ],
+        }))
     );
 
     return analytics;
