@@ -127,7 +127,7 @@ export const ChartSocial: FC<{
             borderColor: colors.border,
             borderWidth: isSinglePoint ? 0 : 2,
             label: 'Total',
-            backgroundColor: isSinglePoint ? colors.border : gradient,
+            backgroundColor: gradient,
             fill: false,
             data: list.map((row) => row.total),
             tension: 0.4,
@@ -139,10 +139,11 @@ export const ChartSocial: FC<{
             pointHoverBorderWidth: 2,
             ...(isSinglePoint
               ? {
-                  borderRadius: 6,
-                  barPercentage: 0.5,
-                  categoryPercentage: 0.7,
-                  maxBarThickness: 34,
+                  borderRadius: 5,
+                  borderSkipped: false,
+                  barPercentage: 0.28,
+                  categoryPercentage: 0.5,
+                  maxBarThickness: 18,
                 }
               : {}),
           },
