@@ -31,6 +31,7 @@ export const ChartSocial: FC<{
       total: Number(row.total || 0),
     }));
   }, [data, directPoints]);
+  const pointRadius = list.length === 1 ? 4 : 0;
   const ref = useRef<any>(null);
   const chart = useRef<null | DrawChart>(null);
 
@@ -130,8 +131,9 @@ export const ChartSocial: FC<{
             fill: false,
             data: list.map((row) => row.total),
             tension: 0.4,
-            pointRadius: 0,
+            pointRadius,
             pointHoverRadius: 6,
+            pointBackgroundColor: colors.border,
             pointHoverBackgroundColor: colors.border,
             pointHoverBorderColor: mode === 'dark' ? '#1e1d1d' : '#fff',
             pointHoverBorderWidth: 2,
