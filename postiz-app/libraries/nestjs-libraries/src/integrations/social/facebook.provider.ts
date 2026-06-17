@@ -633,30 +633,34 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     const until = dayjs().endOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
 
-    const { data } = await (
+    const response = await (
       await fetch(
-        `https://graph.facebook.com/v20.0/${id}/insights?metric=page_impressions_unique,page_posts_impressions_unique,page_post_engagements,page_daily_follows,page_video_views&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+        `https://graph.facebook.com/v20.0/${id}/insights?metric=page_post_engagements,page_daily_follows,page_video_views&access_token=${accessToken}&period=day&since=${since}&until=${until}`
       )
     ).json();
 
-    return (
-      data?.map((d: any) => ({
-        label:
-          d.name === 'page_impressions_unique'
-            ? 'Page Impressions'
-            : d.name === 'page_post_engagements'
-            ? 'Posts Engagement'
-            : d.name === 'page_daily_follows'
-            ? 'Page followers'
-            : d.name === 'page_video_views'
-            ? 'Videos views'
-            : 'Posts Impressions',
-        data: d?.values?.map((v: any) => ({
-          total: v.value,
-          date: dayjs(v.end_time).format('YYYY-MM-DD'),
-        })),
-      })) || []
-    );
+    if (!Array.isArray(response?.data)) {
+      console.log(
+        'Facebook analytics unavailable',
+        response?.error || 'Invalid insights response'
+      );
+      return [];
+    }
+
+    return response.data.map((d: any) => ({
+      label:
+        d.name === 'page_post_engagements'
+          ? 'Posts Engagement'
+          : d.name === 'page_daily_follows'
+          ? 'Page followers'
+          : d.name === 'page_video_views'
+          ? 'Videos views'
+          : d.name,
+      data: d?.values?.map((v: any) => ({
+        total: v.value,
+        date: dayjs(v.end_time).format('YYYY-MM-DD'),
+      })),
+    }));
   }
 
   async listMedia(

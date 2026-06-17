@@ -2444,8 +2444,12 @@ export class InstagramProvider
     date: number,
     type = 'graph.facebook.com'
   ): Promise<AnalyticsData[]> {
+    const safeDate = Math.max(1, date);
     const until = dayjs().endOf('day').unix();
-    const since = dayjs().subtract(date, 'day').unix();
+    const since = dayjs()
+      .subtract(safeDate - 1, 'day')
+      .startOf('day')
+      .unix();
     const fetchInsights = async (
       url: string,
       metricGroup: string
