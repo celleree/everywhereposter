@@ -53,6 +53,9 @@ export interface IAuthenticator {
 export interface AnalyticsData {
   label: string;
   data: Array<{ total: number | string; date: string }>;
+  metricName?: string;
+  seriesType?: 'time_series' | 'total_value' | 'range_total_snapshot';
+  summaryType?: 'sum' | 'latest';
   percentageChange?: number;
   average?: boolean;
 }

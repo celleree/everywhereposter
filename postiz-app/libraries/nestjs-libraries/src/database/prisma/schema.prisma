@@ -49,6 +49,7 @@ model Organization {
   historicalImportJobs    HistoricalImportJob[]
   historicalPosts         HistoricalPost[]
   historicalPostMetrics   HistoricalPostMetric[]
+  integrationAnalyticsSnapshots IntegrationAnalyticsSnapshot[]
 
   @@index([apiKey])
   @@index([streakSince])
@@ -409,6 +410,7 @@ model Integration {
   orderItems            OrderItems[]
   plugs                 Plugs[]
   posts                 Post[]
+  analyticsSnapshots    IntegrationAnalyticsSnapshot[]
 
   @@unique([organizationId, internalId])
   @@index([rootInternalId])
@@ -421,6 +423,26 @@ model Integration {
   @@index([inBetweenSteps])
   @@index([refreshNeeded])
   @@index([disabled])
+}
+
+model IntegrationAnalyticsSnapshot {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  integrationId      String
+  providerIdentifier String
+  metricName         String
+  rangeDays          Int
+  snapshotDate       DateTime
+  value              Float
+  observedAt         DateTime     @default(now())
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  integration        Integration  @relation(fields: [integrationId], references: [id])
+
+  @@unique([organizationId, integrationId, metricName, rangeDays, snapshotDate])
+  @@index([organizationId, integrationId, rangeDays, snapshotDate])
+  @@index([integrationId, metricName, rangeDays, snapshotDate])
 }
 
 model Signatures {

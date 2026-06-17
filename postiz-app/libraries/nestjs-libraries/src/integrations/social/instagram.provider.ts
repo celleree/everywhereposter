@@ -2488,6 +2488,9 @@ export class InstagramProvider
         .filter((d: any) => Array.isArray(d?.values))
         .map((d: any) => ({
           label: this.setTitle(d.name),
+          metricName: d.name,
+          seriesType: 'time_series' as const,
+          summaryType: 'sum' as const,
           data: d.values.map((v: any) => ({
             total: v.value,
             date: dayjs(v.end_time).format('YYYY-MM-DD'),
@@ -2500,6 +2503,9 @@ export class InstagramProvider
         .filter((d: any) => typeof d?.total_value?.value !== 'undefined')
         .map((d: any) => ({
           label: this.setTitle(d.name),
+          metricName: d.name,
+          seriesType: 'total_value' as const,
+          summaryType: 'latest' as const,
           data: [
             {
               total: d.total_value.value,

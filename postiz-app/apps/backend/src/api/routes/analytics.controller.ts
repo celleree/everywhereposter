@@ -94,8 +94,12 @@ export class AnalyticsController {
   async getIntegration(
     @GetOrgFromRequest() org: Organization,
     @Param('integration') integration: string,
-    @Query('date') date: string
+    @Query('date') date: string,
+    @Query('refresh') refresh?: string
   ) {
-    return this._integrationService.checkAnalytics(org, integration, date);
+    return this._integrationService.checkAnalytics(org, integration, date, {
+      enableInstagramBusinessSnapshots: true,
+      forceAnalyticsRefresh: refresh === 'true',
+    });
   }
 }

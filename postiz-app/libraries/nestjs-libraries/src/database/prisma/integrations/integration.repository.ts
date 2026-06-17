@@ -16,7 +16,8 @@ export class IntegrationRepository {
     private _plugs: PrismaRepository<'plugs'>,
     private _exisingPlugData: PrismaRepository<'exisingPlugData'>,
     private _customers: PrismaRepository<'customer'>,
-    private _mentions: PrismaRepository<'mentions'>
+    private _mentions: PrismaRepository<'mentions'>,
+    private _analyticsSnapshots: PrismaRepository<'integrationAnalyticsSnapshot'>
   ) {}
 
   getMentions(platform: string, q: string) {
@@ -65,6 +66,76 @@ export class IntegrationRepository {
         image: mention.image,
       })),
       skipDuplicates: true,
+    });
+  }
+
+  upsertIntegrationAnalyticsSnapshot(input: {
+    organizationId: string;
+    integrationId: string;
+    providerIdentifier: string;
+    metricName: string;
+    rangeDays: number;
+    snapshotDate: Date;
+    value: number;
+    observedAt: Date;
+  }) {
+    return this._analyticsSnapshots.model.integrationAnalyticsSnapshot.upsert({
+      where: {
+        organizationId_integrationId_metricName_rangeDays_snapshotDate: {
+          organizationId: input.organizationId,
+          integrationId: input.integrationId,
+          metricName: input.metricName,
+          rangeDays: input.rangeDays,
+          snapshotDate: input.snapshotDate,
+        },
+      },
+      create: {
+        organizationId: input.organizationId,
+        integrationId: input.integrationId,
+        providerIdentifier: input.providerIdentifier,
+        metricName: input.metricName,
+        rangeDays: input.rangeDays,
+        snapshotDate: input.snapshotDate,
+        value: input.value,
+        observedAt: input.observedAt,
+      },
+      update: {
+        providerIdentifier: input.providerIdentifier,
+        value: input.value,
+        observedAt: input.observedAt,
+      },
+    });
+  }
+
+  getIntegrationAnalyticsSnapshots(input: {
+    organizationId: string;
+    integrationId: string;
+    metricNames: string[];
+    rangeDays: number;
+    fromDate: Date;
+    toDate: Date;
+  }) {
+    return this._analyticsSnapshots.model.integrationAnalyticsSnapshot.findMany({
+      where: {
+        organizationId: input.organizationId,
+        integrationId: input.integrationId,
+        metricName: {
+          in: input.metricNames,
+        },
+        rangeDays: input.rangeDays,
+        snapshotDate: {
+          gte: input.fromDate,
+          lte: input.toDate,
+        },
+      },
+      orderBy: [
+        {
+          metricName: 'asc',
+        },
+        {
+          snapshotDate: 'asc',
+        },
+      ],
     });
   }
 

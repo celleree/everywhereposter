@@ -1,4 +1,4 @@
-import { FC, useCallback, useMemo, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Integration } from '@prisma/client';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -11,6 +11,9 @@ import { storeIntegrationReturnRoute } from '@gitroom/frontend/components/launch
 interface AnalyticsDataItem {
   label: string;
   data: Array<{ total: number | string; date: string }>;
+  metricName?: string;
+  seriesType?: 'time_series' | 'total_value' | 'range_total_snapshot';
+  summaryType?: 'sum' | 'latest';
   average?: boolean;
   percentageChange?: number;
 }
@@ -63,13 +66,24 @@ const AnalyticsCard: FC<{
   index: number;
   chartKey: string;
   isInstagram: boolean;
+  isInstagramBusiness: boolean;
   isTotalsMode?: boolean;
-}> = ({ item, total, index, chartKey, isInstagram, isTotalsMode }) => {
+}> = ({
+  item,
+  total,
+  index,
+  chartKey,
+  isInstagram,
+  isInstagramBusiness,
+  isTotalsMode,
+}) => {
   const colorVariants = ['purple', 'green', 'blue'] as const;
   const color = colorVariants[index % colorVariants.length];
 
   const hasDataPoints = item.data.length > 0;
   const isInstagramTotalOnly = isInstagram && !item.average;
+  const isRangeSnapshot =
+    isInstagramBusiness && item.seriesType === 'range_total_snapshot';
 
   return (
     <div className="group relative">
@@ -130,6 +144,11 @@ const AnalyticsCard: FC<{
               <div className="text-[36px] leading-[42px] font-semibold tracking-tight">
                 {total}
               </div>
+              {isRangeSnapshot && (
+                <div className="mt-[4px] text-[12px] text-newTableText/50">
+                  Total for selected range
+                </div>
+              )}
             </div>
           </>
         ) : (
@@ -210,18 +229,31 @@ export const RenderAnalytics: FC<{
 }> = (props) => {
   const { integration, date, isTotalsMode } = props;
   const [loading, setLoading] = useState(true);
+  const [showRefreshPrompt, setShowRefreshPrompt] = useState(false);
+  const [refreshPromptCycle, setRefreshPromptCycle] = useState(0);
+  const refreshPromptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetch = useFetch();
+
+  const loadAnalytics = useCallback(
+    async (forceRefresh = false) => {
+      const refresh = forceRefresh ? '&refresh=true' : '';
+      return (
+        await fetch(`/analytics/${integration.id}?date=${date}${refresh}`)
+      ).json();
+    },
+    [fetch, integration.id, date]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      return (await fetch(`/analytics/${integration.id}?date=${date}`)).json();
+      return loadAnalytics();
     } finally {
       setLoading(false);
     }
-  }, [fetch, integration.id, date]);
+  }, [loadAnalytics]);
 
-  const { data } = useSWR(`/analytics-${integration?.id}-${date}`, load, {
+  const { data, mutate } = useSWR(`/analytics-${integration?.id}-${date}`, load, {
     refreshInterval: 0,
     refreshWhenHidden: false,
     revalidateOnFocus: false,
@@ -252,9 +284,72 @@ export const RenderAnalytics: FC<{
   const isInstagram =
     integration.identifier === 'instagram' ||
     integration.identifier === 'instagram-standalone';
+  const isInstagramBusiness = integration.identifier === 'instagram';
+
+  useEffect(() => {
+    if (!isInstagramBusiness) {
+      setShowRefreshPrompt(false);
+      return;
+    }
+
+    const clearRefreshPromptTimer = () => {
+      if (refreshPromptTimer.current) {
+        clearTimeout(refreshPromptTimer.current);
+        refreshPromptTimer.current = null;
+      }
+    };
+
+    const startRefreshPromptTimer = () => {
+      clearRefreshPromptTimer();
+
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      refreshPromptTimer.current = setTimeout(() => {
+        setShowRefreshPrompt(true);
+      }, 15 * 60 * 1000);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        startRefreshPromptTimer();
+      } else {
+        clearRefreshPromptTimer();
+        setShowRefreshPrompt(false);
+      }
+    };
+
+    startRefreshPromptTimer();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearRefreshPromptTimer();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isInstagramBusiness, integration.id, date, refreshPromptCycle]);
+
+  const refreshAnalytics = useCallback(async () => {
+    setLoading(true);
+    setShowRefreshPrompt(false);
+    try {
+      const refreshed = await loadAnalytics(true);
+      await mutate(refreshed, false);
+    } finally {
+      setLoading(false);
+      setRefreshPromptCycle((current) => current + 1);
+    }
+  }, [loadAnalytics, mutate]);
 
   const totals = useMemo(() => {
     return data?.map((p: AnalyticsDataItem) => {
+      if (p.summaryType === 'latest') {
+        const latest = p.data[p.data.length - 1];
+        return new Intl.NumberFormat().format(
+          Math.round(Number(latest?.total || 0))
+        );
+      }
+
       const value =
         (p?.data.reduce(
           (acc: number, curr: { total: number | string }) =>
@@ -279,6 +374,30 @@ export const RenderAnalytics: FC<{
 
   return (
     <>
+      {isInstagramBusiness && (
+        <div className="mb-[12px] rounded-[8px] border border-newTableBorder bg-newTableHeader px-[14px] py-[10px] text-[13px] text-newTableText/70">
+          {t(
+            'instagram_business_snapshot_note',
+            'Reach comes from Meta daily data. Other Instagram Business metrics use saved range-total snapshots from the days you open or refresh analytics.'
+          )}
+        </div>
+      )}
+      {isInstagramBusiness && showRefreshPrompt && (
+        <div className="mb-[12px] flex items-center justify-between gap-[12px] rounded-[8px] border border-newTableBorder bg-newTableHeader px-[14px] py-[10px]">
+          <span className="text-[13px] text-newTableText/70">
+            {t(
+              'analytics_may_have_changed',
+              'Analytics may have changed. Refresh?'
+            )}
+          </span>
+          <button
+            onClick={refreshAnalytics}
+            className="shrink-0 rounded-[6px] bg-[#612bd3] px-[12px] py-[6px] text-[13px] font-medium text-white hover:bg-[#5023b8]"
+          >
+            {t('refresh', 'Refresh')}
+          </button>
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[16px]">
         {data?.length === 0 && (
           <EmptyState onRefresh={refreshChannel(integration)} />
@@ -291,6 +410,7 @@ export const RenderAnalytics: FC<{
             index={index}
             chartKey={`chart-${integration.id}-${date}-${item.label}-${index}`}
             isInstagram={isInstagram}
+            isInstagramBusiness={isInstagramBusiness}
             isTotalsMode={isTotalsMode}
           />
         ))}

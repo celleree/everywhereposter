@@ -28,9 +28,24 @@ import { TemporalService } from 'nestjs-temporal-core';
 
 dayjs.extend(utc);
 
+type CheckAnalyticsOptions = {
+  forceRefresh?: boolean;
+  forceAnalyticsRefresh?: boolean;
+  enableInstagramBusinessSnapshots?: boolean;
+};
+
 @Injectable()
 export class IntegrationService {
   private storage = UploadFactory.createStorage();
+  private instagramBusinessSnapshotMetrics = [
+    'likes',
+    'views',
+    'comments',
+    'shares',
+    'saves',
+    'replies',
+  ];
+
   private normalizeDisplayName<T extends { providerIdentifier: string; profile?: string | null; name: string }>(
     integration: T
   ): T {
@@ -381,8 +396,15 @@ export class IntegrationService {
     org: Organization,
     integration: string,
     date: string,
-    forceRefresh = false
+    options: boolean | CheckAnalyticsOptions = false
   ): Promise<AnalyticsData[]> {
+    const forceRefresh =
+      typeof options === 'boolean' ? options : !!options.forceRefresh;
+    const forceAnalyticsRefresh =
+      typeof options === 'object' && !!options.forceAnalyticsRefresh;
+    const enableInstagramBusinessSnapshots =
+      typeof options === 'object' && !!options.enableInstagramBusinessSnapshots;
+
     const getIntegration = await this.getIntegrationById(org.id, integration);
 
     if (!getIntegration) {
@@ -396,6 +418,13 @@ export class IntegrationService {
     const integrationProvider = this._integrationManager.getSocialIntegration(
       getIntegration.providerIdentifier
     );
+    const useInstagramBusinessSnapshots =
+      enableInstagramBusinessSnapshots &&
+      getIntegration.providerIdentifier === 'instagram';
+    const snapshotCacheDate = dayjs.utc().format('YYYY-MM-DD');
+    const cacheKey = useInstagramBusinessSnapshots
+      ? `integration:${org.id}:${integration}:${date}:igbiz-snapshots:v1:${snapshotCacheDate}`
+      : `integration:${org.id}:${integration}:${date}`;
 
     if (
       dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) ||
@@ -422,11 +451,11 @@ export class IntegrationService {
       }
     }
 
-    const getIntegrationData = await ioRedis.get(
-      `integration:${org.id}:${integration}:${date}`
-    );
-    if (getIntegrationData) {
-      return JSON.parse(getIntegrationData);
+    if (!forceAnalyticsRefresh) {
+      const getIntegrationData = await ioRedis.get(cacheKey);
+      if (getIntegrationData) {
+        return JSON.parse(getIntegrationData);
+      }
     }
 
     if (integrationProvider.analytics) {
@@ -436,23 +465,122 @@ export class IntegrationService {
           getIntegration.token,
           +date
         );
+        const analytics = useInstagramBusinessSnapshots
+          ? await this.applyInstagramBusinessSnapshots(
+              org.id,
+              getIntegration,
+              +date,
+              loadAnalytics
+            )
+          : loadAnalytics;
         await ioRedis.set(
-          `integration:${org.id}:${integration}:${date}`,
-          JSON.stringify(loadAnalytics),
+          cacheKey,
+          JSON.stringify(analytics),
           'EX',
-          !process.env.NODE_ENV || process.env.NODE_ENV === 'development'
-            ? 1
-            : 3600
+          useInstagramBusinessSnapshots
+            ? 900
+            : !process.env.NODE_ENV || process.env.NODE_ENV === 'development'
+              ? 1
+              : 3600
         );
-        return loadAnalytics;
+        return analytics;
       } catch (e) {
         if (e instanceof RefreshToken) {
-          return this.checkAnalytics(org, integration, date, true);
+          return this.checkAnalytics(org, integration, date, {
+            ...(typeof options === 'object' ? options : {}),
+            forceRefresh: true,
+            forceAnalyticsRefresh: true,
+          });
         }
       }
     }
 
     return [];
+  }
+
+  private async applyInstagramBusinessSnapshots(
+    organizationId: string,
+    integration: Integration,
+    date: number,
+    analytics: AnalyticsData[]
+  ): Promise<AnalyticsData[]> {
+    const rangeDays = Math.max(1, Number(date) || 1);
+    const snapshotDate = dayjs.utc().startOf('day').toDate();
+    const observedAt = new Date();
+    const totalValueMetrics = analytics.filter(
+      (item) =>
+        item.seriesType === 'total_value' &&
+        item.metricName &&
+        this.instagramBusinessSnapshotMetrics.includes(item.metricName)
+    );
+
+    for (const item of totalValueMetrics) {
+      const value = Number(item.data?.[0]?.total);
+
+      if (!Number.isFinite(value) || !item.metricName) {
+        continue;
+      }
+
+      await this._integrationRepository.upsertIntegrationAnalyticsSnapshot({
+        organizationId,
+        integrationId: integration.id,
+        providerIdentifier: integration.providerIdentifier,
+        metricName: item.metricName,
+        rangeDays,
+        snapshotDate,
+        value,
+        observedAt,
+      });
+    }
+
+    const snapshots =
+      await this._integrationRepository.getIntegrationAnalyticsSnapshots({
+        organizationId,
+        integrationId: integration.id,
+        metricNames: this.instagramBusinessSnapshotMetrics,
+        rangeDays,
+        fromDate: dayjs
+          .utc()
+          .subtract(rangeDays - 1, 'day')
+          .startOf('day')
+          .toDate(),
+        toDate: snapshotDate,
+      });
+
+    const snapshotsByMetric = snapshots.reduce(
+      (all, snapshot) => {
+        all[snapshot.metricName] ||= [];
+        all[snapshot.metricName].push(snapshot);
+        return all;
+      },
+      {} as Record<string, typeof snapshots>
+    );
+
+    return analytics.map((item) => {
+      if (
+        item.seriesType !== 'total_value' ||
+        !item.metricName ||
+        !this.instagramBusinessSnapshotMetrics.includes(item.metricName)
+      ) {
+        return item;
+      }
+
+      const metricSnapshots = snapshotsByMetric[item.metricName] || [];
+
+      if (metricSnapshots.length === 0) {
+        return item;
+      }
+
+      return {
+        ...item,
+        seriesType: 'range_total_snapshot' as const,
+        summaryType: 'latest' as const,
+        data: metricSnapshots.map((snapshot) => ({
+          total: snapshot.value,
+          date: dayjs.utc(snapshot.snapshotDate).format('YYYY-MM-DD'),
+        })),
+      };
+    });
   }
 
   customers(orgId: string) {
