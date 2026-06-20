@@ -1,5 +1,7 @@
 # Production deployment handoff
 
+> Historical note: This handoff records the 2026-05-11 deployment state and may not reflect the current GHCR full-SHA deployment workflow. For current operations, read `OPERATING-MANUAL.md`.
+
 This note captures production deployment facts that are not obvious from the Git repository itself.
 
 ## Public deployment

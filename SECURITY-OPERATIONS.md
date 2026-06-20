@@ -1,5 +1,7 @@
 # Security Operations
 
+> Current-source warning: This document contains some historical/local-build operations notes. For current deployment workflow, read `OPERATING-MANUAL.md` first.
+
 This checklist captures the recurring commands for the Hetzner host at `46.62.170.47` and the public app at `https://publisheverywhere.halowebsites.com`.
 
 ## Admin Access

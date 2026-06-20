@@ -26,6 +26,8 @@ https://docs.postiz.com/installation/migration
 
 ## Docker Compose
 
+For current production operations and deployment rules, see `OPERATING-MANUAL.md`. Some README Docker examples are generic setup examples and should not be treated as the current production deploy workflow.
+
 This guide assumes that you have docker installed, with a reasonable amount of resources to run Postiz. This Docker Compose setup has been tested with;
 
 - Virtual Machine, Ubuntu 24.04, 2Gb RAM, 2 vCPUs.

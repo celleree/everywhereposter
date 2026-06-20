@@ -1,5 +1,7 @@
 # Post Everywhere Operating Notes
 
+> Current-source warning: For current deploy, Docker, database, and production rules, read `OPERATING-MANUAL.md` first.
+
 Persistent operational notes for Post Everywhere work. These are intended to prevent repeated environment mistakes and preserve context across sessions.
 
 ## Frequent Notes

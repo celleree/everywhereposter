@@ -2,6 +2,8 @@
 
 Work in credit-saving mode.
 
+Before operational, deploy, Docker, database, or production work, read OPERATING-MANUAL.md first. If this file conflicts with older docs, treat OPERATING-MANUAL.md as the current source of truth unless the user says otherwise.
+
 ## Default Workflow
 
 - Prefer small, targeted fixes.
