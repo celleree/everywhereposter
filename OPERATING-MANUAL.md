@@ -123,6 +123,15 @@ Explain:
 - Avoid local WSL/Docker/cloudflared unless local work is intentional.
 - Do not start duplicate local tunnels.
 
+## Email / Resend
+
+- Email is optional.
+- Blank email env vars keep email disabled/no-op.
+- To enable Resend, set EMAIL_PROVIDER=resend, EMAIL_FROM_NAME, EMAIL_FROM_ADDRESS, and RESEND_API_KEY.
+- Sender address must be verified in Resend.
+- Do not commit real Resend secrets.
+- Changing email config is config work, not a full app deploy by itself.
+
 ## Git Push
 
 Use explicit SSH key if normal push fails:

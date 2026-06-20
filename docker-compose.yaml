@@ -33,10 +33,10 @@ services:
       # Leave registration enabled if you want multiple people to create accounts
       # on the same Postiz instance. Configure one email provider below if you
       # want activation emails and team invite emails to be delivered.
-      # EMAIL_PROVIDER: 'resend'
-      # EMAIL_FROM_NAME: 'Publish Everywhere'
-      # EMAIL_FROM_ADDRESS: 'no-reply@example.com'
-      # RESEND_API_KEY: '${RESEND_API_KEY:-}'
+      EMAIL_PROVIDER: '${EMAIL_PROVIDER:-}'
+      EMAIL_FROM_NAME: '${EMAIL_FROM_NAME:-}'
+      EMAIL_FROM_ADDRESS: '${EMAIL_FROM_ADDRESS:-}'
+      RESEND_API_KEY: '${RESEND_API_KEY:-}'
       # EMAIL_PROVIDER: 'nodemailer'
       # EMAIL_HOST: '${EMAIL_HOST:-smtp.example.com}'
       # EMAIL_PORT: '${EMAIL_PORT:-465}'
