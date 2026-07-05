@@ -56,9 +56,10 @@ export const PLATFORM_RULES: Record<CopyPlatform, PlatformRule> = {
     lineBreaks: 'airy',
     hashtags: 'end_only',
     ctaStyle: 'invite',
-    tone: 'operator detail, concrete lesson, measured confidence, no broetry',
+    tone:
+      'founder/operator insight, concrete lesson, structured specificity, measured confidence',
     nativeFeel:
-      'Write like someone sharing a grounded professional takeaway with specifics, not a motivational thread.',
+      'Write one strong LinkedIn text post from the video/transcript: a clear observation, a specific supporting detail, and a grounded takeaway. Do not mass-generate angles or stretch into weak long-form filler.',
   },
   x: {
     hardCap: X_MAX_CHARACTERS,
@@ -71,9 +72,9 @@ export const PLATFORM_RULES: Record<CopyPlatform, PlatformRule> = {
     lineBreaks: 'tight',
     hashtags: 'none',
     ctaStyle: 'question',
-    tone: 'sharp, immediate, concrete, high signal',
+    tone: 'sharp single insight, opinionated, concise, source-grounded',
     nativeFeel:
-      'One clear point with immediate payoff. No mini-blog, no generic creator cadence.',
+      'Internally consider several hooks or angles from the video/transcript, then return the strongest single text post. It should be short, specific, and easy to post; never a mini-blog.',
   },
   threads: {
     hardCap: 500,
@@ -86,9 +87,9 @@ export const PLATFORM_RULES: Record<CopyPlatform, PlatformRule> = {
     lineBreaks: 'moderate',
     hashtags: 'none',
     ctaStyle: 'invite',
-    tone: 'personal, current, reflective, specific',
+    tone: 'conversational, personal, current, specific short-form',
     nativeFeel:
-      'More conversational and present-tense than X, with room for a personal observation.',
+      'Internally consider a few conversational angles from the video/transcript, then return one natural Threads post. It can feel reflective or lightly opinionated, but should stay short and concrete.',
   },
   facebook: {
     hardCap: 63206,
@@ -101,9 +102,9 @@ export const PLATFORM_RULES: Record<CopyPlatform, PlatformRule> = {
     lineBreaks: 'moderate',
     hashtags: 'none',
     ctaStyle: 'invite',
-    tone: 'context-forward, approachable, story-driven',
+    tone: 'conversational, community-readable, context-forward, human',
     nativeFeel:
-      'Write like a real update to a community or audience, not a repackaged thread.',
+      'Write like a real update to a community or client audience: approachable, grounded in the video/transcript, with enough context to invite conversation. Do not sound like ad copy.',
   },
   instagram: {
     hardCap: 2200,

@@ -6,6 +6,6 @@ export const threadsAdapter: PlatformAdapter = {
   buildSystemPrompt: (brief) =>
     buildBasePlatformPrompt(
       brief,
-      'Let it feel current and personal, but still concrete. A small reflective turn is fine if it stays specific.'
+      'Internally consider a few conversational angles from the source, then return only the strongest single Threads post. Let it feel current and personal, but still concrete. A small reflective turn is fine if it stays specific.'
     ),
 };

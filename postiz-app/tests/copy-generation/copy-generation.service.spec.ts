@@ -49,6 +49,25 @@ const consumeGenerator = async (service: CopyGenerationService, body: any) => {
   return events;
 };
 
+const getGeneratedPromptForPlatform = async (platform: string) => {
+  const sourceBriefService = createSourceBriefService();
+  const modelService = createModelService();
+  const service = new CopyGenerationService(
+    sourceBriefService as any,
+    new AntiGenericService(),
+    modelService as any
+  );
+
+  await consumeGenerator(service, {
+    mediaId: 'media-1',
+    platforms: [platform],
+    goal: 'position',
+    knowledgeBaseFacts: [],
+  });
+
+  return modelService.generatePlatformDraft.mock.calls[0][1] as string;
+};
+
 describe('CopyGenerationService', () => {
   it('returns a completed linkedin draft from grounded image input', async () => {
     const sourceBriefService = createSourceBriefService();
@@ -75,11 +94,55 @@ describe('CopyGenerationService', () => {
     });
     expect(modelService.generatePlatformDraft).toHaveBeenCalledTimes(1);
     expect(modelService.generatePlatformDraft.mock.calls[0][1]).toContain(
-      'operator detail, concrete lesson, measured confidence, no broetry'
+      'founder/operator insight, concrete lesson, structured specificity'
     );
     expect(modelService.generatePlatformDraft.mock.calls[0][1]).toContain(
-      'Write like someone sharing a grounded professional takeaway with specifics'
+      'Write one strong LinkedIn text post from the video/transcript'
     );
+  });
+
+  it('adds text-native and quality-focused guidance for linkedin', async () => {
+    const prompt = await getGeneratedPromptForPlatform('linkedin');
+
+    expect(prompt).toContain('Text-post mode');
+    expect(prompt).toContain('standalone text-native post');
+    expect(prompt).toContain('Prioritize one strong founder/operator-style post');
+    expect(prompt).toContain('Do not produce several weak angles');
+  });
+
+  it('asks x to consider multiple angles internally but return one tight post', async () => {
+    const prompt = await getGeneratedPromptForPlatform('x');
+
+    expect(prompt).toContain('Internally consider 3-5 hooks');
+    expect(prompt).toContain('return only the strongest single X post');
+    expect(prompt).toContain('never a mini-blog');
+    expect(prompt).toContain('Return one standalone draft only');
+  });
+
+  it('keeps threads conversational while returning one best short-form post', async () => {
+    const prompt = await getGeneratedPromptForPlatform('threads');
+
+    expect(prompt).toContain('conversational angles');
+    expect(prompt).toContain('strongest single Threads post');
+    expect(prompt).toContain('current and personal');
+    expect(prompt).toContain('short and concrete');
+  });
+
+  it('makes facebook conversational and community-readable without ad copy', async () => {
+    const prompt = await getGeneratedPromptForPlatform('facebook');
+
+    expect(prompt).toContain('community-readable');
+    expect(prompt).toContain('human update');
+    expect(prompt).toContain('slightly more context than X or Threads');
+    expect(prompt).toContain('Do not sound like an ad');
+  });
+
+  it('keeps instagram caption-oriented', async () => {
+    const prompt = await getGeneratedPromptForPlatform('instagram');
+
+    expect(prompt).toContain('Caption mode');
+    expect(prompt).toContain('media-grounded caption');
+    expect(prompt).toContain('Write a caption that is grounded in the visual media');
   });
 
   it('clamps x drafts to the shared hard cap', async () => {

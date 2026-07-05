@@ -6,6 +6,6 @@ export const facebookAdapter: PlatformAdapter = {
   buildSystemPrompt: (brief) =>
     buildBasePlatformPrompt(
       brief,
-      'Write like a context-rich update to a real audience. Do not borrow thread syntax or creator-template pacing.'
+      'Write a conversational, community-readable post with slightly more context than X or Threads. Make it feel like a human update to people who know the topic. Do not sound like an ad, landing-page copy, or repackaged thread.'
     ),
 };

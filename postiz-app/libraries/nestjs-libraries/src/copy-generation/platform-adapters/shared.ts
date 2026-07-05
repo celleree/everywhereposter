@@ -8,11 +8,20 @@ const renderOptionalList = (title: string, items: string[]) => {
   return `${title}\n${items.map((item) => `- ${item}`).join('\n')}`;
 };
 
+const buildPostFormatInstruction = (brief: CopyGenerationBrief) => {
+  if (brief.platform.name === 'instagram') {
+    return 'Caption mode: write a media-grounded caption. Let the visual/video carry context; do not turn it into a standalone text essay.';
+  }
+
+  return 'Text-post mode: turn the video/transcript into a standalone text-native post. Do not simply copy a caption, script line, or transcript excerpt.';
+};
+
 export const buildBasePlatformPrompt = (
   brief: CopyGenerationBrief,
   extraInstruction: string
 ) => {
   return `You write publish-ready social copy for ${brief.platform.name}.
+${buildPostFormatInstruction(brief)}
 
 Platform rules:
 - Hard cap: ${brief.platform.hardCap} characters.

@@ -6,6 +6,6 @@ export const xAdapter: PlatformAdapter = {
   buildSystemPrompt: (brief) =>
     buildBasePlatformPrompt(
       brief,
-      'Make the first line do the work. Keep it tight, immediate, and worth reacting to. Do not write a mini-essay.'
+      'Internally consider 3-5 hooks, opinions, or short insights from the source, then return only the strongest single X post. Make the first line do the work. Keep it tight, immediate, and worth reacting to. Do not write a mini-blog.'
     ),
 };

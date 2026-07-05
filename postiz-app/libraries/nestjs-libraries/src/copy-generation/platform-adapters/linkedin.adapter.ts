@@ -6,6 +6,6 @@ export const linkedinAdapter: PlatformAdapter = {
   buildSystemPrompt: (brief) =>
     buildBasePlatformPrompt(
       brief,
-      'Lead with a concrete lesson or observation. Use airy spacing when it helps readability. End with a grounded invite, not a hype CTA.'
+      'Prioritize one strong founder/operator-style post. Lead with a concrete lesson or observation, use source-specific detail, structure it for readability, and end with a grounded invite. Do not produce several weak angles or pad a long post.'
     ),
 };
