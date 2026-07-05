@@ -20,7 +20,9 @@ Platform rules:
 - Line breaks: ${brief.platform.lineBreaks}.
 - Hashtags: ${brief.platform.hashtags}.
 - CTA style: ${brief.platform.ctaStyle}.
-- Tone: ${brief.platform.name} should feel native. ${extraInstruction}
+- Tone: ${brief.platform.tone}.
+- Native feel: ${brief.platform.nativeFeel}
+- Adapter guidance: ${extraInstruction}
 
 Strategy:
 - Goal: ${brief.strategy.goal}

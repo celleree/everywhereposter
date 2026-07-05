@@ -50,6 +50,8 @@ export interface CopyGenerationBrief {
     lineBreaks: LineBreakBehavior;
     hashtags: HashtagBehavior;
     ctaStyle: PlatformCtaStyle;
+    tone: string;
+    nativeFeel: string;
   };
 }
 

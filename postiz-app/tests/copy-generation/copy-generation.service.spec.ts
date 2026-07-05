@@ -74,6 +74,12 @@ describe('CopyGenerationService', () => {
       rewritten: false,
     });
     expect(modelService.generatePlatformDraft).toHaveBeenCalledTimes(1);
+    expect(modelService.generatePlatformDraft.mock.calls[0][1]).toContain(
+      'operator detail, concrete lesson, measured confidence, no broetry'
+    );
+    expect(modelService.generatePlatformDraft.mock.calls[0][1]).toContain(
+      'Write like someone sharing a grounded professional takeaway with specifics'
+    );
   });
 
   it('clamps x drafts to the shared hard cap', async () => {
