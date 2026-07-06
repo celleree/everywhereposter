@@ -199,7 +199,20 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
       );
     }
 
-    const currentIntegration = integrations.find((p) => p.id === current)!;
+    const currentIntegration = integrations.find((p) => p.id === current);
+
+    if (!currentIntegration) {
+      return (
+        <div className="flex min-w-0 items-center gap-[10px]">
+          <div className="relative">
+            <SettingsIcon size={15} className="text-white" />
+          </div>
+          <div className="min-w-0 break-words">
+            {t('channel_settings', 'Channel Settings')}
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="flex min-w-0 items-center gap-[10px]">

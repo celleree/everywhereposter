@@ -34,6 +34,19 @@ export enum PostComment {
   COMMENT,
 }
 
+const parseAdditionalSettings = (raw?: string) => {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 const providerSupportsCommentRows = (postComment: PostComment) =>
   postComment === PostComment.ALL || postComment === PostComment.COMMENT;
 
@@ -158,8 +171,8 @@ export const withProvider = function <T extends object>(params: {
         typeof maximumCharacters === 'number'
           ? maximumCharacters
           : maximumCharacters(
-              JSON.parse(
-                selectedIntegration.integration.additionalSettings || '[]'
+              parseAdditionalSettings(
+                selectedIntegration.integration.additionalSettings
               )
             )
       );
@@ -181,8 +194,8 @@ export const withProvider = function <T extends object>(params: {
           typeof maximumCharacters === 'number'
             ? maximumCharacters
             : maximumCharacters(
-                JSON.parse(
-                  selectedIntegration.integration.additionalSettings || '[]'
+                parseAdditionalSettings(
+                  selectedIntegration.integration.additionalSettings
                 )
               )
         );
@@ -240,8 +253,8 @@ export const withProvider = function <T extends object>(params: {
               ? await checkValidity(
                   value.map((p) => p.media || []),
                   settings,
-                  JSON.parse(
-                    selectedIntegration.integration.additionalSettings || '[]'
+                  parseAdditionalSettings(
+                    selectedIntegration.integration.additionalSettings
                   )
                 )
               : true,
@@ -251,8 +264,8 @@ export const withProvider = function <T extends object>(params: {
               typeof maximumCharacters === 'number'
                 ? maximumCharacters
                 : maximumCharacters(
-                    JSON.parse(
-                      selectedIntegration.integration.additionalSettings || '[]'
+                    parseAdditionalSettings(
+                      selectedIntegration.integration.additionalSettings
                     )
                   ),
             fix: () => {
@@ -322,9 +335,9 @@ export const withProvider = function <T extends object>(params: {
                     typeof maximumCharacters === 'number'
                       ? maximumCharacters
                       : maximumCharacters(
-                          JSON.parse(
+                          parseAdditionalSettings(
                             selectedIntegration.integration
-                              .additionalSettings || '[]'
+                              .additionalSettings
                           )
                         )
                   }
@@ -336,9 +349,9 @@ export const withProvider = function <T extends object>(params: {
                     typeof maximumCharacters === 'number'
                       ? maximumCharacters
                       : maximumCharacters(
-                          JSON.parse(
+                          parseAdditionalSettings(
                             selectedIntegration.integration
-                              .additionalSettings || '[]'
+                              .additionalSettings
                           )
                         )
                   }
