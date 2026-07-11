@@ -16,7 +16,7 @@ services:
       NEXT_PUBLIC_POLOTNO: ''
       NEXT_PUBLIC_UPLOAD_DIRECTORY: '/uploads'
       IS_GENERAL: 'true'
-      DISABLE_REGISTRATION: 'false'
+      DISABLE_REGISTRATION: '${DISABLE_REGISTRATION:-true}'
       STORAGE_PROVIDER: 'local'
     depends_on:
       postiz:
