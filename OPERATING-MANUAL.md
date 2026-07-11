@@ -24,16 +24,33 @@
 Commands:
 
 ```bash
-git status --short
-git branch --show-current
+sh scripts/check-repository-state.sh
 git log -5 --oneline --decorate
+```
+
+For a new issue, create the branch automatically from the latest remote `main`:
+
+```bash
+sh scripts/start-change.sh fix/<short-name>
 ```
 
 Rules:
 
+- Stop if the repository-state check fails.
+- Never edit directly on `main`.
+- Every change uses a short-lived branch and a pull request targeting `main`.
+- The old snapshot branch is historical only and must not be used for new work.
 - If the working tree is dirty, identify the dirty files before editing.
 - Do not overwrite user or environment changes.
 - Do not touch backup/env files unless explicitly asked.
+
+## Canonical Branch Safety
+
+- `main` is the only canonical long-lived branch.
+- `scripts/start-change.sh` fetches `origin/main` and creates new work from that exact commit.
+- `scripts/check-repository-state.sh` stops work when the tree is dirty, the snapshot branch is active, or the branch is behind `origin/main`.
+- The Repository guard GitHub workflow verifies that the default branch, operating docs, and production build workflow still point to `main`.
+- GitHub branch protection must block force pushes and deletion, require pull requests, and require the `Canonical branch guard` status check.
 
 ## Current Deployment Model
 
@@ -137,7 +154,9 @@ Explain:
 Use explicit SSH key if normal push fails:
 
 ```bash
-GIT_SSH_COMMAND='ssh -i ~/.ssh/github_publish_everywhere -o IdentitiesOnly=yes' git push origin main
+CURRENT_BRANCH=$(git branch --show-current)
+test "$CURRENT_BRANCH" != "main"
+GIT_SSH_COMMAND='ssh -i ~/.ssh/github_publish_everywhere -o IdentitiesOnly=yes' git push -u origin "$CURRENT_BRANCH"
 ```
 
 ## Code Change Workflow

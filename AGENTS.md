@@ -34,8 +34,10 @@ Before operational, deploy, Docker, database, or production work, read OPERATING
 - Work one step at a time, especially for server and dev tasks.
 - For Post Everywhere, the usual live working environment is Hetzner SSH at `/home/arund/publish-everywhere-git`, not local WSL.
 - Do not start Docker Desktop, the local WSL Postiz stack, or local cloudflared unless local work is intentional.
-- Before coding sessions, run `git status --short` and `git log -5 --oneline`.
-- The canonical active branch is `main`.
+- Before coding sessions, run `sh scripts/check-repository-state.sh`. Stop if it fails.
+- Start every new issue from current `main` with `sh scripts/start-change.sh fix/<short-name>` (or `feature/`, `chore/`, `docs/`, or `agent/`).
+- Never edit directly on `main`; use a short-lived branch and a pull request targeting `main`.
+- The canonical active branch is `main`. The old snapshot branch is historical only.
 - Use VS Code SSH for editing and the Hetzner console for heavy Docker builds.
 
 # Publish Everywhere Codex Instructions
