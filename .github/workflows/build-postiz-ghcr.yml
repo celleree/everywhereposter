@@ -15,14 +15,103 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   IMAGE_NAME: ghcr.io/celleree/publish-everywhere-postiz
 
 jobs:
-  build:
+  source-gate:
+    name: Production source gate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify canonical branch safeguards
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: sh scripts/check-canonical-branch.sh
+
+      - name: Verify main update came from a merged PR
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUSH_WAS_FORCED: ${{ github.event.forced }}
+        run: |
+          set -eu
+
+          if [ "$PUSH_WAS_FORCED" = "true" ]; then
+            echo "ERROR: main was force-updated."
+            exit 1
+          fi
+
+          MERGED_PR_COUNT="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')"
+
+          if [ "$MERGED_PR_COUNT" -lt 1 ]; then
+            echo "ERROR: main was updated without a merged pull request."
+            exit 1
+          fi
+
+          echo "main update is associated with a merged pull request."
+
+  quality:
+    name: Type checks and stable unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: postiz-app
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+          cache-dependency-path: postiz-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check frontend
+        run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit
+
+      - name: Type-check backend
+        run: pnpm exec tsc -p apps/backend/tsconfig.build.json --noEmit
+
+      - name: Type-check orchestrator
+        run: pnpm exec tsc -p apps/orchestrator/tsconfig.build.json --noEmit
+
+      - name: Run copy-generation tests
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand
+
+      - name: Run knowledge-base tests
+        run: pnpm exec jest --config jest.knowledge-base.config.cjs --runInBand
+
+  build:
+    name: Build and publish image
+    needs:
+      - source-gate
+      - quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Check out repository
