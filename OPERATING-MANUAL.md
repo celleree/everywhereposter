@@ -4,7 +4,7 @@
 
 - This is the current source of truth for operating the project.
 - Older deployment notes may be historical or stale unless they explicitly point back to this file.
-- Active branch: snapshot/local-working-state-2026-04-29
+- Canonical active branch: main
 - Main app path: postiz-app/
 - Public URL: https://publisheverywhere.halowebsites.com
 
@@ -137,7 +137,7 @@ Explain:
 Use explicit SSH key if normal push fails:
 
 ```bash
-GIT_SSH_COMMAND='ssh -i ~/.ssh/github_publish_everywhere -o IdentitiesOnly=yes' git push origin snapshot/local-working-state-2026-04-29
+GIT_SSH_COMMAND='ssh -i ~/.ssh/github_publish_everywhere -o IdentitiesOnly=yes' git push origin main
 ```
 
 ## Code Change Workflow
