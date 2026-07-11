@@ -37,3 +37,28 @@ Before operational, deploy, Docker, database, or production work, read OPERATING
 - Before coding sessions, run `git status --short` and `git log -5 --oneline`.
 - The current active branch is `snapshot/local-working-state-2026-04-29`.
 - Use VS Code SSH for editing and the Hetzner console for heavy Docker builds.
+
+# Publish Everywhere Codex Instructions
+
+## Default behavior
+
+- Work in credit-saving mode.
+- Do not scan the whole repo unless explicitly asked.
+- Start from the error, issue, or most relevant file.
+- Propose a plan before editing.
+- Make the smallest useful fix.
+- Do not refactor unrelated code.
+- Do not change product promises without checking docs/brain/PRODUCT_TRUTH.md.
+- Do not add dependencies without approval.
+- Run the narrowest relevant verification command.
+
+## Reference docs
+
+Before product, copy, platform, or workflow changes, check:
+
+- docs/brain/PRODUCT_TRUTH.md
+- docs/brain/CODEX_WORKFLOW.md
+- docs/brain/WORKED_LEARNINGS.md
+- docs/brain/FAILED_APPROACHES.md
+- docs/brain/KNOWN_ISSUES.md
+- docs/brain/DEPLOYMENT_NOTES.md
