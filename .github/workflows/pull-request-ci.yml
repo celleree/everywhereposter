@@ -1,0 +1,100 @@
+name: Pull request CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: pull-request-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  repository-guard:
+    name: Repository guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify canonical branch safeguards
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: sh scripts/check-canonical-branch.sh
+
+  quality:
+    name: Type checks and unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: postiz-app
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+          cache-dependency-path: postiz-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check frontend
+        run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit
+
+      - name: Type-check backend
+        run: pnpm exec tsc -p apps/backend/tsconfig.build.json --noEmit
+
+      - name: Type-check orchestrator
+        run: pnpm exec tsc -p apps/orchestrator/tsconfig.build.json --noEmit
+
+      - name: Run copy-generation tests
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand
+
+      - name: Run published-posts tests
+        run: pnpm exec jest --config jest.published-posts.config.cjs --runInBand
+
+      - name: Run knowledge-base tests
+        run: pnpm exec jest --config jest.knowledge-base.config.cjs --runInBand
+
+  docker-build:
+    name: Docker build
+    needs:
+      - repository-guard
+      - quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image without publishing
+        uses: docker/build-push-action@v6
+        with:
+          context: ./postiz-app
+          file: ./postiz-app/Dockerfile.dev
+          platforms: linux/amd64
+          push: false
+          tags: publish-everywhere/postiz-app:ci-${{ github.sha }}
+          cache-from: type=gha,scope=pull-request-ci
+          cache-to: type=gha,mode=max,scope=pull-request-ci
