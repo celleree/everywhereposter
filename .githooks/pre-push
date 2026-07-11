@@ -1,0 +1,34 @@
+#!/bin/sh
+# publish-everywhere-branch-guard-v1
+set -eu
+
+if [ "${1:-}" = "--self-test" ]; then
+  echo "Publish Everywhere pre-push guard is installed."
+  exit 0
+fi
+
+ZERO_OID="0000000000000000000000000000000000000000"
+BLOCKED=0
+
+while read -r LOCAL_REF LOCAL_OID REMOTE_REF REMOTE_OID; do
+  case "$REMOTE_REF" in
+    refs/heads/main)
+      echo "ERROR: Direct pushes to main are blocked." >&2
+      echo "Push a short-lived branch and open a pull request targeting main." >&2
+      BLOCKED=1
+      ;;
+    refs/heads/snapshot/local-working-state-2026-04-29)
+      echo "ERROR: The obsolete snapshot branch is historical and cannot receive new pushes." >&2
+      BLOCKED=1
+      ;;
+  esac
+
+  if [ "$LOCAL_OID" != "$ZERO_OID" ] && [ "$REMOTE_OID" != "$ZERO_OID" ]; then
+    if ! git merge-base --is-ancestor "$REMOTE_OID" "$LOCAL_OID"; then
+      echo "ERROR: Force push or non-fast-forward update blocked for $REMOTE_REF." >&2
+      BLOCKED=1
+    fi
+  fi
+done
+
+[ "$BLOCKED" -eq 0 ] || exit 1
