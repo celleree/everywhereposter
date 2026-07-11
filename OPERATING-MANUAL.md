@@ -24,6 +24,7 @@
 Commands:
 
 ```bash
+sh scripts/install-git-guardrails.sh
 sh scripts/check-repository-state.sh
 git log -5 --oneline --decorate
 ```
@@ -47,10 +48,12 @@ Rules:
 ## Canonical Branch Safety
 
 - `main` is the only canonical long-lived branch.
+- `scripts/install-git-guardrails.sh` installs the managed pre-push hook for each checkout.
+- The pre-push hook blocks direct pushes to `main`, pushes to the obsolete snapshot, and non-fast-forward pushes.
 - `scripts/start-change.sh` fetches `origin/main` and creates new work from that exact commit.
-- `scripts/check-repository-state.sh` stops work when the tree is dirty, the snapshot branch is active, or the branch is behind `origin/main`.
-- The Repository guard GitHub workflow verifies that the default branch, operating docs, and production build workflow still point to `main`.
-- GitHub branch protection must block force pushes and deletion, require pull requests, and require the `Canonical branch guard` status check.
+- `scripts/check-repository-state.sh` stops work when guardrails are missing, the tree is dirty, the snapshot branch is active, or the branch is behind `origin/main`.
+- The Repository guard GitHub workflow verifies canonical branch settings and flags forced or direct updates to `main`.
+- When enforced branch protection is available, it should also block force pushes and deletion, require pull requests, and require the `Canonical branch guard` status check.
 
 ## Current Deployment Model
 
