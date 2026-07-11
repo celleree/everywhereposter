@@ -10,6 +10,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" ||
   fail "Run this command inside the Publish Everywhere repository."
 cd "$REPO_ROOT"
 
+HOOK_PATH="$(git rev-parse --git-path hooks)/pre-push"
+[ -x "$HOOK_PATH" ] && grep -Fq "publish-everywhere-branch-guard-v1" "$HOOK_PATH" ||
+  fail "Git guardrails are not installed. Run: sh scripts/install-git-guardrails.sh"
+
 CURRENT_BRANCH="$(git branch --show-current)"
 [ -n "$CURRENT_BRANCH" ] || fail "Detached HEAD detected. Check out main or a feature branch first."
 
