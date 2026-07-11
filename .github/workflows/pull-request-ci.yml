@@ -33,6 +33,8 @@ jobs:
   quality:
     name: Type checks and stable unit tests
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
     defaults:
       run:
         working-directory: postiz-app
