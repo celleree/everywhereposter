@@ -1,0 +1,20 @@
+name: Apply published-posts test fixes
+
+on:
+  push:
+    branches:
+      - agent/fix-published-posts-tests
+    paths:
+      - .github/workflows/apply-published-tests-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-published-posts-tests
+          fetch-depth
