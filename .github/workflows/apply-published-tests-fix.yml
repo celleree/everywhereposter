@@ -1,6 +1,7 @@
 name: Apply published-posts test fixes
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - agent/fix-published-posts-tests
@@ -14,7 +15,5 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/fix-published-posts-tests
-          fetch-depth
+      - name: Check out branch
+       
