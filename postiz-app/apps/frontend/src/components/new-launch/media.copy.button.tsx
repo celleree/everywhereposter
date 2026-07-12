@@ -159,6 +159,40 @@ const MediaCopyModal: FC<{
       const reader = request.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let finalResponse: GenerateMediaCopyResponse | null = null;
+      let buffer = '';
+
+      const parseLine = (line: string) => {
+        if (!line.trim()) {
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(line);
+          const stageName = parsed.name as string;
+          setStatusText(
+            stageLabelMap[stageName] ||
+              t('processing_media_copy', 'Processing media copy...')
+          );
+
+          if (stageName === 'platform-started' && parsed.data?.platform) {
+            const platform = parsed.data.platform as CopyPlatform;
+            setStatusText(`Generating ${platformLabels[platform]}...`);
+          }
+
+          if (stageName === 'platform-rewrite-started' && parsed.data?.platform) {
+            const platform = parsed.data.platform as CopyPlatform;
+            setStatusText(
+              `Refining ${platformLabels[platform]} to sound more natural...`
+            );
+          }
+
+          if (stageName === 'completed') {
+            finalResponse = parsed.data as GenerateMediaCopyResponse;
+          }
+        } catch {
+          // Ignore malformed streaming messages.
+        }
+      };
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
@@ -167,36 +201,17 @@ const MediaCopyModal: FC<{
           break;
         }
 
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split('\n').filter(Boolean)) {
-          try {
-            const parsed = JSON.parse(line);
-            const stageName = parsed.name as string;
-            setStatusText(
-              stageLabelMap[stageName] ||
-                t('processing_media_copy', 'Processing media copy...')
-            );
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-            if (stageName === 'platform-started' && parsed.data?.platform) {
-              const platform = parsed.data.platform as CopyPlatform;
-              setStatusText(`Generating ${platformLabels[platform]}...`);
-            }
-
-            if (stageName === 'platform-rewrite-started' && parsed.data?.platform) {
-              const platform = parsed.data.platform as CopyPlatform;
-              setStatusText(
-                `Refining ${platformLabels[platform]} to sound more natural...`
-              );
-            }
-
-            if (stageName === 'completed') {
-              finalResponse = parsed.data as GenerateMediaCopyResponse;
-            }
-          } catch (error) {
-            // Ignore incomplete streaming chunks.
-          }
+        for (const line of lines) {
+          parseLine(line);
         }
       }
+
+      buffer += decoder.decode();
+      parseLine(buffer);
 
       if (!finalResponse) {
         throw new Error('Copy generation did not return a final payload');
