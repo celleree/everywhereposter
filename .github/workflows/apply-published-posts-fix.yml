@@ -1,0 +1,26 @@
+name: Apply published-posts test repair
+
+on:
+  push:
+    branches:
+      - fix/published-posts-tests
+
+permissions:
+  contents: write
+
+jobs:
+  apply-repair:
+    name: Apply scoped test and CI repairs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/published-posts-tests
+          fetch-depth: 0
+
+      - name: Apply exact scoped replacements
+        shell: bash
+        run: |
+          python3
