@@ -1,8 +1,8 @@
 # Security Operations
 
-> Current-source warning: This document contains some historical/local-build operations notes. For current deployment workflow, read `OPERATING-MANUAL.md` first.
+> Current-source rule: this document covers host security and post-maintenance validation only. For application deployment, use `OPERATING-MANUAL.md` and `docs/production-handoff-2026-05-11.md`.
 
-This checklist captures the recurring commands for the Hetzner host at `46.62.170.47` and the public app at `https://publisheverywhere.halowebsites.com`.
+This checklist covers the Hetzner host at `46.62.170.47` and the public app at `https://publisheverywhere.halowebsites.com`.
 
 ## Admin Access
 
@@ -62,7 +62,7 @@ Run after maintenance or a reboot:
 ssh arund@46.62.170.47 'sudo -n bash -lc '"'"'
 systemctl is-active ssh docker ufw fail2ban
 echo ---
-cd /opt/publish-everywhere && docker compose ps
+cd /home/arund/publish-everywhere-git && docker compose ps
 echo ---
 ss -tulpn | egrep "(:22 |:4007 |:7233 |:8080 |:8969 )|Local Address:Port" || true
 echo ---
@@ -77,10 +77,9 @@ uname -r
 Expected result:
 
 - `ssh`, `docker`, `ufw`, and `fail2ban` are all `active`
-- Docker services are healthy
+- Docker services are running as expected
 - `4007`, `7233`, `8080`, and `8969` are bound only on `127.0.0.1`
 - `fail2ban` shows the `sshd` jail as active
-- Kernel stays on the upgraded line, currently `6.8.0-107-generic`
 
 ## SSH Validation
 
@@ -99,23 +98,34 @@ Expected result:
 - Root SSH is denied
 - Password-only SSH is denied
 
-## Maintenance Notes
+## Deployment Boundary
 
-- Rollback snapshot created on `2026-04-08`:
-  `/root/security-snapshots/20260408T211645Z`
-- App deployment directory:
-  `/opt/publish-everywhere`
-- Deploy from the single canonical repo at `/opt/publish-everywhere`; the app source now lives inside `/opt/publish-everywhere/postiz-app`.
-- Standard deploy flow:
+Do not deploy from this document.
 
-```bash
-ssh arund@46.62.170.47 'cd /opt/publish-everywhere && git pull --ff-only && docker compose up -d --build'
-```
+Current application deployment is:
 
-- If the standalone frontend overlay is in use, deploy with:
+1. Merge through a pull request into `main`.
+2. Let GitHub Actions build and publish the exact full-SHA GHCR image.
+3. Pull that exact image on Hetzner.
+4. Retag it as `publish-everywhere/postiz-app:custom`.
+5. Recreate only the `postiz` service without building on the server.
+6. Verify logs, image identity, registration state, and public HTTP behavior.
 
-```bash
-ssh arund@46.62.170.47 'cd /opt/publish-everywhere && git pull --ff-only && docker compose -f docker-compose.yaml -f docker-compose.frontend-overlay.yaml up -d --build'
-```
+Use these sources for the exact commands and rollback procedure:
 
+- `OPERATING-MANUAL.md`
+- `docs/production-handoff-2026-05-11.md`
+
+The following historical patterns are obsolete and must not be used:
+
+- `/opt/publish-everywhere`
+- `git pull` followed by an on-server Docker build
+- `docker compose up -d --build`
+- the standalone frontend overlay deployment flow
+- deployment from an old snapshot branch
+
+## Recovery Notes
+
+- Rollback snapshot created on `2026-04-08`: `/root/security-snapshots/20260408T211645Z`
+- Canonical checkout: `/home/arund/publish-everywhere-git`
 - If SSH hardening ever misfires, use the Hetzner web console as the recovery path.
