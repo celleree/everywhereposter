@@ -105,6 +105,9 @@ jobs:
       - name: Run knowledge-base tests
         run: pnpm exec jest --config jest.knowledge-base.config.cjs --runInBand
 
+      - name: Run published-posts tests
+        run: pnpm exec jest --config jest.published-posts.config.cjs --runInBand
+
   build:
     name: Build and publish image
     needs:

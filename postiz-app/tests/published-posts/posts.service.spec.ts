@@ -503,6 +503,7 @@ describe('PostsService published post management', () => {
       service.getPublishedComments('org-1', 'post-1')
     ).resolves.toEqual({
       supported: true,
+      canComment: false,
       comments,
     });
 
@@ -559,6 +560,7 @@ describe('PostsService published post management', () => {
       service.getPublishedComments('org-1', 'post-1')
     ).resolves.toEqual({
       supported: true,
+      canComment: false,
       comments,
     });
 

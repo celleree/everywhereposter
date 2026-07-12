@@ -10,6 +10,10 @@ jest.mock('sharp', () => {
   };
 });
 
+jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
+  IntegrationManager: class IntegrationManager {},
+}));
+
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 
 describe('RefreshIntegrationService identity persistence', () => {
