@@ -737,6 +737,22 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
         const reader = request.body.getReader();
         const decoder = new TextDecoder('utf-8');
         let finalResponse: GenerateMediaCopyResponse | null = null;
+        let buffer = '';
+
+        const parseLine = (line: string) => {
+          if (!line.trim()) {
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.name === 'completed') {
+              finalResponse = parsed.data as GenerateMediaCopyResponse;
+            }
+          } catch {
+            // Ignore malformed streaming messages.
+          }
+        };
 
         // eslint-disable-next-line no-constant-condition
         while (true) {
@@ -745,18 +761,17 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             break;
           }
 
-          const chunk = decoder.decode(value, { stream: true });
-          for (const line of chunk.split('\n').filter(Boolean)) {
-            try {
-              const parsed = JSON.parse(line);
-              if (parsed.name === 'completed') {
-                finalResponse = parsed.data as GenerateMediaCopyResponse;
-              }
-            } catch {
-              // Ignore incomplete streaming chunks.
-            }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            parseLine(line);
           }
         }
+
+        buffer += decoder.decode();
+        parseLine(buffer);
 
         if (!finalResponse) {
           throw new Error(
