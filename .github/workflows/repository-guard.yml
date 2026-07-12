@@ -26,6 +26,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check sensitive logging guard
+        run: node --test postiz-app/tests/security/sensitive-logging.guard.test.mjs
+
       - name: Verify canonical branch safeguards
         env:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
