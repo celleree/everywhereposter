@@ -1,5 +1,7 @@
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
+  ArrayUnique,
   IsArray,
   IsIn,
   IsNumber,
@@ -99,6 +101,8 @@ export class GenerateMediaCopyDto {
 
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(COPY_PLATFORMS.length)
+  @ArrayUnique()
   @IsIn(COPY_PLATFORMS, { each: true })
   platforms: CopyPlatform[];
 

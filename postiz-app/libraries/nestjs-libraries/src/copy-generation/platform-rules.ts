@@ -4,6 +4,8 @@ export const COPY_PLATFORMS = [
   'threads',
   'facebook',
   'instagram',
+  'tiktok',
+  'youtube',
   'bluesky',
 ] as const;
 
@@ -120,6 +122,36 @@ export const PLATFORM_RULES: Record<CopyPlatform, PlatformRule> = {
     tone: 'visual, concrete, warm, caption-native',
     nativeFeel:
       'Write as an Instagram caption grounded in the media, with a clear first line and no generic creator filler.',
+  },
+  tiktok: {
+    hardCap: 2200,
+    targetCharacters: {
+      short: 100,
+      medium: 180,
+      long: 300,
+    },
+    defaultTargetLength: 'medium',
+    lineBreaks: 'moderate',
+    hashtags: 'sparse',
+    ctaStyle: 'invite',
+    tone: 'short-form video caption, immediate, conversational, specific',
+    nativeFeel:
+      'Write one TikTok caption that complements the video instead of narrating it. Lead with a specific hook or useful context, keep it natural and concise, and use only a few relevant hashtags. Do not invent trends, sounds, or challenges.',
+  },
+  youtube: {
+    hardCap: 5000,
+    targetCharacters: {
+      short: 300,
+      medium: 600,
+      long: 1200,
+    },
+    defaultTargetLength: 'medium',
+    lineBreaks: 'airy',
+    hashtags: 'end_only',
+    ctaStyle: 'direct',
+    tone: 'viewer-oriented, descriptive, trustworthy, search-aware',
+    nativeFeel:
+      'Write one grounded YouTube description that explains what the viewer will get from the video, includes concrete source details, and uses an appropriate CTA. Do not invent links, timestamps, chapters, sponsors, or claims.',
   },
   bluesky: {
     hardCap: 300,

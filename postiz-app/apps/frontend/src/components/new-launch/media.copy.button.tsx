@@ -14,6 +14,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import {
   CopyPlatform,
+  COPY_PLATFORMS,
   mapIntegrationIdentifierToCopyPlatform,
 } from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
 import { GenerateMediaCopyResponse } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
@@ -33,6 +34,8 @@ const platformLabels: Record<CopyPlatform, string> = {
   threads: 'Threads',
   facebook: 'Facebook',
   instagram: 'Instagram',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
   bluesky: 'Bluesky',
 };
 
@@ -316,7 +319,7 @@ const MediaCopyModal: FC<{
           <div className="flex flex-col gap-[8px]">
             <div className="text-[13px] font-[600]">Platforms</div>
             <div className="grid grid-cols-3 gap-[8px]">
-              {selectedPlatforms.map((platform) => (
+              {COPY_PLATFORMS.map((platform) => (
                 <label
                   key={platform}
                   className="bg-newBgColorInner rounded-[8px] px-[12px] py-[8px] flex items-center gap-[8px]"
