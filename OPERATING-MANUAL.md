@@ -79,6 +79,7 @@ Rules:
 
 ## Current Deployment Model
 
+- Record each verified deployment or rollback in `docs/RELEASE-LEDGER.md`.
 - GitHub Actions builds the Postiz app image.
 - Image: ghcr.io/celleree/publish-everywhere-postiz
 - Tags: latest and full commit SHA.
