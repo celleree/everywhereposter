@@ -1,194 +1,92 @@
-# Production deployment handoff
+# Production Deployment Handoff
 
-> Historical note: This handoff records the 2026-05-11 deployment state and may not reflect the current GHCR full-SHA deployment workflow. For current operations, read `OPERATING-MANUAL.md`.
+> Current operational summary. `OPERATING-MANUAL.md` is the source of truth when this file and another note disagree.
 
-This note captures production deployment facts that are not obvious from the Git repository itself.
+## Current Production Model
 
-## Public deployment
+- Canonical branch: `main`
+- Server checkout: `/home/arund/publish-everywhere-git`
+- Public URL: `https://publisheverywhere.halowebsites.com`
+- Application image: `ghcr.io/celleree/publish-everywhere-postiz:<full-commit-sha>`
+- Local runtime tag: `publish-everywhere/postiz-app:custom`
+- Runtime container: `postiz`
+- Production images are built by GitHub Actions and pulled by exact full commit SHA.
+- App-only deployments recreate only the `postiz` container.
 
-Public site:
+## Safe Deployment Flow
 
-```text
-https://publisheverywhere.halowebsites.com
-```
+1. Merge a reviewed pull request into `main`.
+2. Confirm the `Build Postiz image` workflow succeeds for the exact merge commit.
+3. Confirm the Hetzner checkout is clean and points at the intended commit.
+4. Pull the exact full-SHA GHCR image.
+5. Tag that image as `publish-everywhere/postiz-app:custom`.
+6. Recreate only `postiz` without building locally.
+7. Check container state and logs.
+8. Verify the public route and the exact changed behavior in the browser.
 
-Final observed state after the 2026-05-11 deployment:
-
-```text
-Public site shows updated UI.
-Floating legal bar is gone.
-Profiles/data are intact.
-postiz and public-web rebuilt successfully.
-```
-
-## Production server
-
-```text
-Provider: Hetzner
-IP: 46.62.170.47
-SSH host alias: publish-everywhere-hetzner
-SSH user: arund
-```
-
-## Cloudflare Tunnel
-
-```text
-Tunnel name: publish-everywhere
-Tunnel ID: c9487391-ac63-4934-b29d-06b1a1fd3801
-Connector ID: 99da6331-a478-42d6-88f4-338e61ab87b1
-Origin IP: 46.62.170.47
-```
-
-Important tunnel/container note:
-
-```text
-Cloudflare Tunnel is running from the Hetzner Docker stack, not the local Windows/WSL Docker stack.
-Container: cloudflared-publish-everywhere
-```
-
-## Production paths
-
-Production deployment folders on Hetzner:
-
-```text
-/opt/publish-everywhere
-/opt/publish-everywhere/docker-compose.yaml
-/opt/publish-everywhere/postiz-app
-/opt/publish-everywhere/site/branding
-/opt/publish-everywhere/nginx/privacy-site.conf
-```
-
-Important: these production folders are not Git checkouts:
-
-```text
-/opt/publish-everywhere
-/opt/publish-everywhere/postiz-app
-```
-
-The running Docker Compose project builds the public app from:
-
-```text
-/opt/publish-everywhere/postiz-app
-```
-
-## Docker services
-
-Main production containers:
-
-```text
-postiz
-publish-everywhere-web
-cloudflared-publish-everywhere
-postiz-postgres
-postiz-redis
-```
-
-Successful rebuild command used from `/opt/publish-everywhere`:
+Reference commands:
 
 ```bash
-sudo docker compose -f docker-compose.yaml up -d --build --force-recreate postiz public-web
+cd /home/arund/publish-everywhere-git
+
+git status --short
+git rev-parse HEAD
+
+FULL_SHA=$(git rev-parse HEAD)
+docker pull ghcr.io/celleree/publish-everywhere-postiz:${FULL_SHA}
+docker tag \
+  ghcr.io/celleree/publish-everywhere-postiz:${FULL_SHA} \
+  publish-everywhere/postiz-app:custom
+
+docker compose up -d --no-build --no-deps --force-recreate postiz
+sleep 45
+docker inspect postiz --format 'status={{.State.Status}} image={{.Image}} restart_count={{.RestartCount}}'
+docker logs --tail 120 postiz
+curl -ksSL -o /dev/null -w 'HTTP=%{http_code} URL=%{url_effective}\n' \
+  https://publisheverywhere.halowebsites.com/
 ```
 
-This rebuilt/recreated only `postiz` and `public-web`. It did not delete volumes or reset the database.
+Use the full commit SHA. Do not deploy from `latest` alone.
 
-## Deployment method used on 2026-05-11
+## Obsolete 2026-05-11 Instructions
 
-Local fixed branch:
+The following details from the original handoff are historical and must not be used for current deployments:
 
-```text
-snapshot/local-working-state-2026-04-29
-```
+- The `snapshot/local-working-state-2026-04-29` branch
+- `/opt/publish-everywhere` as the active source checkout
+- `rsync` from a local machine into production
+- `docker compose ... up --build`
+- Rebuilding `public-web` for an app-only code change
+- Treating the production folders as a non-Git source tree
 
-The local branch was pushed to GitHub, but Hetzner could not read the private GitHub repo over HTTPS without credentials. Because production is not Git-managed, deployment was done with `rsync`.
+Git history preserves the original 2026-05-11 handoff if historical investigation is required.
 
-Process used:
+## Production Safety
 
-```text
-1. rsynced the local clean branch to Hetzner staging:
-   /tmp/publish-everywhere-staging
-
-2. Copied only these staged paths into production:
-   postiz-app/
-   site/branding/
-   nginx/privacy-site.conf
-
-3. Intentionally did not overwrite:
-   /opt/publish-everywhere/docker-compose.yaml
-
-4. Rebuilt only:
-   postiz
-   public-web
-```
-
-Important warning:
-
-```text
-Do not overwrite production docker-compose.yaml from the local branch without reviewing it first.
-The local version includes safety/profile changes that may alter production behavior, including required env vars and Cloudflare tunnel profile handling.
-```
-
-## Backups created on Hetzner
-
-```text
-/home/arund/postiz-prod-backups/20260511T031011Z/publish-everywhere-full.tgz
-/home/arund/postiz-prod-backups/20260511T031438Z/postiz-postgres-pg_dumpall.sql.gz
-```
-
-## SSH access issue solved
-
-SSH initially failed because Fail2ban had banned the user's public IP.
-
-```text
-IP at the time: 136.52.69.219
-```
-
-Unban command used:
-
-```bash
-fail2ban-client set sshd unbanip 136.52.69.219
-```
-
-Server access state observed:
-
-```text
-No Hetzner Cloud firewall attached.
-UFW allowed port 22.
-sshd was listening on 0.0.0.0:22.
-```
-
-## Permission notes
-
-```text
-Use sudo for Docker commands.
-Do not chmod/chown .cloudflared.
-.cloudflared is root-owned and should stay protected.
-```
-
-The Docker socket required `sudo` for the `arund` user. Do not casually add the user to the Docker group on production; Docker group access effectively grants root-level control.
-
-## Commands to avoid on production
-
-Do not run these unless intentionally deleting/resetting data:
+Never perform these actions as part of a routine app deploy:
 
 ```bash
 docker compose down -v
-docker volume rm
 docker volume prune
 docker system prune --volumes
 prisma migrate reset
 prisma db push --force-reset
 ```
 
-## Public verification command
+Additional rules:
 
-This verification passed after deployment:
+- Do not build the full application image on Hetzner.
+- Do not restart every service for an app-only change.
+- Do not run Prisma schema commands casually against production.
+- Do not claim deployment success from GitHub Actions alone.
+- Do not delete the previous known-good image before rollback needs are understood.
 
-```bash
-curl -ksL "https://publisheverywhere.halowebsites.com/branding/branding.js?v=20260510a" | grep -n "ensureLegalBar();" || echo "public legal bar call removed"
-```
+## Rollback
 
-Expected and observed result:
+1. Identify the last known-good full commit SHA or retained rollback image.
+2. Pull it from GHCR if it is not already local.
+3. Tag it as `publish-everywhere/postiz-app:custom`.
+4. Recreate only `postiz` with `--no-build --no-deps`.
+5. Check logs and manually verify the public app.
 
-```text
-public legal bar call removed
-```
+Do not remove or recreate database, Redis, Temporal, config, or uploads volumes during an application rollback.
