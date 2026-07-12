@@ -95,6 +95,22 @@ const AI_PRESETS = [
       `Generate an Instagram caption using the uploaded media context, current draft, and selected accounts: ${platformText}. Make the first line clear, keep it grounded in the media, and apply the result with the setPosts action.`,
   },
   {
+    id: 'generate-tiktok',
+    platform: 'tiktok',
+    title: 'Generate TikTok caption',
+    helper: 'Short, natural, and video-native.',
+    buildMessage: (platformText: string) =>
+      `Generate a TikTok caption using the uploaded media context, current draft, and selected accounts: ${platformText}. Complement the video instead of narrating it, keep it concise, and use only relevant hashtags. Apply the result with the setPosts action.`,
+  },
+  {
+    id: 'generate-youtube',
+    platform: 'youtube',
+    title: 'Generate YouTube description',
+    helper: 'Grounded and viewer-oriented.',
+    buildMessage: (platformText: string) =>
+      `Generate a YouTube description using the uploaded media context, current draft, and selected accounts: ${platformText}. Explain what viewers will get without inventing links, chapters, timestamps, or claims. Apply the result with the setPosts action.`,
+  },
+  {
     id: 'generate-bluesky',
     platform: 'bluesky',
     title: 'Generate Bluesky post',

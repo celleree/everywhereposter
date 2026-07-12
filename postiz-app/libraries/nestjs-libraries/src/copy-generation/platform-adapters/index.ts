@@ -5,6 +5,8 @@ import { xAdapter } from '@gitroom/nestjs-libraries/copy-generation/platform-ada
 import { threadsAdapter } from '@gitroom/nestjs-libraries/copy-generation/platform-adapters/threads.adapter';
 import { facebookAdapter } from '@gitroom/nestjs-libraries/copy-generation/platform-adapters/facebook.adapter';
 import { instagramAdapter } from '@gitroom/nestjs-libraries/copy-generation/platform-adapters/instagram.adapter';
+import { tiktokAdapter } from '@gitroom/nestjs-libraries/copy-generation/platform-adapters/tiktok.adapter';
+import { youtubeAdapter } from '@gitroom/nestjs-libraries/copy-generation/platform-adapters/youtube.adapter';
 import { blueskyAdapter } from '@gitroom/nestjs-libraries/copy-generation/platform-adapters/bluesky.adapter';
 
 export const platformAdapters: Record<CopyPlatform, PlatformAdapter> = {
@@ -13,5 +15,7 @@ export const platformAdapters: Record<CopyPlatform, PlatformAdapter> = {
   threads: threadsAdapter,
   facebook: facebookAdapter,
   instagram: instagramAdapter,
+  tiktok: tiktokAdapter,
+  youtube: youtubeAdapter,
   bluesky: blueskyAdapter,
 };
