@@ -21,6 +21,16 @@ Before operational, deploy, Docker, database, or production work, read OPERATING
 - Show the diff after changes.
 - Stop after the first working fix.
 
+## Related Work Batching
+
+- Before opening a standalone pull request, check whether the task belongs in the active batch.
+- Default to approximately 3–6 related, low-risk tasks in one branch and one pull request.
+- Agree on the batch scope before implementation.
+- Keep one focused commit per task.
+- Run the narrowest relevant validation after each task, then run full pull-request CI once when the batch is complete.
+- Stop expanding the batch when review, diagnosis, or safe rollback becomes difficult.
+- Do not batch urgent production fixes, security or authentication changes, database migrations, destructive data changes, high-risk deployment or infrastructure changes, or unrelated product areas.
+
 ## Avoid
 
 - Do not use subagents unless explicitly requested.

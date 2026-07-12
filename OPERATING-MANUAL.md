@@ -19,6 +19,28 @@
 - Do not combine unrelated fixes.
 - Stop after the first working fix.
 
+## Related Work Batching
+
+Default policy for routine, related, low-risk work:
+
+- Group approximately 3–6 related tasks into one short-lived branch and one pull request.
+- Agree on the batch scope before implementation.
+- Keep one focused commit per task so each change remains reviewable and reversible.
+- Run the narrowest relevant local validation after each task.
+- Run full pull-request CI only after the agreed batch is complete.
+- Merge once and allow the production image workflow to run once.
+- Before opening a standalone pull request, check whether the task belongs in the active batch.
+- Stop expanding a batch when review, diagnosis, or safe rollback becomes difficult.
+
+Do not batch:
+
+- Urgent production fixes.
+- Security or authentication changes.
+- Database migrations.
+- Destructive data changes.
+- High-risk deployment or infrastructure changes.
+- Unrelated features from different product areas.
+
 ## Current Pre-Work Checklist
 
 Commands:
