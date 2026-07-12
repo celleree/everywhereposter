@@ -83,7 +83,7 @@ describe('published post capabilities', () => {
 
     expect(new InstagramProvider().getPublishedCapabilities()).toMatchObject({
       editMode: 'none',
-      canDeletePublished: false,
+      canDeletePublished: true,
     });
 
     expect(new TiktokProvider().getPublishedCapabilities()).toMatchObject({

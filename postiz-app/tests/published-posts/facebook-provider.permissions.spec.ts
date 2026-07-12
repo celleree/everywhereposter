@@ -92,9 +92,9 @@ describe('FacebookProvider permissions upgrade', () => {
         code: 'oauth-code',
         codeVerifier: 'ignored',
       })
-    ).rejects.toThrow(
-      'Missing required permissions: pages_read_user_content'
-    );
+    ).rejects.toMatchObject({
+      message: 'Missing required permissions: pages_read_user_content',
+    });
   });
 
   it('stores the Facebook page content read marker on successful auth', async () => {
