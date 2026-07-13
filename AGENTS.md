@@ -31,9 +31,18 @@ Before operational, deploy, Docker, database, or production work, read OPERATING
 - Stop expanding the batch when review, diagnosis, or safe rollback becomes difficult.
 - Do not batch urgent production fixes, security or authentication changes, database migrations, destructive data changes, high-risk deployment or infrastructure changes, or unrelated product areas.
 
+## Controlled Multi-Agent Work
+
+- Do not use subagents by default.
+- Subagents are allowed only when the user explicitly requests multi-agent work or the issue is marked agent-ready and the workflow in `docs/brain/DEVELOPMENT_AGENT_SYSTEM.md` is followed.
+- Assign separate planner, implementer, and reviewer roles. The implementer must not serve as the final reviewer.
+- Parallel agents require independent tasks, isolated branches or worktrees, explicit file ownership, and one named integrator.
+- Do not use parallel agents for authentication, security, database migrations, destructive data changes, deployment, infrastructure, or unclear product behavior.
+- Maximum default repair cycles: two. Return unresolved work for human reassessment after that.
+- Agents may not merge, deploy, force-push, access production secrets, or expand scope without explicit human approval.
+
 ## Avoid
 
-- Do not use subagents unless explicitly requested.
 - Do not perform broad cleanup.
 - Do not improve unrelated code.
 - Do not explore unrelated folders.
@@ -67,10 +76,11 @@ Before operational, deploy, Docker, database, or production work, read OPERATING
 
 ## Reference docs
 
-Before product, copy, platform, or workflow changes, check:
+Before product, copy, platform, workflow, or multi-agent development changes, check:
 
 - docs/brain/PRODUCT_TRUTH.md
 - docs/brain/CODEX_WORKFLOW.md
+- docs/brain/DEVELOPMENT_AGENT_SYSTEM.md
 - docs/brain/WORKED_LEARNINGS.md
 - docs/brain/FAILED_APPROACHES.md
 - docs/brain/KNOWN_ISSUES.md
