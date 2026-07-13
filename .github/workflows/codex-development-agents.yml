@@ -11,7 +11,7 @@ on:
         description: Agent role to run
         required: true
         type: choice
-        options: [plan, implement, review, memory]
+        options: [plan, implement, review, repair, memory]
       number:
         description: Issue or pull request number
         required: true
