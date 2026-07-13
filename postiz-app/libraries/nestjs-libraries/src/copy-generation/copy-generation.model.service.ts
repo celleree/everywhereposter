@@ -37,7 +37,7 @@ const TranscriptInsightsSchema = z.object({
   unknowns: z.array(z.string()).default([]),
   coreMessage: z.string(),
   sourceConfidence: z.number().min(0).max(1).default(0.7),
-  voiceProfile: VoiceProfileSchema.optional(),
+  voiceProfile: VoiceProfileSchema.nullable(),
 });
 
 const PlatformDraftSchema = z.object({

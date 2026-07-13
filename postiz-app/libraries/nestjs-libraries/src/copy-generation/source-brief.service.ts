@@ -163,7 +163,9 @@ export class SourceBriefService {
       transcriptFacts = transcriptInsights.facts || [];
       transcriptUnknowns = transcriptInsights.unknowns || [];
       coreMessage = transcriptInsights.coreMessage || coreMessage;
-      voiceProfile = this.normalizeVoiceProfile(transcriptInsights.voiceProfile);
+      voiceProfile = this.normalizeVoiceProfile(
+        transcriptInsights.voiceProfile ?? undefined
+      );
       sourceConfidenceParts.push(transcriptInsights.sourceConfidence || 0.7);
 
       if (
