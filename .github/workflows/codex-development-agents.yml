@@ -1,0 +1,77 @@
+name: Codex development agents
+
+on:
+  issues:
+    types: [labeled]
+  pull_request_target:
+    types: [ready_for_review, closed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Agent role to run
+        required: true
+        type: choice
+        options: [plan, implement, review, memory]
+      number:
+        description: Issue or pull request number
+        required: true
+        type: string
+
+concurrency:
+  group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  resolve:
+    if: >-
+      github.actor == github.repository_owner &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'issues' && github.event.label.name == 'agent-ready') ||
+        (github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review') ||
+        (github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true)
+      )
+    runs-on: [self-hosted, linux, codex]
+    timeout-minutes: 90
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve role and target
+        id: task
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+            echo "number=${{ inputs.number }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "issues" ]]; then
+            echo "mode=plan" >> "$GITHUB_OUTPUT"
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event.action }}" == "ready_for_review" ]]; then
+            echo "mode=review" >> "$GITHUB_OUTPUT"
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=memory" >> "$GITHUB_OUTPUT"
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify trusted runner tools
+        run: |
+          codex login status
+          gh auth status
+          git --version
+          jq --version
+
+      - name: Run bounded Codex role
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/agents/codex-task.sh "${{ steps.task.outputs.mode }}" "${{ steps.task.outputs.number }}"
