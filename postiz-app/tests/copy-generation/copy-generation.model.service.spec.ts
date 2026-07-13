@@ -1,26 +1,29 @@
-import OpenAI from 'openai';
 import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.model.service';
 
-jest.mock('openai', () => ({
-  __esModule: true,
-  default: jest.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        parse: jest.fn(),
+jest.mock('openai', () => {
+  const parse = jest.fn();
+
+  return {
+    __esModule: true,
+    default: jest.fn().mockImplementation(() => ({
+      chat: {
+        completions: {
+          parse,
+        },
       },
-    },
-    audio: {
-      transcriptions: {
-        create: jest.fn(),
+      audio: {
+        transcriptions: {
+          create: jest.fn(),
+        },
       },
-    },
-  })),
-  toFile: jest.fn(),
-}));
+    })),
+    parse,
+    toFile: jest.fn(),
+  };
+});
 
 const getParseMock = () =>
-  (OpenAI as unknown as jest.Mock).mock.results[0].value.chat.completions
-    .parse as jest.Mock;
+  (jest.requireMock('openai') as { parse: jest.Mock }).parse;
 
 describe('CopyGenerationModelService structured output schemas', () => {
   const service = new CopyGenerationModelService();
