@@ -6,7 +6,7 @@ need() { command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"; }
 
 need codex; need gh; need git; need jq
 MODE=${1:-}; NUMBER=${2:-}
-[ -n "$MODE" ] && [ -n "$NUMBER" ] || fail "Usage: sh scripts/agents/codex-task.sh plan|implement|review|memory NUMBER"
+[ -n "$MODE" ] && [ -n "$NUMBER" ] || fail "Usage: sh scripts/agents/codex-task.sh plan|implement|review|repair|memory NUMBER"
 
 ROOT=$(git rev-parse --show-toplevel); cd "$ROOT"
 OWNER=$(gh repo view --json owner --jq .owner.login)
@@ -33,6 +33,8 @@ case "$MODE" in
     gh issue view "$NUMBER" --json title,body,url,labels,author > "$ITEM"
     jq -e '.labels | map(.name) | index("agent-ready")' "$ITEM" >/dev/null || fail "Issue must have the agent-ready label."
     grep -Fq 'High - authentication, security, database, billing, infrastructure, or deployment' "$ITEM" && fail "High-risk issues require manual implementation."
+    git fetch --quiet origin main
+    git switch --force-create main origin/main >/dev/null
     sh scripts/install-git-guardrails.sh
     sh scripts/check-repository-state.sh
     BRANCH="agent/issue-${NUMBER}"
@@ -46,6 +48,18 @@ case "$MODE" in
     gh pr diff "$NUMBER" > "$DIFF"
     SANDBOX=read-only
     PROMPT='Act as an independent adversarial reviewer. Read /tmp/codex-item.json, /tmp/codex-diff.patch, AGENTS.md, applicable product contracts, and tests. Do not edit files. Report only evidence-backed findings ordered by severity, validation gaps, and a pass/fail recommendation.'
+    TARGET=pr
+    ;;
+  repair)
+    gh pr view "$NUMBER" --json title,body,url,author,baseRefName,headRefName,files,commits,reviews,comments > "$ITEM"
+    AUTHOR=$(jq -r '.author.login' "$ITEM")
+    [ "$AUTHOR" = "$OWNER" ] || fail "Only owner-authored PRs may use unattended repair."
+    BRANCH=$(jq -r '.headRefName' "$ITEM")
+    git fetch --quiet origin main "$BRANCH"
+    git switch --force-create "$BRANCH" "origin/$BRANCH" >/dev/null
+    gh pr diff "$NUMBER" > "$DIFF"
+    SANDBOX=workspace-write
+    PROMPT='Act as the repair agent. Read /tmp/codex-item.json, /tmp/codex-diff.patch, AGENTS.md, review findings, and CI evidence. Fix only verified findings. Do not expand scope, add dependencies, change database schema, modify agent-system files, merge, or deploy. Run the narrowest relevant validation.'
     TARGET=pr
     ;;
   memory)
@@ -65,7 +79,7 @@ codex exec --ephemeral --sandbox "$SANDBOX" --output-last-message "$OUTPUT" "$PR
 [ -n "$SAVED_GH" ] && export GH_TOKEN=$SAVED_GH
 [ -n "$SAVED_GITHUB" ] && export GITHUB_TOKEN=$SAVED_GITHUB
 
-if [ "$MODE" = implement ]; then
+if [ "$MODE" = implement ] || [ "$MODE" = repair ]; then
   git diff --check
   git diff --name-only > "$FILES"
   [ -s "$FILES" ] || fail "Codex made no changes."
@@ -74,9 +88,15 @@ if [ "$MODE" = implement ]; then
   grep -Eq '(^|/)(\.env($|\.)|secrets?($|\.)|credentials?($|\.))' "$FILES" && fail "Secret or environment files changed."
   grep -Eq '^(AGENTS\.md|OPERATING-MANUAL\.md|\.github/workflows/codex-development-agents\.yml|scripts/agents/|docs/brain/(DEVELOPMENT_AGENT_SYSTEM|CODEX_AUTOMATION)\.md)' "$FILES" && fail "Protected automation files changed."
   git add -- $(cat "$FILES")
-  git commit -m "Implement issue #${NUMBER} with Codex"
-  git push -u origin "$BRANCH"
-  gh pr create --draft --base main --head "$BRANCH" --title "Codex implementation for issue #${NUMBER}" --body "Automated implementation for #${NUMBER}. Human review, CI, merge approval, and deployment approval remain required."
+  if [ "$MODE" = implement ]; then
+    git commit -m "Implement issue #${NUMBER} with Codex"
+    git push -u origin "$BRANCH"
+    gh pr create --draft --base main --head "$BRANCH" --title "Codex implementation for issue #${NUMBER}" --body "Automated implementation for #${NUMBER}. Human review, CI, merge approval, and deployment approval remain required."
+  else
+    git commit -m "Address review findings on PR #${NUMBER}"
+    git push origin "$BRANCH"
+    gh pr comment "$NUMBER" --body "Codex repair completed and pushed. Human review and CI remain required."
+  fi
   exit 0
 fi
 
