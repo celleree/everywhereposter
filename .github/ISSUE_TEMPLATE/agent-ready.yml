@@ -1,0 +1,101 @@
+name: Agent-ready development task
+description: Define a bounded task for ChatGPT and Codex planning, implementation, review, and verification.
+title: "[Agent-ready] "
+labels:
+  - agent-ready
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template only after the requested outcome is clear enough for implementation. Keep unresolved product decisions visible rather than letting an agent invent them.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: State the user-visible or operational result.
+      placeholder: What should be true when this is complete?
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Current behavior
+      description: Describe the current state, failure, or limitation with evidence.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List objective, testable conditions.
+      placeholder: |
+        - [ ] Criterion one
+        - [ ] Criterion two
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Product and technical constraints
+      description: Include contracts, compatibility requirements, safety rules, or files that must be checked.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Expected scope
+      description: Name the likely files, directories, services, or product surfaces. This may be refined during investigation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Explicitly out of scope
+      description: State what must not change.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk classification
+      options:
+        - Low - isolated code, copy, tests, or documentation
+        - Medium - shared workflow or user-visible behavior
+        - High - authentication, security, database, billing, infrastructure, or deployment
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Required validation
+      description: List focused tests, type checks, builds, manual checks, or CI requirements.
+    validations:
+      required: true
+
+  - type: textarea
+    id: unresolved
+    attributes:
+      label: Unresolved human decisions
+      description: List decisions that an agent must not make on its own. Write "None" when there are none.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Readiness confirmation
+      options:
+        - label: The desired outcome and acceptance criteria are clear.
+          required: true
+        - label: Product decisions that still require a human are listed above.
+          required: true
+        - label: The task has explicit exclusions and validation requirements.
+          required: true
