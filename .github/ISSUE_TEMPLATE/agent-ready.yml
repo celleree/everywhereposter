@@ -1,13 +1,11 @@
-name: Agent-ready development task
+name: Agent development task
 description: Define a bounded task for ChatGPT and Codex planning, implementation, review, and verification.
-title: "[Agent-ready] "
-labels:
-  - agent-ready
+title: "[Agent task] "
 body:
   - type: markdown
     attributes:
       value: |
-        Use this template only after the requested outcome is clear enough for implementation. Keep unresolved product decisions visible rather than letting an agent invent them.
+        Creating this issue does not start automation. Complete the task definition first. A repository owner must review it and manually apply the `agent-ready` label before the planning agent can run.
 
   - type: textarea
     id: outcome
@@ -98,4 +96,6 @@ body:
         - label: Product decisions that still require a human are listed above.
           required: true
         - label: The task has explicit exclusions and validation requirements.
+          required: true
+        - label: I understand that a repository owner must apply `agent-ready` separately.
           required: true

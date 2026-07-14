@@ -21,32 +21,40 @@ concurrency:
   group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+permissions: {}
 
 jobs:
-  resolve:
+  read-role:
     if: >-
       github.actor == github.repository_owner &&
       (
-        github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'issues' && github.event.label.name == 'agent-ready') ||
         (github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review') ||
-        (github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true)
+        (github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true) ||
+        (
+          github.event_name == 'workflow_dispatch' &&
+          (inputs.mode == 'plan' || inputs.mode == 'review' || inputs.mode == 'memory')
+        )
       )
     runs-on: [self-hosted, linux, codex]
     timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
+      GIT_TERMINAL_PROMPT: "0"
+
     steps:
       - name: Check out trusted main
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Resolve role and target
+      - name: Resolve read-only role and target
         id: task
         shell: bash
         run: |
@@ -65,13 +73,63 @@ jobs:
           fi
 
       - name: Verify trusted runner tools
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          rm -rf "$GH_CONFIG_DIR"
+          mkdir -p "$GH_CONFIG_DIR"
           codex login status
-          gh auth status
+          codex --version
+          gh --version
           git --version
           jq --version
+          command -v base64
+          bwrap --version
 
       - name: Run bounded Codex role
         env:
           GH_TOKEN: ${{ github.token }}
         run: sh scripts/agents/codex-task.sh "${{ steps.task.outputs.mode }}" "${{ steps.task.outputs.number }}"
+
+  write-role:
+    if: >-
+      github.actor == github.repository_owner &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.mode == 'implement' || inputs.mode == 'repair')
+    runs-on: [self-hosted, linux, codex]
+    timeout-minutes: 90
+    permissions:
+      actions: write
+      contents: write
+      issues: read
+      pull-requests: write
+    env:
+      GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
+      GIT_TERMINAL_PROMPT: "0"
+
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify trusted runner tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf "$GH_CONFIG_DIR"
+          mkdir -p "$GH_CONFIG_DIR"
+          codex login status
+          codex --version
+          gh --version
+          git --version
+          jq --version
+          command -v base64
+          bwrap --version
+
+      - name: Run bounded Codex role
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/agents/codex-task.sh "${{ inputs.mode }}" "${{ inputs.number }}"
