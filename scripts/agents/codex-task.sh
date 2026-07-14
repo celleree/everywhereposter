@@ -225,7 +225,7 @@ fi
 codex login status >/dev/null 2>&1 ||
   fail "Codex is not authenticated on this trusted runner."
 
-cat "$CONTEXT" | codex exec \
+cat "$CONTEXT" | codex --ask-for-approval never exec \
   --ephemeral \
   --ignore-user-config \
   --config 'tools.web_search=false' \
@@ -235,7 +235,6 @@ cat "$CONTEXT" | codex exec \
   --config 'shell_environment_policy.exclude=["HOME","CODEX_HOME","GH_*","GITHUB_*","ACTIONS_*","*TOKEN*","*SECRET*","*KEY*","SSH_*"]' \
   --config "shell_environment_policy.set={ HOME = \"$AGENT_HOME\" }" \
   --sandbox "$SANDBOX" \
-  --ask-for-approval never \
   --output-last-message "$OUTPUT" \
   "$PROMPT"
 
