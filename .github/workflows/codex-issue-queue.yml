@@ -8,72 +8,8 @@ on:
         description: Comma-separated open issue numbers to process sequentially
         required: true
         type: string
-        default: "15,16,17,18,27,28,30"
+        default: "30,27,28,15,16,17,18"
       implement_issues:
-        description: Safe subset approved for draft-PR implementation
+        description: Pre-approved safe issues eligible for draft-PR implementation
         required: true
         type: string
-        default: "27,28,30"
-      max_minutes_per_role:
-        description: Maximum runtime for each Codex plan or implementation role
-        required: true
-        type: choice
-        options: [180, 360, 720]
-        default: 360
-      confirmation:
-        description: Type RUN UNATTENDED to start
-        required: true
-        type: string
-
-concurrency:
-  group: codex-unattended-issue-queue
-  cancel-in-progress: false
-
-permissions: {}
-
-jobs:
-  queue:
-    if: >-
-      github.actor == github.repository_owner &&
-      inputs.confirmation == 'RUN UNATTENDED'
-    runs-on: [self-hosted, linux, codex]
-    timeout-minutes: 1440
-    permissions:
-      actions: write
-      contents: write
-      issues: write
-      pull-requests: write
-    env:
-      GIT_TERMINAL_PROMPT: "0"
-      QUEUE_ISSUES: ${{ inputs.issues }}
-      QUEUE_IMPLEMENT_ISSUES: ${{ inputs.implement_issues }}
-      QUEUE_MAX_MINUTES: ${{ inputs.max_minutes_per_role }}
-
-    steps:
-      - name: Check out trusted main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Verify trusted runner tools
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
-        run: |
-          rm -rf "$GH_CONFIG_DIR"
-          mkdir -p "$GH_CONFIG_DIR"
-          codex login status
-          codex --version
-          gh --version
-          git --version
-          jq --version
-          timeout --version | head -n 1
-          bwrap --version
-
-      - name: Start unattended sequential queue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
-        run: bash scripts/agents/codex-issue-queue.sh
