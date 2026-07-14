@@ -1,15 +1,14 @@
 name: Codex unattended issue queue
-run-name: Codex unattended queue - ${{ inputs.issues }}
+run-name: Codex unattended queue
 
 on:
   workflow_dispatch:
     inputs:
-      issues:
-        description: Comma-separated open issue numbers to process sequentially
+      max_minutes_per_role:
+        description: Maximum runtime for each Codex plan or implementation role
         required: true
-        type: string
-        default: "30,27,28,15,16,17,18"
-      implement_issues:
-        description: Pre-approved safe issues eligible for draft-PR implementation
-        required: true
-        type: string
+        type: choice
+        options:
+          - "180"
+          - "300"
+        default
