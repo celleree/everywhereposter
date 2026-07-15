@@ -5,6 +5,7 @@ ROOT=$(git rev-parse --show-toplevel)
 QUEUE_SCRIPT="$ROOT/scripts/agents/codex-issue-queue.sh"
 TASK_SCRIPT="$ROOT/scripts/agents/codex-task.sh"
 WORKFLOW="$ROOT/.github/workflows/codex-issue-queue.yml"
+AUTOMATION_DOC="$ROOT/docs/brain/CODEX_AUTOMATION.md"
 TMP_ROOT=$(mktemp -d)
 trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
 
@@ -274,23 +275,23 @@ assert_contains "$LAST_CASE_DIR/summary" 'did not produce a verifiable draft pul
 run_case plan-timeout 106 true 1
 assert_contains "$LAST_CASE_DIR/summary" 'Planning timed out' 'role timeout must be recorded'
 run_case safe 107 false 0
-assert_contains "$LAST_CASE_DIR/log" 'role:plan:107' 'a later issue must still run after an earlier timeout'
+assert_contains "$LAST_CASE_DIR/log" 'role:plan:107' 'another issue must remain runnable after an issue timeout'
 
 run_case plan-failure 113 true 1
 assert_contains "$LAST_CASE_DIR/summary" 'Planning failed' 'role failure must be recorded'
 run_case safe 114 false 0
-assert_contains "$LAST_CASE_DIR/log" 'role:plan:114' 'a later issue must still run after an earlier issue failure'
+assert_contains "$LAST_CASE_DIR/log" 'role:plan:114' 'another issue must remain runnable after an issue failure'
 
 run_case comment-failure 108 true 1
 assert_contains "$LAST_CASE_DIR/log" 'role:implement:108' 'comment failure must not abort role processing'
 assert_contains "$LAST_CASE_DIR/summary" 'Operational failure' 'comment failure must be recorded'
 run_case safe 109 false 0
-assert_contains "$LAST_CASE_DIR/log" 'role:plan:109' 'a later issue must still run after a status failure'
+assert_contains "$LAST_CASE_DIR/log" 'role:plan:109' 'another issue must remain runnable after a status failure'
 
 run_case api-failure 110 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:110' 'readiness API failure must fail closed'
 run_case safe 111 false 0
-assert_contains "$LAST_CASE_DIR/log" 'role:plan:111' 'a later issue must still run after an API failure'
+assert_contains "$LAST_CASE_DIR/log" 'role:plan:111' 'another issue must remain runnable after an API failure'
 
 run_case pr-lookup-failure 112 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:112' 'PR lookup failure must block duplicate-unsafe implementation'
@@ -478,8 +479,13 @@ assert_contains "$WORKFLOW" "inputs.confirmation == 'RUN UNATTENDED'" 'dispatch 
 assert_contains "$WORKFLOW" "github.ref == 'refs/heads/main'" 'dispatch must be restricted to main'
 assert_eq '2' "$(grep -Fc 'ref: ${{ github.sha }}' "$WORKFLOW")" \
   'preparation and issue jobs must use the same reviewed main revision'
-assert_contains "$WORKFLOW" 'max-parallel: 1' 'matrix issues must run sequentially'
-assert_contains "$WORKFLOW" 'fail-fast: false' 'one issue failure must not cancel later matrix issues'
+assert_contains "$WORKFLOW" 'max-parallel: 1' 'no more than one matrix issue job may run at a time'
+assert_contains "$WORKFLOW" 'fail-fast: false' 'one issue failure must not cancel remaining matrix issues'
+assert_not_contains "$WORKFLOW" 'execution order' 'the workflow must not promise matrix execution order'
+assert_contains "$AUTOMATION_DOC" 'GitHub controls which pending matrix job is selected next, so runtime start order is not guaranteed.' \
+  'the canonical documentation must warn that GitHub controls runtime matrix order'
+assert_contains "$AUTOMATION_DOC" 'Queued issues must therefore be independent and must not depend on an earlier queue entry completing first.' \
+  'the canonical documentation must require independent queued issues'
 assert_contains "$WORKFLOW" 'timeout-minutes: 340' 'each issue job must have bounded timeout headroom'
 assert_not_contains "$WORKFLOW" 'gh pr merge' 'the workflow must not merge pull requests'
 assert_not_contains "$WORKFLOW" 'deploy' 'the workflow must not deploy'

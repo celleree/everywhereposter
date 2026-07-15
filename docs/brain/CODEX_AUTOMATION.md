@@ -116,9 +116,9 @@ Merging a pull request automatically runs the read-only memory coordinator and p
 
 The repository owner may explicitly launch `Codex unattended issue queue` from `main` with `workflow_dispatch` after typing the confirmation phrase. Dispatches from any other ref are rejected. It has no scheduled, issue-label, pull-request, or repository event trigger.
 
-The owner supplies an ordered issue list and an optional implementation subset. Queue parsing accepts comma-separated issue numbers, rejects malformed values, removes duplicates while preserving the first occurrence, and rejects implementation numbers that are absent from the main queue. An empty implementation subset is valid and makes every entry plan-only.
+The owner supplies an issue list and an optional implementation subset. Queue parsing is deterministic: it accepts comma-separated issue numbers, rejects malformed values, removes duplicates while preserving the first occurrence in the generated matrix data, and rejects implementation numbers that are absent from the main queue. An empty implementation subset is valid and makes every entry plan-only.
 
-The workflow prepares an ordered matrix, then runs one issue job at a time with `max-parallel: 1`. `fail-fast` is disabled, so a failed or timed-out issue does not cancel later issue jobs. Each issue job may:
+The workflow prepares matrix data that preserves first-occurrence order and uses `max-parallel: 1`, so no more than one issue job runs at a time. GitHub controls which pending matrix job is selected next, so runtime start order is not guaranteed. Queued issues must therefore be independent and must not depend on an earlier queue entry completing first. `fail-fast` is disabled, so a failed or timed-out issue does not cancel the remaining issue jobs. Each issue job may:
 
 1. Run the read-only planning role and allow that role to inspect and comment on the issue.
 2. Stop as plan-only when the issue is not in the owner-supplied implementation subset.
@@ -177,7 +177,7 @@ GitHub events produced with the repository `GITHUB_TOKEN` have special recursion
 ## Limits
 
 - Standard development-agent jobs have a 90-minute maximum runtime.
-- Queue roles are limited to 60, 120, or 150 minutes. Each ordered issue has its own 340-minute job, which accommodates two maximum-length roles, both five-minute termination grace periods, and at least 30 minutes for checkout, cleanup, comments, and final reporting.
+- Queue roles are limited to 60, 120, or 150 minutes. Each matrix issue has its own 340-minute job, which accommodates two maximum-length roles, both five-minute termination grace periods, and at least 30 minutes for checkout, cleanup, comments, and final reporting.
 - Maximum unattended implementation size: 30 changed files.
 - Secret, environment, agent-system, workflow, dependency, database-schema, container, and deployment files are blocked.
 - GitHub credentials are removed before Codex receives issue, PR, comment, or diff content.
@@ -189,7 +189,7 @@ GitHub events produced with the repository `GITHUB_TOKEN` have special recursion
 
 For the standard development-agent workflow, a failed role stops that workflow run. Do not blindly rerun it. Review the issue, branch, logs, and any partial changes first.
 
-The unattended queue isolates failures per issue. Planning and implementation commands each run under their own command timeout inside the issue job. A role failure or timeout is recorded in that issue's job summary, cleanup is attempted, the issue job fails, and the ordered matrix remains eligible to start the next issue.
+The unattended queue isolates failures per issue. Planning and implementation commands each run under their own command timeout inside the issue job. A role failure or timeout is recorded in that issue's job summary, cleanup is attempted, the issue job fails, and the remaining matrix entries stay eligible to run in the order GitHub selects.
 
 Expected per-issue GitHub failures are explicitly contained rather than being left to `set -e`:
 

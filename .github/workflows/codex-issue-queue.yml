@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       issues:
-        description: Comma-separated open issue numbers in execution order
+        description: Comma-separated open issue numbers
         required: true
         type: string
         default: "30,27,28,15,16,17,18"
@@ -53,7 +53,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Preserve queue order and remove duplicates
+      - name: Normalize issue list and remove duplicates
         id: queue
         env:
           QUEUE_ISSUES: ${{ inputs.issues }}
@@ -66,6 +66,8 @@ jobs:
     needs: prepare
     if: needs.prepare.result == 'success'
     strategy:
+      # Matrix data preserves first-occurrence order, but GitHub controls pending
+      # job selection. Entries must be independent of runtime start order.
       fail-fast: false
       max-parallel: 1
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
