@@ -145,7 +145,7 @@ has_blocked_category() {
   local scoped_text
 
   scoped_text=$(awk '
-    /^###[[:space:]]+(Desired outcome|Current behavior|Acceptance criteria|Product and technical constraints|Expected scope|Explicitly out of scope|Required validation|Unresolved human decisions)[[:space:]]*$/ {
+    /^###[[:space:]]+(Desired outcome|Current behavior|Acceptance criteria|Product and technical constraints|Expected scope|Required validation|Unresolved human decisions)[[:space:]]*$/ {
       capture=1
       next
     }

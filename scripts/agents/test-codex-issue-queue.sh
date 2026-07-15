@@ -91,11 +91,13 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
     missing-readiness) labels='[]' ;;
     non-template) body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation' ;;
     missing-section) body=${body//$'\n### Required validation\n\nCheck the rendered text.\n'/} ;;
+    missing-exclusions) body=${body//$'\n### Explicitly out of scope\n\nApplication code.\n'/} ;;
     duplicated-section) body+=$'\n\n### Desired outcome\n\nA duplicate outcome.' ;;
     missing-risk) body=${body%%$'\n\n### Risk classification'*} ;;
     malformed-risk) body+=$'\n\n### Risk classification\n\nLow - something else' ;;
     high-risk) body=${body/Low - isolated code, copy, tests, or documentation/High - authentication, security, database, billing, infrastructure, or deployment} ;;
     blocked-category) title='Upgrade a package dependency' ;;
+    safe-exclusions) body=${body/Application code./Do not touch the database schema, deployment configuration, dependencies, containers, or GitHub workflow files.} ;;
     protected-constraints) body=${body/No additional constraints./Change the database schema.} ;;
     protected-validation) body=${body/Check the rendered text./Validate the deployment workflow.} ;;
     closed-on-refresh)
@@ -207,6 +209,8 @@ run_case non-template 115 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:115' 'a valid-looking low-risk non-template issue must fail closed'
 run_case missing-section 116 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:116' 'a missing required section must fail closed'
+run_case missing-exclusions 122 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:122' 'the explicitly out-of-scope section must remain required'
 run_case duplicated-section 117 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:117' 'a duplicated required section must fail closed'
 run_case missing-risk 102 true 1
@@ -217,6 +221,8 @@ run_case high-risk 104 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:104' 'high risk must block implementation'
 run_case blocked-category 105 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:105' 'blocked work categories must block implementation'
+run_case safe-exclusions 123 true 0
+assert_contains "$LAST_CASE_DIR/log" 'role:implement:123' 'protected categories stated only as explicit exclusions must not block safe work'
 run_case protected-constraints 118 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:118' 'protected work in product and technical constraints must block implementation'
 run_case protected-validation 119 true 1
