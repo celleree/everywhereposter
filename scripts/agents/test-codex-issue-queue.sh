@@ -99,7 +99,13 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
     malformed-risk) body+=$'\n\n### Risk classification\n\nLow - something else' ;;
     high-risk) body=${body/Low - isolated code, copy, tests, or documentation/High - authentication, security, database, billing, infrastructure, or deployment} ;;
     blocked-category) title='Upgrade a package dependency' ;;
+    oauth-title) title='Add OAuth callback' ;;
+    oauth-constraints) body=${body/No additional constraints./Add OAuth token refresh handling.} ;;
+    oauth-scope) body=${body/docs\/example.md/oauth2 provider integration.} ;;
+    oauth-validation) body=${body/Check the rendered text./Validate OAuth 2 provider integration.} ;;
+    oauth-outcome) body=${body/Correct a documentation typo./Add OAuth 2.0 provider integration.} ;;
     safe-exclusions) body=${body/Application code./Do not touch the database schema, deployment configuration, dependencies, containers, or GitHub workflow files.} ;;
+    safe-oauth-exclusion) body=${body/Application code./OAuth changes are explicitly out of scope.} ;;
     protected-constraints) body=${body/No additional constraints./Change the database schema.} ;;
     protected-validation) body=${body/Check the rendered text./Validate the deployment workflow.} ;;
     post-validation-edit)
@@ -256,8 +262,20 @@ run_case high-risk 104 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:104' 'high risk must block implementation'
 run_case blocked-category 105 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:105' 'blocked work categories must block implementation'
+run_case oauth-title 125 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:125' 'OAuth callback work in the title must block implementation'
+run_case oauth-constraints 126 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:126' 'OAuth token refresh work in constraints must block implementation'
+run_case oauth-scope 127 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:127' 'lowercase OAuth2 work in expected scope must block implementation'
+run_case oauth-validation 128 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:128' 'OAuth 2 work in required validation must block implementation'
+run_case oauth-outcome 129 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:129' 'OAuth 2.0 work in the desired outcome must block implementation'
 run_case safe-exclusions 123 true 0
 assert_contains "$LAST_CASE_DIR/log" 'role:implement:123' 'protected categories stated only as explicit exclusions must not block safe work'
+run_case safe-oauth-exclusion 130 true 0
+assert_contains "$LAST_CASE_DIR/log" 'role:implement:130' 'OAuth stated only as explicitly out of scope must not block safe work'
 run_case protected-constraints 118 true 1
 assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:118' 'protected work in product and technical constraints must block implementation'
 run_case protected-validation 119 true 1
