@@ -10,226 +10,478 @@ need() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"
 }
 
-need gh
-need git
-need timeout
-need sed
-need tr
-need grep
-need jq
-
-: "${GH_TOKEN:?GH_TOKEN must be provided by GitHub Actions}"
-: "${QUEUE_ISSUES:?QUEUE_ISSUES is required}"
-: "${QUEUE_IMPLEMENT_ISSUES:?QUEUE_IMPLEMENT_ISSUES is required}"
-: "${QUEUE_MAX_MINUTES:?QUEUE_MAX_MINUTES is required}"
-
-case "$QUEUE_MAX_MINUTES" in
-  ''|*[!0-9]*) fail "QUEUE_MAX_MINUTES must contain digits only." ;;
-esac
-[ "$QUEUE_MAX_MINUTES" -ge 30 ] || fail "QUEUE_MAX_MINUTES must be at least 30."
-[ "$QUEUE_MAX_MINUTES" -le 720 ] || fail "QUEUE_MAX_MINUTES may not exceed 720."
-
-ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || fail "Run inside the repository checkout."
-cd "$ROOT"
-
-OWNER=$(gh repo view --json owner --jq .owner.login)
-ACTOR=${GITHUB_ACTOR:-}
-[ "$ACTOR" = "$OWNER" ] || fail "Only the repository owner may launch the unattended queue."
-
-TMP_ROOT=$(mktemp -d)
-ISSUES_FILE="$TMP_ROOT/issues.txt"
-IMPLEMENT_FILE="$TMP_ROOT/implement.txt"
-RESULTS_FILE="$TMP_ROOT/results.md"
-trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
-
 normalize_list() {
   local raw=$1
   local output=$2
+  local allow_empty=$3
   local item
 
   : > "$output"
-  for item in $(printf '%s' "$raw" | tr ',' ' '); do
-    case "$item" in
-      ''|*[!0-9]*) fail "Invalid issue number in queue: $item" ;;
-    esac
-    printf '%s\n' "$item" >> "$output"
-  done
-
-  sed -i '/^$/d' "$output"
-  sort -n -u "$output" -o "$output"
-  [ -s "$output" ] || fail "The queue contains no issue numbers."
-}
-
-normalize_list "$QUEUE_ISSUES" "$ISSUES_FILE"
-normalize_list "$QUEUE_IMPLEMENT_ISSUES" "$IMPLEMENT_FILE"
-
-while IFS= read -r issue; do
-  grep -Fxq "$issue" "$ISSUES_FILE" || fail "Implementation issue #$issue is not present in QUEUE_ISSUES."
-done < "$IMPLEMENT_FILE"
-
-RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-ISSUE_LIST=$(paste -sd, "$ISSUES_FILE")
-IMPLEMENT_LIST=$(paste -sd, "$IMPLEMENT_FILE")
-
-{
-  echo "# Codex unattended queue started"
-  echo
-  echo "- Run: $RUN_URL"
-  echo "- Issues: $ISSUE_LIST"
-  echo "- Approved implementation subset: $IMPLEMENT_LIST"
-  echo "- Maximum Codex runtime per role: ${QUEUE_MAX_MINUTES} minutes"
-  echo "- Execution: sequential"
-  echo "- Automatic merge: disabled"
-  echo "- Deployment: disabled"
-  echo
-  echo "| Issue | Result |"
-  echo "|---:|---|"
-} > "$RESULTS_FILE"
-
-cat "$RESULTS_FILE" >> "$GITHUB_STEP_SUMMARY"
-echo "::notice title=Codex queue started::Issues $ISSUE_LIST are running sequentially. No merge or deployment will occur."
-
-comment_issue() {
-  local issue=$1
-  local body=$2
-  gh issue comment "$issue" --body "$body" >/dev/null
-}
-
-restore_main() {
-  git config --local --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
-  git reset --hard >/dev/null 2>&1 || true
-  git clean -fd >/dev/null 2>&1 || true
-  git switch --force-create main origin/main >/dev/null 2>&1 || true
-}
-
-run_role() {
-  local mode=$1
-  local number=$2
-  timeout --signal=TERM --kill-after=5m "${QUEUE_MAX_MINUTES}m" \
-    sh scripts/agents/codex-task.sh "$mode" "$number"
-}
-
-planned=0
-implemented=0
-plan_only=0
-failed=0
-skipped=0
-
-while IFS= read -r issue; do
-  state=$(gh issue view "$issue" --json state --jq .state 2>/dev/null || true)
-  if [ "$state" != "OPEN" ]; then
-    printf '| #%s | Skipped: issue is not open |\n' "$issue" >> "$RESULTS_FILE"
-    skipped=$((skipped + 1))
-    continue
+  if [[ -z "${raw//[[:space:]]/}" ]]; then
+    [[ "$allow_empty" == "true" ]] || fail "The queue contains no issue numbers."
+    return 0
   fi
 
-  gh issue edit "$issue" --add-label agent-ready >/dev/null
-  comment_issue "$issue" "<!-- codex-queue-start:${GITHUB_RUN_ID} -->
+  while IFS= read -r item || [[ -n "$item" ]]; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ "$item" =~ ^[0-9]+$ ]] || fail "Invalid issue number in queue: ${item:-<empty>}"
+    if ! grep -Fxq "$item" "$output"; then
+      printf '%s\n' "$item" >> "$output"
+    fi
+  done < <(printf '%s\n' "$raw" | tr ',' '\n')
+
+  [[ -s "$output" || "$allow_empty" == "true" ]] || fail "The queue contains no issue numbers."
+}
+
+prepare_queue() {
+  need jq
+  need grep
+  need tr
+
+  : "${QUEUE_ISSUES:?QUEUE_ISSUES is required}"
+  QUEUE_IMPLEMENT_ISSUES=${QUEUE_IMPLEMENT_ISSUES:-}
+
+  local issues_file implement_file issue implement matrix
+  TMP_ROOT=$(mktemp -d)
+  issues_file="$TMP_ROOT/issues.txt"
+  implement_file="$TMP_ROOT/implement.txt"
+  trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
+
+  normalize_list "$QUEUE_ISSUES" "$issues_file" false
+  normalize_list "$QUEUE_IMPLEMENT_ISSUES" "$implement_file" true
+
+  while IFS= read -r issue; do
+    grep -Fxq "$issue" "$issues_file" ||
+      fail "Implementation issue #$issue is not present in QUEUE_ISSUES."
+  done < "$implement_file"
+
+  matrix='[]'
+  while IFS= read -r issue; do
+    implement=false
+    if grep -Fxq "$issue" "$implement_file"; then
+      implement=true
+    fi
+    matrix=$(jq -cn \
+      --argjson current "$matrix" \
+      --arg issue "$issue" \
+      --argjson implement "$implement" \
+      '$current + [{issue: $issue, implement: $implement}]')
+  done < "$issues_file"
+
+  jq -cn --argjson include "$matrix" '{include: $include}'
+}
+
+extract_risk() {
+  local body_file=$1
+  local headings values risk
+
+  headings=$(awk '/^###[[:space:]]+Risk classification[[:space:]]*$/ { count++ } END { print count + 0 }' "$body_file")
+  [[ "$headings" == "1" ]] || return 1
+
+  values=$(awk '
+    /^###[[:space:]]+Risk classification[[:space:]]*$/ { capture=1; next }
+    capture && /^###[[:space:]]+/ { capture=0 }
+    capture && $0 !~ /^[[:space:]]*$/ { print }
+  ' "$body_file")
+  [[ $(printf '%s\n' "$values" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ') == "1" ]] || return 1
+
+  risk=$(printf '%s' "$values" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  case "$risk" in
+    'Low - isolated code, copy, tests, or documentation'|\
+    'Medium - shared workflow or user-visible behavior')
+      printf '%s\n' "$risk"
+      ;;
+    'High - authentication, security, database, billing, infrastructure, or deployment')
+      return 2
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+has_blocked_category() {
+  local title=$1
+  local body_file=$2
+  local scoped_text
+
+  scoped_text=$(awk '
+    /^###[[:space:]]+(Desired outcome|Current behavior|Acceptance criteria|Expected scope)[[:space:]]*$/ {
+      capture=1
+      next
+    }
+    /^###[[:space:]]+/ { capture=0 }
+    capture { print }
+  ' "$body_file")
+
+  printf '%s\n%s\n' "$title" "$scoped_text" | grep -Eiq \
+    'authentication|authorization|(^|[^[:alnum:]_])auth([^[:alnum:]_]|$)|security|billing|payments?|databases?|schema|migrations?|infrastructure|dependenc(y|ies)|package[[:space:]]+(upgrade|update|bump)|package\.json|(^|/)(pnpm-lock|package-lock|yarn\.lock|bun\.lock)|containers?|docker|github[[:space:]]+actions|\.github/workflows|workflow[[:space:]]+(file|ya?ml|action|change)|deploy(ment|ing)?|production[[:space:]]+(operation|change|deploy)'
+}
+
+run_issue() {
+  need gh
+  need git
+  need timeout
+  need sed
+  need grep
+  need jq
+  need tail
+
+  : "${GH_TOKEN:?GH_TOKEN must be provided by GitHub Actions}"
+  : "${QUEUE_ISSUE:?QUEUE_ISSUE is required}"
+  : "${QUEUE_IMPLEMENT:?QUEUE_IMPLEMENT is required}"
+  : "${QUEUE_MAX_MINUTES:?QUEUE_MAX_MINUTES is required}"
+  : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+  : "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+  : "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+
+  [[ "$QUEUE_ISSUE" =~ ^[0-9]+$ ]] || fail "QUEUE_ISSUE must contain digits only."
+  [[ "$QUEUE_IMPLEMENT" == "true" || "$QUEUE_IMPLEMENT" == "false" ]] ||
+    fail "QUEUE_IMPLEMENT must be true or false."
+  [[ "$QUEUE_MAX_MINUTES" =~ ^[0-9]+$ ]] || fail "QUEUE_MAX_MINUTES must contain digits only."
+  [[ "$QUEUE_MAX_MINUTES" -ge 30 ]] || fail "QUEUE_MAX_MINUTES must be at least 30."
+  [[ "$QUEUE_MAX_MINUTES" -le 150 ]] || fail "QUEUE_MAX_MINUTES may not exceed 150."
+
+  local root owner actor item body_file results_file run_url
+  local operational_failures=0 outcome=success outcome_detail='Completed successfully'
+  local cleanup_failed=0 rc existing_json existing_pr label_actors label_actor risk pr_json pr_url pr_draft
+
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || fail "Run inside the repository checkout."
+  cd "$root"
+
+  TMP_ROOT=$(mktemp -d)
+  item="$TMP_ROOT/item.json"
+  body_file="$TMP_ROOT/body.md"
+  results_file="$TMP_ROOT/results.md"
+  trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
+
+  run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+  {
+    echo "# Codex unattended queue result for issue #${QUEUE_ISSUE}"
+    echo
+    echo "- Run: $run_url"
+    echo "- Implementation requested: $QUEUE_IMPLEMENT"
+    echo "- Maximum Codex runtime per role: ${QUEUE_MAX_MINUTES} minutes"
+    echo "- Automatic merge: disabled"
+    echo "- Deployment: disabled"
+    echo
+  } > "$results_file"
+
+  record_operation_failure() {
+    local message=$1
+    operational_failures=$((operational_failures + 1))
+    echo "::warning title=Codex queue operational failure::$message"
+    printf -- '- Operational failure: %s\n' "$message" >> "$results_file"
+  }
+
+  post_comment() {
+    local body=$1
+    if ! gh issue comment "$QUEUE_ISSUE" --body "$body" >/dev/null; then
+      record_operation_failure "Could not post an issue comment for #${QUEUE_ISSUE}."
+      return 1
+    fi
+  }
+
+  restore_main() {
+    cleanup_failed=0
+    if ! git config --local --unset-all http.https://github.com/.extraheader >/dev/null 2>&1; then
+      if git config --local --get-all http.https://github.com/.extraheader >/dev/null 2>&1; then
+        record_operation_failure "Could not remove the temporary GitHub credential header for #${QUEUE_ISSUE}."
+        cleanup_failed=1
+      fi
+    fi
+    if ! git reset --hard >/dev/null 2>&1; then
+      record_operation_failure "Could not reset the runner checkout after #${QUEUE_ISSUE}."
+      cleanup_failed=1
+    fi
+    if ! git clean -fd >/dev/null 2>&1; then
+      record_operation_failure "Could not clean the runner checkout after #${QUEUE_ISSUE}."
+      cleanup_failed=1
+    fi
+    if ! git switch --force-create main origin/main >/dev/null 2>&1; then
+      record_operation_failure "Could not restore trusted main after #${QUEUE_ISSUE}."
+      cleanup_failed=1
+    fi
+    [[ "$cleanup_failed" == "0" ]]
+  }
+
+  run_role() {
+    local mode=$1
+    timeout --signal=TERM --kill-after=5m "${QUEUE_MAX_MINUTES}m" \
+      sh scripts/agents/codex-task.sh "$mode" "$QUEUE_ISSUE"
+  }
+
+  finish() {
+    local requested_status=$1
+    {
+      echo
+      echo "## Final result"
+      echo
+      echo "- Outcome: $outcome"
+      echo "- Detail: $outcome_detail"
+      echo "- Recorded operational failures: $operational_failures"
+      echo
+      echo "No pull request was merged and no deployment was performed."
+    } >> "$results_file"
+    cat "$results_file" > "$GITHUB_STEP_SUMMARY"
+    echo "::notice title=Codex queue issue finished::Issue #${QUEUE_ISSUE}: ${outcome_detail}."
+    if [[ "$requested_status" != "0" || "$operational_failures" -gt 0 ]]; then
+      return 1
+    fi
+  }
+
+  if ! owner=$(gh repo view --json owner --jq .owner.login); then
+    outcome=failure
+    outcome_detail='Repository-owner lookup failed; no role ran'
+    record_operation_failure 'Could not identify the repository owner.'
+    finish 1
+    return
+  fi
+  actor=${GITHUB_ACTOR:-}
+  if [[ "$actor" != "$owner" ]]; then
+    outcome=blocked
+    outcome_detail='The workflow actor is not the repository owner; no role ran'
+    finish 1
+    return
+  fi
+
+  if ! gh issue view "$QUEUE_ISSUE" --json state,title,body,labels > "$item"; then
+    outcome=failure
+    outcome_detail='Issue lookup failed; no role ran'
+    record_operation_failure "Could not look up issue #${QUEUE_ISSUE}."
+    finish 1
+    return
+  fi
+  if [[ $(jq -r '.state // empty' "$item") != "OPEN" ]]; then
+    outcome=skipped
+    outcome_detail='Issue is not open'
+    finish 0
+    return
+  fi
+
+  if ! post_comment "<!-- codex-queue-start:${GITHUB_RUN_ID} -->
 ## Codex unattended queue started
 
-This issue is now being processed by the owner-approved unattended queue.
+Planning has started for this issue in the owner-triggered sequential queue. Planning does not add \`agent-ready\` and cannot authorize implementation.
 
-- Run: $RUN_URL
-- Execution: sequential
+- Run: $run_url
 - Maximum Codex runtime per role: ${QUEUE_MAX_MINUTES} minutes
 - Automatic merge: disabled
-- Deployment: disabled"
-
-  if run_role plan "$issue"; then
-    planned=$((planned + 1))
-  else
-    rc=$?
-    restore_main
-    comment_issue "$issue" "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
-## Codex queue stopped for this issue
-
-The planning role failed or timed out with exit code \`$rc\`. The queue will continue to the next issue. No merge or deployment occurred.
-
-Run: $RUN_URL"
-    printf '| #%s | Planning failed or timed out (exit %s) |\n' "$issue" "$rc" >> "$RESULTS_FILE"
-    failed=$((failed + 1))
-    continue
+- Deployment: disabled"; then
+    : # The failure is recorded; planning may still proceed.
   fi
 
-  if ! grep -Fxq "$issue" "$IMPLEMENT_FILE"; then
-    comment_issue "$issue" "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
+  if run_role plan; then
+    printf -- '- Planning: completed\n' >> "$results_file"
+  else
+    rc=$?
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    outcome=failure
+    if [[ "$rc" == "124" || "$rc" == "137" ]]; then
+      outcome_detail="Planning timed out (exit $rc); later queue issues remain eligible to run"
+    else
+      outcome_detail="Planning failed (exit $rc); later queue issues remain eligible to run"
+    fi
+    if ! post_comment "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
+## Codex planning stopped
+
+$outcome_detail. No implementation, merge, or deployment occurred.
+
+Run: $run_url"; then
+      : # The failure is recorded and final reporting still runs.
+    fi
+    finish 1
+    return
+  fi
+
+  if [[ "$QUEUE_IMPLEMENT" == "false" ]]; then
+    outcome=plan-only
+    outcome_detail='Planning completed; implementation was not requested'
+    if ! post_comment "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
 ## Codex planning completed
 
-This issue is plan-only in the current unattended queue because its risk or required file scope needs separate human approval. No implementation, merge, or deployment was attempted.
+This queue entry is plan-only. No implementation, merge, or deployment was attempted.
 
-Run: $RUN_URL"
-    printf '| #%s | Planning completed; implementation blocked by queue policy |\n' "$issue" >> "$RESULTS_FILE"
-    plan_only=$((plan_only + 1))
-    restore_main
-    continue
+Run: $run_url"; then
+      : # The failure is recorded and final reporting still runs.
+    fi
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 0
+    return
   fi
 
-  existing_pr=$(gh pr list --state all --head "agent/issue-${issue}" --json number,url --jq '.[0].url // empty')
-  if [ -n "$existing_pr" ]; then
-    comment_issue "$issue" "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
-## Existing agent pull request detected
-
-The queue did not create a duplicate implementation branch. Existing pull request: $existing_pr
-
-Run: $RUN_URL"
-    printf '| #%s | Skipped implementation; existing PR: %s |\n' "$issue" "$existing_pr" >> "$RESULTS_FILE"
-    skipped=$((skipped + 1))
-    restore_main
-    continue
+  if ! gh issue view "$QUEUE_ISSUE" --json state,title,body,labels > "$item"; then
+    outcome=blocked
+    outcome_detail='Readiness and risk lookup failed; implementation blocked'
+    record_operation_failure "Could not refresh issue #${QUEUE_ISSUE} before implementation."
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 1
+    return
+  fi
+  if ! jq -e '.labels | map(.name) | index("agent-ready")' "$item" >/dev/null; then
+    outcome=blocked
+    outcome_detail='The pre-existing agent-ready label is missing; implementation blocked'
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 1
+    return
   fi
 
-  comment_issue "$issue" "<!-- codex-queue-implement:${GITHUB_RUN_ID} -->
-## Codex implementation started
+  if ! label_actors=$(gh api --paginate \
+    "repos/${GITHUB_REPOSITORY}/issues/${QUEUE_ISSUE}/events" \
+    --jq '.[] | select(.event == "labeled" and .label.name == "agent-ready") | .actor.login'); then
+    outcome=blocked
+    outcome_detail='Readiness audit lookup failed; implementation blocked'
+    record_operation_failure "Could not verify who applied agent-ready to issue #${QUEUE_ISSUE}."
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 1
+    return
+  fi
+  label_actor=$(printf '%s\n' "$label_actors" | sed '/^[[:space:]]*$/d' | tail -n 1)
+  if [[ "$label_actor" != "$owner" ]]; then
+    outcome=blocked
+    outcome_detail='agent-ready was not most recently applied by the repository owner; implementation blocked'
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 1
+    return
+  fi
 
-Planning completed and this issue is in the approved implementation subset. The agent is now preparing a draft pull request. No automatic merge or deployment is permitted.
-
-Run: $RUN_URL"
-
-  if run_role implement "$issue"; then
-    pr_url=$(gh pr list --state open --head "agent/issue-${issue}" --json url --jq '.[0].url // empty')
-    comment_issue "$issue" "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
-## Codex implementation completed
-
-Draft pull request: ${pr_url:-created, but URL lookup was unavailable}
-
-Pull-request CI was dispatched. Human review and explicit merge approval remain required. No deployment occurred.
-
-Run: $RUN_URL"
-    printf '| #%s | Draft PR created: %s |\n' "$issue" "${pr_url:-URL unavailable}" >> "$RESULTS_FILE"
-    implemented=$((implemented + 1))
+  jq -r '.body // ""' "$item" > "$body_file"
+  if risk=$(extract_risk "$body_file"); then
+    rc=0
   else
     rc=$?
-    restore_main
-    comment_issue "$issue" "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
-## Codex implementation stopped
+  fi
+  if [[ "$rc" == "2" ]]; then
+    outcome=blocked
+    outcome_detail='High-risk classification blocks unattended implementation'
+  elif [[ "$rc" != "0" ]]; then
+    outcome=blocked
+    outcome_detail='Missing, malformed, or ambiguous risk classification blocks unattended implementation'
+  elif has_blocked_category "$(jq -r '.title // ""' "$item")" "$body_file"; then
+    outcome=blocked
+    outcome_detail='The issue describes a category blocked from unattended implementation'
+  fi
+  if [[ "$outcome" == "blocked" ]]; then
+    if ! post_comment "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
+## Codex implementation blocked
 
-The implementation role failed, hit a safety barrier, or timed out with exit code \`$rc\`. The queue will continue to the next issue. No merge or deployment occurred.
+$outcome_detail. Planning may be used, but implementation requires a manual path. No merge or deployment occurred.
 
-Run: $RUN_URL"
-    printf '| #%s | Implementation failed, blocked, or timed out (exit %s) |\n' "$issue" "$rc" >> "$RESULTS_FILE"
-    failed=$((failed + 1))
+Run: $run_url"; then
+      : # The failure is recorded and final reporting still runs.
+    fi
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 1
+    return
+  fi
+  printf -- '- Risk classification: %s\n' "$risk" >> "$results_file"
+
+  if ! existing_json=$(gh pr list --state all --head "agent/issue-${QUEUE_ISSUE}" --json number,url,isDraft); then
+    outcome=blocked
+    outcome_detail='Pull-request lookup failed; duplicate-safe implementation blocked'
+    record_operation_failure "Could not check for an existing pull request for issue #${QUEUE_ISSUE}."
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 1
+    return
+  fi
+  existing_pr=$(printf '%s' "$existing_json" | jq -r '.[0].url // empty')
+  if [[ -n "$existing_pr" ]]; then
+    outcome=skipped
+    outcome_detail="Existing pull request detected: $existing_pr"
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 0
+    return
   fi
 
-  restore_main
-done < "$ISSUES_FILE"
+  if ! post_comment "<!-- codex-queue-implement:${GITHUB_RUN_ID} -->
+## Codex implementation started
 
-{
-  echo
-  echo "## Final counts"
-  echo
-  echo "- Plans completed: $planned"
-  echo "- Draft PRs created: $implemented"
-  echo "- Plan-only issues: $plan_only"
-  echo "- Skipped issues: $skipped"
-  echo "- Failed or blocked issues: $failed"
-  echo
-  echo "No pull request was merged and no deployment was performed."
-} >> "$RESULTS_FILE"
+Planning completed, the owner-applied readiness gate is present, and the issue passed fail-closed risk checks. The agent may create a draft pull request only. Automatic merge and deployment remain disabled.
 
-cat "$RESULTS_FILE" > "$GITHUB_STEP_SUMMARY"
+Run: $run_url"; then
+    : # The failure is recorded; a status-comment outage is not an implementation authorization gate.
+  fi
 
-echo "::notice title=Codex queue finished::Plans $planned; draft PRs $implemented; plan-only $plan_only; skipped $skipped; failed or blocked $failed."
+  if run_role implement; then
+    printf -- '- Implementation role: completed\n' >> "$results_file"
+  else
+    rc=$?
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    outcome=failure
+    if [[ "$rc" == "124" || "$rc" == "137" ]]; then
+      outcome_detail="Implementation timed out (exit $rc); later queue issues remain eligible to run"
+    else
+      outcome_detail="Implementation failed or hit a safety barrier (exit $rc); later queue issues remain eligible to run"
+    fi
+    if ! post_comment "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
+## Codex implementation stopped
 
-if [ "$failed" -gt 0 ]; then
-  exit 1
-fi
+$outcome_detail. No merge or deployment occurred.
+
+Run: $run_url"; then
+      : # The failure is recorded and final reporting still runs.
+    fi
+    finish 1
+    return
+  fi
+
+  if ! restore_main; then
+    : # Cleanup failures are recorded independently.
+  fi
+  if ! pr_json=$(gh pr list --state open --head "agent/issue-${QUEUE_ISSUE}" --json url,isDraft); then
+    outcome=failure
+    outcome_detail='Implementation completed, but draft pull-request lookup failed'
+    record_operation_failure "Could not look up the created pull request for issue #${QUEUE_ISSUE}."
+    finish 1
+    return
+  fi
+  pr_url=$(printf '%s' "$pr_json" | jq -r '.[0].url // empty')
+  pr_draft=$(printf '%s' "$pr_json" | jq -r '.[0].isDraft // empty')
+  if [[ -z "$pr_url" || "$pr_draft" != "true" ]]; then
+    outcome=failure
+    outcome_detail='Implementation did not produce a verifiable draft pull request'
+    finish 1
+    return
+  fi
+
+  outcome=implemented
+  outcome_detail="Draft pull request created: $pr_url"
+  if ! post_comment "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
+## Codex implementation completed
+
+Draft pull request: $pr_url
+
+Human review and explicit merge approval remain required. No deployment occurred.
+
+Run: $run_url"; then
+    : # The failure is recorded and final reporting still runs.
+  fi
+  finish 0
+}
+
+case "${1:-}" in
+  prepare) prepare_queue ;;
+  run) run_issue ;;
+  *) fail "Usage: bash scripts/agents/codex-issue-queue.sh prepare|run" ;;
+esac
