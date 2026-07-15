@@ -181,7 +181,7 @@ run_issue() {
   [[ "$QUEUE_MAX_MINUTES" -ge 30 ]] || fail "QUEUE_MAX_MINUTES must be at least 30."
   [[ "$QUEUE_MAX_MINUTES" -le 150 ]] || fail "QUEUE_MAX_MINUTES may not exceed 150."
 
-  local root owner actor item body_file results_file run_url
+  local root owner actor item body_file validated_snapshot results_file run_url
   local operational_failures=0 outcome=success outcome_detail='Completed successfully'
   local cleanup_failed=0 rc existing_json existing_pr label_actors label_actor risk pr_json pr_url pr_draft
 
@@ -191,6 +191,7 @@ run_issue() {
   TMP_ROOT=$(mktemp -d)
   item="$TMP_ROOT/item.json"
   body_file="$TMP_ROOT/body.md"
+  validated_snapshot="$TMP_ROOT/validated-issue.json"
   results_file="$TMP_ROOT/results.md"
   trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
 
@@ -246,8 +247,14 @@ run_issue() {
 
   run_role() {
     local mode=$1
-    timeout --signal=TERM --kill-after=5m "${QUEUE_MAX_MINUTES}m" \
-      sh scripts/agents/codex-task.sh "$mode" "$QUEUE_ISSUE"
+    if [[ "$mode" == "implement" ]]; then
+      QUEUE_VALIDATED_ISSUE_SNAPSHOT="$validated_snapshot" \
+        timeout --signal=TERM --kill-after=5m "${QUEUE_MAX_MINUTES}m" \
+        sh scripts/agents/codex-task.sh "$mode" "$QUEUE_ISSUE"
+    else
+      timeout --signal=TERM --kill-after=5m "${QUEUE_MAX_MINUTES}m" \
+        sh scripts/agents/codex-task.sh "$mode" "$QUEUE_ISSUE"
+    fi
   }
 
   finish() {
@@ -284,7 +291,7 @@ run_issue() {
     return
   fi
 
-  if ! gh issue view "$QUEUE_ISSUE" --json state,title,body,labels > "$item"; then
+  if ! gh issue view "$QUEUE_ISSUE" --json number,state,title,body,url,labels,author > "$item"; then
     outcome=failure
     outcome_detail='Issue lookup failed; no role ran'
     record_operation_failure "Could not look up issue #${QUEUE_ISSUE}."
@@ -353,7 +360,7 @@ Run: $run_url"; then
     return
   fi
 
-  if ! gh issue view "$QUEUE_ISSUE" --json state,title,body,labels > "$item"; then
+  if ! gh issue view "$QUEUE_ISSUE" --json number,state,title,body,url,labels,author > "$item"; then
     outcome=blocked
     outcome_detail='Readiness and risk lookup failed; implementation blocked'
     record_operation_failure "Could not refresh issue #${QUEUE_ISSUE} before implementation."
@@ -443,6 +450,26 @@ Run: $run_url"; then
     return
   fi
   printf -- '- Risk classification: %s\n' "$risk" >> "$results_file"
+
+  if ! jq -ce --argjson issue "$QUEUE_ISSUE" '
+    if type == "object" and
+      .number == $issue and
+      .state == "OPEN" and
+      (.title | type == "string" and length > 0) and
+      (.body | type == "string" and length > 0) and
+      (.url | type == "string" and length > 0) and
+      (.labels | type == "array") and
+      (.author | type == "object")
+    then . else empty end
+  ' "$item" > "$validated_snapshot"; then
+    outcome=blocked
+    outcome_detail='Validated issue snapshot could not be created; implementation blocked'
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 1
+    return
+  fi
 
   if ! existing_json=$(gh pr list --state all --head "agent/issue-${QUEUE_ISSUE}" --json number,url,isDraft); then
     outcome=blocked
