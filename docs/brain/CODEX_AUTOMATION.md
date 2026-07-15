@@ -114,7 +114,7 @@ Merging a pull request automatically runs the read-only memory coordinator and p
 
 ### Unattended issue queue
 
-The repository owner may explicitly launch `Codex unattended issue queue` with `workflow_dispatch` after typing the confirmation phrase. It has no scheduled, issue-label, pull-request, or repository event trigger.
+The repository owner may explicitly launch `Codex unattended issue queue` from `main` with `workflow_dispatch` after typing the confirmation phrase. Dispatches from any other ref are rejected. It has no scheduled, issue-label, pull-request, or repository event trigger.
 
 The owner supplies an ordered issue list and an optional implementation subset. Queue parsing accepts comma-separated issue numbers, rejects malformed values, removes duplicates while preserving the first occurrence, and rejects implementation numbers that are absent from the main queue. An empty implementation subset is valid and makes every entry plan-only.
 
@@ -122,21 +122,21 @@ The workflow prepares an ordered matrix, then runs one issue job at a time with 
 
 1. Run the read-only planning role and allow that role to inspect and comment on the issue.
 2. Stop as plan-only when the issue is not in the owner-supplied implementation subset.
-3. Before implementation, refresh the issue and require an existing `agent-ready` label whose most recent label event was performed by the repository owner.
-4. Parse exactly one recognized `Risk classification` field and apply the blocked-category checks.
+3. Before implementation, refresh the issue, require it to remain open, and require an existing `agent-ready` label whose most recent label event was performed by the repository owner.
+4. Require exactly one complete set of recognized issue-template sections, including all completed readiness confirmations, then parse exactly one recognized `Risk classification` field and apply the blocked-category checks.
 5. Run implementation only after all gates pass.
 
 Planning and the queue never add `agent-ready`. Adding an issue to the implementation subset is not a substitute for the separately owner-applied label.
 
-Risk handling fails closed. Missing, duplicated, malformed, ambiguous, or unknown risk classifications block implementation. A `High` classification blocks implementation. Low- or medium-classified issues also remain blocked when the title or implementation-defining issue fields describe authentication, authorization, security-sensitive changes, billing or payments, databases, schema changes or migrations, infrastructure, dependencies or package upgrades, containers or Docker, GitHub Actions or workflow changes, deployment, or production operations. Non-template issues therefore cannot become eligible merely because parsing failed or expected fields are absent.
+Template and risk handling fail closed. Missing, duplicated, malformed, incomplete, or unrecognized required sections block implementation. Missing, duplicated, malformed, ambiguous, or unknown risk classifications also block implementation. A `High` classification blocks implementation. Low- or medium-classified issues remain blocked when the title or any implementation-defining section describes authentication, authorization, security-sensitive changes, billing or payments, databases, schema changes or migrations, infrastructure, dependencies or package upgrades, containers or Docker, GitHub Actions or workflow changes, deployment, or production operations. Non-template issues therefore cannot become eligible merely because they contain a recognized risk sentence.
 
 Every queue-created pull request must be a draft. The implementation role uses `gh pr create --draft`, and the queue verifies that the resulting open pull request is present and still a draft. The queue has no merge or deployment command.
 
 ## Credential and Sandbox Controls
 
-- Read-only and write-capable roles use separate jobs and separate least-privilege GitHub token permissions.
+- Standard development-agent roles use separate jobs and least-privilege GitHub token permissions. In the unattended queue, each issue has one isolated repository-write matrix job, and planning and implementation may run sequentially inside that job only after all readiness, template, and risk gates pass.
 - `actions/checkout` does not persist its GitHub credentials.
-- Git operations receive the short-lived workflow token only immediately before required fetch or push commands.
+- Credentials are removed before Codex receives untrusted issue content. The implementation role receives Git access only during the narrowly controlled setup, commit, push, and draft-PR operations performed by the trusted wrapper.
 - The token is removed from Git configuration and the process environment before Codex starts.
 - The script fails closed if persistent `gh` authentication or usable Git remote credentials remain.
 - Codex runs with user configuration ignored so unrelated MCP servers and local automation settings are not loaded.

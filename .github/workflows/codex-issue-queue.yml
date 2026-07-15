@@ -38,7 +38,8 @@ jobs:
   prepare:
     if: >-
       github.actor == github.repository_owner &&
-      inputs.confirmation == 'RUN UNATTENDED'
+      inputs.confirmation == 'RUN UNATTENDED' &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -46,7 +47,7 @@ jobs:
     outputs:
       matrix: ${{ steps.queue.outputs.matrix }}
     steps:
-      - name: Check out the dispatched revision
+      - name: Check out the reviewed main revision
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -84,10 +85,10 @@ jobs:
       QUEUE_MAX_MINUTES: ${{ inputs.max_minutes_per_role }}
 
     steps:
-      - name: Check out trusted main
+      - name: Check out the reviewed main revision
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 

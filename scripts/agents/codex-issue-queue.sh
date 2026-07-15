@@ -74,16 +74,9 @@ prepare_queue() {
 
 extract_risk() {
   local body_file=$1
-  local headings values risk
+  local values risk
 
-  headings=$(awk '/^###[[:space:]]+Risk classification[[:space:]]*$/ { count++ } END { print count + 0 }' "$body_file")
-  [[ "$headings" == "1" ]] || return 1
-
-  values=$(awk '
-    /^###[[:space:]]+Risk classification[[:space:]]*$/ { capture=1; next }
-    capture && /^###[[:space:]]+/ { capture=0 }
-    capture && $0 !~ /^[[:space:]]*$/ { print }
-  ' "$body_file")
+  values=$(section_content "$body_file" 'Risk classification' | sed '/^[[:space:]]*$/d')
   [[ $(printf '%s\n' "$values" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ') == "1" ]] || return 1
 
   risk=$(printf '%s' "$values" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -101,13 +94,58 @@ extract_risk() {
   esac
 }
 
+section_content() {
+  local body_file=$1
+  local section=$2
+
+  awk -v heading="### $section" '
+    $0 == heading { capture=1; next }
+    capture && /^###/ { exit }
+    capture { print }
+  ' "$body_file"
+}
+
+validate_complete_template() {
+  local body_file=$1
+  local section content heading_count total_headings readiness_lines
+  local required_sections=(
+    'Desired outcome'
+    'Current behavior'
+    'Acceptance criteria'
+    'Product and technical constraints'
+    'Expected scope'
+    'Explicitly out of scope'
+    'Risk classification'
+    'Required validation'
+    'Unresolved human decisions'
+    'Readiness confirmation'
+  )
+
+  total_headings=$(grep -Ec '^###' "$body_file" || true)
+  [[ "$total_headings" == "${#required_sections[@]}" ]] || return 1
+
+  for section in "${required_sections[@]}"; do
+    heading_count=$(grep -Fxc "### $section" "$body_file" || true)
+    [[ "$heading_count" == "1" ]] || return 1
+    content=$(section_content "$body_file" "$section")
+    printf '%s\n' "$content" | grep -q '[^[:space:]]' || return 1
+  done
+
+  readiness_lines=$(section_content "$body_file" 'Readiness confirmation' | sed '/^[[:space:]]*$/d')
+  [[ $(printf '%s\n' "$readiness_lines" | wc -l | tr -d ' ') == "4" ]] || return 1
+  if printf '%s\n' "$readiness_lines" |
+    grep -Ev '^[[:space:]]*-[[:space:]]+\[[xX]\][[:space:]]+[^[:space:]].*$' >/dev/null; then
+    return 1
+  fi
+}
+
 has_blocked_category() {
   local title=$1
   local body_file=$2
   local scoped_text
 
   scoped_text=$(awk '
-    /^###[[:space:]]+(Desired outcome|Current behavior|Acceptance criteria|Expected scope)[[:space:]]*$/ {
+    /^###[[:space:]]+(Desired outcome|Current behavior|Acceptance criteria|Product and technical constraints|Expected scope|Explicitly out of scope|Required validation|Unresolved human decisions)[[:space:]]*$/ {
       capture=1
       next
     }
@@ -325,6 +363,15 @@ Run: $run_url"; then
     finish 1
     return
   fi
+  if [[ $(jq -r '.state // empty' "$item") != "OPEN" ]]; then
+    outcome=skipped
+    outcome_detail='Issue was closed during planning; implementation skipped'
+    if ! restore_main; then
+      : # Cleanup failures are recorded independently.
+    fi
+    finish 0
+    return
+  fi
   if ! jq -e '.labels | map(.name) | index("agent-ready")' "$item" >/dev/null; then
     outcome=blocked
     outcome_detail='The pre-existing agent-ready label is missing; implementation blocked'
@@ -359,12 +406,18 @@ Run: $run_url"; then
   fi
 
   jq -r '.body // ""' "$item" > "$body_file"
-  if risk=$(extract_risk "$body_file"); then
+  if ! validate_complete_template "$body_file"; then
+    outcome=blocked
+    outcome_detail='Missing, duplicated, malformed, or incomplete required issue-template sections block unattended implementation'
+    rc=1
+  elif risk=$(extract_risk "$body_file"); then
     rc=0
   else
     rc=$?
   fi
-  if [[ "$rc" == "2" ]]; then
+  if [[ "$outcome" == "blocked" ]]; then
+    : # The complete-template validation already supplied the blocking detail.
+  elif [[ "$rc" == "2" ]]; then
     outcome=blocked
     outcome_detail='High-risk classification blocks unattended implementation'
   elif [[ "$rc" != "0" ]]; then
