@@ -250,6 +250,7 @@ codex login status >/dev/null 2>&1 ||
 cat "$CONTEXT" | codex --ask-for-approval never exec \
   --ephemeral \
   --ignore-user-config \
+  --config 'features.use_legacy_landlock=true' \
   --config 'tools.web_search=false' \
   --config 'sandbox_workspace_write.network_access=false' \
   --config 'allow_login_shell=false' \
