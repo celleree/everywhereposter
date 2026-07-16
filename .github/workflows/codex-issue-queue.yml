@@ -38,6 +38,7 @@ jobs:
   prepare:
     if: >-
       github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner &&
       inputs.confirmation == 'RUN UNATTENDED' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -64,7 +65,10 @@ jobs:
 
   issue:
     needs: prepare
-    if: needs.prepare.result == 'success'
+    if: >-
+      needs.prepare.result == 'success' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
     strategy:
       # Matrix data preserves first-occurrence order, but GitHub controls pending
       # job selection. Entries must be independent of runtime start order.

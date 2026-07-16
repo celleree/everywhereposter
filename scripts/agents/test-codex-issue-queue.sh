@@ -109,7 +109,7 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
     protected-constraints) body=${body/No additional constraints./Change the database schema.} ;;
     protected-validation) body=${body/Check the rendered text./Validate the deployment workflow.} ;;
     post-validation-edit)
-      if [[ "$view_count" -gt 2 ]]; then
+      if [[ "$view_count" -gt 1 ]]; then
         title='Add authentication and billing support'
         body=${body/Correct a documentation typo./Change authentication, billing, and database deployment behavior.}
       fi
@@ -127,7 +127,85 @@ fi
 
 if [[ "${1:-}" == "api" ]]; then
   [[ "$MOCK_SCENARIO" == "api-failure" ]] && exit 1
-  echo celleree
+  title='Safe documentation correction'
+  labels='[{"name":"agent-ready"}]'
+  state=OPEN
+  last_edited=null
+  include_last_edited=true
+  body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Current behavior\n\nA heading is misspelled.\n\n### Acceptance criteria\n\nThe heading is corrected.\n\n### Product and technical constraints\n\nNo additional constraints.\n\n### Expected scope\n\ndocs/example.md\n\n### Explicitly out of scope\n\nApplication code.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation\n\n### Required validation\n\nCheck the rendered text.\n\n### Unresolved human decisions\n\nNone.\n\n### Readiness confirmation\n\n- [x] The desired outcome and acceptance criteria are clear.\n- [x] Product decisions that still require a human are listed above.\n- [x] The task has explicit exclusions and validation requirements.\n- [x] I understand that a repository owner must apply `agent-ready` separately.'
+  events='[{"__typename":"LabeledEvent","createdAt":"2026-07-16T02:00:00Z","actor":{"login":"celleree"},"label":{"name":"agent-ready"}}]'
+  has_next=false
+  end_cursor=null
+
+  case "$MOCK_SCENARIO" in
+    missing-readiness) labels='[]' ;;
+    non-template) body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation' ;;
+    missing-section) body=${body//$'\n### Required validation\n\nCheck the rendered text.\n'/} ;;
+    missing-exclusions) body=${body//$'\n### Explicitly out of scope\n\nApplication code.\n'/} ;;
+    duplicated-section) body+=$'\n\n### Desired outcome\n\nA duplicate outcome.' ;;
+    missing-risk) body=${body%%$'\n\n### Risk classification'*} ;;
+    malformed-risk) body+=$'\n\n### Risk classification\n\nLow - something else' ;;
+    high-risk) body=${body/Low - isolated code, copy, tests, or documentation/High - authentication, security, database, billing, infrastructure, or deployment} ;;
+    blocked-category) title='Upgrade a package dependency' ;;
+    oauth-title) title='Add OAuth callback' ;;
+    oauth-constraints) body=${body/No additional constraints./Add OAuth token refresh handling.} ;;
+    oauth-scope) body=${body/docs\/example.md/oauth2 provider integration.} ;;
+    oauth-validation) body=${body/Check the rendered text./Validate OAuth 2 provider integration.} ;;
+    oauth-outcome) body=${body/Correct a documentation typo./Add OAuth 2.0 provider integration.} ;;
+    safe-exclusions) body=${body/Application code./Do not touch the database schema, deployment configuration, dependencies, containers, or GitHub workflow files.} ;;
+    safe-oauth-exclusion) body=${body/Application code./OAuth changes are explicitly out of scope.} ;;
+    protected-constraints) body=${body/No additional constraints./Change the database schema.} ;;
+    protected-validation) body=${body/Check the rendered text./Validate the deployment workflow.} ;;
+    closed-on-refresh) state=CLOSED ;;
+    body-edited-after|edit-after-planning)
+      body=${body/Correct a documentation typo./Correct two documentation typos.}
+      last_edited='"2026-07-16T03:00:00Z"'
+      ;;
+    title-edited-after)
+      title='Safe documentation correction, revised'
+      last_edited='"2026-07-16T03:00:00Z"'
+      events='[{"__typename":"LabeledEvent","createdAt":"2026-07-16T02:00:00Z","actor":{"login":"celleree"},"label":{"name":"agent-ready"}},{"__typename":"RenamedTitleEvent","createdAt":"2026-07-16T03:00:00Z","actor":{"login":"author"},"previousTitle":"Safe documentation correction","currentTitle":"Safe documentation correction, revised"}]'
+      ;;
+    owner-reapproved)
+      body=${body/Correct a documentation typo./Correct two documentation typos.}
+      last_edited='"2026-07-16T03:00:00Z"'
+      events='[{"__typename":"LabeledEvent","createdAt":"2026-07-16T02:00:00Z","actor":{"login":"celleree"},"label":{"name":"agent-ready"}},{"__typename":"LabeledEvent","createdAt":"2026-07-16T04:00:00Z","actor":{"login":"celleree"},"label":{"name":"agent-ready"}}]'
+      ;;
+    non-owner-readiness)
+      events='[{"__typename":"LabeledEvent","createdAt":"2026-07-16T02:00:00Z","actor":{"login":"celleree"},"label":{"name":"agent-ready"}},{"__typename":"LabeledEvent","createdAt":"2026-07-16T04:00:00Z","actor":{"login":"collaborator"},"label":{"name":"agent-ready"}}]'
+      ;;
+    missing-edit-metadata) include_last_edited=false ;;
+    missing-label-timestamp)
+      events='[{"__typename":"LabeledEvent","createdAt":null,"actor":{"login":"celleree"},"label":{"name":"agent-ready"}}]'
+      ;;
+    malformed-label-timestamp)
+      events='[{"__typename":"LabeledEvent","createdAt":"not-a-date","actor":{"login":"celleree"},"label":{"name":"agent-ready"}}]'
+      ;;
+    malformed-edit-timestamp) last_edited='"not-a-date"' ;;
+    paginated-events)
+      title='Safe documentation correction, approved revision'
+      last_edited='"2026-07-16T03:00:00Z"'
+      if [[ "$*" == *'endCursor=page-2'* ]]; then
+        events='[{"__typename":"RenamedTitleEvent","createdAt":"2026-07-16T03:00:00Z","actor":{"login":"author"},"previousTitle":"Safe documentation correction","currentTitle":"Safe documentation correction, approved revision"},{"__typename":"LabeledEvent","createdAt":"2026-07-16T04:00:00Z","actor":{"login":"celleree"},"label":{"name":"agent-ready"}}]'
+      else
+        events='[{"__typename":"LabeledEvent","createdAt":"2026-07-16T02:00:00Z","actor":{"login":"celleree"},"label":{"name":"agent-ready"}}]'
+        has_next=true
+        end_cursor='"page-2"'
+      fi
+      ;;
+  esac
+
+  issue=$(jq -cn --argjson number "$QUEUE_ISSUE" --arg state "$state" --arg title "$title" \
+    --arg body "$body" --arg url "https://github.test/issues/$QUEUE_ISSUE" \
+    --argjson labels "$labels" --argjson events "$events" --argjson lastEditedAt "$last_edited" \
+    --argjson hasNextPage "$has_next" --argjson endCursor "$end_cursor" \
+    '{number:$number,state:$state,title:$title,body:$body,url:$url,lastEditedAt:$lastEditedAt,
+      author:{login:"author"},labels:{nodes:$labels,pageInfo:{hasNextPage:false}},
+      timelineItems:{nodes:$events,pageInfo:{hasNextPage:$hasNextPage,endCursor:$endCursor}}}')
+  if [[ "$include_last_edited" == "false" ]]; then
+    issue=$(printf '%s' "$issue" | jq -c 'del(.lastEditedAt)')
+  fi
+  jq -cn --argjson issue "$issue" '{data:{repository:{issue:$issue}}}'
   exit 0
 fi
 
@@ -188,6 +266,10 @@ run_case() {
   local issue=$2
   local implement=$3
   local expected_rc=$4
+  local actor=celleree
+  local triggering_actor=celleree
+  [[ $# -ge 5 ]] && actor=$5
+  [[ $# -ge 6 ]] && triggering_actor=$6
   local case_dir="$TMP_ROOT/case-$issue-$scenario"
   local rc
 
@@ -209,7 +291,8 @@ run_case() {
     MOCK_LIVE_CAPTURE="$case_dir/live.json" \
     MOCK_SCENARIO="$scenario" \
     GH_TOKEN=test-token \
-    GITHUB_ACTOR=celleree \
+    GITHUB_ACTOR="$actor" \
+    GITHUB_TRIGGERING_ACTOR="$triggering_actor" \
     GITHUB_REPOSITORY=celleree/publish-everywhere \
     GITHUB_RUN_ID=123 \
     GITHUB_STEP_SUMMARY="$case_dir/summary" \
@@ -220,6 +303,12 @@ run_case() {
   rc=$?
   set -e
 
+  if [[ "$expected_rc" != "$rc" ]]; then
+    echo "--- log for $scenario ---" >&2
+    cat "$case_dir/log" >&2
+    echo "--- summary for $scenario ---" >&2
+    cat "$case_dir/summary" >&2
+  fi
   assert_eq "$expected_rc" "$rc" "unexpected exit code for $scenario"
   LAST_CASE_DIR="$case_dir"
 }
@@ -233,6 +322,44 @@ assert_eq 'Safe documentation correction' "$(jq -r .title "$LAST_CASE_DIR/snapsh
 assert_contains "$LAST_CASE_DIR/snapshot.json" 'Correct a documentation typo.' \
   'implementation must receive the exact validated body'
 assert_contains "$LAST_CASE_DIR/summary" 'Draft pull request created' 'safe ready work must report a draft PR'
+
+run_case owner-initial-dispatch 131 false 0 celleree celleree
+assert_contains "$LAST_CASE_DIR/log" 'role:plan:131' 'an owner initial dispatch must be allowed'
+run_case owner-rerun 132 false 0 celleree celleree
+assert_contains "$LAST_CASE_DIR/log" 'role:plan:132' 'an owner rerun must be allowed'
+run_case non-owner-rerun 133 true 1 celleree collaborator
+assert_not_contains "$LAST_CASE_DIR/log" 'role:plan:133' 'a non-owner rerun must be blocked before planning'
+run_case missing-triggering-actor 134 true 1 celleree ''
+assert_not_contains "$LAST_CASE_DIR/log" 'role:plan:134' 'a missing triggering actor must fail closed'
+
+run_case body-edited-after 135 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:135' 'a body edit after owner approval must block implementation'
+assert_contains "$LAST_CASE_DIR/summary" 'changed after owner readiness approval' \
+  'a later body edit must explain that owner reapproval is required'
+run_case title-edited-after 136 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:136' 'a title edit after owner approval must block implementation'
+run_case owner-reapproved 137 true 0
+assert_contains "$LAST_CASE_DIR/log" 'role:implement:137' 'owner reapproval after the final edit must restore eligibility'
+assert_contains "$LAST_CASE_DIR/snapshot.json" 'Correct two documentation typos.' \
+  'the pinned snapshot must exactly match the owner-approved edited body'
+run_case non-owner-readiness 138 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:138' 'a latest readiness label from a non-owner must block implementation'
+run_case missing-edit-metadata 139 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:139' 'missing edit metadata must fail closed'
+run_case missing-label-timestamp 140 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:140' 'a missing readiness timestamp must fail closed'
+run_case malformed-label-timestamp 141 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:141' 'a malformed readiness timestamp must fail closed'
+run_case malformed-edit-timestamp 142 true 1
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:142' 'a malformed edit timestamp must fail closed'
+run_case paginated-events 143 true 0
+assert_eq '2' "$(grep -Fc 'api graphql' "$LAST_CASE_DIR/log")" \
+  'readiness and title-edit timeline pagination must inspect every page'
+assert_eq 'Safe documentation correction, approved revision' "$(jq -r .title "$LAST_CASE_DIR/snapshot.json")" \
+  'the paginated authorization check must pin the owner-approved title version'
+run_case edit-after-planning 144 true 1
+assert_contains "$LAST_CASE_DIR/log" 'role:plan:144' 'the edit-after-planning test must complete planning first'
+assert_not_contains "$LAST_CASE_DIR/log" 'role:implement:144' 'an edit after planning but before implementation must be blocked'
 
 run_case post-validation-edit 124 true 0
 assert_contains "$LAST_CASE_DIR/live.json" 'Add authentication and billing support' \
@@ -492,9 +619,14 @@ assert_contains "$LAST_TASK_CASE_DIR/context" 'Manual live title' \
 
 assert_eq '1' "$(grep -Ec '^[[:space:]]*workflow_dispatch:' "$WORKFLOW")" \
   'the workflow must expose exactly one workflow_dispatch trigger'
-assert_contains "$WORKFLOW" 'github.actor == github.repository_owner' 'dispatch must require the repository owner'
+assert_eq '2' "$(grep -Fc 'github.actor == github.repository_owner' "$WORKFLOW")" \
+  'prepare and issue jobs must independently require the original repository owner'
+assert_eq '2' "$(grep -Fc 'github.triggering_actor == github.repository_owner' "$WORKFLOW")" \
+  'prepare and issue jobs must independently require the triggering repository owner'
 assert_contains "$WORKFLOW" "inputs.confirmation == 'RUN UNATTENDED'" 'dispatch must require the confirmation phrase'
 assert_contains "$WORKFLOW" "github.ref == 'refs/heads/main'" 'dispatch must be restricted to main'
+assert_contains "$QUEUE_SCRIPT" 'GITHUB_TRIGGERING_ACTOR' \
+  'the queue script must defensively validate the triggering actor before processing'
 assert_eq '2' "$(grep -Fc 'ref: ${{ github.sha }}' "$WORKFLOW")" \
   'preparation and issue jobs must use the same reviewed main revision'
 assert_contains "$WORKFLOW" 'max-parallel: 1' 'no more than one matrix issue job may run at a time'

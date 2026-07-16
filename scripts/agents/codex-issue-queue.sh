@@ -157,6 +157,152 @@ has_blocked_category() {
     'authentication|authorization|oauth|(^|[^[:alnum:]_])auth([^[:alnum:]_]|$)|security|billing|payments?|databases?|schema|migrations?|infrastructure|dependenc(y|ies)|package[[:space:]]+(upgrade|update|bump)|package\.json|(^|/)(pnpm-lock|package-lock|yarn\.lock|bun\.lock)|containers?|docker|github[[:space:]]+actions|\.github/workflows|workflow[[:space:]]+(file|ya?ml|action|change)|deploy(ment|ing)?|production[[:space:]]+(operation|change|deploy)'
 }
 
+refresh_owner_approved_issue() {
+  local owner=$1
+  local output_file=$2
+  local events_file=$3
+  local repo_name=${GITHUB_REPOSITORY#*/}
+  local query response issue_json reference_json cursor='' previous_cursor=''
+  local has_next label_event label_actor label_time label_epoch last_edited edit_epoch rename_epoch
+  local first_page=true
+
+  APPROVAL_ERROR='Readiness and content-version metadata could not be verified'
+  : > "$events_file"
+  query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
+    repository(owner:$owner,name:$name) {
+      issue(number:$number) {
+        number state title body url lastEditedAt
+        author { login }
+        labels(first:100) { nodes { name } pageInfo { hasNextPage } }
+        timelineItems(first:100,after:$endCursor,itemTypes:[LABELED_EVENT,RENAMED_TITLE_EVENT]) {
+          nodes {
+            __typename
+            ... on LabeledEvent { createdAt actor { login } label { name } }
+            ... on RenamedTitleEvent { createdAt actor { login } previousTitle currentTitle }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+  }'
+
+  while true; do
+    local args=(api graphql -f "query=$query" -F "owner=$owner" -F "name=$repo_name" -F "number=$QUEUE_ISSUE")
+    if [[ -n "$cursor" ]]; then
+      args+=(-f "endCursor=$cursor")
+    fi
+    if ! response=$(gh "${args[@]}"); then
+      APPROVAL_ERROR='Readiness audit lookup failed'
+      return 1
+    fi
+    if ! issue_json=$(printf '%s' "$response" | jq -ce '
+      .data.repository.issue |
+      select(type == "object") |
+      select(has("lastEditedAt")) |
+      select(.number | type == "number") |
+      select(.state | type == "string") |
+      select(.title | type == "string") |
+      select(.body | type == "string") |
+      select(.url | type == "string") |
+      select(.author | type == "object") |
+      select(.labels.nodes | type == "array") |
+      select(.labels.pageInfo.hasNextPage == false) |
+      select(.timelineItems.nodes | type == "array") |
+      select(.timelineItems.pageInfo.hasNextPage | type == "boolean")
+    '); then
+      APPROVAL_ERROR='Missing or malformed issue edit, label, or pagination metadata'
+      return 1
+    fi
+
+    if [[ "$first_page" == "true" ]]; then
+      reference_json=$(printf '%s' "$issue_json" | jq -c 'del(.timelineItems)')
+      if ! printf '%s' "$issue_json" | jq -ce '{
+        number, state, title, body, url,
+        labels: .labels.nodes,
+        author,
+        lastEditedAt
+      }' > "$output_file"; then
+        APPROVAL_ERROR='Refreshed issue content could not be parsed'
+        return 1
+      fi
+      first_page=false
+    elif [[ $(printf '%s' "$issue_json" | jq -c 'del(.timelineItems)') != "$reference_json" ]]; then
+      APPROVAL_ERROR='Issue content changed while readiness metadata was paginated'
+      return 1
+    fi
+
+    if ! printf '%s' "$issue_json" | jq -ce '.timelineItems.nodes[]' >> "$events_file"; then
+      APPROVAL_ERROR='Timeline event metadata could not be parsed'
+      return 1
+    fi
+    has_next=$(printf '%s' "$issue_json" | jq -r '.timelineItems.pageInfo.hasNextPage')
+    if [[ "$has_next" == "false" ]]; then
+      break
+    fi
+    previous_cursor=$cursor
+    cursor=$(printf '%s' "$issue_json" | jq -r '.timelineItems.pageInfo.endCursor // empty')
+    if [[ -z "$cursor" || "$cursor" == "$previous_cursor" ]]; then
+      APPROVAL_ERROR='Timeline pagination cursor is missing or repeated'
+      return 1
+    fi
+  done
+
+  if ! jq -es '
+    all(.[];
+      if .__typename == "LabeledEvent" then
+        ((.createdAt | type) == "string") and
+        ((.actor.login | type) == "string") and
+        ((.actor.login | length) > 0) and
+        ((.label.name | type) == "string") and
+        ((.label.name | length) > 0)
+      elif .__typename == "RenamedTitleEvent" then
+        ((.createdAt | type) == "string") and
+        ((.previousTitle | type) == "string") and
+        ((.currentTitle | type) == "string")
+      else false end
+    ) and
+    all(.[]; try (.createdAt | fromdateiso8601 | type == "number") catch false)
+  ' "$events_file" >/dev/null; then
+    APPROVAL_ERROR='Timeline event metadata or timestamps are missing or malformed'
+    return 1
+  fi
+  if ! label_event=$(jq -ces '
+    [.[] | select(.__typename == "LabeledEvent" and .label.name == "agent-ready")] |
+    sort_by(.createdAt) | last | select(type == "object")
+  ' "$events_file"); then
+    APPROVAL_ERROR='The latest agent-ready label event or timestamp is missing'
+    return 1
+  fi
+  label_actor=$(printf '%s' "$label_event" | jq -r '.actor.login')
+  label_time=$(printf '%s' "$label_event" | jq -r '.createdAt')
+  if [[ "$label_actor" != "$owner" ]]; then
+    APPROVAL_ERROR='agent-ready was not most recently applied by the repository owner'
+    return 1
+  fi
+  if ! jq -e '.labels | map(.name) | index("agent-ready")' "$output_file" >/dev/null; then
+    APPROVAL_ERROR='The pre-existing agent-ready label is missing'
+    return 1
+  fi
+
+  label_epoch=$(jq -nr --arg value "$label_time" '$value | fromdateiso8601')
+  last_edited=$(jq -r 'if .lastEditedAt == null then "" else .lastEditedAt end' "$output_file")
+  edit_epoch=-1
+  if [[ -n "$last_edited" ]]; then
+    if ! edit_epoch=$(jq -enr --arg value "$last_edited" '$value | fromdateiso8601'); then
+      APPROVAL_ERROR='The issue lastEditedAt timestamp is malformed'
+      return 1
+    fi
+  fi
+  rename_epoch=$(jq -es '[.[] | select(.__typename == "RenamedTitleEvent") | (.createdAt | fromdateiso8601)] | max // -1' "$events_file")
+  if [[ "$rename_epoch" -gt "$edit_epoch" ]]; then
+    edit_epoch=$rename_epoch
+  fi
+  if [[ "$edit_epoch" -ge "$label_epoch" ]]; then
+    APPROVAL_ERROR='The issue title or body changed after owner readiness approval; remove and reapply agent-ready after the final edit'
+    return 1
+  fi
+}
+
 run_issue() {
   need gh
   need git
@@ -181,9 +327,9 @@ run_issue() {
   [[ "$QUEUE_MAX_MINUTES" -ge 30 ]] || fail "QUEUE_MAX_MINUTES must be at least 30."
   [[ "$QUEUE_MAX_MINUTES" -le 150 ]] || fail "QUEUE_MAX_MINUTES may not exceed 150."
 
-  local root owner actor item body_file validated_snapshot results_file run_url
+  local root owner actor triggering_actor item body_file validated_snapshot events_file results_file run_url
   local operational_failures=0 outcome=success outcome_detail='Completed successfully'
-  local cleanup_failed=0 rc existing_json existing_pr label_actors label_actor risk pr_json pr_url pr_draft
+  local cleanup_failed=0 rc existing_json existing_pr risk pr_json pr_url pr_draft
 
   root=$(git rev-parse --show-toplevel 2>/dev/null) || fail "Run inside the repository checkout."
   cd "$root"
@@ -192,6 +338,7 @@ run_issue() {
   item="$TMP_ROOT/item.json"
   body_file="$TMP_ROOT/body.md"
   validated_snapshot="$TMP_ROOT/validated-issue.json"
+  events_file="$TMP_ROOT/issue-authorization-events.jsonl"
   results_file="$TMP_ROOT/results.md"
   trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
 
@@ -284,9 +431,10 @@ run_issue() {
     return
   fi
   actor=${GITHUB_ACTOR:-}
-  if [[ "$actor" != "$owner" ]]; then
+  triggering_actor=${GITHUB_TRIGGERING_ACTOR:-}
+  if [[ "$actor" != "$owner" || "$triggering_actor" != "$owner" ]]; then
     outcome=blocked
-    outcome_detail='The workflow actor is not the repository owner; no role ran'
+    outcome_detail='The workflow actor and triggering actor must both be the repository owner; no role ran'
     finish 1
     return
   fi
@@ -360,10 +508,10 @@ Run: $run_url"; then
     return
   fi
 
-  if ! gh issue view "$QUEUE_ISSUE" --json number,state,title,body,url,labels,author > "$item"; then
+  if ! refresh_owner_approved_issue "$owner" "$item" "$events_file"; then
     outcome=blocked
-    outcome_detail='Readiness and risk lookup failed; implementation blocked'
-    record_operation_failure "Could not refresh issue #${QUEUE_ISSUE} before implementation."
+    outcome_detail="${APPROVAL_ERROR}; implementation blocked"
+    record_operation_failure "Could not verify owner approval of the exact current content for issue #${QUEUE_ISSUE}."
     if ! restore_main; then
       : # Cleanup failures are recorded independently.
     fi
@@ -379,39 +527,6 @@ Run: $run_url"; then
     finish 0
     return
   fi
-  if ! jq -e '.labels | map(.name) | index("agent-ready")' "$item" >/dev/null; then
-    outcome=blocked
-    outcome_detail='The pre-existing agent-ready label is missing; implementation blocked'
-    if ! restore_main; then
-      : # Cleanup failures are recorded independently.
-    fi
-    finish 1
-    return
-  fi
-
-  if ! label_actors=$(gh api --paginate \
-    "repos/${GITHUB_REPOSITORY}/issues/${QUEUE_ISSUE}/events" \
-    --jq '.[] | select(.event == "labeled" and .label.name == "agent-ready") | .actor.login'); then
-    outcome=blocked
-    outcome_detail='Readiness audit lookup failed; implementation blocked'
-    record_operation_failure "Could not verify who applied agent-ready to issue #${QUEUE_ISSUE}."
-    if ! restore_main; then
-      : # Cleanup failures are recorded independently.
-    fi
-    finish 1
-    return
-  fi
-  label_actor=$(printf '%s\n' "$label_actors" | sed '/^[[:space:]]*$/d' | tail -n 1)
-  if [[ "$label_actor" != "$owner" ]]; then
-    outcome=blocked
-    outcome_detail='agent-ready was not most recently applied by the repository owner; implementation blocked'
-    if ! restore_main; then
-      : # Cleanup failures are recorded independently.
-    fi
-    finish 1
-    return
-  fi
-
   jq -r '.body // ""' "$item" > "$body_file"
   if ! validate_complete_template "$body_file"; then
     outcome=blocked

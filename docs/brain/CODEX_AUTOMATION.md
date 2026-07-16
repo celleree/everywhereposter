@@ -114,7 +114,7 @@ Merging a pull request automatically runs the read-only memory coordinator and p
 
 ### Unattended issue queue
 
-The repository owner may explicitly launch `Codex unattended issue queue` from `main` with `workflow_dispatch` after typing the confirmation phrase. Dispatches from any other ref are rejected. It has no scheduled, issue-label, pull-request, or repository event trigger.
+The repository owner may explicitly launch `Codex unattended issue queue` from `main` with `workflow_dispatch` after typing the confirmation phrase. Both GitHub's original workflow actor and the triggering actor must be the repository owner, so a collaborator cannot rerun either the full workflow or an individual privileged issue job from an earlier owner-authorized run. Missing triggering-actor information fails closed. Dispatches from any other ref are rejected. It has no scheduled, issue-label, pull-request, or repository event trigger.
 
 The owner supplies an issue list and an optional implementation subset. Queue parsing is deterministic: it accepts comma-separated issue numbers, rejects malformed values, removes duplicates while preserving the first occurrence in the generated matrix data, and rejects implementation numbers that are absent from the main queue. An empty implementation subset is valid and makes every entry plan-only.
 
@@ -122,7 +122,7 @@ The workflow prepares matrix data that preserves first-occurrence order and uses
 
 1. Run the read-only planning role and allow that role to inspect and comment on the issue.
 2. Stop as plan-only when the issue is not in the owner-supplied implementation subset.
-3. Before implementation, refresh the issue, require it to remain open, and require an existing `agent-ready` label whose most recent label event was performed by the repository owner.
+3. Before implementation, refresh the issue, require it to remain open, and require an existing `agent-ready` label whose most recent label event was performed by the repository owner after the final title or body edit.
 4. Require exactly one complete set of recognized issue-template sections, including all completed readiness confirmations, then parse exactly one recognized `Risk classification` field and apply the blocked-category checks.
 5. Run implementation only after all gates pass.
 
@@ -130,7 +130,9 @@ Planning and the queue never add `agent-ready`. Adding an issue to the implement
 
 Template and risk handling fail closed. Missing, duplicated, malformed, incomplete, or unrecognized required sections block implementation. Missing, duplicated, malformed, ambiguous, or unknown risk classifications also block implementation. A `High` classification blocks implementation. Low- or medium-classified issues remain blocked when the title or any requested or permitted implementation field describes authentication, authorization, security-sensitive changes, billing or payments, databases, schema changes or migrations, infrastructure, dependencies or package upgrades, containers or Docker, GitHub Actions or workflow changes, deployment, or production operations. The required `Explicitly out of scope` section is validated for completeness but is excluded from this keyword scan because it describes work that must not be performed. Non-template issues therefore cannot become eligible merely because they contain a recognized risk sentence.
 
-After those gates pass, the queue writes the exact validated issue payload to its private temporary directory and passes only that snapshot path to the implementation wrapper. Queued implementation validates the snapshot and constructs the Codex context from its pinned title and body without refetching the live issue, so later issue edits cannot change the approved prompt. Missing, unreadable, malformed, incomplete, or wrong-issue snapshots block implementation. Manual non-queue implementation retains its live issue lookup and existing gates.
+The pre-implementation refresh reads the exact title and body together with GraphQL `lastEditedAt` and paginated label and title-rename timeline events. Metadata, timestamps, parsing, and pagination all fail closed. If the title or body was edited at or after the latest owner-applied readiness event, unattended implementation is blocked until the owner removes and reapplies `agent-ready` after the final edit. Generic issue activity such as comments or label changes is not treated as a content edit.
+
+After those gates pass, the queue writes that same refreshed and validated issue payload to its private temporary directory and passes only that snapshot path to the implementation wrapper. Queued implementation validates the snapshot and constructs the Codex context from its pinned title and body without refetching the live issue, so later issue edits cannot change the approved prompt. Missing, unreadable, malformed, incomplete, or wrong-issue snapshots block implementation. Manual non-queue implementation retains its live issue lookup and existing gates.
 
 Every queue-created pull request must be a draft. The implementation role uses `gh pr create --draft`, and the queue verifies that the resulting open pull request is present and still a draft. The queue has no merge or deployment command.
 
@@ -195,7 +197,7 @@ Expected per-issue GitHub failures are explicitly contained rather than being le
 
 - Issue lookup failures are recorded and fail only that issue job.
 - Repository-owner lookup failures are recorded and fail only that issue job.
-- A readiness-event API failure or pre-implementation issue refresh failure blocks implementation and is recorded.
+- A readiness-event, edit-metadata, timestamp, pagination, or pre-implementation issue refresh failure blocks implementation and is recorded.
 - A pull-request lookup failure before implementation blocks implementation rather than risking a duplicate branch or pull request.
 - A pull-request lookup failure after implementation is recorded and fails that issue's reporting.
 - Queue status-comment failures are recorded in the job summary and make that issue job fail, but they do not stop safe role processing or cancel later queue entries.
