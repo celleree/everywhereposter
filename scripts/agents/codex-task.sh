@@ -93,7 +93,29 @@ case "$MODE" in
     ;;
 
   implement)
-    gh issue view "$NUMBER" --json title,body,url,labels,author > "$ITEM"
+    if [ "${QUEUE_IMPLEMENT-}" = "true" ]; then
+      [ "${QUEUE_ISSUE-}" = "$NUMBER" ] ||
+        fail "Queued snapshot issue number does not match the implementation issue."
+      SNAPSHOT=${QUEUE_VALIDATED_ISSUE_SNAPSHOT-}
+      [ -n "$SNAPSHOT" ] || fail "Queued implementation requires a validated issue snapshot."
+      [ -f "$SNAPSHOT" ] && [ -r "$SNAPSHOT" ] ||
+        fail "Validated issue snapshot is missing or unreadable."
+      jq -e --argjson issue "$NUMBER" '
+        if type == "object" and
+          .number == $issue and
+          .state == "OPEN" and
+          (.title | type == "string" and length > 0) and
+          (.body | type == "string" and length > 0) and
+          (.url | type == "string" and length > 0) and
+          (.labels | type == "array") and
+          (.labels | map(.name) | index("agent-ready")) and
+          (.author | type == "object")
+        then . else empty end
+      ' "$SNAPSHOT" > "$ITEM" || fail "Validated issue snapshot is malformed or for the wrong issue."
+      unset SNAPSHOT QUEUE_VALIDATED_ISSUE_SNAPSHOT
+    else
+      gh issue view "$NUMBER" --json title,body,url,labels,author > "$ITEM"
+    fi
     jq -e '.labels | map(.name) | index("agent-ready")' "$ITEM" >/dev/null ||
       fail "Issue must have the agent-ready label."
     grep -Fq 'High - authentication, security, database, billing, infrastructure, or deployment' "$ITEM" &&

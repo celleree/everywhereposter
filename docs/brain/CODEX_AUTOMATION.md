@@ -2,29 +2,29 @@
 
 ## Status
 
-This document describes the gated Codex development workflow introduced by `.github/workflows/codex-development-agents.yml`.
+This document describes the gated Codex development workflows in `.github/workflows/codex-development-agents.yml` and `.github/workflows/codex-issue-queue.yml`.
 
-The workflow is inactive until all of the following are true:
+These workflows are inactive until all of the following are true:
 
 1. The pull request adding the workflow has been reviewed and merged into `main`.
 2. A dedicated self-hosted runner has been registered for this private repository.
 3. The runner has been authenticated to Codex and verified to have no persistent GitHub credentials or production access.
 4. A harmless planning dry run and a documentation-only implementation dry run have passed.
 
-This is a human-gated system. It must never merge or deploy automatically.
+This is a human-gated system. It must never merge or deploy automatically. The issue queue reduces repeated dispatches, but it does not remove readiness, risk, review, merge, or deployment gates.
 
 ## Human Gates
 
 Human approval remains required for:
 
 1. Applying the `agent-ready` label to an issue.
-2. Launching the `implement` workflow manually.
+2. Authorizing implementation either by launching the `implement` workflow manually or by including an already-ready issue in an owner-triggered unattended queue.
 3. Marking a draft pull request ready for review.
 4. Deciding whether review findings warrant a manually launched `repair` run.
 5. Merging the pull request.
 6. Deploying or changing production.
 
-High-risk authentication, security, billing, database, infrastructure, migration, dependency, container, and deployment work is excluded from unattended implementation.
+High-risk authentication, authorization, security-sensitive, billing, payment, database, schema, migration, infrastructure, dependency or package-upgrade, container or Docker, GitHub Actions or workflow, deployment, and production-operations work is excluded from unattended implementation.
 
 ## Trusted Runner Requirements
 
@@ -112,11 +112,35 @@ Repair is restricted to an open, owner-controlled `agent/issue-N` pull request t
 
 Merging a pull request automatically runs the read-only memory coordinator and posts proposed brain or release-ledger updates. It does not edit canonical memory.
 
+### Unattended issue queue
+
+The repository owner may explicitly launch `Codex unattended issue queue` from `main` with `workflow_dispatch` after typing the confirmation phrase. Both GitHub's original workflow actor and the triggering actor must be the repository owner, so a collaborator cannot rerun either the full workflow or an individual privileged issue job from an earlier owner-authorized run. Missing triggering-actor information fails closed. Dispatches from any other ref are rejected. It has no scheduled, issue-label, pull-request, or repository event trigger.
+
+The owner supplies an issue list and an optional implementation subset. Queue parsing is deterministic: it accepts comma-separated issue numbers, rejects malformed values, removes duplicates while preserving the first occurrence in the generated matrix data, and rejects implementation numbers that are absent from the main queue. An empty implementation subset is valid and makes every entry plan-only.
+
+The workflow prepares matrix data that preserves first-occurrence order and uses `max-parallel: 1`, so no more than one issue job runs at a time. GitHub controls which pending matrix job is selected next, so runtime start order is not guaranteed. Queued issues must therefore be independent and must not depend on an earlier queue entry completing first. `fail-fast` is disabled, so a failed or timed-out issue does not cancel the remaining issue jobs. Each issue job may:
+
+1. Run the read-only planning role and allow that role to inspect and comment on the issue.
+2. Stop as plan-only when the issue is not in the owner-supplied implementation subset.
+3. Before implementation, refresh the issue, require it to remain open, and require an existing `agent-ready` label whose most recent label event was performed by the repository owner after the final title or body edit.
+4. Require exactly one complete set of recognized issue-template sections, including all completed readiness confirmations, then parse exactly one recognized `Risk classification` field and apply the blocked-category checks.
+5. Run implementation only after all gates pass.
+
+Planning and the queue never add `agent-ready`. Adding an issue to the implementation subset is not a substitute for the separately owner-applied label.
+
+Template and risk handling fail closed. Missing, duplicated, malformed, incomplete, or unrecognized required sections block implementation. Missing, duplicated, malformed, ambiguous, or unknown risk classifications also block implementation. A `High` classification blocks implementation. Low- or medium-classified issues remain blocked when the title or any requested or permitted implementation field describes authentication, authorization, security-sensitive changes, billing or payments, databases, schema changes or migrations, infrastructure, dependencies or package upgrades, containers or Docker, GitHub Actions or workflow changes, deployment, or production operations. The required `Explicitly out of scope` section is validated for completeness but is excluded from this keyword scan because it describes work that must not be performed. Non-template issues therefore cannot become eligible merely because they contain a recognized risk sentence.
+
+The pre-implementation refresh reads the exact title and body together with GraphQL `lastEditedAt` and paginated label and title-rename timeline events. Metadata, timestamps, parsing, and pagination all fail closed. If the title or body was edited at or after the latest owner-applied readiness event, unattended implementation is blocked until the owner removes and reapplies `agent-ready` after the final edit. Generic issue activity such as comments or label changes is not treated as a content edit.
+
+After those gates pass, the queue writes that same refreshed and validated issue payload to its private temporary directory and passes only that snapshot path to the implementation wrapper. Queued implementation validates the snapshot and constructs the Codex context from its pinned title and body without refetching the live issue, so later issue edits cannot change the approved prompt. Missing, unreadable, malformed, incomplete, or wrong-issue snapshots block implementation. Manual non-queue implementation retains its live issue lookup and existing gates.
+
+Every queue-created pull request must be a draft. The implementation role uses `gh pr create --draft`, and the queue verifies that the resulting open pull request is present and still a draft. The queue has no merge or deployment command.
+
 ## Credential and Sandbox Controls
 
-- Read-only and write-capable roles use separate jobs and separate least-privilege GitHub token permissions.
+- Standard development-agent roles use separate jobs and least-privilege GitHub token permissions. In the unattended queue, each issue has one isolated repository-write matrix job, and planning and implementation may run sequentially inside that job only after all readiness, template, and risk gates pass.
 - `actions/checkout` does not persist its GitHub credentials.
-- Git operations receive the short-lived workflow token only immediately before required fetch or push commands.
+- Credentials are removed before Codex receives untrusted issue content. The implementation role receives Git access only during the narrowly controlled setup, commit, push, and draft-PR operations performed by the trusted wrapper.
 - The token is removed from Git configuration and the process environment before Codex starts.
 - The script fails closed if persistent `gh` authentication or usable Git remote credentials remain.
 - Codex runs with user configuration ignored so unrelated MCP servers and local automation settings are not loaded.
@@ -154,7 +178,8 @@ GitHub events produced with the repository `GITHUB_TOKEN` have special recursion
 
 ## Limits
 
-- Maximum runtime: 90 minutes per workflow job.
+- Standard development-agent jobs have a 90-minute maximum runtime.
+- Queue roles are limited to 60, 120, or 150 minutes. Each matrix issue has its own 340-minute job, which accommodates two maximum-length roles, both five-minute termination grace periods, and at least 30 minutes for checkout, cleanup, comments, and final reporting.
 - Maximum unattended implementation size: 30 changed files.
 - Secret, environment, agent-system, workflow, dependency, database-schema, container, and deployment files are blocked.
 - GitHub credentials are removed before Codex receives issue, PR, comment, or diff content.
@@ -164,7 +189,23 @@ GitHub events produced with the repository `GITHUB_TOKEN` have special recursion
 
 ## Failure Handling
 
-If a Codex run fails, the workflow stops. Do not blindly rerun it. Review the issue, branch, logs, and any partial changes first.
+For the standard development-agent workflow, a failed role stops that workflow run. Do not blindly rerun it. Review the issue, branch, logs, and any partial changes first.
+
+The unattended queue isolates failures per issue. Planning and implementation commands each run under their own command timeout inside the issue job. A role failure or timeout is recorded in that issue's job summary, cleanup is attempted, the issue job fails, and the remaining matrix entries stay eligible to run in the order GitHub selects.
+
+Expected per-issue GitHub failures are explicitly contained rather than being left to `set -e`:
+
+- Issue lookup failures are recorded and fail only that issue job.
+- Repository-owner lookup failures are recorded and fail only that issue job.
+- A readiness-event, edit-metadata, timestamp, pagination, or pre-implementation issue refresh failure blocks implementation and is recorded.
+- A pull-request lookup failure before implementation blocks implementation rather than risking a duplicate branch or pull request.
+- A pull-request lookup failure after implementation is recorded and fails that issue's reporting.
+- Queue status-comment failures are recorded in the job summary and make that issue job fail, but they do not stop safe role processing or cancel later queue entries.
+- Cleanup failures are recorded and fail the affected issue job.
+
+Unexpected setup failures, such as missing runner tools, invalid queue inputs, or an unauthorized actor, may stop the workflow before issue processing begins.
+
+The final result for every started issue explicitly states that no pull request was merged and no deployment was performed. A queue failure must never trigger automatic retry, merge, or deployment.
 
 To disable automation immediately:
 

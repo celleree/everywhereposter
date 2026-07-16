@@ -1,0 +1,120 @@
+name: Codex unattended issue queue
+run-name: Codex unattended queue - ${{ inputs.issues }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      issues:
+        description: Comma-separated open issue numbers
+        required: true
+        type: string
+        default: "30,27,28,15,16,17,18"
+      implement_issues:
+        description: Ready, safe issue numbers eligible for draft-PR implementation
+        required: false
+        type: string
+        default: "27,28,30"
+      max_minutes_per_role:
+        description: Maximum runtime for each Codex plan or implementation role
+        required: true
+        type: choice
+        options:
+          - "60"
+          - "120"
+          - "150"
+        default: "120"
+      confirmation:
+        description: Type RUN UNATTENDED to start
+        required: true
+        type: string
+
+concurrency:
+  group: codex-unattended-issue-queue
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    if: >-
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner &&
+      inputs.confirmation == 'RUN UNATTENDED' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.queue.outputs.matrix }}
+    steps:
+      - name: Check out the reviewed main revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Normalize issue list and remove duplicates
+        id: queue
+        env:
+          QUEUE_ISSUES: ${{ inputs.issues }}
+          QUEUE_IMPLEMENT_ISSUES: ${{ inputs.implement_issues }}
+        run: |
+          matrix=$(bash scripts/agents/codex-issue-queue.sh prepare)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  issue:
+    needs: prepare
+    if: >-
+      needs.prepare.result == 'success' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    strategy:
+      # Matrix data preserves first-occurrence order, but GitHub controls pending
+      # job selection. Entries must be independent of runtime start order.
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: [self-hosted, linux, codex]
+    # Two 150-minute roles plus their kill grace leave at least 30 minutes for
+    # checkout, cleanup, status comments, and final reporting.
+    timeout-minutes: 340
+    permissions:
+      actions: write
+      contents: write
+      issues: write
+      pull-requests: write
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+      QUEUE_ISSUE: ${{ matrix.issue }}
+      QUEUE_IMPLEMENT: ${{ matrix.implement }}
+      QUEUE_MAX_MINUTES: ${{ inputs.max_minutes_per_role }}
+
+    steps:
+      - name: Check out the reviewed main revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify trusted runner tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
+        run: |
+          rm -rf "$GH_CONFIG_DIR"
+          mkdir -p "$GH_CONFIG_DIR"
+          codex login status
+          codex --version
+          gh --version
+          git --version
+          jq --version
+          timeout --version | head -n 1
+          bwrap --version
+
+      - name: Process issue with isolated role timeouts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
+        run: bash scripts/agents/codex-issue-queue.sh run
