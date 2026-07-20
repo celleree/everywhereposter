@@ -247,10 +247,16 @@ fi
 codex login status >/dev/null 2>&1 ||
   fail "Codex is not authenticated on this trusted runner."
 
+if [ "$SANDBOX" = "read-only" ]; then
+  set -- --config features.use_legacy_landlock=true
+else
+  set --
+fi
+
 cat "$CONTEXT" | codex --ask-for-approval never exec \
   --ephemeral \
   --ignore-user-config \
-  --config 'features.use_legacy_landlock=true' \
+  "$@" \
   --config 'tools.web_search=false' \
   --config 'sandbox_workspace_write.network_access=false' \
   --config 'allow_login_shell=false' \
