@@ -53,7 +53,8 @@ Before operational, deploy, Docker, database, or production work, read OPERATING
 - Work one step at a time, especially for server and dev tasks.
 - For Post Everywhere, the usual live working environment is Hetzner SSH at `/home/arund/publish-everywhere-git`, not local WSL.
 - Do not start Docker Desktop, the local WSL Postiz stack, or local cloudflared unless local work is intentional.
-- Before coding sessions, run `sh scripts/install-git-guardrails.sh`, then `sh scripts/check-repository-state.sh`. Stop if either fails.
+- Before normal coding sessions, run `sh scripts/install-git-guardrails.sh`, then `sh scripts/check-repository-state.sh`. Stop if either fails.
+- Exception: when running through the trusted automated agent wrapper in `scripts/agents/codex-task.sh`, these checks are completed before the Codex sandbox starts. Do not rerun either command inside the sandbox; `.git` is intentionally read-only.
 - The installed pre-push hook blocks direct pushes to `main`, pushes to the obsolete snapshot, and force pushes from this checkout.
 - Start every new issue from current `main` with `sh scripts/start-change.sh fix/<short-name>` (or `feature/`, `chore/`, `docs/`, or `agent/`).
 - Never edit directly on `main`; use a short-lived branch and a pull request targeting `main`.
