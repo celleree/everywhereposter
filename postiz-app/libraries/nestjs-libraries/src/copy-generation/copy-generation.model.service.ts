@@ -1,4 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { execFile } from 'child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { basename, join } from 'path';
+import { tmpdir } from 'os';
+import { promisify } from 'util';
 import OpenAI, { toFile } from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
@@ -12,6 +17,7 @@ import { CopyGenerationBrief } from '@gitroom/nestjs-libraries/dtos/copy-generat
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
 });
+const execFileAsync = promisify(execFile);
 
 const VoiceProfileSchema = z.object({
   sentenceLength: z.enum(['short', 'mixed', 'long']).default('mixed'),
@@ -115,11 +121,12 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
     mimeType: string;
     originalName?: string | null;
   }) {
+    const audioBuffer = await this.extractAudio(params.buffer, params.originalName);
     const file = await toFile(
-      params.buffer,
-      params.originalName || 'uploaded-video.mp4',
+      audioBuffer,
+      `${basename(params.originalName || 'uploaded-video', '.mp4')}.mp3`,
       {
-        type: params.mimeType,
+        type: 'audio/mpeg',
       }
     );
 
@@ -127,6 +134,53 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
       file,
       model: 'gpt-4o-mini-transcribe',
     });
+  }
+
+  private async extractAudio(buffer: Buffer, originalName?: string | null) {
+    const workingDirectory = await mkdtemp(
+      join(tmpdir(), 'postiz-transcription-')
+    );
+    const inputPath = join(
+      workingDirectory,
+      basename(originalName || 'uploaded-video.mp4')
+    );
+    const outputPath = join(workingDirectory, 'audio.mp3');
+
+    try {
+      await writeFile(inputPath, buffer);
+      await execFileAsync(
+        'ffmpeg',
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-i',
+          inputPath,
+          '-map',
+          '0:a:0',
+          '-vn',
+          '-ac',
+          '1',
+          '-ar',
+          '16000',
+          '-b:a',
+          '32k',
+          outputPath,
+        ],
+        {
+          maxBuffer: 1024 * 1024,
+        }
+      );
+
+      const audioBuffer = await readFile(outputPath);
+      if (!audioBuffer.byteLength) {
+        throw new Error('Video audio extraction returned an empty file.');
+      }
+
+      return audioBuffer;
+    } finally {
+      await rm(workingDirectory, { recursive: true, force: true });
+    }
   }
 
   async summarizeTranscript(transcript: string) {
