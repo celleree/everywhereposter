@@ -56,7 +56,7 @@ export const RenderComponents: FC<{
           <p className="text-sm text-gray-400">
             {t(
               'internal_team_comments_do_not_publish',
-              'Internal team comments stay in Publish Everywhere and do not publish to Instagram or other social platforms.'
+              'Internal team comments stay in EverywherePoster and do not publish to Instagram or other social platforms.'
             )}
           </p>
           <textarea

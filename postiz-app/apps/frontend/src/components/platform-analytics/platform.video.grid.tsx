@@ -202,7 +202,7 @@ export const PlatformVideoGrid: FC<{
                         <div className="text-[12px] text-newTableText/45 mt-[6px]">
                           {t(
                             'no_linked_publish_everywhere_post_yet',
-                            'No linked Publish Everywhere post yet'
+                            'No linked EverywherePoster post yet'
                           )}
                         </div>
                       )}

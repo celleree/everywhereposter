@@ -1,7 +1,7 @@
 # Copy Generation PRD (Phase 1)
 
 ## Why this exists
-Publish Everywhere already has clear product direction around AI-generated captions, platform-specific copy, a brand database / knowledge base, and personalized writing controls.
+EverywherePoster already has clear product direction around AI-generated captions, platform-specific copy, a brand database / knowledge base, and personalized writing controls.
 
 What is missing is the implementation layer for:
 - generating copy from an uploaded image or video

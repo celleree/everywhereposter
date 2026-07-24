@@ -11,7 +11,7 @@ import {
 acceptLanguage.languages(languages);
 
 const PUBLIC_FRONTEND_FALLBACK_URL =
-  'https://publisheverywhere.halowebsites.com';
+  'https://app.everywhereposter.com';
 
 const getFirstHeaderValue = (value: string | null) =>
   value?.split(',')?.[0]?.trim();

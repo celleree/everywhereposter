@@ -6,9 +6,9 @@ import Link from 'next/link';
 import { getT } from '@gitroom/react/translation/get.translation.service.backend';
 import { LoginWithOidc } from '@gitroom/frontend/components/auth/login.with.oidc';
 export const metadata: Metadata = {
-  title: 'Publish Everywhere Register',
+  title: 'EverywherePoster Register',
   description:
-    'Create your Publish Everywhere account to plan and publish social media content.',
+    'Create your EverywherePoster account to plan and publish social media content.',
 };
 export default async function Auth(params: {searchParams: Promise<{provider: string}>}) {
   const t = await getT();

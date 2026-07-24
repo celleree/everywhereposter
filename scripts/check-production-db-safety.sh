@@ -4,7 +4,9 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/.env}"
-PUBLIC_DOMAIN="publisheverywhere.halowebsites.com"
+PRODUCTION_DOMAIN="app.everywhereposter.com"
+# Retain the previous public hostname as a safety-only migration guard.
+LEGACY_PRODUCTION_DOMAIN="publisheverywhere.halowebsites.com"
 
 read_env_value() {
   key="$1"
@@ -65,7 +67,7 @@ public_domain=false
 local_docker_db=false
 
 case "$PUBLIC_BASE_URL" in
-  *"$PUBLIC_DOMAIN"*) public_domain=true ;;
+  *"$PRODUCTION_DOMAIN"*|*"$LEGACY_PRODUCTION_DOMAIN"*) public_domain=true ;;
 esac
 
 case "$DATABASE_URL" in

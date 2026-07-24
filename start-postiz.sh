@@ -3,12 +3,14 @@ set -eu
 
 cd /app
 
-PRODUCTION_DOMAIN="publisheverywhere.halowebsites.com"
+PRODUCTION_DOMAIN="app.everywhereposter.com"
+# Retain the previous public hostname as a safety-only migration guard.
+LEGACY_PRODUCTION_DOMAIN="publisheverywhere.halowebsites.com"
 PUBLIC_DOMAIN_MODE="false"
 LOCAL_DOCKER_DB="false"
 
 case "${MAIN_URL:-} ${FRONTEND_URL:-}" in
-  *"$PRODUCTION_DOMAIN"*) PUBLIC_DOMAIN_MODE="true" ;;
+  *"$PRODUCTION_DOMAIN"*|*"$LEGACY_PRODUCTION_DOMAIN"*) PUBLIC_DOMAIN_MODE="true" ;;
 esac
 
 case "${DATABASE_URL:-}" in
@@ -17,7 +19,7 @@ esac
 
 if [ "$PUBLIC_DOMAIN_MODE" = "true" ] && [ "$LOCAL_DOCKER_DB" = "true" ] && [ "${ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB:-false}" != "true" ]; then
   cat >&2 <<EOF
-ERROR: Refusing to start Publish Everywhere with the public production domain and the bundled local Docker Postgres database.
+ERROR: Refusing to start EverywherePoster with the public production domain and the bundled local Docker Postgres database.
 
 This protects users from accidentally serving production traffic from a fresh/local DB, which can make real profile/data appear deleted.
 

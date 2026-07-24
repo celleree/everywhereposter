@@ -31,14 +31,14 @@ const jakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin'],
 });
 
-const BRAND_NAME = 'Publish Everywhere';
+const BRAND_NAME = 'EverywherePoster';
 const BRAND_DESCRIPTION =
-  'Publish Everywhere helps you plan, schedule, and publish social media content from one place.';
+  'EverywherePoster helps you plan, schedule, and publish social media content from one place.';
 const SITE_URL = (
   process.env.FRONTEND_URL ||
   process.env.PUBLIC_BASE_URL ||
   process.env.MAIN_URL ||
-  'https://publisheverywhere.halowebsites.com'
+  'https://app.everywhereposter.com'
 ).replace(/\/$/, '');
 const SOCIAL_IMAGE_URL = `${SITE_URL}/branding/pe-logo.png`;
 const BACKEND_URL =

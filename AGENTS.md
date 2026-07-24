@@ -61,7 +61,7 @@ Before operational, deploy, Docker, database, or production work, read OPERATING
 - The canonical active branch is `main`. The old snapshot branch is historical only.
 - Use VS Code SSH for editing and the Hetzner console for heavy Docker builds.
 
-# Publish Everywhere Codex Instructions
+# EverywherePoster Codex Instructions
 
 ## Default behavior
 
