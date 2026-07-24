@@ -41,7 +41,6 @@ export interface SourceBriefResult {
   blocked: boolean;
 }
 
-const MAX_AUTO_TRANSCRIBE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_VOICE_PROFILE: VoiceProfileSnapshot = {
   sentenceLength: 'mixed',
   lineBreakHabit: 'moderate',
@@ -116,34 +115,25 @@ export class SourceBriefService {
     if (mediaType === 'video' && !transcript?.text) {
       try {
         const videoBuffer = Buffer.from(await readOrFetch(media.path));
+        const transcription =
+          await this._copyGenerationModelService.transcribeVideo({
+            buffer: videoBuffer,
+            mimeType,
+            originalName: media.originalName || media.name,
+          });
 
-        if (videoBuffer.byteLength > MAX_AUTO_TRANSCRIBE_BYTES) {
+        if (transcription.text?.trim()) {
+          transcript = {
+            text: transcription.text.trim(),
+            source: 'generated',
+            confidence: 0.68,
+          };
+        } else {
           warnings.push({
             code: 'TRANSCRIPT_REQUIRED',
             message:
-              'This video is too large for best-effort auto transcription right now. Add a transcript to generate grounded copy.',
+              'Auto transcription did not return usable text. Add a transcript to generate grounded copy from this video.',
           });
-        } else {
-          const transcription =
-            await this._copyGenerationModelService.transcribeVideo({
-              buffer: videoBuffer,
-              mimeType,
-              originalName: media.originalName || media.name,
-            });
-
-          if (transcription.text?.trim()) {
-            transcript = {
-              text: transcription.text.trim(),
-              source: 'generated',
-              confidence: 0.68,
-            };
-          } else {
-            warnings.push({
-              code: 'TRANSCRIPT_REQUIRED',
-              message:
-                'Auto transcription did not return usable text. Add a transcript to generate grounded copy from this video.',
-            });
-          }
         }
       } catch (error) {
         warnings.push({

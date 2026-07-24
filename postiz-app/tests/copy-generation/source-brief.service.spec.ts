@@ -1,5 +1,9 @@
 import { SourceBriefService } from '@gitroom/nestjs-libraries/copy-generation/source-brief.service';
 
+jest.mock('@gitroom/helpers/utils/read.or.fetch', () => ({
+  readOrFetch: jest.fn(),
+}));
+
 const voiceProfile = {
   sentenceLength: 'mixed' as const,
   lineBreakHabit: 'moderate' as const,
@@ -21,6 +25,9 @@ const createService = (knowledgeBaseVoiceProfile?: typeof voiceProfile) => {
     }),
   };
   const modelService = {
+    transcribeVideo: jest.fn().mockResolvedValue({
+      text: 'A generated transcript with concrete details.',
+    }),
     summarizeTranscript: jest.fn().mockResolvedValue({
       transcriptSummary: 'A concise transcript summary.',
       facts: ['A concrete fact', 'Another concrete fact'],
@@ -71,5 +78,25 @@ describe('SourceBriefService nullable voice profile', () => {
     );
 
     expect(result.voiceProfile).toEqual(voiceProfile);
+  });
+
+  it('auto-transcribes videos whose original file is larger than 25 MB', async () => {
+    const { readOrFetch } = jest.requireMock(
+      '@gitroom/helpers/utils/read.or.fetch'
+    ) as { readOrFetch: jest.Mock };
+    readOrFetch.mockResolvedValue(Buffer.alloc(25 * 1024 * 1024 + 1));
+    const service = createService();
+
+    const result = await service.build('org-1', {
+      ...request,
+      transcript: undefined,
+    } as any);
+
+    expect(result.blocked).toBe(false);
+    expect(result.transcript).toEqual({
+      text: 'A generated transcript with concrete details.',
+      source: 'generated',
+      confidence: 0.68,
+    });
   });
 });
