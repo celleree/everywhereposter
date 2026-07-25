@@ -237,7 +237,7 @@ const usePostActions = (onMutate?: () => void) => {
             : isRemoteDeletedPost
             ? t(
                 'are_you_sure_you_want_to_remove_this_post_from_publish_everywhere',
-                'Are you sure you want to remove this post from Publish Everywhere?'
+                'Are you sure you want to remove this post from EverywherePoster?'
               )
             : t(
                 'are_you_sure_you_want_to_delete_post',
@@ -282,7 +282,7 @@ const usePostActions = (onMutate?: () => void) => {
           : isRemoteDeletedPost
           ? t(
               'post_removed_successfully',
-              'Post removed from Publish Everywhere successfully'
+              'Post removed from EverywherePoster successfully'
             )
           : t('post_deleted_successfully', 'Post deleted successfully'),
         'success'
@@ -345,7 +345,7 @@ const usePostActions = (onMutate?: () => void) => {
         !(await deleteDialog(
           t(
             'remove_imported_post_from_publish_everywhere_question',
-            'Remove imported post from Publish Everywhere?'
+            'Remove imported post from EverywherePoster?'
           )
         ))
       ) {
@@ -373,7 +373,7 @@ const usePostActions = (onMutate?: () => void) => {
       toaster.show(
         t(
           'imported_post_removed_successfully',
-          'Imported post removed from Publish Everywhere'
+          'Imported post removed from EverywherePoster'
         ),
         'success'
       );

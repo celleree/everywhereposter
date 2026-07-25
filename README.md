@@ -1,6 +1,6 @@
-# Publish Everywhere
+# EverywherePoster
 
-A single-repo Docker Compose deployment for running Publish Everywhere with the app source tracked in `postiz-app/`.
+A single-repo Docker Compose deployment for running EverywherePoster with the app source tracked in `postiz-app/`.
 
 ## Product Planning Docs
 
@@ -70,7 +70,7 @@ docker compose up --build
 ```
 
 Wait for it to load:
-Open your website on https://publisheverywhere.halowebsites.com
+Open your website on https://app.everywhereposter.com
 
 Fresh clone note:
 
@@ -98,10 +98,10 @@ Practical note:
 
 This deployment now includes both a public deletion-instructions page and a Meta-compatible callback/status flow for connected Facebook, Instagram, and Threads accounts.
 
-- Public instructions page: `https://publisheverywhere.halowebsites.com/data-deletion`
-- Meta Data Deletion Request URL: `https://publisheverywhere.halowebsites.com/api/public/meta/data-deletion`
+- Public instructions page: `https://everywhereposter.com/data-deletion`
+- Meta Data Deletion Request URL: `https://app.everywhereposter.com/api/public/meta/data-deletion`
 - Meta callback status page format:
-  `https://publisheverywhere.halowebsites.com/api/public/meta/data-deletion/status?code=<confirmation_code>`
+  `https://app.everywhereposter.com/api/public/meta/data-deletion/status?code=<confirmation_code>`
 
 What the callback does:
 
@@ -117,7 +117,7 @@ Public-use note:
 Facebook Page permission upgrade note:
 
 - Existing Facebook Page integrations must reconnect to grant `pages_read_user_content`.
-- This permission is now requested alongside `pages_manage_engagement` so Publish Everywhere can honestly read Page comment content for connected Page posts during Meta review.
+- This permission is now requested alongside `pages_manage_engagement` so EverywherePoster can honestly read Page comment content for connected Page posts during Meta review.
 
 ---
 
@@ -139,8 +139,8 @@ Operator notes:
 Verification:
 
 ```bash
-curl -sS --max-time 15 https://publisheverywhere.halowebsites.com/.well-known/oauth-authorization-server | jq .
-curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 https://publisheverywhere.halowebsites.com/mcp
+curl -sS --max-time 15 https://app.everywhereposter.com/.well-known/oauth-authorization-server | jq .
+curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 https://app.everywhereposter.com/mcp
 ```
 
 Expected result:
@@ -168,9 +168,9 @@ services:
     restart: always
     environment:
       # === Required Settings
-      MAIN_URL: 'https://publisheverywhere.halowebsites.com'
-      FRONTEND_URL: 'https://publisheverywhere.halowebsites.com'
-      NEXT_PUBLIC_BACKEND_URL: 'https://publisheverywhere.halowebsites.com/api'
+      MAIN_URL: 'https://app.everywhereposter.com'
+      FRONTEND_URL: 'https://app.everywhereposter.com'
+      NEXT_PUBLIC_BACKEND_URL: 'https://app.everywhereposter.com/api'
       JWT_SECRET: 'random string that is unique to every install - just type random characters here!'
       DATABASE_URL: 'postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local'
       REDIS_URL: 'redis://postiz-redis:6379'
@@ -179,7 +179,7 @@ services:
       IS_GENERAL: 'true'
       DISABLE_REGISTRATION: 'false'
       DISABLE_POSTIZ_MCP: 'false'
-      MCP_URL: 'https://publisheverywhere.halowebsites.com'
+      MCP_URL: 'https://app.everywhereposter.com'
 
       # === Storage Settings
       STORAGE_PROVIDER: 'local'

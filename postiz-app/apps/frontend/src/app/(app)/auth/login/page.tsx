@@ -2,9 +2,9 @@ export const dynamic = 'force-dynamic';
 import { Login } from '@gitroom/frontend/components/auth/login';
 import { Metadata } from 'next';
 export const metadata: Metadata = {
-  title: 'Publish Everywhere Login',
+  title: 'EverywherePoster Login',
   description:
-    'Sign in to Publish Everywhere to schedule and publish social media content.',
+    'Sign in to EverywherePoster to schedule and publish social media content.',
 };
 export default async function Auth() {
   return <Login />;

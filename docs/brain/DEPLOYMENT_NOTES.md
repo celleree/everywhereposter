@@ -1,6 +1,6 @@
 # Deployment Notes
 
-Deployment memory for Publish Everywhere. `OPERATING-MANUAL.md` remains the source of truth; this file captures durable deployment lessons and reminders.
+Deployment memory for EverywherePoster. `OPERATING-MANUAL.md` remains the source of truth; this file captures durable deployment lessons and reminders.
 
 ## Current Model
 

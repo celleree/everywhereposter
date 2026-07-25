@@ -1,5 +1,6 @@
 (function () {
-  const BRAND_NAME = 'Publish Everywhere';
+  const BRAND_NAME = 'EverywherePoster';
+  const MARKETING_ORIGIN = 'https://everywhereposter.com';
   const BRAND_ASSET = '/branding/pe-logo.svg';
   const FAVICON_ASSET = '/branding/favicon.svg';
   const IMAGE_ASSET_PATHS = [
@@ -23,12 +24,12 @@
   const LEGAL_BAR_STYLE_ID = 'publish-everywhere-legal-links-style';
 
   const textReplacements = [
-    ['Postiz To Grow Their Social Presence', 'Publish Everywhere To Grow Their Social Presence'],
-    ['How to Use Postiz', 'How to Use Publish Everywhere'],
-    ['Use Postiz', 'Use Publish Everywhere'],
-    ['Join 10,000+ Entrepreneurs Who Use Postiz', 'Join 10,000+ Entrepreneurs Who Use Publish Everywhere'],
-    ['watch this short video to learn how to get the most out of Postiz', 'watch this short video to learn how to get the most out of Publish Everywhere'],
-    ['Watch this short video to learn how to get the most out of Postiz', 'Watch this short video to learn how to get the most out of Publish Everywhere'],
+    ['Postiz To Grow Their Social Presence', 'EverywherePoster To Grow Their Social Presence'],
+    ['How to Use Postiz', 'How to Use EverywherePoster'],
+    ['Use Postiz', 'Use EverywherePoster'],
+    ['Join 10,000+ Entrepreneurs Who Use Postiz', 'Join 10,000+ Entrepreneurs Who Use EverywherePoster'],
+    ['watch this short video to learn how to get the most out of Postiz', 'watch this short video to learn how to get the most out of EverywherePoster'],
+    ['Watch this short video to learn how to get the most out of Postiz', 'Watch this short video to learn how to get the most out of EverywherePoster'],
     ['Postiz', BRAND_NAME],
   ];
 
@@ -77,12 +78,12 @@
       }
 
       if (href.includes('postiz.com/terms')) {
-        link.setAttribute('href', '/terms');
+        link.setAttribute('href', `${MARKETING_ORIGIN}/terms`);
         link.setAttribute('rel', 'nofollow');
       }
 
       if (href.includes('postiz.com/privacy')) {
-        link.setAttribute('href', '/privacy');
+        link.setAttribute('href', `${MARKETING_ORIGIN}/privacy`);
         link.setAttribute('rel', 'nofollow');
       }
 
@@ -275,9 +276,9 @@
       bar.id = LEGAL_BAR_ID;
       bar.setAttribute('aria-label', 'Legal');
       bar.innerHTML = [
-        '<a href="/terms" rel="nofollow">Terms of Service</a>',
+        '<a href="' + MARKETING_ORIGIN + '/terms" rel="nofollow">Terms of Service</a>',
         '<span class="separator" aria-hidden="true">|</span>',
-        '<a href="/privacy" rel="nofollow">Privacy Policy</a>',
+        '<a href="' + MARKETING_ORIGIN + '/privacy" rel="nofollow">Privacy Policy</a>',
       ].join('');
     }
 

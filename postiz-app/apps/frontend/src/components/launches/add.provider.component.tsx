@@ -377,7 +377,7 @@ const InstagramStandaloneInstructions: FC<{
           or use a private/incognito browser window.
         </p>
         <p>
-          After switching accounts, return to Publish Everywhere and click
+          After switching accounts, return to EverywherePoster and click
           Instagram (Standalone) again.
         </p>
       </div>

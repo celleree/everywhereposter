@@ -489,7 +489,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     if (isRemoteDeletedPost) {
       return t(
         'deleted_on_platform_can_republish',
-        'This post was already deleted on the platform. You can republish it or remove it from Publish Everywhere.'
+        'This post was already deleted on the platform. You can republish it or remove it from EverywherePoster.'
       );
     }
 
@@ -550,7 +550,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     const confirmationMessage = showPublishedActions
       ? t(
           'are_you_sure_you_want_to_remove_this_post_from_publish_everywhere',
-          'Are you sure you want to remove this post from Publish Everywhere? This does not change the live platform post.'
+          'Are you sure you want to remove this post from EverywherePoster? This does not change the live platform post.'
         )
       : t(
           'are_you_sure_you_want_to_delete_post',

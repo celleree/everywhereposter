@@ -18,6 +18,6 @@ Persistent operational notes for Post Everywhere work. These are intended to pre
 - The Hetzner server has only 4 GB RAM, so Docker and Next.js builds may need extra swap. `/swapfile2` was added for this.
 - Instagram posting fixes are committed through `23d45941`. The current repo `HEAD` after planning docs is `eb770cf9`.
 - Instagram image posts now work, but images must use a valid feed aspect ratio unless normalization is added. Square images and 4:5 portrait images work. Very tall images, such as `666x1000`, fail validation.
-- If Instagram posts appear live but Publish Everywhere says they failed, check the post-publish permalink lookup.
-- The public URL is fixed as `https://publisheverywhere.halowebsites.com` and should not be changed casually because OAuth, Meta, and app config depend on it.
+- If Instagram posts appear live but EverywherePoster says they failed, check the post-publish permalink lookup.
+- The public URL is fixed as `https://app.everywhereposter.com` and should not be changed casually because OAuth, Meta, and app config depend on it.
 - Required environment variable names on Hetzner include `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET`, and public URL variables. Do not commit secrets.

@@ -14,8 +14,8 @@ import { PostStatisticsPanel } from '@gitroom/frontend/components/launches/stati
 
 dayjs.extend(utc);
 export const metadata: Metadata = {
-  title: 'Publish Everywhere Preview',
-  description: 'Preview a shared post from Publish Everywhere.',
+  title: 'EverywherePoster Preview',
+  description: 'Preview a shared post from EverywherePoster.',
 };
 export default async function Auth(
   props: {

@@ -493,8 +493,8 @@ export class PublicController {
     const summary = !record
       ? 'We could not find a deletion request for that confirmation code.'
       : record.status === 'completed'
-      ? 'Your deletion request was received and matching Meta-connected data has been removed from Publish Everywhere.'
-      : 'Your deletion request was received. We did not find any matching Meta-connected data in Publish Everywhere, so no further action was required.';
+      ? 'Your deletion request was received and matching Meta-connected data has been removed from EverywherePoster.'
+      : 'Your deletion request was received. We did not find any matching Meta-connected data in EverywherePoster, so no further action was required.';
     const detail = !record
       ? 'The code may be missing, invalid, or older than our retention window for status lookups.'
       : record.status === 'completed'
@@ -514,7 +514,7 @@ export class PublicController {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${this.escapeHtml(title)} | Publish Everywhere</title>
+    <title>${this.escapeHtml(title)} | EverywherePoster</title>
     <style>
       :root {
         color-scheme: light;
@@ -615,7 +615,7 @@ export class PublicController {
   <body>
     <main>
       <section class="card">
-        <p class="eyebrow">Publish Everywhere</p>
+        <p class="eyebrow">EverywherePoster</p>
         <h1>${this.escapeHtml(title)}</h1>
         <p>${this.escapeHtml(summary)}</p>
         <p>${this.escapeHtml(detail)}</p>

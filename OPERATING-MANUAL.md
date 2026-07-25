@@ -1,4 +1,4 @@
-# Publish Everywhere Operating Manual
+# EverywherePoster Operating Manual
 
 ## Status
 
@@ -6,7 +6,7 @@
 - Older deployment notes may be historical or stale unless they explicitly point back to this file.
 - Canonical active branch: main
 - Main app path: postiz-app/
-- Public URL: https://publisheverywhere.halowebsites.com
+- Public URL: https://app.everywhereposter.com
 
 ## Default Work Style
 
@@ -162,7 +162,7 @@ Explain:
 ## Server And Environment Notes
 
 - Usual live repo path: /home/arund/publish-everywhere-git
-- Public URL: https://publisheverywhere.halowebsites.com
+- Public URL: https://app.everywhereposter.com
 - Avoid local WSL/Docker/cloudflared unless local work is intentional.
 - Do not start duplicate local tunnels.
 
@@ -212,7 +212,7 @@ GIT_SSH_COMMAND='ssh -i ~/.ssh/github_publish_everywhere -o IdentitiesOnly=yes' 
 
 ### Instagram Scheduling
 
-- Current scheduling is Publish Everywhere/Temporal local scheduling.
+- Current scheduling is EverywherePoster/Temporal local scheduling.
 - Do not assume scheduled posts appear in Instagram's native scheduled-posts UI.
 - Verify Meta docs before claiming native scheduled visibility is possible.
 

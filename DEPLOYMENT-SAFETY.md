@@ -32,7 +32,7 @@ Before enabling it, confirm the domain and database belong together. A public do
 - `JWT_SECRET`
 - `CLOUDFLARED_CREDENTIALS_FILE` when using the `public-tunnel` profile
 
-Startup refuses `publisheverywhere.halowebsites.com` with the bundled local Docker Postgres unless `ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB=true` is set after a deliberate review.
+Startup refuses `app.everywhereposter.com` with the bundled local Docker Postgres unless `ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB=true` is set after a deliberate review.
 
 Prisma `db push` is skipped by default in public-domain mode. Set `RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE=true` only when schema changes are intended, or set `SKIP_PRISMA_DB_PUSH=true` to skip it explicitly.
 

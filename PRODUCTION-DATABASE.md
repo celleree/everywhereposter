@@ -4,7 +4,7 @@ Use a managed PostgreSQL database before onboarding real users. The bundled Dock
 
 ## What `DATABASE_URL` Is
 
-`DATABASE_URL` tells Publish Everywhere which PostgreSQL database to use.
+`DATABASE_URL` tells EverywherePoster which PostgreSQL database to use.
 
 Production URLs usually look like this:
 
@@ -26,8 +26,8 @@ Provider-agnostic setup:
 4. Set the public URLs:
 
    ```text
-   PUBLIC_BASE_URL=https://publisheverywhere.halowebsites.com
-   PUBLIC_BACKEND_URL=https://publisheverywhere.halowebsites.com/api
+   PUBLIC_BASE_URL=https://app.everywhereposter.com
+   PUBLIC_BACKEND_URL=https://app.everywhereposter.com/api
    ```
 
 5. Set this for normal production restarts:
@@ -50,7 +50,7 @@ postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local
 
 `postiz-postgres` is only the Docker service hostname inside this compose stack. It should not be used as the public production database unless you have deliberately reviewed and accepted the risk.
 
-The public domain guardrail blocks `publisheverywhere.halowebsites.com` from using the bundled local Docker database unless this reviewed exception is set:
+The public domain guardrail blocks `app.everywhereposter.com` from using the bundled local Docker database unless this reviewed exception is set:
 
 ```text
 ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB=true

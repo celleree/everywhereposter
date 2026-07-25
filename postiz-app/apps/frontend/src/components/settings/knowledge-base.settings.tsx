@@ -298,7 +298,7 @@ export const KnowledgeBaseSettings = () => {
         <div className="text-customColor18 mt-[4px]">
           {t(
             'knowledge_base_description',
-            'Upload transcripts so Publish Everywhere can learn recurring facts and a better default voice for text-post generation.'
+            'Upload transcripts so EverywherePoster can learn recurring facts and a better default voice for text-post generation.'
           )}
         </div>
       </div>

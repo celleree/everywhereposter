@@ -5,7 +5,7 @@ import { Metadata } from 'next';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: `${isGeneralServerSide() ? 'Publish Everywhere' : 'Gitroom'} Create`,
+  title: `${isGeneralServerSide() ? 'EverywherePoster' : 'Gitroom'} Create`,
   description: '',
 };
 
