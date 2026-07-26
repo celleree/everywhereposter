@@ -75,7 +75,7 @@ describe('InstagramProvider identity mapping', () => {
       .mockResolvedValueOnce({
         json: async () => ({
           access_token: 'page-token',
-          name: 'Publish Everywhere Page',
+          name: 'EverywherePoster Page',
         }),
       } as Response)
       .mockResolvedValueOnce({

@@ -71,7 +71,7 @@ describe('CopyGenerationModelService structured output schemas', () => {
     const inputBuffer = Buffer.from('large video');
     const audioBuffer = Buffer.from('compressed audio');
     getFileSystemMocks().mkdtemp.mockResolvedValue(
-      '/tmp/postiz-transcription-test'
+      '/tmp/everywhereposter-transcription-test'
     );
     getFileSystemMocks().readFile.mockResolvedValue(audioBuffer);
     getExecFileMock().mockImplementation(
@@ -89,7 +89,7 @@ describe('CopyGenerationModelService structured output schemas', () => {
     });
 
     expect(getFileSystemMocks().writeFile).toHaveBeenCalledWith(
-      '/tmp/postiz-transcription-test/uploaded-video.mp4',
+      '/tmp/everywhereposter-transcription-test/uploaded-video.mp4',
       inputBuffer
     );
     expect(getExecFileMock()).toHaveBeenCalledWith(
@@ -104,7 +104,7 @@ describe('CopyGenerationModelService structured output schemas', () => {
       { type: 'audio/mpeg' }
     );
     expect(getFileSystemMocks().rm).toHaveBeenCalledWith(
-      '/tmp/postiz-transcription-test',
+      '/tmp/everywhereposter-transcription-test',
       { recursive: true, force: true }
     );
     expect(result.text).toBe('Generated transcript.');

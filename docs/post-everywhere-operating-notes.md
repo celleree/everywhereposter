@@ -1,13 +1,13 @@
-# Post Everywhere Operating Notes
+# EverywherePoster Operating Notes
 
 > Current-source warning: For current deploy, Docker, database, and production rules, read `OPERATING-MANUAL.md` first.
 
-Persistent operational notes for Post Everywhere work. These are intended to prevent repeated environment mistakes and preserve context across sessions.
+Persistent operational notes for EverywherePoster work. These are intended to prevent repeated environment mistakes and preserve context across sessions.
 
 ## Frequent Notes
 
 - Arundel prefers one step at a time, especially for server and development tasks. Avoid long command dumps unless requested.
-- For Post Everywhere work, the correct live working environment is usually Hetzner SSH at `/home/arund/publish-everywhere-git`, not local WSL.
+- For EverywherePoster work, the correct live working environment is usually Hetzner SSH at `/home/arund/publish-everywhere-git`, not local WSL.
 - Avoid starting Docker Desktop, the local WSL Postiz stack, or local cloudflared on the PC unless intentionally working locally. A duplicate local tunnel previously caused Cloudflare to route traffic to the wrong stack.
 - Before coding sessions, check `git status --short` and `git log -5 --oneline`.
 - The current active branch is `snapshot/local-working-state-2026-04-29`.

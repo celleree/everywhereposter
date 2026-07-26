@@ -122,7 +122,7 @@ describe('FacebookProvider permissions upgrade', () => {
       .mockResolvedValueOnce({
         json: async () => ({
           id: 'user-1',
-          name: 'Publish Everywhere',
+          name: 'EverywherePoster',
           picture: {
             data: {
               url: 'https://example.com/picture.jpg',
@@ -154,10 +154,10 @@ describe('FacebookProvider permissions upgrade', () => {
     const provider = new FacebookProvider();
     jest.spyOn(provider, 'fetchPageInformation').mockResolvedValue({
       id: 'page-1',
-      name: 'Publish Everywhere',
+      name: 'EverywherePoster',
       access_token: 'page-token',
       picture: 'https://example.com/page.jpg',
-      username: 'publish-everywhere',
+      username: 'everywhereposter',
     });
 
     await expect(

@@ -167,7 +167,7 @@ describe('PostsService published post management', () => {
     process.env.FRONTEND_URL = 'https://publish.example';
     process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY = '/uploads';
     delete process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY;
-    process.env.UPLOAD_DIRECTORY = '/tmp/postiz-missing-upload-test';
+    process.env.UPLOAD_DIRECTORY = '/tmp/everywhereposter-missing-upload-test';
 
     try {
       const { service } = createService();
@@ -396,7 +396,7 @@ describe('PostsService published post management', () => {
     ).rejects.toThrow(new BadRequestException('Delete unavailable for this connection.'));
   });
 
-  it('returns a success payload after removing a post from Publish Everywhere', async () => {
+  it('returns a success payload after removing a post from EverywherePoster', async () => {
     const { service, postRepository } = createService();
 
     postRepository.deletePost.mockResolvedValue(undefined);
