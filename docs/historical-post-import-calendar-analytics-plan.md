@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Publish Everywhere should support importing previously published social posts so users can see a fuller content history in the calendar and analytics views. The long-term goal is to support all connected platforms, but the work should start with a shared historical import framework and then add platform adapters one by one.
+EverywherePoster should support importing previously published social posts so users can see a fuller content history in the calendar and analytics views. The long-term goal is to support all connected platforms, but the work should start with a shared historical import framework and then add platform adapters one by one.
 
 Imported historical posts must be read-only. They should appear in calendar and analytics surfaces where useful, but they must never enter normal publish, retry, edit, approval, queue, or delete flows.
 
@@ -10,7 +10,7 @@ Imported historical posts must be read-only. They should appear in calendar and 
 
 - Import historical posts from connected platform accounts.
 - Store imported posts in a shared canonical model with platform-specific raw metadata available for diagnostics and future fields.
-- Show imported posts in the calendar alongside Publish Everywhere-created posts, clearly marked as imported historical content.
+- Show imported posts in the calendar alongside EverywherePoster-created posts, clearly marked as imported historical content.
 - Include imported posts in analytics views when the user chooses historical or all-content reporting.
 - Build duplicate prevention so repeated imports and platform pagination overlap do not create duplicate records.
 - Allow platform adapters to be added incrementally, starting with Instagram.
@@ -20,7 +20,7 @@ Imported historical posts must be read-only. They should appear in calendar and 
 ## Non-Goals
 
 - Do not backfill historical posts into normal draft, scheduled, publish queue, retry, or deletion tables.
-- Do not allow editing imported posts inside Publish Everywhere unless a future feature explicitly supports annotations or metadata overrides.
+- Do not allow editing imported posts inside EverywherePoster unless a future feature explicitly supports annotations or metadata overrides.
 - Do not promise full analytics parity on day one for every platform.
 - Do not add scraping or unofficial APIs.
 - Do not import private data beyond the scopes explicitly granted by the connected account.
@@ -159,7 +159,7 @@ Indexes and constraints:
 Notes:
 
 - Do not reuse normal published post IDs unless the existing schema already has a safe content abstraction.
-- If a normal Publish Everywhere-created post can also be discovered by historical import, link it rather than duplicate it.
+- If a normal EverywherePoster-created post can also be discovered by historical import, link it rather than duplicate it.
 
 ### `historical_post_metrics`
 
@@ -227,7 +227,7 @@ Notes:
 
 ### Linking Imported Posts To Existing Posts
 
-If a post was originally published through Publish Everywhere and later appears during historical import, the system should avoid creating a competing calendar item.
+If a post was originally published through EverywherePoster and later appears during historical import, the system should avoid creating a competing calendar item.
 
 Possible model:
 
@@ -396,8 +396,8 @@ Calendar requirements:
 - Disable publish, retry, edit, reschedule, approval, and delete actions.
 - Allow opening a read-only details view.
 - Link to the platform permalink when available.
-- Allow filtering by `Imported`, `Published by Publish Everywhere`, platform, account, and post type.
-- Avoid double-counting linked posts that were originally published by Publish Everywhere.
+- Allow filtering by `Imported`, `Published by EverywherePoster`, platform, account, and post type.
+- Avoid double-counting linked posts that were originally published by EverywherePoster.
 - If an imported post is unavailable or deleted on the platform, show a neutral unavailable state rather than removing it from history by default.
 
 Calendar data-query options:
@@ -415,7 +415,7 @@ Read-only guardrails:
 
 ## Analytics Behavior
 
-Imported historical posts should help users understand historical performance without implying that Publish Everywhere managed the original publish action.
+Imported historical posts should help users understand historical performance without implying that EverywherePoster managed the original publish action.
 
 Analytics requirements:
 
@@ -423,7 +423,7 @@ Analytics requirements:
 - Allow analytics filters for source, platform, account, date range, and post type.
 - Include imported posts in historical/all-content views.
 - Exclude imported posts from operational publishing metrics such as queue success rate, retry rate, failed publish count, and scheduler reliability.
-- Prevent double-counting when an imported post is linked to an existing Publish Everywhere publication.
+- Prevent double-counting when an imported post is linked to an existing EverywherePoster publication.
 - Show metric freshness, such as `last synced`.
 - Handle missing metrics explicitly with `not available`, not zero.
 
@@ -517,7 +517,7 @@ Primary duplicate key:
 
 Secondary matching for linking:
 
-- Platform publication records from normal Publish Everywhere flows should match historical imports by platform post ID.
+- Platform publication records from normal EverywherePoster flows should match historical imports by platform post ID.
 - If platform post ID is missing, use permalink or canonical URL as a weaker signal.
 - Avoid fuzzy caption/date matching unless manually reviewed. It can create bad merges.
 
@@ -712,7 +712,7 @@ Exit criteria:
 - Re-running backfill updates records without duplicates.
 - Incremental sync uses cursor and overlap window.
 - Metrics refresh updates metric snapshots.
-- Existing Publish Everywhere-created posts link to imported records rather than duplicating calendar items.
+- Existing EverywherePoster-created posts link to imported records rather than duplicating calendar items.
 - Revoked or insufficient scopes pause jobs cleanly.
 
 ### API Tests
@@ -780,8 +780,8 @@ Alerts:
 
 ## Operational Notes
 
-- Use the Hetzner SSH repo at `/home/arund/publish-everywhere-git` for live Publish Everywhere work.
-- Avoid local WSL or Docker for live Publish Everywhere operations.
+- Use the Hetzner SSH repo at `/home/arund/publish-everywhere-git` for live EverywherePoster work.
+- Avoid local WSL or Docker for live EverywherePoster operations.
 - Heavy Docker builds on the 4GB Hetzner server may need swap.
 - Heavy Docker builds are safer from the Hetzner console so the session can be recovered if SSH drops.
 - Do not include secrets in planning docs, logs, commits, screenshots, or support notes.
@@ -811,7 +811,7 @@ Alerts:
 - Should imported historical posts live in separate tables, or should the app use an existing polymorphic post/content model?
 - Should imported posts be visible by default in the calendar after import, or should users opt in per view?
 - How far back should initial backfill go per platform and plan tier?
-- Should users be able to delete imported records from Publish Everywhere without deleting them on the platform?
+- Should users be able to delete imported records from EverywherePoster without deleting them on the platform?
 - Should users be able to add internal notes or tags to imported posts while keeping platform content read-only?
 - What retention policy applies when a connected account is removed?
 - Which analytics metrics should be considered required for launch versus optional per platform?
@@ -821,4 +821,4 @@ Alerts:
 - How should imports interact with billing limits, API quota costs, or workspace plan tiers?
 - Should imports run automatically on connection, or only after explicit user action?
 - What support tooling is needed to retry, pause, or inspect a specific import source?
-- How should duplicate linking work for historical posts originally published by Publish Everywhere before platform IDs were stored reliably?
+- How should duplicate linking work for historical posts originally published by EverywherePoster before platform IDs were stored reliably?

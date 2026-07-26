@@ -79,7 +79,7 @@ const buildPosts = (viewerCanAccessAnalytics: boolean) => [
     image: '[]',
     viewerCanAccessAnalytics,
     integration: {
-      name: 'Publish Everywhere',
+      name: 'EverywherePoster',
       picture: '/avatar.png',
       providerIdentifier: 'x',
       profile: 'publish',
