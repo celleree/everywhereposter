@@ -227,7 +227,7 @@ const McpSection = ({
           <div className="text-[13px] text-customColor18 mt-[2px]">
             {t(
               'connect_your_mcp_client_to_postiz_to_schedule_your_posts_faster',
-              'Connect Postiz MCP server to your client (Http streaming) to schedule your posts faster.'
+              'Connect EverywherePoster MCP server to your client (Http streaming) to schedule your posts faster.'
             )}
           </div>
         </div>
@@ -499,7 +499,7 @@ const PublicApiContent = () => {
         <br />
         {t(
           'api_auth_note_line2',
-          'If you are building a product that schedules posts on behalf of other Postiz users,'
+          'If you are building a product that schedules posts on behalf of other EverywherePoster users,'
         )}
         <br />
         {t(
@@ -521,7 +521,7 @@ const PublicApiContent = () => {
             <div className="text-[13px] text-customColor18 mt-[2px]">
               {t(
                 'use_postiz_api_to_integrate_with_your_tools',
-                'Use Postiz API to integrate with your tools.'
+                'Use EverywherePoster API to integrate with your tools.'
               )}
             </div>
           </div>

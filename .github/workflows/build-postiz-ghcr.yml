@@ -1,4 +1,4 @@
-name: Build Postiz image
+name: Build EverywherePoster image
 
 on:
   workflow_dispatch:
