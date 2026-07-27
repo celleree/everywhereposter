@@ -182,20 +182,20 @@ export const SelectCurrent: FC = () => {
           className={clsx(
             'flex min-w-[220px] items-center gap-[12px] rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
             current === 'global'
-              ? 'border-[#FC69FF] bg-[#24142F]'
-              : 'border-newBorder bg-newBgColor hover:border-[#FC69FF]/60'
+              ? 'border-ai bg-newBgLineColor'
+              : 'border-newBorder bg-newBgColor hover:border-ai'
           )}
         >
           <div
             className={clsx(
               'flex h-[44px] w-[44px] items-center justify-center rounded-[14px] bg-newBgLineColor',
-              current === 'global' ? 'text-[#FC69FF]' : 'text-textColor/70'
+              current === 'global' ? 'text-ai' : 'text-textColor/70'
             )}
           >
             <GlobalIcon />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-[700] text-white">
+            <div className="text-[15px] font-[700] text-textColor">
               Global version
             </div>
             <div className="mt-[2px] text-[13px] text-textColor/65">
@@ -230,8 +230,8 @@ export const SelectCurrent: FC = () => {
               className={clsx(
                 'group relative flex min-w-[250px] items-center gap-[12px] rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
                 current === integration.id
-                  ? 'border-[#FC69FF] bg-[#24142F]'
-                  : 'border-newBorder bg-newBgColor hover:border-[#FC69FF]/60'
+                  ? 'border-ai bg-newBgLineColor'
+                  : 'border-newBorder bg-newBgColor hover:border-ai'
               )}
             >
               <div className="relative">
@@ -263,7 +263,7 @@ export const SelectCurrent: FC = () => {
                 )}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[15px] font-[700] text-white">
+              <div className="truncate text-[15px] font-[700] text-textColor">
                 {integration.name}
               </div>
               <div className="mt-[2px] text-[13px] text-textColor/65">
@@ -272,7 +272,7 @@ export const SelectCurrent: FC = () => {
               <div className="mt-[8px] flex items-center gap-[8px]">
                 <IsGlobal id={integration.id} />
                 {current === integration.id && (
-                  <span className="inline-flex rounded-full bg-[#612BD3] px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-white">
+                  <span className="inline-flex rounded-full bg-btnPrimary px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-white">
                     Active
                   </span>
                 )}
@@ -281,7 +281,7 @@ export const SelectCurrent: FC = () => {
                 <button
                   type="button"
                   onClick={addInstagramFirstComment(integration)}
-                  className="mt-[10px] inline-flex max-w-full items-center rounded-[8px] border border-[#D82D7E]/70 bg-[#D82D7E]/15 px-[10px] py-[6px] text-[12px] font-[700] leading-[16px] text-white transition-colors hover:bg-[#D82D7E]/30"
+                  className="mt-[10px] inline-flex max-w-full items-center rounded-[8px] border border-ai bg-newBgLineColor px-[10px] py-[6px] text-[12px] font-[700] leading-[16px] text-textColor transition-colors hover:bg-boxHover"
                 >
                   {hasInstagramFirstComment
                     ? t(
@@ -329,7 +329,7 @@ export const IsGlobal: FC<{ id: string }> = ({ id }) => {
         'no_longer_global_mode',
         'No longer in global mode'
       )}
-      className="inline-flex rounded-full bg-[#FC69FF]/15 px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-[#FC69FF]"
+      className="inline-flex rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-textColor"
     >
       Custom
     </span>

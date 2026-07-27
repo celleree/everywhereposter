@@ -33,7 +33,7 @@ export const AddPostButton: FC<{
       <div
         onClick={props.disabled ? undefined : onClick}
         aria-disabled={props.disabled}
-        className={`select-none h-[34px] max-w-full min-w-0 rounded-[6px] flex bg-[#D82D7E] gap-[8px] justify-center items-center pl-[16px] pr-[20px] text-[13px] font-[600] mt-[12px] ${
+        className={`select-none h-[34px] max-w-full min-w-0 rounded-[6px] flex bg-btnPrimary gap-[8px] justify-center items-center pl-[16px] pr-[20px] text-[13px] font-[600] mt-[12px] ${
           props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
         }`}
       >

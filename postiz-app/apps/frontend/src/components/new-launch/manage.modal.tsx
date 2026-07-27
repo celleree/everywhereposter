@@ -1204,8 +1204,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                               'min-w-0 max-w-full rounded-[12px] border px-[14px] py-[12px] text-start transition-all disabled:cursor-not-allowed disabled:opacity-70 mobile:px-[12px] mobile:py-[12px]',
                               activeAiPreset === preset.id ||
                                 queuedAiPreset === preset.id
-                                ? 'border-[#7C4DFF] bg-[#22163B]'
-                                : 'border-newBorder bg-newBgColor [@media(hover:hover)]:hover:border-[#7C4DFF] [@media(hover:hover)]:hover:bg-newBgLineColor/70'
+                                ? 'border-ai bg-newBgLineColor'
+                                : 'border-newBorder bg-newBgColor [@media(hover:hover)]:hover:border-ai [@media(hover:hover)]:hover:bg-boxHover'
                             )}
                           >
                             <div className="text-[15px] font-[700] text-white">
@@ -1277,7 +1277,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                           type="button"
                           onClick={() => setShowSettings(!showSettings)}
                           className={clsx(
-                            'flex min-w-0 items-center gap-[8px] bg-[#612BD3] p-[14px] text-left',
+                            'flex min-w-0 items-center gap-[8px] bg-btnPrimary p-[14px] text-left',
                             showSettings ? 'rounded-b-none' : ''
                           )}
                         >
@@ -1422,7 +1422,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               )}
               {addEditSets && (
                 <button
-                  className="btnSub flex h-[44px] min-w-[180px] items-center justify-center gap-[8px] rounded-[8px] bg-[#612BD3] ps-[20px] pe-[16px] text-[15px] font-[600] text-white outline-none disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full mobile:min-w-0"
+                  className="btnSub flex h-[44px] min-w-[180px] items-center justify-center gap-[8px] rounded-[8px] bg-btnPrimary ps-[20px] pe-[16px] text-[15px] font-[600] text-white outline-none disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full mobile:min-w-0"
                   disabled={
                     selectedIntegrations.length === 0 || loading || locked
                   }
@@ -1437,7 +1437,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     selectedIntegrations.length === 0 || loading || locked
                   }
                   onClick={schedule('now')}
-                  className="relative flex h-[44px] cursor-pointer items-center justify-center rounded-[8px] bg-[#D82D7E] px-[20px] text-[15px] font-[600] text-white disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full"
+                  className="relative flex h-[44px] cursor-pointer items-center justify-center rounded-[8px] bg-btnPrimary px-[20px] text-[15px] font-[600] text-white disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full"
                 >
                   {loading && (
                     <div className="absolute left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
@@ -1461,7 +1461,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     onClick={schedule(
                       isPublishedPost ? 'update' : 'schedule'
                     )}
-                    className="btnSub relative flex h-[44px] min-w-[180px] items-center justify-center gap-[8px] rounded-[8px] bg-[#612BD3] ps-[20px] pe-[16px] text-white outline-none disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full mobile:min-w-0"
+                    className="btnSub relative flex h-[44px] min-w-[180px] items-center justify-center gap-[8px] rounded-[8px] bg-btnPrimary ps-[20px] pe-[16px] text-white outline-none disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full mobile:min-w-0"
                   >
                     {loading && (
                       <div className="absolute left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
@@ -1503,7 +1503,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       }
                       className="absolute bottom-[100%] -left-[12px] z-[300] hidden w-[206px] rounded-[8px] bg-newBgColorInner p-[12px] disabled:cursor-not-allowed disabled:opacity-80 [@media(hover:hover)]:group-hover:flex mobile:hidden"
                     >
-                      <div className="post-now flex h-[44px] w-full items-center justify-center rounded-[8px] bg-[#D82D7E] text-white">
+                      <div className="post-now flex h-[44px] w-full items-center justify-center rounded-[8px] bg-btnPrimary text-white">
                         {t('post_now', 'Post Now')}
                       </div>
                     </button>
@@ -1706,7 +1706,7 @@ const ComposerUploadCard: FC<{
       className={clsx(
         'w-full min-w-0 max-w-full overflow-x-hidden rounded-[14px] border border-dashed px-[16px] py-[16px] transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]',
         isDragActive
-          ? 'border-[#7C4DFF] bg-[#22163B]'
+          ? 'border-ai bg-newBgLineColor'
           : 'border-newBorder bg-newBgColor',
         disabled && 'opacity-70'
       )}
@@ -1722,7 +1722,7 @@ const ComposerUploadCard: FC<{
               event.stopPropagation();
               open();
             }}
-            className="rounded-[12px] bg-[#612BD3] px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
+            className="rounded-[12px] bg-btnPrimary px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
           >
             Choose files
           </button>
@@ -1730,7 +1730,7 @@ const ComposerUploadCard: FC<{
             type="button"
             disabled={disabled || loading}
             onClick={openMediaLibrary}
-            className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:border-[#7C4DFF] mobile:w-full"
+            className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:border-ai mobile:w-full"
           >
             {t('media_library', 'Media Library')}
           </button>
@@ -1738,7 +1738,7 @@ const ComposerUploadCard: FC<{
             <button
               type="button"
               onClick={cancelUpload}
-              className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-[#7C4DFF] mobile:w-full"
+              className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-ai mobile:w-full"
             >
               {t('cancel_upload', 'Cancel upload')}
             </button>

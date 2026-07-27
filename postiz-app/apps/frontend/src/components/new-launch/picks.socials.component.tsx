@@ -61,9 +61,9 @@ export const PicksSocialsComponent: FC<{ toolTip?: boolean }> = ({
                   className={clsx(
                     'group relative flex min-h-[88px] w-full items-center gap-[14px] rounded-[16px] border bg-newBgColor px-[14px] py-[14px] text-start transition-all xs:flex-col xs:items-start xs:gap-[10px]',
                     existing.integration && 'cursor-default',
-                    !existing.integration && 'hover:border-[#7C4DFF] hover:bg-newBgLineColor/70',
+                    !existing.integration && 'hover:border-ai hover:bg-boxHover',
                     selected
-                      ? 'border-[#7C4DFF] bg-[#22163B]'
+                      ? 'border-ai bg-newBgLineColor'
                       : 'border-newBorder'
                   )}
                 >
@@ -112,7 +112,7 @@ export const PicksSocialsComponent: FC<{ toolTip?: boolean }> = ({
                     className={clsx(
                       'flex h-[28px] min-w-[86px] items-center justify-center rounded-full border px-[12px] text-[12px] font-[700] uppercase tracking-[0.04em] xs:w-full',
                       selected
-                        ? 'border-[#9F7AEA] bg-[#612BD3] text-white'
+                        ? 'border-ai bg-newBgLineColor text-textColor'
                         : 'border-newBorder text-textColor/65'
                     )}
                   >

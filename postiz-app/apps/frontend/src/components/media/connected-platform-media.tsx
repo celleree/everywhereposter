@@ -74,8 +74,8 @@ export const ConnectedPlatformMedia: FC = () => {
             className={clsx(
               'min-w-[180px] rounded-[12px] border p-[12px] flex items-center gap-[12px] text-left transition-all',
               selectedId === integration.id
-                ? 'border-[#612bd3] bg-[#612bd3]/10'
-                : 'border-newTableBorder bg-newBgColorInner hover:border-[#612bd3]/40'
+                ? 'border-ai bg-newBgLineColor'
+                : 'border-newTableBorder bg-newBgColorInner hover:border-ai'
             )}
           >
             <div className="relative shrink-0">
