@@ -14,7 +14,29 @@ const voiceProfile = {
   confidence: 0.8,
 };
 
-const createService = (knowledgeBaseVoiceProfile?: typeof voiceProfile) => {
+const defaultVideoInsights = {
+  visualSummary: 'A presenter demonstrates a publishing workflow on screen.',
+  facts: [
+    'A presenter appears in the sampled frames.',
+    'A publishing interface is visible on screen.',
+  ],
+  unknowns: ['The exact product version is not visible.'],
+  coreMessage: 'One source video can support a complete publishing workflow.',
+  sourceConfidence: 0.82,
+  scenes: [
+    {
+      timestampSeconds: 4.2,
+      description: 'The presenter speaks beside a publishing interface.',
+      visibleText: '',
+      usefulForPosting: true,
+    },
+  ],
+};
+
+const createService = (
+  knowledgeBaseVoiceProfile?: typeof voiceProfile,
+  modelOverrides: Record<string, unknown> = {}
+) => {
   const mediaRepository = {
     getMediaByOrganizationIdAndId: jest.fn().mockResolvedValue({
       id: 'media-1',
@@ -28,6 +50,7 @@ const createService = (knowledgeBaseVoiceProfile?: typeof voiceProfile) => {
     transcribeVideo: jest.fn().mockResolvedValue({
       text: 'A generated transcript with concrete details.',
     }),
+    analyzeVideoFrames: jest.fn().mockResolvedValue(defaultVideoInsights),
     summarizeTranscript: jest.fn().mockResolvedValue({
       transcriptSummary: 'A concise transcript summary.',
       facts: ['A concrete fact', 'Another concrete fact'],
@@ -36,6 +59,7 @@ const createService = (knowledgeBaseVoiceProfile?: typeof voiceProfile) => {
       sourceConfidence: 0.8,
       voiceProfile: null,
     }),
+    ...modelOverrides,
   };
   const knowledgeBaseService = {
     resolvePersonalization: jest.fn().mockResolvedValue({
@@ -46,11 +70,14 @@ const createService = (knowledgeBaseVoiceProfile?: typeof voiceProfile) => {
     }),
   };
 
-  return new SourceBriefService(
-    mediaRepository as any,
-    modelService as any,
-    knowledgeBaseService as any
-  );
+  return {
+    service: new SourceBriefService(
+      mediaRepository as any,
+      modelService as any,
+      knowledgeBaseService as any
+    ),
+    modelService,
+  };
 };
 
 const request = {
@@ -64,28 +91,33 @@ const request = {
   },
 };
 
-describe('SourceBriefService nullable voice profile', () => {
+const { readOrFetch } = jest.requireMock(
+  '@gitroom/helpers/utils/read.or.fetch'
+) as { readOrFetch: jest.Mock };
+
+describe('SourceBriefService video grounding', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    readOrFetch.mockResolvedValue(Buffer.from('video-file'));
+  });
+
   it('omits a null transcript voice profile', async () => {
-    const result = await createService().build('org-1', request as any);
+    const { service } = createService();
+    const result = await service.build('org-1', request as any);
 
     expect(result.voiceProfile).toBeUndefined();
   });
 
   it('replaces a null transcript voice profile with the knowledge-base fallback', async () => {
-    const result = await createService(voiceProfile).build(
-      'org-1',
-      request as any
-    );
+    const { service } = createService(voiceProfile);
+    const result = await service.build('org-1', request as any);
 
     expect(result.voiceProfile).toEqual(voiceProfile);
   });
 
   it('auto-transcribes videos whose original file is larger than 25 MB', async () => {
-    const { readOrFetch } = jest.requireMock(
-      '@gitroom/helpers/utils/read.or.fetch'
-    ) as { readOrFetch: jest.Mock };
     readOrFetch.mockResolvedValue(Buffer.alloc(25 * 1024 * 1024 + 1));
-    const service = createService();
+    const { service } = createService();
 
     const result = await service.build('org-1', {
       ...request,
@@ -98,5 +130,83 @@ describe('SourceBriefService nullable voice profile', () => {
       source: 'generated',
       confidence: 0.68,
     });
+  });
+
+  it('analyzes representative video frames with the available transcript', async () => {
+    const { service, modelService } = createService();
+
+    const result = await service.build('org-1', request as any);
+
+    expect(modelService.analyzeVideoFrames).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mimeType: 'video/mp4',
+        originalName: 'video.mp4',
+        transcriptText: request.transcript.text,
+      })
+    );
+    expect(result.source.visualSummary).toBe(defaultVideoInsights.visualSummary);
+    expect(result.source.facts).toEqual(
+      expect.arrayContaining(defaultVideoInsights.facts)
+    );
+    expect(result.source.scenes).toEqual(defaultVideoInsights.scenes);
+    expect(result.blocked).toBe(false);
+  });
+
+  it('continues with transcript grounding when frame analysis fails', async () => {
+    const { service } = createService(undefined, {
+      analyzeVideoFrames: jest
+        .fn()
+        .mockRejectedValue(new Error('ffmpeg could not extract frames')),
+    });
+
+    const result = await service.build('org-1', request as any);
+
+    expect(result.blocked).toBe(false);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'VIDEO_VISUAL_ANALYSIS_FAILED' }),
+      ])
+    );
+    expect(result.source.transcriptSummary).toBe('A concise transcript summary.');
+  });
+
+  it('allows visual-only grounding when a silent video has usable frames', async () => {
+    const { service } = createService(undefined, {
+      transcribeVideo: jest.fn().mockResolvedValue({ text: '' }),
+    });
+
+    const result = await service.build('org-1', {
+      ...request,
+      transcript: undefined,
+    } as any);
+
+    expect(result.transcript).toBeUndefined();
+    expect(result.blocked).toBe(false);
+    expect(result.source.scenes).toEqual(defaultVideoInsights.scenes);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'NO_TRANSCRIPT' })])
+    );
+  });
+
+  it('blocks generation when neither transcript nor usable frame analysis exists', async () => {
+    const { service } = createService(undefined, {
+      transcribeVideo: jest.fn().mockResolvedValue({ text: '' }),
+      analyzeVideoFrames: jest
+        .fn()
+        .mockRejectedValue(new Error('No video stream found')),
+    });
+
+    const result = await service.build('org-1', {
+      ...request,
+      transcript: undefined,
+    } as any);
+
+    expect(result.blocked).toBe(true);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'VIDEO_VISUAL_ANALYSIS_FAILED' }),
+        expect.objectContaining({ code: 'NO_TRANSCRIPT' }),
+      ])
+    );
   });
 });
