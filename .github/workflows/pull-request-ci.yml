@@ -89,6 +89,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test Docker build classifier
+        shell: bash
+        run: bash scripts/test-classify-docker-build.sh
+
       - name: Classify changed files
         id: classify
         shell: bash
@@ -96,63 +100,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "Manual workflow dispatch always requires a Docker build."
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [[ -z "$BASE_SHA" || -z "$HEAD_SHA" ]]; then
-            echo "Missing pull-request base or head SHA; defaulting to Docker build."
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          mapfile -t changed_files < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-
-          if (( ${#changed_files[@]} == 0 )); then
-            echo "No changed files were detected; defaulting to Docker build."
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Changed files:"
-          printf '  %s\n' "${changed_files[@]}"
-
-          should_build=false
-          for file in "${changed_files[@]}"; do
-            safe_only=false
-
-            if [[ "$file" == "AGENTS.md" ]]; then
-              safe_only=true
-            elif [[ "$file" != */* && "$file" == *.md ]]; then
-              safe_only=true
-            elif [[ "$file" == docs/*.md ]]; then
-              safe_only=true
-            elif [[ "$file" == postiz-app/tests/* ]]; then
-              safe_only=true
-            elif [[ "$file" == postiz-app/libraries/react-shared-libraries/src/translation/locales/*.json ]]; then
-              safe_only=true
-            fi
-
-            if [[ "$safe_only" == "true" ]]; then
-              echo "SAFE-ONLY: $file"
-            else
-              echo "DOCKER REQUIRED: $file"
-              should_build=true
-            fi
-          done
-
-          if [[ "$should_build" == "true" ]]; then
-            echo "At least one file is outside the safe-only allowlist; Docker build required."
-          else
-            echo "Every changed file is explicitly safe-only; Docker image build will be skipped."
-          fi
-
-          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+        run: bash scripts/classify-docker-build.sh
 
   docker-build:
     name: Docker build
