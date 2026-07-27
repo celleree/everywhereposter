@@ -131,7 +131,7 @@ export class PostsController {
     @GetOrgFromRequest() org: Organization,
     @Param('id') id?: string
   ) {
-    return { date: await this._postsService.findFreeDateTime(org.id, id) };
+    return { date: await this._postsService.findFreeDateTime(org.id, id); }
   }
 
   @Get('/list')
@@ -214,11 +214,24 @@ export class PostsController {
     @Res({ passthrough: false }) res: Response
   ) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    for await (const event of this._copyGenerationService.generate(org.id, body)) {
-      res.write(JSON.stringify(event) + '\n');
-    }
+    res.setHeader('X-Accel-Buffering', 'no');
+    const heartbeat = setInterval(() => {
+      res.write(
+        JSON.stringify({
+          name: 'copy-generation-heartbeat',
+          data: { timestamp: Date.now() },
+        }) + '\n'
+      );
+    }, 15_000);
 
-    res.end();
+    try {
+      for await (const event of this._copyGenerationService.generate(org.id, body)) {
+        res.write(JSON.stringify(event) + '\n');
+      }
+    } finally {
+      clearInterval(heartbeat);
+      res.end();
+    }
   }
 
   @Delete('/historical/:id')
@@ -258,8 +271,8 @@ export class PostsController {
   @Post('/separate-posts')
   async separatePosts(
     @GetOrgFromRequest() org: Organization,
-    @Body() body: { content: string; len: number }
+    @Body() body: any
   ) {
-    return this._postsService.separatePosts(body.content, body.len);
+    return this._postsService.separatePosts(org.id, body);
   }
 }
