@@ -129,10 +129,9 @@ export const TimeTable: FC<{
 
   return (
     <div className="relative w-full max-w-[400px] mx-auto">
-      {/* Add Time Slot Section */}
       <div className="bg-newBgColorInner rounded-[12px] p-[20px] border border-newTableBorder">
         <div className="text-[15px] font-semibold mb-[16px] flex items-center gap-[8px]">
-          <DelayIcon size={18} className="text-[#612BD3]" />
+          <DelayIcon size={18} className="text-ai" />
           {t('add_time_slot', 'Add Time Slot')}
         </div>
 
@@ -172,7 +171,7 @@ export const TimeTable: FC<{
           <button
             type="button"
             onClick={addHour}
-            className="h-[42px] px-[16px] bg-[#612BD3] hover:bg-[#7640e0] transition-colors rounded-[8px] flex items-center gap-[6px] text-white text-[14px] font-medium"
+            className="h-[42px] px-[16px] bg-btnPrimary hover:opacity-90 transition-opacity rounded-[8px] flex items-center gap-[6px] text-white text-[14px] font-medium"
           >
             <PlusIcon size={14} />
             {t('add', 'Add')}
@@ -180,7 +179,6 @@ export const TimeTable: FC<{
         </div>
       </div>
 
-      {/* Time Slots List */}
       <div className="mt-[20px]">
         <div className="text-[14px] text-newTextColor/60 mb-[12px]">
           {t('scheduled_times', 'Scheduled Times')} ({times.length})
@@ -199,11 +197,11 @@ export const TimeTable: FC<{
                   'group flex items-center justify-between',
                   'h-[48px] px-[16px] rounded-[8px]',
                   'bg-newBgColorInner border border-newTableBorder',
-                  'hover:border-[#612BD3]/40 transition-colors'
+                  'hover:border-ai/40 transition-colors'
                 )}
               >
                 <div className="flex items-center gap-[12px]">
-                  <div className="w-[8px] h-[8px] rounded-full bg-[#612BD3]" />
+                  <div className="w-[8px] h-[8px] rounded-full bg-ai" />
                   <span className="text-[15px] font-medium tabular-nums">
                     {timeSlot.formatted}
                   </span>
@@ -221,7 +219,6 @@ export const TimeTable: FC<{
         )}
       </div>
 
-      {/* Save Button */}
       <div className="mt-[24px]">
         <Button type="button" className="w-full rounded-[8px]" onClick={save}>
           {t('save_changes', 'Save Changes')}
