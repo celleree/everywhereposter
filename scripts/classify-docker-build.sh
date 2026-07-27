@@ -26,8 +26,8 @@ fi
 changed_files_path=$(mktemp)
 trap 'rm -f "$changed_files_path"' EXIT
 
-if ! git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$changed_files_path"; then
-  echo "Unable to determine changed files; defaulting to Docker build."
+if ! git diff --no-renames --name-only "$BASE_SHA...$HEAD_SHA" > "$changed_files_path"; then
+  echo "Unable to determine changed files from the pull-request merge base; defaulting to Docker build."
   write_result true
   exit 0
 fi
@@ -40,7 +40,7 @@ if (( ${#changed_files[@]} == 0 )); then
   exit 0
 fi
 
-echo "Changed files:"
+echo "Changed files from the pull-request merge base:"
 printf '  %s\n' "${changed_files[@]}"
 
 should_build=false
