@@ -124,6 +124,20 @@ base_sha=$(git -C "$case_dir" rev-parse HEAD)
 git -C "$case_dir" mv docs/old.md docs/new.md
 finish_case docs-rename false
 
+new_repo advanced-base
+common_sha=$base_sha
+printf 'pr docs\n' > "$case_dir/README.md"
+git -C "$case_dir" add README.md
+git -C "$case_dir" commit -qm pr-doc-change
+head_sha=$(git -C "$case_dir" rev-parse HEAD)
+git -C "$case_dir" checkout -q -b advanced-main "$common_sha"
+mkdir -p "$case_dir/postiz-app/apps/frontend/src"
+printf 'export {};\n' > "$case_dir/postiz-app/apps/frontend/src/from-main.ts"
+git -C "$case_dir" add postiz-app/apps/frontend/src/from-main.ts
+git -C "$case_dir" commit -qm main-app-change
+advanced_base_sha=$(git -C "$case_dir" rev-parse HEAD)
+assert_result advanced-base false "$(classify pull_request "$advanced_base_sha" "$head_sha")"
+
 new_repo invalid-sha
 head_sha=$(git -C "$case_dir" rev-parse HEAD)
 assert_result invalid-sha true "$(classify pull_request deadbeef "$head_sha")"
