@@ -220,11 +220,16 @@ export class PostsController {
 
     try {
       for await (const event of this._copyGenerationService.generate(org.id, body)) {
+        if (heartbeat.isClosed()) {
+          break;
+        }
         res.write(JSON.stringify(event) + '\n');
       }
     } finally {
-      clearInterval(heartbeat);
-      res.end();
+      heartbeat.stop();
+      if (!res.writableEnded && !res.destroyed) {
+        res.end();
+      }
     }
   }
 
