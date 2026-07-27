@@ -1,9 +1,9 @@
 'use client';
 
-import { Button } from '@gitroom/react/form/button';
 import React, { FC } from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { PostComment } from '@gitroom/frontend/components/new-launch/providers/high.order.provider';
+
 export const AddPostButton: FC<{
   onClick: () => void;
   num: number;
@@ -33,7 +33,7 @@ export const AddPostButton: FC<{
       <div
         onClick={props.disabled ? undefined : onClick}
         aria-disabled={props.disabled}
-        className={`select-none h-[34px] max-w-full min-w-0 rounded-[6px] flex bg-[#D82D7E] gap-[8px] justify-center items-center pl-[16px] pr-[20px] text-[13px] font-[600] mt-[12px] ${
+        className={`select-none h-[34px] max-w-full min-w-0 rounded-[6px] flex bg-btnPrimary gap-[8px] justify-center items-center pl-[16px] pr-[20px] text-[13px] font-[600] mt-[12px] ${
           props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
         }`}
       >
@@ -54,9 +54,7 @@ export const AddPostButton: FC<{
             />
           </svg>
         </div>
-        <div className="min-w-0 truncate !text-white">
-          {label}
-        </div>
+        <div className="min-w-0 truncate !text-white">{label}</div>
       </div>
     </div>
   );
