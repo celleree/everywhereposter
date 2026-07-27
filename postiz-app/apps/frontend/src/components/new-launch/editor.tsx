@@ -430,7 +430,7 @@ export const EditorWrapper: FC<{
               )}
             </div>
             <div>
-              <div className="text-white rounded-[8px] h-[44px] px-[20px] bg-[#D82D7E] cursor-pointer flex justify-center items-center">
+              <div className="text-white rounded-[8px] h-[44px] px-[20px] bg-btnPrimary cursor-pointer flex justify-center items-center">
                 {t('edit_content', 'Edit content')}
               </div>
             </div>
@@ -496,7 +496,7 @@ export const EditorWrapper: FC<{
                             onClick={goBackToGlobal}
                           >
                             <div className="flex gap-[6px] items-center">
-                              <div className="w-[8px] h-[8px] rounded-full bg-[#FC69FF]" />
+                              <div className="w-[8px] h-[8px] rounded-full bg-btnPrimary" />
                               <div className="text-[14px] font-[600]">
                                 {t(
                                   'editing_a_specific_network',
@@ -793,7 +793,7 @@ export const Editor: FC<{
                   <button
                     type="button"
                     onClick={cancelUpload}
-                    className="rounded-[10px] border border-newBorder bg-newBgColorInner px-[14px] py-[8px] text-[13px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-[#7C4DFF]"
+                    className="rounded-[10px] border border-newBorder bg-newBgColorInner px-[14px] py-[8px] text-[13px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-ai"
                   >
                     {t('cancel_upload', 'Cancel upload')}
                   </button>

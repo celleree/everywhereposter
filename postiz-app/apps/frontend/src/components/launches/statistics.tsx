@@ -625,7 +625,7 @@ export const PostStatisticsPanel: FC<{
                     const color = colorVariants[index % colorVariants.length];
                     return (
                       <div key={`analytics-${index}`} className="group">
-                        <div className="flex flex-col h-full bg-newTableHeader border border-newTableBorder rounded-[12px] overflow-hidden transition-all duration-200 hover:border-[#612bd3]/50">
+                        <div className="flex flex-col h-full bg-newTableHeader border border-newTableBorder rounded-[12px] overflow-hidden transition-all duration-200 hover:border-ai">
                           <div className="flex items-center justify-between px-[16px] pt-[14px] pb-[8px]">
                             <div className="flex items-center gap-[10px]">
                               <div
@@ -746,7 +746,7 @@ export const PostStatisticsPanel: FC<{
                             !newComment.trim()
                           }
                           onClick={runAddPlatformComment}
-                          className="min-h-[38px] rounded-[8px] bg-[#612bd3] px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          className="min-h-[38px] rounded-[8px] bg-btnPrimary px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {isAddingComment
                             ? t('adding', 'Adding...')
@@ -1055,7 +1055,7 @@ export const PostStatisticsPanel: FC<{
                                 onClick={() =>
                                   runCommentAction(comment, 'reply')
                                 }
-                                className="min-h-[38px] rounded-[8px] bg-[#612bd3] px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="min-h-[38px] rounded-[8px] bg-btnPrimary px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {isReplying
                                   ? t('replying', 'Replying...')

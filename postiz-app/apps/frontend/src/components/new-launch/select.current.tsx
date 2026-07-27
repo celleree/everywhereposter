@@ -182,8 +182,8 @@ export const SelectCurrent: FC = () => {
           className={clsx(
             'flex min-w-[220px] items-center gap-[12px] rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
             current === 'global'
-              ? 'border-ai bg-ai/10'
-              : 'border-newBorder bg-newBgColor hover:border-ai/60'
+              ? 'border-ai bg-newBgLineColor'
+              : 'border-newBorder bg-newBgColor hover:border-ai'
           )}
         >
           <div
@@ -230,8 +230,8 @@ export const SelectCurrent: FC = () => {
               className={clsx(
                 'group relative flex min-w-[250px] items-center gap-[12px] rounded-[16px] border px-[14px] py-[14px] text-start transition-all',
                 current === integration.id
-                  ? 'border-ai bg-ai/10'
-                  : 'border-newBorder bg-newBgColor hover:border-ai/60'
+                  ? 'border-ai bg-newBgLineColor'
+                  : 'border-newBorder bg-newBgColor hover:border-ai'
               )}
             >
               <div className="relative">
@@ -261,48 +261,48 @@ export const SelectCurrent: FC = () => {
                     height={14}
                   />
                 )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[15px] font-[700] text-textColor">
+                {integration.name}
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-[700] text-textColor">
-                  {integration.name}
-                </div>
-                <div className="mt-[2px] text-[13px] text-textColor/65">
-                  Platform review
-                </div>
-                <div className="mt-[8px] flex items-center gap-[8px]">
-                  <IsGlobal id={integration.id} />
-                  {current === integration.id && (
-                    <span className="inline-flex rounded-full bg-btnPrimary px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-white">
-                      Active
-                    </span>
-                  )}
-                </div>
-                {isInstagram && (
-                  <button
-                    type="button"
-                    onClick={addInstagramFirstComment(integration)}
-                    className="mt-[10px] inline-flex max-w-full items-center rounded-[8px] border border-ai/70 bg-ai/15 px-[10px] py-[6px] text-[12px] font-[700] leading-[16px] text-textColor transition-colors hover:bg-ai/25"
-                  >
-                    {hasInstagramFirstComment
-                      ? t(
-                          'edit_instagram_first_comment',
-                          'Edit Instagram first comment'
-                        )
-                      : t(
-                          'add_instagram_first_comment',
-                          'Add Instagram first comment'
-                        )}
-                  </button>
+              <div className="mt-[2px] text-[13px] text-textColor/65">
+                Platform review
+              </div>
+              <div className="mt-[8px] flex items-center gap-[8px]">
+                <IsGlobal id={integration.id} />
+                {current === integration.id && (
+                  <span className="inline-flex rounded-full bg-btnPrimary px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-white">
+                    Active
+                  </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={removeSocial(integration)}
-                className="flex h-[28px] w-[28px] items-center justify-center rounded-full border border-newBorder bg-newBgLineColor text-[11px] font-[700] text-textColor/70 opacity-0 transition-opacity group-hover:opacity-100"
-              >
-                X
-              </button>
+              {isInstagram && (
+                <button
+                  type="button"
+                  onClick={addInstagramFirstComment(integration)}
+                  className="mt-[10px] inline-flex max-w-full items-center rounded-[8px] border border-ai bg-newBgLineColor px-[10px] py-[6px] text-[12px] font-[700] leading-[16px] text-ai transition-colors hover:bg-boxHover"
+                >
+                  {hasInstagramFirstComment
+                    ? t(
+                        'edit_instagram_first_comment',
+                        'Edit Instagram first comment'
+                      )
+                    : t(
+                        'add_instagram_first_comment',
+                        'Add Instagram first comment'
+                      )}
+                </button>
+              )}
             </div>
+            <button
+              type="button"
+              onClick={removeSocial(integration)}
+              className="flex h-[28px] w-[28px] items-center justify-center rounded-full border border-newBorder bg-newBgLineColor text-[11px] font-[700] text-textColor/70 opacity-0 transition-opacity group-hover:opacity-100"
+            >
+              X
+            </button>
+          </div>
           );
         })}
       </div>
@@ -329,7 +329,7 @@ export const IsGlobal: FC<{ id: string }> = ({ id }) => {
         'no_longer_global_mode',
         'No longer in global mode'
       )}
-      className="inline-flex rounded-full bg-ai/15 px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-ai"
+      className="inline-flex rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-ai"
     >
       Custom
     </span>

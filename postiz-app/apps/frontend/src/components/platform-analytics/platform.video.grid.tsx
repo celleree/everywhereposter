@@ -144,7 +144,7 @@ export const PlatformVideoGrid: FC<{
                   }}
                   className={`group overflow-hidden rounded-[14px] border border-newTableBorder bg-newTableHeader transition-all ${
                     postId
-                      ? 'cursor-pointer hover:border-[#612bd3]/60'
+                      ? 'cursor-pointer hover:border-ai'
                       : 'cursor-default'
                   }`}
                 >
