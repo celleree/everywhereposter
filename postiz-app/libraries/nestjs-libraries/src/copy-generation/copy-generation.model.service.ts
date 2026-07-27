@@ -5,6 +5,7 @@ import { basename, join } from 'path';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import OpenAI, { toFile } from 'openai';
+import type { ChatCompletionContentPart } from 'openai/resources/chat/completions';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import {
@@ -150,19 +151,33 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
       throw new Error('Video frame extraction returned no usable frames.');
     }
 
-    const frameContent = frames.flatMap((frame, index) => [
-      {
-        type: 'text' as const,
-        text: `Frame ${index + 1} sampled at ${frame.timestampSeconds.toFixed(2)} seconds.`,
-      },
-      {
-        type: 'image_url' as const,
-        image_url: {
-          url: `data:image/jpeg;base64,${frame.buffer.toString('base64')}`,
-          detail: 'low' as const,
+    const frameContent: ChatCompletionContentPart[] = frames.flatMap(
+      (frame, index): ChatCompletionContentPart[] => [
+        {
+          type: 'text',
+          text: `Frame ${index + 1} sampled at ${frame.timestampSeconds.toFixed(2)} seconds.`,
         },
+        {
+          type: 'image_url',
+          image_url: {
+            url: `data:image/jpeg;base64,${frame.buffer.toString('base64')}`,
+            detail: 'low',
+          },
+        },
+      ]
+    );
+    const userContent: ChatCompletionContentPart[] = [
+      {
+        type: 'text',
+        text: `Video MIME type: ${params.mimeType}
+Existing alt text: ${params.altText || 'none'}
+Original name: ${params.originalName || 'unknown'}
+Associated transcript: ${params.transcriptText?.slice(0, 12000) || 'none'}
+
+Analyze the sampled frames below as one video.`,
       },
-    ]);
+      ...frameContent,
+    ];
 
     const analysis = await openai.chat.completions.parse({
       model: 'gpt-4.1',
@@ -185,18 +200,7 @@ Rules:
         },
         {
           role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Video MIME type: ${params.mimeType}
-Existing alt text: ${params.altText || 'none'}
-Original name: ${params.originalName || 'unknown'}
-Associated transcript: ${params.transcriptText?.slice(0, 12000) || 'none'}
-
-Analyze the sampled frames below as one video.`,
-            },
-            ...frameContent,
-          ],
+          content: userContent,
         },
       ],
       response_format: zodResponseFormat(VideoInsightsSchema, 'videoInsights'),
