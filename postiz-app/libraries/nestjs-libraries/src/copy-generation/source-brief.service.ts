@@ -4,6 +4,7 @@ import { uniq } from 'lodash';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 import { MediaRepository } from '@gitroom/nestjs-libraries/database/prisma/media/media.repository';
 import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.model.service';
+import { prepareVideoMediaFile } from '@gitroom/nestjs-libraries/copy-generation/video-media-file';
 import { GenerateMediaCopyDto } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.dto';
 import { KnowledgeBaseService } from '@gitroom/nestjs-libraries/database/prisma/knowledge-base/knowledge-base.service';
 import {
@@ -59,6 +60,35 @@ const DEFAULT_VOICE_PROFILE: VoiceProfileSnapshot = {
   confidence: 0.35,
 };
 
+const normalizeStrings = (values: unknown[], limit?: number) => {
+  const normalized = Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  );
+
+  return typeof limit === 'number' ? normalized.slice(0, limit) : normalized;
+};
+
+const mergeGroundingFacts = (visualFacts: string[], transcriptFacts: string[]) => {
+  if (!visualFacts.length || !transcriptFacts.length) {
+    return normalizeStrings([...transcriptFacts, ...visualFacts], 8);
+  }
+
+  return normalizeStrings(
+    [
+      ...transcriptFacts.slice(0, 4),
+      ...visualFacts.slice(0, 4),
+      ...transcriptFacts.slice(4),
+      ...visualFacts.slice(4),
+    ],
+    8
+  );
+};
+
 @Injectable()
 export class SourceBriefService {
   constructor(
@@ -80,266 +110,295 @@ export class SourceBriefService {
     const mimeType = this.getMimeType(media.path, media.originalName, media.name);
     const mediaType = mimeType.startsWith('video/') ? 'video' : 'image';
     const warnings: CopyGenerationWarning[] = [];
+    let preparedVideoFile:
+      | Awaited<ReturnType<typeof prepareVideoMediaFile>>
+      | undefined;
+    let preparedVideoFilePromise:
+      | ReturnType<typeof prepareVideoMediaFile>
+      | undefined;
 
-    let transcript = body.transcript?.text?.trim()
-      ? {
-          text: body.transcript.text.trim(),
-          source: body.transcript.source,
-          confidence: body.transcript.confidence,
-        }
-      : undefined;
-
-    let transcriptSummary = '';
-    let transcriptFacts: string[] = [];
-    let transcriptUnknowns: string[] = [];
-    let visualSummary =
-      media.alt?.trim() ||
-      (mediaType === 'video'
-        ? `Video asset: ${media.originalName || media.name}`
-        : `Image asset: ${media.originalName || media.name}`);
-    let visualFacts: string[] = [];
-    let visualUnknowns: string[] = [];
-    let visualScenes: VisualScene[] = [];
-    let voiceProfile: VoiceProfileSnapshot | undefined;
-    let coreMessage = '';
-    const sourceConfidenceParts: number[] = [];
-    let videoBuffer: Buffer | undefined;
-
-    const getVideoBuffer = async () => {
-      if (!videoBuffer) {
-        videoBuffer = Buffer.from(await readOrFetch(media.path));
-      }
-
-      return videoBuffer;
+    const getVideoInputPath = async () => {
+      preparedVideoFilePromise ||= prepareVideoMediaFile(
+        media.path,
+        media.originalName || media.name
+      );
+      preparedVideoFile = await preparedVideoFilePromise;
+      return preparedVideoFile.inputPath;
     };
 
-    if (mediaType === 'image') {
-      const imageBuffer = Buffer.from(await readOrFetch(media.path));
-      const imageInsights = await this._copyGenerationModelService.analyzeImage({
-        buffer: imageBuffer,
-        mimeType,
-        altText: media.alt,
-        originalName: media.originalName || media.name,
-        transcriptText: transcript?.text,
-      });
+    try {
+      let transcript = body.transcript?.text?.trim()
+        ? {
+            text: body.transcript.text.trim(),
+            source: body.transcript.source,
+            confidence: body.transcript.confidence,
+          }
+        : undefined;
 
-      visualSummary = imageInsights.visualSummary || visualSummary;
-      visualFacts = imageInsights.facts || [];
-      visualUnknowns = imageInsights.unknowns || [];
-      coreMessage = imageInsights.coreMessage || coreMessage;
-      sourceConfidenceParts.push(imageInsights.sourceConfidence || 0.65);
-    }
+      let transcriptSummary = '';
+      let transcriptFacts: string[] = [];
+      let transcriptUnknowns: string[] = [];
+      let visualSummary =
+        media.alt?.trim() ||
+        (mediaType === 'video'
+          ? `Video asset: ${media.originalName || media.name}`
+          : `Image asset: ${media.originalName || media.name}`);
+      let visualFacts: string[] = [];
+      let visualUnknowns: string[] = [];
+      let visualScenes: VisualScene[] = [];
+      let voiceProfile: VoiceProfileSnapshot | undefined;
+      let coreMessage = '';
+      const sourceConfidenceParts: number[] = [];
+      let hasUsableVisualEvidence = false;
 
-    if (mediaType === 'video' && !transcript?.text) {
-      try {
-        const transcription =
-          await this._copyGenerationModelService.transcribeVideo({
-            buffer: await getVideoBuffer(),
-            mimeType,
-            originalName: media.originalName || media.name,
-          });
-        if (transcription.text?.trim()) {
-          transcript = {
-            text: transcription.text.trim(),
-            source: 'generated',
-            confidence: 0.68,
-          };
-        } else {
+      if (mediaType === 'image') {
+        const imageBuffer = Buffer.from(await readOrFetch(media.path));
+        const imageInsights = await this._copyGenerationModelService.analyzeImage({
+          buffer: imageBuffer,
+          mimeType,
+          altText: media.alt,
+          originalName: media.originalName || media.name,
+          transcriptText: transcript?.text,
+        });
+
+        visualSummary = imageInsights.visualSummary?.trim() || visualSummary;
+        visualFacts = normalizeStrings(imageInsights.facts || []);
+        visualUnknowns = normalizeStrings(imageInsights.unknowns || []);
+        coreMessage = imageInsights.coreMessage?.trim() || coreMessage;
+        sourceConfidenceParts.push(imageInsights.sourceConfidence || 0.65);
+      }
+
+      if (mediaType === 'video' && !transcript?.text) {
+        try {
+          const transcription =
+            await this._copyGenerationModelService.transcribeVideo({
+              inputPath: await getVideoInputPath(),
+              mimeType,
+              originalName: media.originalName || media.name,
+            });
+          if (transcription.text?.trim()) {
+            transcript = {
+              text: transcription.text.trim(),
+              source: 'generated',
+              confidence: 0.68,
+            };
+          } else {
+            warnings.push({
+              code: 'TRANSCRIPT_REQUIRED',
+              message:
+                'Auto transcription did not return usable text. Add a transcript for stronger grounded copy from this video.',
+            });
+          }
+        } catch {
           warnings.push({
             code: 'TRANSCRIPT_REQUIRED',
             message:
-              'Auto transcription did not return usable text. Add a transcript for stronger grounded copy from this video.',
+              'Auto transcription failed for this video. Add a transcript for stronger grounded copy.',
           });
         }
-      } catch {
-        warnings.push({
-          code: 'TRANSCRIPT_REQUIRED',
-          message:
-            'Auto transcription failed for this video. Add a transcript for stronger grounded copy.',
-        });
       }
-    }
 
-    if (mediaType === 'video') {
-      try {
-        const videoInsights =
-          await this._copyGenerationModelService.analyzeVideoFrames({
-            buffer: await getVideoBuffer(),
-            mimeType,
-            altText: media.alt,
-            originalName: media.originalName || media.name,
-            transcriptText: transcript?.text,
-          });
+      if (mediaType === 'video') {
+        try {
+          const videoInsights =
+            await this._copyGenerationModelService.analyzeVideoFrames({
+              inputPath: await getVideoInputPath(),
+              mimeType,
+              altText: media.alt,
+              originalName: media.originalName || media.name,
+              transcriptText: transcript?.text,
+            });
 
-        visualSummary = videoInsights.visualSummary || visualSummary;
-        visualFacts = videoInsights.facts || [];
-        visualUnknowns = videoInsights.unknowns || [];
-        visualScenes = (videoInsights.scenes || []).flatMap(
-          (scene): VisualScene[] => {
-            const description = scene.description?.trim();
-            if (
-              typeof scene.timestampSeconds !== 'number' ||
-              !Number.isFinite(scene.timestampSeconds) ||
-              !description
-            ) {
-              return [];
-            }
+          const normalizedFacts = normalizeStrings(videoInsights.facts || []);
+          const normalizedUnknowns = normalizeStrings(videoInsights.unknowns || []);
+          const sceneKeys = new Set<string>();
+          const normalizedScenes = (videoInsights.scenes || []).flatMap(
+            (scene): VisualScene[] => {
+              const description = scene.description?.trim();
+              if (
+                typeof scene.timestampSeconds !== 'number' ||
+                !Number.isFinite(scene.timestampSeconds) ||
+                !description
+              ) {
+                return [];
+              }
 
-            return [
-              {
+              const normalizedScene = {
                 timestampSeconds: Math.max(0, scene.timestampSeconds),
                 description,
                 visibleText: scene.visibleText?.trim() || '',
                 usefulForPosting: scene.usefulForPosting !== false,
-              },
-            ];
+              };
+              const key = `${normalizedScene.timestampSeconds}:${description.toLowerCase()}`;
+              if (sceneKeys.has(key)) {
+                return [];
+              }
+              sceneKeys.add(key);
+              return [normalizedScene];
+            }
+          );
+          const usefulScenes = normalizedScenes.filter(
+            (scene) => scene.usefulForPosting
+          );
+
+          hasUsableVisualEvidence =
+            normalizedFacts.length > 0 || usefulScenes.length > 0;
+          visualUnknowns = normalizedUnknowns;
+          visualScenes = normalizedScenes;
+
+          if (hasUsableVisualEvidence) {
+            visualSummary = videoInsights.visualSummary?.trim() || visualSummary;
+            visualFacts = normalizedFacts;
+            coreMessage = videoInsights.coreMessage?.trim() || coreMessage;
+            sourceConfidenceParts.push(videoInsights.sourceConfidence || 0.65);
+          } else {
+            warnings.push({
+              code: 'VIDEO_VISUAL_ANALYSIS_EMPTY',
+              message:
+                'Representative video frames were analyzed but did not produce usable grounded facts or posting scenes.',
+            });
           }
+        } catch {
+          warnings.push({
+            code: 'VIDEO_VISUAL_ANALYSIS_FAILED',
+            message:
+              'Representative video frames could not be analyzed, so generation will rely on the transcript and other available source details.',
+          });
+        }
+      }
+
+      if (transcript?.text) {
+        const transcriptInsights =
+          await this._copyGenerationModelService.summarizeTranscript(
+            transcript.text
+          );
+        transcriptSummary = transcriptInsights.transcriptSummary?.trim() || '';
+        transcriptFacts = normalizeStrings(transcriptInsights.facts || []);
+        transcriptUnknowns = normalizeStrings(transcriptInsights.unknowns || []);
+        coreMessage = transcriptInsights.coreMessage?.trim() || coreMessage;
+        voiceProfile = this.normalizeVoiceProfile(
+          transcriptInsights.voiceProfile ?? undefined
         );
-        coreMessage = videoInsights.coreMessage || coreMessage;
-        sourceConfidenceParts.push(videoInsights.sourceConfidence || 0.65);
-      } catch {
+        sourceConfidenceParts.push(transcriptInsights.sourceConfidence || 0.7);
+
+        if (
+          typeof transcript.confidence === 'number' &&
+          transcript.confidence < 0.55
+        ) {
+          warnings.push({
+            code: 'LOW_TRANSCRIPT_CONFIDENCE',
+            message:
+              'The provided transcript confidence is low, so copy may need manual review.',
+          });
+        }
+      } else if (mediaType === 'video') {
         warnings.push({
-          code: 'VIDEO_VISUAL_ANALYSIS_FAILED',
-          message:
-            'Representative video frames could not be analyzed, so generation will rely on the transcript and other available source details.',
+          code: 'NO_TRANSCRIPT',
+          message: hasUsableVisualEvidence
+            ? 'No transcript is available, so generation will rely only on the representative video frames and may miss spoken context.'
+            : 'No transcript or usable frame analysis is available for this video, so grounded copy generation is blocked.',
         });
       }
-    }
 
-    if (transcript?.text) {
-      const transcriptInsights =
-        await this._copyGenerationModelService.summarizeTranscript(
-          transcript.text
+      const knowledgeBasePersonalization =
+        await this._knowledgeBaseService.resolvePersonalization(
+          orgId,
+          body.voiceProfileId
         );
-      transcriptSummary = transcriptInsights.transcriptSummary || '';
-      transcriptFacts = transcriptInsights.facts || [];
-      transcriptUnknowns = transcriptInsights.unknowns || [];
-      coreMessage = transcriptInsights.coreMessage || coreMessage;
-      voiceProfile = this.normalizeVoiceProfile(
-        transcriptInsights.voiceProfile ?? undefined
+
+      if (!voiceProfile && knowledgeBasePersonalization.voiceProfile) {
+        voiceProfile =
+          knowledgeBasePersonalization.voiceProfile as VoiceProfileSnapshot;
+      }
+
+      const facts = mergeGroundingFacts(visualFacts, transcriptFacts);
+      const unknowns = normalizeStrings(
+        [...visualUnknowns, ...transcriptUnknowns],
+        6
       );
-      sourceConfidenceParts.push(transcriptInsights.sourceConfidence || 0.7);
+
+      if (facts.length < 2) {
+        warnings.push({
+          code: 'SOURCE_FACTS_THIN',
+          message:
+            'The source inputs did not yield many concrete facts, so drafts may need a stronger manual pass.',
+        });
+      }
 
       if (
-        typeof transcript.confidence === 'number' &&
-        transcript.confidence < 0.55
+        body.voiceProfileId &&
+        knowledgeBasePersonalization.explicitVoiceProfileMissed
       ) {
         warnings.push({
-          code: 'LOW_TRANSCRIPT_CONFIDENCE',
+          code: 'VOICE_PROFILE_WEAK',
           message:
-            'The provided transcript confidence is low, so copy may need manual review.',
+            'The requested stored voice profile was not found, so the generator fell back to the active org profile or platform-native defaults.',
         });
       }
-    } else if (mediaType === 'video') {
-      const hasGroundedVisuals = visualFacts.length > 0 || visualScenes.length > 0;
-      warnings.push({
-        code: 'NO_TRANSCRIPT',
-        message: hasGroundedVisuals
-          ? 'No transcript is available, so generation will rely only on the representative video frames and may miss spoken context.'
-          : 'No transcript or usable frame analysis is available for this video, so grounded copy generation is blocked.',
-      });
+
+      if (voiceProfile && voiceProfile.confidence < 0.45) {
+        warnings.push({
+          code: 'VOICE_PROFILE_WEAK',
+          message:
+            'The transcript was too weak to build a strong voice profile, so personalization is limited.',
+        });
+      }
+
+      const averageConfidence =
+        sourceConfidenceParts.length > 0
+          ? sourceConfidenceParts.reduce((sum, value) => sum + value, 0) /
+            sourceConfidenceParts.length
+          : mediaType === 'image'
+          ? 0.55
+          : 0.2;
+      const hasGroundedVideoSource =
+        Boolean(transcript?.text) || hasUsableVisualEvidence;
+
+      return {
+        media: {
+          id: media.id,
+          path: media.path,
+          originalName: media.originalName,
+          alt: media.alt,
+          mediaType,
+          mimeType,
+        },
+        source: {
+          mediaType,
+          visualSummary,
+          ...(transcriptSummary ? { transcriptSummary } : {}),
+          facts,
+          unknowns,
+          ...(visualScenes.length ? { scenes: visualScenes } : {}),
+        },
+        ...(transcript
+          ? {
+              transcript,
+            }
+          : {}),
+        storedKnowledgeBaseFacts: knowledgeBasePersonalization.storedFacts,
+        overlapReferenceTexts: uniq(
+          [
+            ...(transcript?.text ? [transcript.text] : []),
+            ...knowledgeBasePersonalization.overlapReferenceTexts,
+          ]
+            .map((item) => item.trim())
+            .filter(Boolean)
+        ),
+        ...(voiceProfile ? { voiceProfile } : {}),
+        sourceConfidence: this.clampConfidence(averageConfidence),
+        coreMessage:
+          coreMessage ||
+          facts[0] ||
+          transcriptSummary ||
+          visualSummary ||
+          'Share the clearest useful point from the source input.',
+        warnings,
+        blocked: mediaType === 'video' && !hasGroundedVideoSource,
+      };
+    } finally {
+      await preparedVideoFile?.cleanup();
     }
-
-    const knowledgeBasePersonalization =
-      await this._knowledgeBaseService.resolvePersonalization(
-        orgId,
-        body.voiceProfileId
-      );
-
-    if (!voiceProfile && knowledgeBasePersonalization.voiceProfile) {
-      voiceProfile =
-        knowledgeBasePersonalization.voiceProfile as VoiceProfileSnapshot;
-    }
-
-    const facts = uniq(
-      [...visualFacts, ...transcriptFacts]
-        .map((fact) => fact.trim())
-        .filter(Boolean)
-        .slice(0, 8)
-    );
-    const unknowns = uniq(
-      [...visualUnknowns, ...transcriptUnknowns]
-        .map((unknown) => unknown.trim())
-        .filter(Boolean)
-        .slice(0, 6)
-    );
-
-    if (facts.length < 2) {
-      warnings.push({
-        code: 'SOURCE_FACTS_THIN',
-        message:
-          'The source inputs did not yield many concrete facts, so drafts may need a stronger manual pass.',
-      });
-    }
-
-    if (body.voiceProfileId && knowledgeBasePersonalization.explicitVoiceProfileMissed) {
-      warnings.push({
-        code: 'VOICE_PROFILE_WEAK',
-        message:
-          'The requested stored voice profile was not found, so the generator fell back to the active org profile or platform-native defaults.',
-      });
-    }
-
-    if (voiceProfile && voiceProfile.confidence < 0.45) {
-      warnings.push({
-        code: 'VOICE_PROFILE_WEAK',
-        message:
-          'The transcript was too weak to build a strong voice profile, so personalization is limited.',
-      });
-    }
-
-    const averageConfidence =
-      sourceConfidenceParts.length > 0
-        ? sourceConfidenceParts.reduce((sum, value) => sum + value, 0) /
-          sourceConfidenceParts.length
-        : mediaType === 'image'
-        ? 0.55
-        : 0.2;
-    const hasGroundedVideoSource =
-      Boolean(transcript?.text) || visualFacts.length > 0 || visualScenes.length > 0;
-
-    return {
-      media: {
-        id: media.id,
-        path: media.path,
-        originalName: media.originalName,
-        alt: media.alt,
-        mediaType,
-        mimeType,
-      },
-      source: {
-        mediaType,
-        visualSummary,
-        ...(transcriptSummary ? { transcriptSummary } : {}),
-        facts,
-        unknowns,
-        ...(visualScenes.length ? { scenes: visualScenes } : {}),
-      },
-      ...(transcript
-        ? {
-            transcript,
-          }
-        : {}),
-      storedKnowledgeBaseFacts: knowledgeBasePersonalization.storedFacts,
-      overlapReferenceTexts: uniq(
-        [
-          ...(transcript?.text ? [transcript.text] : []),
-          ...knowledgeBasePersonalization.overlapReferenceTexts,
-        ]
-          .map((item) => item.trim())
-          .filter(Boolean)
-      ),
-      ...(voiceProfile ? { voiceProfile } : {}),
-      sourceConfidence: this.clampConfidence(averageConfidence),
-      coreMessage:
-        coreMessage ||
-        facts[0] ||
-        transcriptSummary ||
-        visualSummary ||
-        'Share the clearest useful point from the source input.',
-      warnings,
-      blocked: mediaType === 'video' && !hasGroundedVideoSource,
-    };
   }
 
   private getMimeType(path: string, originalName?: string | null, name?: string | null) {
