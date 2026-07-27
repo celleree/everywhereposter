@@ -63,7 +63,25 @@ jobs:
         run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit
 
       - name: Type-check backend
-        run: pnpm exec tsc -p apps/backend/tsconfig.build.json --noEmit
+        id: backend-typecheck
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec tsc -p apps/backend/tsconfig.build.json --noEmit 2>&1 | tee backend-tsc.log
+
+      - name: Upload backend type-check diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-typecheck-diagnostics
+          path: postiz-app/backend-tsc.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Stop after backend type-check failure
+        if: steps.backend-typecheck.outcome == 'failure'
+        run: exit 1
 
       - name: Type-check orchestrator
         run: pnpm exec tsc -p apps/orchestrator/tsconfig.build.json --noEmit
