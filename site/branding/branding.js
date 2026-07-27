@@ -1,7 +1,8 @@
 (function () {
   const BRAND_NAME = 'EverywherePoster';
   const MARKETING_ORIGIN = 'https://everywhereposter.com';
-  const BRAND_ASSET = '/branding/pe-logo.svg';
+  const BRAND_ASSET_BLACK = '/branding/everywhereposter-icon-black.svg';
+  const BRAND_ASSET_WHITE = '/branding/everywhereposter-icon-white.svg';
   const FAVICON_ASSET = '/branding/favicon.svg';
   const IMAGE_ASSET_PATHS = [
     '/logo.svg',
@@ -9,6 +10,8 @@
     '/postiz.svg',
     '/postiz-text.svg',
     '/no-picture.jpg',
+    BRAND_ASSET_BLACK,
+    BRAND_ASSET_WHITE,
   ];
   const LOGO_SIGNATURES = [
     {
@@ -100,6 +103,12 @@
     }
   }
 
+  function getBrandAsset() {
+    return document.body && document.body.classList.contains('dark')
+      ? BRAND_ASSET_WHITE
+      : BRAND_ASSET_BLACK;
+  }
+
   function applyFavicon() {
     const links = document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"]');
     if (!links.length) {
@@ -125,7 +134,7 @@
     const height = source && source.getAttribute('height') ? source.getAttribute('height') : '84';
     const className = source && source.getAttribute('class') ? source.getAttribute('class') : '';
     const img = document.createElement('img');
-    img.src = BRAND_ASSET;
+    img.src = getBrandAsset();
     img.alt = BRAND_NAME;
     img.width = Number(width) || 84;
     img.height = Number(height) || 84;
@@ -158,6 +167,7 @@
 
   function rewriteImages(root) {
     const scope = root && root.querySelectorAll ? root : document;
+    const brandAsset = getBrandAsset();
     for (const img of scope.querySelectorAll('img')) {
       const src = img.getAttribute('src') || img.currentSrc || '';
       const srcset = img.getAttribute('srcset') || '';
@@ -167,8 +177,8 @@
         continue;
       }
 
-      if (img.getAttribute('src') !== BRAND_ASSET) {
-        img.setAttribute('src', BRAND_ASSET);
+      if (img.getAttribute('src') !== brandAsset) {
+        img.setAttribute('src', brandAsset);
       }
       if (img.hasAttribute('srcset')) {
         img.removeAttribute('srcset');
@@ -318,7 +328,7 @@
 
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ['src', 'srcset'],
+    attributeFilter: ['class', 'src', 'srcset'],
     childList: true,
     subtree: true,
     characterData: true,
