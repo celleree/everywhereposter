@@ -11,6 +11,13 @@ import {
   VoiceProfileSnapshot,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
 
+export interface VisualScene {
+  timestampSeconds: number;
+  description: string;
+  visibleText: string;
+  usefulForPosting: boolean;
+}
+
 export interface SourceBriefResult {
   media: {
     id: string;
@@ -26,6 +33,7 @@ export interface SourceBriefResult {
     transcriptSummary?: string;
     facts: string[];
     unknowns: string[];
+    scenes?: VisualScene[];
   };
   transcript?: {
     text: string;
@@ -91,9 +99,19 @@ export class SourceBriefService {
         : `Image asset: ${media.originalName || media.name}`);
     let visualFacts: string[] = [];
     let visualUnknowns: string[] = [];
+    let visualScenes: VisualScene[] = [];
     let voiceProfile: VoiceProfileSnapshot | undefined;
     let coreMessage = '';
     const sourceConfidenceParts: number[] = [];
+    let videoBuffer: Buffer | undefined;
+
+    const getVideoBuffer = async () => {
+      if (!videoBuffer) {
+        videoBuffer = Buffer.from(await readOrFetch(media.path));
+      }
+
+      return videoBuffer;
+    };
 
     if (mediaType === 'image') {
       const imageBuffer = Buffer.from(await readOrFetch(media.path));
@@ -114,14 +132,12 @@ export class SourceBriefService {
 
     if (mediaType === 'video' && !transcript?.text) {
       try {
-        const videoBuffer = Buffer.from(await readOrFetch(media.path));
         const transcription =
           await this._copyGenerationModelService.transcribeVideo({
-            buffer: videoBuffer,
+            buffer: await getVideoBuffer(),
             mimeType,
             originalName: media.originalName || media.name,
           });
-
         if (transcription.text?.trim()) {
           transcript = {
             text: transcription.text.trim(),
@@ -132,14 +148,40 @@ export class SourceBriefService {
           warnings.push({
             code: 'TRANSCRIPT_REQUIRED',
             message:
-              'Auto transcription did not return usable text. Add a transcript to generate grounded copy from this video.',
+              'Auto transcription did not return usable text. Add a transcript for stronger grounded copy from this video.',
           });
         }
-      } catch (error) {
+      } catch {
         warnings.push({
           code: 'TRANSCRIPT_REQUIRED',
           message:
-            'Auto transcription failed for this video. Add a transcript to generate grounded copy.',
+            'Auto transcription failed for this video. Add a transcript for stronger grounded copy.',
+        });
+      }
+    }
+
+    if (mediaType === 'video') {
+      try {
+        const videoInsights =
+          await this._copyGenerationModelService.analyzeVideoFrames({
+            buffer: await getVideoBuffer(),
+            mimeType,
+            altText: media.alt,
+            originalName: media.originalName || media.name,
+            transcriptText: transcript?.text,
+          });
+
+        visualSummary = videoInsights.visualSummary || visualSummary;
+        visualFacts = videoInsights.facts || [];
+        visualUnknowns = videoInsights.unknowns || [];
+        visualScenes = videoInsights.scenes || [];
+        coreMessage = videoInsights.coreMessage || coreMessage;
+        sourceConfidenceParts.push(videoInsights.sourceConfidence || 0.65);
+      } catch {
+        warnings.push({
+          code: 'VIDEO_VISUAL_ANALYSIS_FAILED',
+          message:
+            'Representative video frames could not be analyzed, so generation will rely on the transcript and other available source details.',
         });
       }
     }
@@ -169,10 +211,12 @@ export class SourceBriefService {
         });
       }
     } else if (mediaType === 'video') {
+      const hasGroundedVisuals = visualFacts.length > 0 || visualScenes.length > 0;
       warnings.push({
         code: 'NO_TRANSCRIPT',
-        message:
-          'No transcript is available for this video, so grounded text-copy generation is blocked.',
+        message: hasGroundedVisuals
+          ? 'No transcript is available, so generation will rely only on the representative video frames and may miss spoken context.'
+          : 'No transcript or usable frame analysis is available for this video, so grounded copy generation is blocked.',
       });
     }
 
@@ -231,6 +275,8 @@ export class SourceBriefService {
         : mediaType === 'image'
         ? 0.55
         : 0.2;
+    const hasGroundedVideoSource =
+      Boolean(transcript?.text) || visualFacts.length > 0 || visualScenes.length > 0;
 
     return {
       media: {
@@ -247,6 +293,7 @@ export class SourceBriefService {
         ...(transcriptSummary ? { transcriptSummary } : {}),
         facts,
         unknowns,
+        ...(visualScenes.length ? { scenes: visualScenes } : {}),
       },
       ...(transcript
         ? {
@@ -271,7 +318,7 @@ export class SourceBriefService {
         visualSummary ||
         'Share the clearest useful point from the source input.',
       warnings,
-      blocked: mediaType === 'video' && !transcript?.text,
+      blocked: mediaType === 'video' && !hasGroundedVideoSource,
     };
   }
 
