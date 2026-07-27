@@ -40,7 +40,7 @@ const SITE_URL = (
   process.env.MAIN_URL ||
   'https://app.everywhereposter.com'
 ).replace(/\/$/, '');
-const SOCIAL_IMAGE_URL = `${SITE_URL}/branding/pe-logo.png`;
+const SOCIAL_IMAGE_URL = `${SITE_URL}/logo.svg`;
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ||
   (process.env.NODE_ENV === 'development' && process.env.BACKEND_INTERNAL_URL
@@ -98,7 +98,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <html suppressHydrationWarning>
       <head>
-        <link rel="icon" type="image/png" href="/branding/favicon.png" />
+        <link rel="icon" type="image/svg+xml" href="/logo.svg" />
         <Script
           id="strip-extension-hydration-attributes"
           strategy="beforeInteractive"
