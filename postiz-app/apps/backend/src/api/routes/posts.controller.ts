@@ -31,6 +31,7 @@ import {
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
 import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.service';
+import { startCopyGenerationHeartbeat } from '@gitroom/backend/api/routes/copy-generation-heartbeat';
 
 @ApiTags('Posts')
 @Controller('/posts')
@@ -215,14 +216,7 @@ export class PostsController {
   ) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('X-Accel-Buffering', 'no');
-    const heartbeat = setInterval(() => {
-      res.write(
-        JSON.stringify({
-          name: 'copy-generation-heartbeat',
-          data: { timestamp: Date.now() },
-        }) + '\n'
-      );
-    }, 15_000);
+    const heartbeat = startCopyGenerationHeartbeat(res);
 
     try {
       for await (const event of this._copyGenerationService.generate(org.id, body)) {
