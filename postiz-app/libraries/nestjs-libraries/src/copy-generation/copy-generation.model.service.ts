@@ -37,6 +37,22 @@ const ImageInsightsSchema = z.object({
   sourceConfidence: z.number().min(0).max(1).default(0.65),
 });
 
+const VideoSceneSchema = z.object({
+  timestampSeconds: z.number().min(0),
+  description: z.string(),
+  visibleText: z.string().default(''),
+  usefulForPosting: z.boolean().default(true),
+});
+
+const VideoInsightsSchema = z.object({
+  visualSummary: z.string(),
+  facts: z.array(z.string()).default([]),
+  unknowns: z.array(z.string()).default([]),
+  coreMessage: z.string(),
+  sourceConfidence: z.number().min(0).max(1).default(0.65),
+  scenes: z.array(VideoSceneSchema).default([]),
+});
+
 const TranscriptInsightsSchema = z.object({
   transcriptSummary: z.string(),
   facts: z.array(z.string()).default([]),
@@ -56,6 +72,11 @@ const PlatformDraftSchema = z.object({
 const RewriteDraftSchema = z.object({
   draft: z.string(),
 });
+
+interface ExtractedVideoFrame {
+  timestampSeconds: number;
+  buffer: Buffer;
+}
 
 @Injectable()
 export class CopyGenerationModelService {
@@ -114,6 +135,101 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
         sourceConfidence: 0.5,
       }
     );
+  }
+
+  async analyzeVideoFrames(params: {
+    buffer: Buffer;
+    mimeType: string;
+    transcriptText?: string;
+    altText?: string | null;
+    originalName?: string | null;
+  }) {
+    const frames = await this.extractVideoFrames(params.buffer, params.originalName);
+
+    if (!frames.length) {
+      throw new Error('Video frame extraction returned no usable frames.');
+    }
+
+    const frameContent = frames.flatMap((frame, index) => [
+      {
+        type: 'text' as const,
+        text: `Frame ${index + 1} sampled at ${frame.timestampSeconds.toFixed(2)} seconds.`,
+      },
+      {
+        type: 'image_url' as const,
+        image_url: {
+          url: `data:image/jpeg;base64,${frame.buffer.toString('base64')}`,
+          detail: 'low' as const,
+        },
+      },
+    ]);
+
+    const analysis = await openai.chat.completions.parse({
+      model: 'gpt-4.1',
+      messages: [
+        {
+          role: 'system',
+          content: `You analyze representative frames sampled across a user-provided video so other models can create grounded social posts and image concepts.
+
+Rules:
+- Use only details supported by the supplied frames and associated transcript.
+- Treat timestamps as labels for the supplied images. Never invent a timestamp.
+- Describe recurring subjects, actions, objects, settings, demonstrations, and visible on-screen text.
+- Do not identify a person, brand, location, product, or result unless the frames, visible text, or transcript clearly support it.
+- Extract 3-8 concrete visual facts. Put uncertain details in unknowns instead of guessing.
+- Return a concise visual summary that explains what the video visibly shows across the sampled frames.
+- Create scene entries only for supplied frames that could help with a social post, cover, thumbnail, quote card, or supporting image.
+- Record visibleText only when it is confidently readable. Otherwise return an empty string.
+- The core message may combine the transcript and visuals, but it must not add claims that neither source supports.
+- Avoid generic marketing language.`,
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Video MIME type: ${params.mimeType}
+Existing alt text: ${params.altText || 'none'}
+Original name: ${params.originalName || 'unknown'}
+Associated transcript: ${params.transcriptText?.slice(0, 12000) || 'none'}
+
+Analyze the sampled frames below as one video.`,
+            },
+            ...frameContent,
+          ],
+        },
+      ],
+      response_format: zodResponseFormat(VideoInsightsSchema, 'videoInsights'),
+    });
+
+    const parsed = analysis.choices[0].message.parsed;
+
+    if (!parsed) {
+      return VideoInsightsSchema.parse({
+        visualSummary: params.altText || 'Uploaded video',
+        facts: [],
+        unknowns: ['The sampled video frames could not be summarized reliably.'],
+        coreMessage:
+          params.transcriptText?.slice(0, 180) ||
+          params.altText ||
+          'Share the clearest useful point from the uploaded video.',
+        sourceConfidence: 0.35,
+        scenes: [],
+      });
+    }
+
+    return {
+      ...parsed,
+      scenes: parsed.scenes
+        .map((scene) => ({
+          ...scene,
+          timestampSeconds: this.findNearestTimestamp(
+            scene.timestampSeconds,
+            frames.map((frame) => frame.timestampSeconds)
+          ),
+        }))
+        .slice(0, frames.length),
+    };
   }
 
   async transcribeVideo(params: {
@@ -181,6 +297,128 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
     } finally {
       await rm(workingDirectory, { recursive: true, force: true });
     }
+  }
+
+  private async extractVideoFrames(
+    buffer: Buffer,
+    originalName?: string | null
+  ): Promise<ExtractedVideoFrame[]> {
+    const workingDirectory = await mkdtemp(join(tmpdir(), 'postiz-video-frames-'));
+    const inputPath = join(
+      workingDirectory,
+      basename(originalName || 'uploaded-video.mp4')
+    );
+
+    try {
+      await writeFile(inputPath, buffer);
+
+      let timestamps = [0];
+      try {
+        const duration = await this.probeVideoDuration(inputPath);
+        timestamps = this.buildFrameTimestamps(duration);
+      } catch {
+        timestamps = [0];
+      }
+
+      const frames: ExtractedVideoFrame[] = [];
+
+      for (const [index, timestampSeconds] of timestamps.entries()) {
+        const outputPath = join(workingDirectory, `frame-${index + 1}.jpg`);
+
+        try {
+          await execFileAsync(
+            'ffmpeg',
+            [
+              '-hide_banner',
+              '-loglevel',
+              'error',
+              '-ss',
+              timestampSeconds.toFixed(3),
+              '-i',
+              inputPath,
+              '-frames:v',
+              '1',
+              '-an',
+              '-vf',
+              'scale=1280:-2:force_original_aspect_ratio=decrease',
+              '-q:v',
+              '4',
+              '-y',
+              outputPath,
+            ],
+            {
+              maxBuffer: 2 * 1024 * 1024,
+            }
+          );
+
+          const frameBuffer = await readFile(outputPath);
+          if (frameBuffer.byteLength) {
+            frames.push({
+              timestampSeconds,
+              buffer: frameBuffer,
+            });
+          }
+        } catch {
+          // Keep any other representative frames when one timestamp is unreadable.
+        }
+      }
+
+      return frames;
+    } finally {
+      await rm(workingDirectory, { recursive: true, force: true });
+    }
+  }
+
+  private async probeVideoDuration(inputPath: string) {
+    const { stdout } = await execFileAsync(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        inputPath,
+      ],
+      {
+        maxBuffer: 1024 * 1024,
+      }
+    );
+    const duration = Number.parseFloat(`${stdout}`.trim());
+
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error('Video duration could not be determined.');
+    }
+
+    return duration;
+  }
+
+  private buildFrameTimestamps(durationSeconds: number) {
+    const fractions =
+      durationSeconds <= 3
+        ? [0.5]
+        : durationSeconds <= 10
+        ? [0.12, 0.5, 0.88]
+        : durationSeconds <= 20
+        ? [0.08, 0.35, 0.65, 0.9]
+        : [0.06, 0.22, 0.38, 0.54, 0.7, 0.88];
+
+    return Array.from(
+      new Set(
+        fractions.map((fraction) =>
+          Number(Math.max(0, durationSeconds * fraction).toFixed(3))
+        )
+      )
+    );
+  }
+
+  private findNearestTimestamp(timestamp: number, timestamps: number[]) {
+    return timestamps.reduce((nearest, candidate) =>
+      Math.abs(candidate - timestamp) < Math.abs(nearest - timestamp)
+        ? candidate
+        : nearest
+    );
   }
 
   async summarizeTranscript(transcript: string) {
