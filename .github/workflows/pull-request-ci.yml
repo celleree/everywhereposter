@@ -108,11 +108,42 @@ jobs:
       - repository-guard
       - quality
       - classify-docker-build
+    if: ${{ always() }}
     runs-on: ubuntu-latest
 
     steps:
+      - name: Verify prerequisites and classification
+        shell: bash
+        env:
+          REPOSITORY_GUARD_RESULT: ${{ needs.repository-guard.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          CLASSIFIER_RESULT: ${{ needs.classify-docker-build.result }}
+          SHOULD_BUILD: ${{ needs.classify-docker-build.outputs.should_build }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$REPOSITORY_GUARD_RESULT" != "success" ]]; then
+            echo "Repository guard did not succeed: $REPOSITORY_GUARD_RESULT"
+            exit 1
+          fi
+
+          if [[ "$QUALITY_RESULT" != "success" ]]; then
+            echo "Quality checks did not succeed: $QUALITY_RESULT"
+            exit 1
+          fi
+
+          if [[ "$CLASSIFIER_RESULT" != "success" ]]; then
+            echo "Docker classifier did not succeed: $CLASSIFIER_RESULT"
+            exit 1
+          fi
+
+          if [[ "$SHOULD_BUILD" != "true" && "$SHOULD_BUILD" != "false" ]]; then
+            echo "Docker classifier returned an invalid or missing result: $SHOULD_BUILD"
+            exit 1
+          fi
+
       - name: Report safe-only skip
-        if: needs.classify-docker-build.outputs.should_build != 'true'
+        if: needs.classify-docker-build.outputs.should_build == 'false'
         run: echo "Docker image build skipped because every changed file is explicitly safe-only."
 
       - name: Check out repository
