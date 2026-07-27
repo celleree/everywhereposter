@@ -59,6 +59,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify FFmpeg tools
+        run: |
+          ffmpeg -version
+          ffprobe -version
+
       - name: Type-check frontend
         run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit
 
@@ -67,6 +72,21 @@ jobs:
 
       - name: Type-check orchestrator
         run: pnpm exec tsc -p apps/orchestrator/tsconfig.build.json --noEmit
+
+      - name: Test video media acquisition
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/video-media-file.spec.ts
+
+      - name: Test video frame model processing
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/copy-generation.model.service.spec.ts
+
+      - name: Test source brief grounding
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/source-brief.service.spec.ts
+
+      - name: Test copy stream heartbeat
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/posts.controller.copy-heartbeat.spec.ts
+
+      - name: Test real FFmpeg frame extraction
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/video-frame-extraction.integration.spec.ts
 
       - name: Run copy-generation tests
         run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand
