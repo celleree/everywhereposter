@@ -40,7 +40,7 @@ classify() {
       HEAD_SHA="$head" \
       GITHUB_OUTPUT="$output_file" \
       bash "$CLASSIFIER"
-  )
+  ) >&2
 
   sed -n 's/^should_build=//p' "$output_file" | tail -n 1
 }
