@@ -21,6 +21,13 @@ export interface VoiceProfileSnapshot {
   confidence: number;
 }
 
+export interface CopyGenerationVisualScene {
+  timestampSeconds: number;
+  description: string;
+  visibleText: string;
+  usefulForPosting: boolean;
+}
+
 export interface CopyGenerationBrief {
   source: {
     mediaType: 'image' | 'video';
@@ -28,6 +35,7 @@ export interface CopyGenerationBrief {
     transcriptSummary?: string;
     facts: string[];
     unknowns: string[];
+    scenes?: CopyGenerationVisualScene[];
   };
   strategy: {
     audience?: string;
