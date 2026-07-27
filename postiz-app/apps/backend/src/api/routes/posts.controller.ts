@@ -131,7 +131,7 @@ export class PostsController {
     @GetOrgFromRequest() org: Organization,
     @Param('id') id?: string
   ) {
-    return { date: await this._postsService.findFreeDateTime(org.id, id); }
+    return { date: await this._postsService.findFreeDateTime(org.id, id) };
   }
 
   @Get('/list')
