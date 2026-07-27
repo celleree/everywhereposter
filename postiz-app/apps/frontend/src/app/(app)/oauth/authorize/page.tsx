@@ -86,7 +86,7 @@ export default function OAuthAuthorizePage() {
         </div>
         <div className="relative z-10 text-center">
           <div className="flex justify-center mb-[24px]">
-            <Logo />
+            <Logo tone="white" />
           </div>
           <div className="text-[16px] text-gray-400">
             Please wait...
@@ -108,7 +108,7 @@ export default function OAuthAuthorizePage() {
         </div>
         <div className="relative z-10 text-center">
           <div className="flex justify-center mb-[24px]">
-            <Logo />
+            <Logo tone="white" />
           </div>
           <div className="w-[80px] h-[80px] mx-auto mb-[24px] rounded-full bg-red-500/20 flex items-center justify-center">
             <svg
@@ -147,7 +147,7 @@ export default function OAuthAuthorizePage() {
 
       <div className="relative z-10 w-full max-w-[500px] mx-auto px-[20px]">
         <div className="flex justify-center mb-[32px]">
-          <Logo />
+          <Logo tone="white" />
         </div>
 
         <div className="bg-[#1A1919] rounded-[16px] p-[32px] flex flex-col gap-[24px]">
