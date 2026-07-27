@@ -174,7 +174,27 @@ export class SourceBriefService {
         visualSummary = videoInsights.visualSummary || visualSummary;
         visualFacts = videoInsights.facts || [];
         visualUnknowns = videoInsights.unknowns || [];
-        visualScenes = videoInsights.scenes || [];
+        visualScenes = (videoInsights.scenes || []).flatMap(
+          (scene): VisualScene[] => {
+            const description = scene.description?.trim();
+            if (
+              typeof scene.timestampSeconds !== 'number' ||
+              !Number.isFinite(scene.timestampSeconds) ||
+              !description
+            ) {
+              return [];
+            }
+
+            return [
+              {
+                timestampSeconds: Math.max(0, scene.timestampSeconds),
+                description,
+                visibleText: scene.visibleText?.trim() || '',
+                usefulForPosting: scene.usefulForPosting !== false,
+              },
+            ];
+          }
+        );
         coreMessage = videoInsights.coreMessage || coreMessage;
         sourceConfidenceParts.push(videoInsights.sourceConfidence || 0.65);
       } catch {
