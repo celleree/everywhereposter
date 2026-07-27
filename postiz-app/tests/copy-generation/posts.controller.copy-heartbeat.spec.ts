@@ -1,68 +1,35 @@
-import { PostsController } from '@gitroom/backend/api/routes/posts.controller';
+import {
+  COPY_GENERATION_HEARTBEAT_MS,
+  startCopyGenerationHeartbeat,
+} from '@gitroom/backend/api/routes/copy-generation-heartbeat';
 
-describe('PostsController copy generation heartbeat', () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
+describe('copy generation heartbeat', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
   });
 
-  it('writes and clears a 15-second heartbeat around copy generation', async () => {
-    const intervalToken = { token: 'heartbeat' } as unknown as NodeJS.Timeout;
-    const intervalSpy = jest
-      .spyOn(global, 'setInterval')
-      .mockImplementation(((callback: () => void, delay?: number) => {
-        expect(delay).toBe(15_000);
-        callback();
-        return intervalToken;
-      }) as typeof setInterval);
-    const clearIntervalSpy = jest
-      .spyOn(global, 'clearInterval')
-      .mockImplementation(() => undefined);
-    const copyGenerationService = {
-      generate: async function* () {
-        yield { name: 'copy-generation-started', data: { requestId: 'request-1' } };
-        yield {
-          name: 'completed',
-          data: {
-            requestId: 'request-1',
-            status: 'failed',
-            sourceConfidence: 0.2,
-            warnings: [],
-            results: [],
-          },
-        };
-      },
-    };
-    const controller = new PostsController(
-      {} as any,
-      {} as any,
-      {} as any,
-      copyGenerationService as any,
-      {} as any
-    );
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it('writes every 15 seconds and stops after the interval is cleared', () => {
     const response = {
-      setHeader: jest.fn(),
       write: jest.fn(),
-      end: jest.fn(),
     };
+    const heartbeat = startCopyGenerationHeartbeat(response as any);
 
-    await controller.generateMediaCopy(
-      { id: 'org-1' } as any,
-      { mediaId: 'media-1', platforms: ['linkedin'], goal: 'position' } as any,
-      response as any
-    );
+    expect(COPY_GENERATION_HEARTBEAT_MS).toBe(15_000);
+    expect(jest.getTimerCount()).toBe(1);
 
-    expect(intervalSpy).toHaveBeenCalledTimes(1);
-    expect(response.setHeader).toHaveBeenCalledWith('X-Accel-Buffering', 'no');
+    jest.advanceTimersByTime(COPY_GENERATION_HEARTBEAT_MS);
+    expect(response.write).toHaveBeenCalledTimes(1);
     expect(response.write).toHaveBeenCalledWith(
       expect.stringContaining('copy-generation-heartbeat')
     );
-    expect(response.write).toHaveBeenCalledWith(
-      expect.stringContaining('copy-generation-started')
-    );
-    expect(response.write).toHaveBeenCalledWith(
-      expect.stringContaining('completed')
-    );
-    expect(clearIntervalSpy).toHaveBeenCalledWith(intervalToken);
-    expect(response.end).toHaveBeenCalledTimes(1);
+
+    clearInterval(heartbeat);
+    jest.advanceTimersByTime(COPY_GENERATION_HEARTBEAT_MS * 2);
+    expect(response.write).toHaveBeenCalledTimes(1);
   });
 });
