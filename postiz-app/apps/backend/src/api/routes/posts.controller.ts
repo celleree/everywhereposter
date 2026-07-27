@@ -271,8 +271,8 @@ export class PostsController {
   @Post('/separate-posts')
   async separatePosts(
     @GetOrgFromRequest() org: Organization,
-    @Body() body: any
+    @Body() body: { content: string; len: number }
   ) {
-    return this._postsService.separatePosts(org.id, body);
+    return this._postsService.separatePosts(body.content, body.len);
   }
 }
