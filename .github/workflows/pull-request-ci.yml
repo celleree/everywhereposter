@@ -77,21 +77,85 @@ jobs:
       - name: Run published-posts tests
         run: pnpm exec jest --config jest.published-posts.config.cjs --runInBand
 
+  classify-docker-build:
+    name: Classify Docker build requirement
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.classify.outputs.should_build }}
+
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Test Docker build classifier
+        shell: bash
+        run: bash scripts/test-classify-docker-build.sh
+
+      - name: Classify changed files
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/classify-docker-build.sh
+
   docker-build:
     name: Docker build
     needs:
       - repository-guard
       - quality
+      - classify-docker-build
+    if: ${{ always() }}
     runs-on: ubuntu-latest
 
     steps:
+      - name: Verify prerequisites and classification
+        shell: bash
+        env:
+          REPOSITORY_GUARD_RESULT: ${{ needs.repository-guard.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          CLASSIFIER_RESULT: ${{ needs.classify-docker-build.result }}
+          SHOULD_BUILD: ${{ needs.classify-docker-build.outputs.should_build }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$REPOSITORY_GUARD_RESULT" != "success" ]]; then
+            echo "Repository guard did not succeed: $REPOSITORY_GUARD_RESULT"
+            exit 1
+          fi
+
+          if [[ "$QUALITY_RESULT" != "success" ]]; then
+            echo "Quality checks did not succeed: $QUALITY_RESULT"
+            exit 1
+          fi
+
+          if [[ "$CLASSIFIER_RESULT" != "success" ]]; then
+            echo "Docker classifier did not succeed: $CLASSIFIER_RESULT"
+            exit 1
+          fi
+
+          if [[ "$SHOULD_BUILD" != "true" && "$SHOULD_BUILD" != "false" ]]; then
+            echo "Docker classifier returned an invalid or missing result: $SHOULD_BUILD"
+            exit 1
+          fi
+
+      - name: Report safe-only skip
+        if: needs.classify-docker-build.outputs.should_build == 'false'
+        run: echo "Docker image build skipped because every changed file is explicitly safe-only."
+
       - name: Check out repository
+        if: needs.classify-docker-build.outputs.should_build == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
+        if: needs.classify-docker-build.outputs.should_build == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Build image without publishing
+        if: needs.classify-docker-build.outputs.should_build == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./postiz-app
