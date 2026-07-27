@@ -281,7 +281,7 @@ export const SelectCurrent: FC = () => {
                 <button
                   type="button"
                   onClick={addInstagramFirstComment(integration)}
-                  className="mt-[10px] inline-flex max-w-full items-center rounded-[8px] border border-ai bg-newBgLineColor px-[10px] py-[6px] text-[12px] font-[700] leading-[16px] text-ai transition-colors hover:bg-boxHover"
+                  className="mt-[10px] inline-flex max-w-full items-center rounded-[8px] border border-ai bg-newBgLineColor px-[10px] py-[6px] text-[12px] font-[700] leading-[16px] text-textColor transition-colors hover:bg-boxHover"
                 >
                   {hasInstagramFirstComment
                     ? t(
@@ -329,7 +329,7 @@ export const IsGlobal: FC<{ id: string }> = ({ id }) => {
         'no_longer_global_mode',
         'No longer in global mode'
       )}
-      className="inline-flex rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-ai"
+      className="inline-flex rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[700] uppercase tracking-[0.04em] text-textColor"
     >
       Custom
     </span>

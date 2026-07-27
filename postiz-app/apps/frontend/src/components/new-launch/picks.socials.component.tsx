@@ -112,7 +112,7 @@ export const PicksSocialsComponent: FC<{ toolTip?: boolean }> = ({
                     className={clsx(
                       'flex h-[28px] min-w-[86px] items-center justify-center rounded-full border px-[12px] text-[12px] font-[700] uppercase tracking-[0.04em] xs:w-full',
                       selected
-                        ? 'border-ai bg-newBgLineColor text-ai'
+                        ? 'border-ai bg-newBgLineColor text-textColor'
                         : 'border-newBorder text-textColor/65'
                     )}
                   >

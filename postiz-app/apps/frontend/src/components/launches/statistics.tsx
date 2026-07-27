@@ -814,7 +814,7 @@ export const PostStatisticsPanel: FC<{
                                   setReplyComposerCommentId(comment.id);
                                   setOpenCommentActionMenuId(null);
                                 }}
-                                className="cursor-pointer text-[12px] font-medium text-[#7aa2ff] hover:text-[#9db9ff] disabled:cursor-not-allowed disabled:opacity-50"
+                                className="cursor-pointer text-[12px] font-medium text-textColor hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {t('reply', 'Reply')}
                               </button>
@@ -892,7 +892,7 @@ export const PostStatisticsPanel: FC<{
                               href={comment.permalinkUrl}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-[#7aa2ff] hover:text-[#9db9ff]"
+                              className="text-textColor hover:underline"
                             >
                               {t('open_comment', 'Open comment')}
                             </a>

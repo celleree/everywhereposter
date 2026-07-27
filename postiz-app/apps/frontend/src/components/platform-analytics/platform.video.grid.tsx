@@ -212,7 +212,7 @@ export const PlatformVideoGrid: FC<{
                           target="_blank"
                           rel="noreferrer"
                           onClick={(event) => event.stopPropagation()}
-                          className="inline-flex mt-[8px] text-[12px] text-[#8b5cf6] hover:text-[#a78bfa]"
+                          className="inline-flex mt-[8px] text-[12px] text-textColor hover:underline"
                         >
                           {t('open_on_platform', 'Open on platform')}
                         </a>

@@ -262,7 +262,7 @@ export const FirstBillingComponent = () => {
                     className={clsx(
                       'cursor-pointer select-none w-[266px] h-[138px] tablet:w-full tablet:h-[124px] p-[24px] tablet:p-[15px] rounded-[20px] flex flex-col',
                       key === tier
-                        ? 'border-[1.5px] border-[#618DFF]'
+                        ? 'border-[1.5px] border-ai'
                         : 'border-[1.5px] border-newColColor'
                     )}
                   >
