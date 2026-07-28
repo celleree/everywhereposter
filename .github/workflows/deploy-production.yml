@@ -123,6 +123,7 @@ jobs:
       url: https://app.everywhereposter.com
     env:
       TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
+      DEPLOYMENT_MODE: ${{ inputs.deployment_mode }}
       SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
       SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
       SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT || '22' }}
@@ -130,6 +131,7 @@ jobs:
       SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
       GH_TOKEN: ${{ github.token }}
       PRUNE_UNUSED_IMAGES: ${{ inputs.prune_unused_images }}
+      REMOTE_DOCKER_CONFIG: /tmp/everywhereposter-ghcr-${{ github.run_id }}
     steps:
       - name: Validate deployment configuration
         run: |
@@ -158,7 +160,7 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin"
+            "install -d -m 700 '$REMOTE_DOCKER_CONFIG' && DOCKER_CONFIG='$REMOTE_DOCKER_CONFIG' docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin"
 
       - name: Synchronize main and deploy the exact image
         run: |
@@ -169,20 +171,22 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            bash -s -- "$TARGET_SHA" "$PRUNE_UNUSED_IMAGES" <<'REMOTE'
+            bash -s -- "$TARGET_SHA" "$PRUNE_UNUSED_IMAGES" "$REMOTE_DOCKER_CONFIG" <<'REMOTE'
           set -euo pipefail
 
           TARGET_SHA="$1"
           PRUNE_UNUSED_IMAGES="$2"
+          DOCKER_CONFIG="$3"
           REPO_DIR="/home/arund/publish-everywhere-git"
 
+          export DOCKER_CONFIG
           cd "$REPO_DIR"
           [ -z "$(git status --porcelain)" ] || {
             echo "ERROR: the production checkout is dirty; refusing to deploy."
             exit 1
           }
 
-          git fetch origin main
+          git fetch --prune origin refs/heads/main:refs/remotes/origin/main
           git checkout main
           git merge --ff-only origin/main
 
@@ -205,7 +209,7 @@ jobs:
             https://app.everywhereposter.com/)"
 
           case "$HTTP_STATUS" in
-            200|301|302|307|308)
+            2??|3??)
               echo "Public endpoint returned HTTP $HTTP_STATUS."
               ;;
             *)
@@ -216,20 +220,20 @@ jobs:
 
       - name: Record deployment summary
         run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ## EverywherePoster production deployment
+          {
+            echo "## EverywherePoster production deployment"
+            echo
+            echo "- Mode: \`$DEPLOYMENT_MODE\`"
+            echo "- Full commit SHA: \`$TARGET_SHA\`"
+            echo "- Image: \`ghcr.io/celleree/publish-everywhere-postiz:$TARGET_SHA\`"
+            echo "- Runtime service: \`postiz\`"
+            echo "- Public URL: https://app.everywhereposter.com"
+            echo "- Unused-image pruning: \`$PRUNE_UNUSED_IMAGES\`"
+            echo
+            echo "The workflow verified the successful production image build, the full-SHA GHCR image, the running container image ID, container state, logs, and public HTTP response. Product behavior still requires the release-specific manual browser checklist."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          - Mode: `${{ inputs.deployment_mode }}`
-          - Full commit SHA: `$TARGET_SHA`
-          - Image: `ghcr.io/celleree/publish-everywhere-postiz:$TARGET_SHA`
-          - Runtime service: `postiz`
-          - Public URL: https://app.everywhereposter.com
-          - Unused-image pruning: `$PRUNE_UNUSED_IMAGES`
-
-          The workflow verified the successful production image build, the full-SHA GHCR image, the running container image ID, container state, logs, and public HTTP response. Product behavior still requires the release-specific manual browser checklist.
-          EOF
-
-      - name: Log the server out of GHCR
+      - name: Remove temporary server registry credentials
         if: always()
         continue-on-error: true
         run: |
@@ -239,7 +243,7 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "docker logout ghcr.io >/dev/null 2>&1 || true"
+            "rm -rf '$REMOTE_DOCKER_CONFIG'"
 
       - name: Remove runner SSH credentials
         if: always()
