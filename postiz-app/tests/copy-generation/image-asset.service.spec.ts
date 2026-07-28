@@ -225,4 +225,16 @@ describe('ImageAssetService', () => {
     );
     expect(result.results[0]).toMatchObject({ width: 1600, height: 900 });
   });
+
+  it('splits oversized words and keeps every rendered line within the limit', () => {
+    const lines = (createService() as any).wrapText(
+      'https://example.com/this-is-an-intentionally-oversized-token',
+      12,
+      3
+    );
+
+    expect(lines).toHaveLength(3);
+    expect(lines.every((line: string) => line.length <= 12)).toBe(true);
+    expect(lines[2]).toMatch(/…$/);
+  });
 });
