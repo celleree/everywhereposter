@@ -1,12 +1,13 @@
 'use client';
 
-import { FC, forwardRef, useCallback, useState } from 'react';
+import { forwardRef, useCallback } from 'react';
 import clsx from 'clsx';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useFormContext } from 'react-hook-form';
 export const Checkbox = forwardRef<
   null,
   {
     checked?: boolean;
+    disabled?: boolean;
     disableForm?: boolean;
     name?: string;
     className?: string;
@@ -20,13 +21,17 @@ export const Checkbox = forwardRef<
     variant?: 'default' | 'hollow';
   }
 >((props, ref: any) => {
-  const { checked, className, label, disableForm, variant } = props;
+  const { checked, disabled, className, label, disableForm, variant } = props;
   const form = useFormContext();
   const register = disableForm ? {} : form.register(props.name!);
   const watch = disableForm ? false : form.watch(props.name!);
   const val = watch || checked;
 
   const changeStatus = useCallback(() => {
+    if (disabled) {
+      return;
+    }
+
     props?.onChange?.({
       target: {
         name: props.name!,
@@ -42,15 +47,17 @@ export const Checkbox = forwardRef<
         },
       });
     }
-  }, [val]);
+  }, [disabled, disableForm, props, register, val]);
   return (
     <div className="flex gap-[10px]">
       <div
         ref={ref}
         {...disableForm ? {} : form.register(props.name!)}
+        aria-disabled={disabled || undefined}
         onClick={changeStatus}
         className={clsx(
-          'cursor-pointer rounded-[4px] select-none w-[24px] h-[24px] justify-center items-center flex text-white',
+          'rounded-[4px] select-none w-[24px] h-[24px] justify-center items-center flex text-white',
+          disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
           variant === 'default' || !variant
             ? 'bg-forth'
             : 'border-customColor1 border-2 bg-customColor2',
