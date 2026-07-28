@@ -38,37 +38,36 @@ export class MediaService {
     generatePromptFirst?: boolean,
     isVertical = false
   ) {
-    if (process.env.STRIPE_PUBLISHABLE_KEY) {
-      const totalCredits = await this._subscriptionService.checkCredits(
-        org,
-        'ai_images'
-      );
-
-      if (totalCredits.credits <= 0) {
-        throw new SubscriptionException({
-          action: AuthorizationActions.Create,
-          section: Sections.AI,
-        });
+    const generate = async () => {
+      if (generatePromptFirst) {
+        prompt = await this._openAi.generatePromptForPicture(prompt);
+        console.log('Prompt:', prompt);
       }
+      return this._openAi.generateImage(
+        prompt,
+        !!generatePromptFirst,
+        isVertical
+      );
+    };
+
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      return this._subscriptionService.useCredit(org, 'ai_images', generate);
     }
 
-    const generating = await this._subscriptionService.useCredit(
+    const reservation = await this._subscriptionService.useCreditWithinLimit(
       org,
       'ai_images',
-      async () => {
-        if (generatePromptFirst) {
-          prompt = await this._openAi.generatePromptForPicture(prompt);
-          console.log('Prompt:', prompt);
-        }
-        return this._openAi.generateImage(
-          prompt,
-          !!generatePromptFirst,
-          isVertical
-        );
-      }
+      generate
     );
 
-    return generating;
+    if (!reservation.allowed) {
+      throw new SubscriptionException({
+        action: AuthorizationActions.Create,
+        section: Sections.AI,
+      });
+    }
+
+    return reservation.value;
   }
 
   saveFile(
