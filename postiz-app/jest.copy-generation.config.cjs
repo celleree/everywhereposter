@@ -21,8 +21,11 @@ module.exports = {
       },
     ],
   },
-  moduleNameMapper: pathsToModuleNameMapper(compilerOptions.paths, {
-    prefix: '<rootDir>/',
-  }),
+  moduleNameMapper: {
+    '^nostr-tools$': '<rootDir>/tests/copy-generation/mocks/nostr-tools.ts',
+    ...pathsToModuleNameMapper(compilerOptions.paths, {
+      prefix: '<rootDir>/',
+    }),
+  },
   modulePathIgnorePatterns: ['<rootDir>/node_modules', '<rootDir>/apps/.*/dist'],
 };
