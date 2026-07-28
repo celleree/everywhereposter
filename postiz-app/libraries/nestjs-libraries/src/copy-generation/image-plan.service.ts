@@ -27,6 +27,8 @@ const IMAGE_PLAN_TYPES = [
 
 const IMAGE_PLAN_ASPECT_RATIOS = ['1:1', '4:5', '16:9', '9:16'] as const;
 const IMAGE_PLAN_TIMESTAMP_TOLERANCE_SECONDS = 0.25;
+const UNGROUNDED_SOURCE_QUOTE_WARNING =
+  'Source quote was omitted because it could not be verified against the source brief.';
 
 const ImagePlanDraftSchema = z.object({
   type: z.enum(IMAGE_PLAN_TYPES),
@@ -91,14 +93,14 @@ You are planning assets only. Do not claim that any image has been rendered or g
 
 Rules:
 - Return at most one recommended image for each selected platform.
-- Use only facts, scenes, visible text, transcript summary, and core message supplied by the user.
+- Use only facts, scenes, visible text, transcript, transcript summary, and core message supplied by the user.
 - Never invent a person, product, location, result, quote, or timestamp.
 - Prefer an authentic video_frame when a useful scene clearly supports the post.
 - Prefer a quote_card when the message is stronger as controlled typography. The application will render the text, so visualPrompt must not ask an image model to draw words.
 - Use ai_visual only when a supporting concept image adds meaning and can be generated without inventing source facts.
 - Use thumbnail mainly for YouTube or when a platform genuinely needs a cover-style asset.
 - video_frame and thumbnail require one of the supplied scene timestamps. Copy that timestamp exactly; minor numeric rounding beyond 0.25 seconds will be rejected.
-- quote_card should include a concise headline. sourceQuote is optional and may only contain wording actually supplied in the brief.
+- quote_card should include a concise headline. sourceQuote is optional and may only contain wording actually supplied in the transcript, core message, facts, or scenes.
 - ai_visual requires a concrete visualPrompt and must avoid unsupported brand marks, people, proof, or results.
 - Write useful alt text.
 - Put accuracy or source limitations in warnings.
@@ -114,6 +116,9 @@ ${sourceBrief.coreMessage}
 
 Visual summary:
 ${sourceBrief.source.visualSummary}
+
+Transcript:
+${sourceBrief.transcript.text || 'none'}
 
 Transcript summary:
 ${sourceBrief.source.transcriptSummary || 'none'}
@@ -195,6 +200,11 @@ Create the smallest useful platform-specific image plan.`,
 
     const headline = draft.headline.trim();
     const visualPrompt = draft.visualPrompt.trim();
+    const sourceQuote = draft.sourceQuote.trim();
+    const groundedSourceQuote =
+      sourceQuote && this.isSourceQuoteGrounded(sourceQuote, sourceBrief)
+        ? sourceQuote
+        : undefined;
 
     if (draft.type === 'quote_card' && !headline) {
       return null;
@@ -207,6 +217,9 @@ Create the smallest useful platform-specific image plan.`,
     const warnings = Array.from(
       new Set([
         ...draft.warnings.map((warning) => warning.trim()).filter(Boolean),
+        ...(sourceQuote && !groundedSourceQuote
+          ? [UNGROUNDED_SOURCE_QUOTE_WARNING]
+          : []),
         ...(sourceBrief.sourceConfidence < 0.55
           ? ['Source confidence is limited; review this recommendation before generating an asset.']
           : []),
@@ -231,14 +244,46 @@ Create the smallest useful platform-specific image plan.`,
       ...(typeof sourceTimestampSeconds === 'number'
         ? { sourceTimestampSeconds }
         : {}),
-      ...(draft.sourceQuote.trim()
-        ? { sourceQuote: draft.sourceQuote.trim() }
-        : {}),
+      ...(groundedSourceQuote ? { sourceQuote: groundedSourceQuote } : {}),
       visualSummary: draft.visualSummary.trim(),
       ...(visualPrompt ? { visualPrompt } : {}),
       altText: draft.altText.trim(),
       confidence: Math.max(0.1, Math.min(0.95, Number(draft.confidence.toFixed(2)))),
       warnings,
     };
+  }
+
+  private isSourceQuoteGrounded(
+    sourceQuote: string,
+    sourceBrief: SourceBriefResult
+  ): boolean {
+    const normalizedQuote = this.normalizeGroundingText(sourceQuote);
+    if (!normalizedQuote) {
+      return false;
+    }
+
+    const sceneTexts = (sourceBrief.source.scenes || []).flatMap((scene) => [
+      scene.description,
+      scene.visibleText || '',
+    ]);
+    const sourceTexts = [
+      sourceBrief.transcript.text,
+      sourceBrief.coreMessage,
+      ...sourceBrief.source.facts,
+      ...sceneTexts,
+    ];
+
+    return sourceTexts.some((sourceText) =>
+      this.normalizeGroundingText(sourceText).includes(normalizedQuote)
+    );
+  }
+
+  private normalizeGroundingText(value: string): string {
+    return value
+      .normalize('NFKC')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
   }
 }
