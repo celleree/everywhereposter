@@ -118,7 +118,7 @@ Visual summary:
 ${sourceBrief.source.visualSummary}
 
 Transcript:
-${sourceBrief.transcript.text || 'none'}
+${sourceBrief.transcript?.text || 'none'}
 
 Transcript summary:
 ${sourceBrief.source.transcriptSummary || 'none'}
@@ -267,7 +267,7 @@ Create the smallest useful platform-specific image plan.`,
       scene.visibleText || '',
     ]);
     const sourceTexts = [
-      sourceBrief.transcript.text,
+      sourceBrief.transcript?.text || '',
       sourceBrief.coreMessage,
       ...sourceBrief.source.facts,
       ...sceneTexts,
