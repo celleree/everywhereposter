@@ -43,7 +43,7 @@ describe('Checkbox', () => {
 
     const checkbox = screen.getByRole('checkbox', { name: 'Use image' });
 
-    expect(checkbox).toHaveAttribute('aria-disabled', 'false');
+    expect(checkbox).not.toHaveAttribute('aria-disabled');
     expect(checkbox).toHaveAttribute('tabindex', '0');
 
     fireEvent.click(checkbox);
