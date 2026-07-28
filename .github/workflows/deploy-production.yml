@@ -1,0 +1,246 @@
+name: Deploy EverywherePoster production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full 40-character main-branch commit SHA to deploy
+        required: true
+        type: string
+      deployment_mode:
+        description: Release the current main commit or roll back to an earlier main commit
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - rollback
+      prune_unused_images:
+        description: Prune unused Docker images before pulling the requested image
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+    outputs:
+      target_sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate requested commit
+        id: target
+        env:
+          TARGET_SHA: ${{ inputs.commit_sha }}
+          DEPLOYMENT_MODE: ${{ inputs.deployment_mode }}
+        run: |
+          set -euo pipefail
+
+          case "$TARGET_SHA" in
+            ''|*[!0-9a-f]*)
+              echo "ERROR: commit_sha must be a lowercase 40-character commit SHA."
+              exit 1
+              ;;
+          esac
+
+          if [ "${#TARGET_SHA}" -ne 40 ]; then
+            echo "ERROR: commit_sha must be a lowercase 40-character commit SHA."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${TARGET_SHA}^{commit}" 2>/dev/null; then
+            echo "ERROR: requested commit does not exist in repository history."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+            echo "ERROR: requested commit is not part of main history."
+            exit 1
+          fi
+
+          MAIN_SHA="$(git rev-parse origin/main)"
+          if [ "$DEPLOYMENT_MODE" = "release" ] && [ "$TARGET_SHA" != "$MAIN_SHA" ]; then
+            echo "ERROR: release mode only deploys the current main commit: $MAIN_SHA"
+            exit 1
+          fi
+
+          echo "sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "Validated $DEPLOYMENT_MODE target $TARGET_SHA."
+
+      - name: Verify the production image build succeeded
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          RUNS_JSON="$(gh api -X GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/build-postiz-ghcr.yml/runs" \
+            -f branch=main \
+            -f event=push \
+            -f status=success \
+            -f per_page=100)"
+
+          if ! jq -e --arg sha "$TARGET_SHA" \
+            '.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")' \
+            <<<"$RUNS_JSON" >/dev/null; then
+            echo "ERROR: no successful Build EverywherePoster image run exists for $TARGET_SHA."
+            exit 1
+          fi
+
+      - name: Verify the full-SHA image exists in GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker manifest inspect "ghcr.io/celleree/publish-everywhere-postiz:${TARGET_SHA}" >/dev/null
+          docker logout ghcr.io >/dev/null
+
+  deploy:
+    name: Deploy to Hetzner
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://app.everywhereposter.com
+    env:
+      TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
+      SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+      SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+      SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT || '22' }}
+      SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+      GH_TOKEN: ${{ github.token }}
+      PRUNE_UNUSED_IMAGES: ${{ inputs.prune_unused_images }}
+    steps:
+      - name: Validate deployment configuration
+        run: |
+          set -euo pipefail
+          [ -n "$SSH_HOST" ] || { echo "ERROR: production variable PRODUCTION_SSH_HOST is missing."; exit 1; }
+          [ -n "$SSH_USER" ] || { echo "ERROR: production variable PRODUCTION_SSH_USER is missing."; exit 1; }
+          [ -n "$SSH_PORT" ] || { echo "ERROR: production variable PRODUCTION_SSH_PORT is missing."; exit 1; }
+          [ -n "$SSH_PRIVATE_KEY" ] || { echo "ERROR: production secret PRODUCTION_SSH_PRIVATE_KEY is missing."; exit 1; }
+          [ -n "$SSH_KNOWN_HOSTS" ] || { echo "ERROR: production secret PRODUCTION_SSH_KNOWN_HOSTS is missing."; exit 1; }
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Authenticate the server to GHCR
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -p "$SSH_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin"
+
+      - name: Synchronize main and deploy the exact image
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -p "$SSH_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$TARGET_SHA" "$PRUNE_UNUSED_IMAGES" <<'REMOTE'
+          set -euo pipefail
+
+          TARGET_SHA="$1"
+          PRUNE_UNUSED_IMAGES="$2"
+          REPO_DIR="/home/arund/publish-everywhere-git"
+
+          cd "$REPO_DIR"
+          [ -z "$(git status --porcelain)" ] || {
+            echo "ERROR: the production checkout is dirty; refusing to deploy."
+            exit 1
+          }
+
+          git fetch origin main
+          git checkout main
+          git merge --ff-only origin/main
+
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || {
+            echo "ERROR: the production checkout is not synchronized with origin/main."
+            exit 1
+          }
+
+          PRUNE_UNUSED_IMAGES="$PRUNE_UNUSED_IMAGES" \
+            bash scripts/deploy-production.sh "$TARGET_SHA"
+          REMOTE
+
+      - name: Verify the public endpoint
+        run: |
+          set -euo pipefail
+          HTTP_STATUS="$(curl --silent --show-error \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --max-time 30 \
+            https://app.everywhereposter.com/)"
+
+          case "$HTTP_STATUS" in
+            200|301|302|307|308)
+              echo "Public endpoint returned HTTP $HTTP_STATUS."
+              ;;
+            *)
+              echo "ERROR: public endpoint returned HTTP $HTTP_STATUS."
+              exit 1
+              ;;
+          esac
+
+      - name: Record deployment summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## EverywherePoster production deployment
+
+          - Mode: `${{ inputs.deployment_mode }}`
+          - Full commit SHA: `$TARGET_SHA`
+          - Image: `ghcr.io/celleree/publish-everywhere-postiz:$TARGET_SHA`
+          - Runtime service: `postiz`
+          - Public URL: https://app.everywhereposter.com
+          - Unused-image pruning: `$PRUNE_UNUSED_IMAGES`
+
+          The workflow verified the successful production image build, the full-SHA GHCR image, the running container image ID, container state, logs, and public HTTP response. Product behavior still requires the release-specific manual browser checklist.
+          EOF
+
+      - name: Log the server out of GHCR
+        if: always()
+        continue-on-error: true
+        run: |
+          ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -p "$SSH_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "docker logout ghcr.io >/dev/null 2>&1 || true"
+
+      - name: Remove runner SSH credentials
+        if: always()
+        run: rm -rf "$HOME/.ssh"
