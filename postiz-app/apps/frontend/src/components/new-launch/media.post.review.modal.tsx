@@ -26,13 +26,28 @@ import {
   RenderImagePlansResponse,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/render.image.plans.response';
 
-const stageLabelMap: Record<string, string> = {
-  'copy-generation-started': 'Preparing your post set...',
-  'source-brief-complete': 'Understanding the video...',
-  'platform-started': 'Generating a platform draft...',
-  'platform-rewrite-started': 'Refining the platform draft...',
-  'platform-complete': 'Finishing the platform draft...',
-  completed: 'Done',
+const stageLabelMap: Record<string, { key: string; fallback: string }> = {
+  'copy-generation-started': {
+    key: 'preparing_post_set',
+    fallback: 'Preparing your post set...',
+  },
+  'source-brief-complete': {
+    key: 'understanding_video',
+    fallback: 'Understanding the video...',
+  },
+  'platform-started': {
+    key: 'generating_platform_draft',
+    fallback: 'Generating a platform draft...',
+  },
+  'platform-rewrite-started': {
+    key: 'refining_platform_draft',
+    fallback: 'Refining the platform draft...',
+  },
+  'platform-complete': {
+    key: 'finishing_platform_draft',
+    fallback: 'Finishing the platform draft...',
+  },
+  completed: { key: 'done', fallback: 'Done' },
 };
 
 const platformLabels: Record<CopyPlatform, string> = {
@@ -46,11 +61,14 @@ const platformLabels: Record<CopyPlatform, string> = {
   bluesky: 'Bluesky',
 };
 
-const imageTypeLabels: Record<ImagePlanItem['type'], string> = {
-  video_frame: 'Video frame',
-  quote_card: 'Quote card',
-  ai_visual: 'AI visual',
-  thumbnail: 'Thumbnail',
+const imageTypeTranslation: Record<
+  ImagePlanItem['type'],
+  { key: string; fallback: string }
+> = {
+  video_frame: { key: 'video_frame', fallback: 'Video frame' },
+  quote_card: { key: 'quote_card', fallback: 'Quote card' },
+  ai_visual: { key: 'ai_visual', fallback: 'AI visual' },
+  thumbnail: { key: 'thumbnail', fallback: 'Thumbnail' },
 };
 
 const preservesPrimaryVideo = (
@@ -182,6 +200,14 @@ export const MediaPostReviewModal: FC<{
     setActiveAccountIds(selectedIntegrations.map((item) => item.integration.id));
   }, [selectedIntegrations]);
 
+  const imageTypeLabel = useCallback(
+    (type: ImagePlanItem['type']) => {
+      const translation = imageTypeTranslation[type];
+      return t(translation.key, translation.fallback);
+    },
+    [t]
+  );
+
   const togglePlatform = useCallback((platform: CopyPlatform) => {
     setPlatforms((current) =>
       current.includes(platform)
@@ -233,24 +259,39 @@ export const MediaPostReviewModal: FC<{
         const failures = result.results.filter((item) => item.status === 'failed');
         if (failures.length) {
           toaster.show(
-            `${failures.length} image asset${failures.length === 1 ? '' : 's'} could not be created. You can retry individually.`,
+            failures.length === 1
+              ? t(
+                  'one_image_asset_failed',
+                  'One image asset could not be created. You can retry it individually.'
+                )
+              : `${failures.length} ${t(
+                  'image_assets_failed',
+                  'image assets could not be created. You can retry them individually.'
+                )}`,
             'warning'
           );
         }
       } catch (error: any) {
-        toaster.show(error?.message || 'Failed to create image assets.', 'warning');
+        toaster.show(
+          error?.message ||
+            t('failed_create_image_assets', 'Failed to create image assets.'),
+          'warning'
+        );
       } finally {
         setRenderingPlanIds((current) =>
           current.filter((planId) => !planIds.includes(planId))
         );
       }
     },
-    [fetch, mediaId, mediaType, toaster]
+    [fetch, mediaId, mediaType, t, toaster]
   );
 
   const generate = useCallback(async () => {
     if (!platforms.length) {
-      toaster.show('Select at least one platform.', 'warning');
+      toaster.show(
+        t('select_at_least_one_platform', 'Select at least one platform.'),
+        'warning'
+      );
       return;
     }
 
@@ -293,15 +334,26 @@ export const MediaPostReviewModal: FC<{
 
       const finalResponse = await parseGenerationStream(request, (name, data) => {
         if (name === 'platform-started' && data?.platform) {
-          setStatusText(`Generating ${platformLabels[data.platform as CopyPlatform]}...`);
+          setStatusText(
+            `${t('generating', 'Generating')} ${
+              platformLabels[data.platform as CopyPlatform]
+            }...`
+          );
           return;
         }
         if (name === 'platform-rewrite-started' && data?.platform) {
-          setStatusText(`Refining ${platformLabels[data.platform as CopyPlatform]}...`);
+          setStatusText(
+            `${t('refining', 'Refining')} ${
+              platformLabels[data.platform as CopyPlatform]
+            }...`
+          );
           return;
         }
+        const stage = stageLabelMap[name];
         setStatusText(
-          stageLabelMap[name] || t('processing_post_set', 'Processing post set...')
+          stage
+            ? t(stage.key, stage.fallback)
+            : t('processing_post_set', 'Processing post set...')
         );
       });
 
@@ -316,7 +368,11 @@ export const MediaPostReviewModal: FC<{
       setTab('overview');
       await renderPlans(finalResponse.imagePlans || []);
     } catch (error: any) {
-      toaster.show(error?.message || 'Failed to generate the post set.', 'warning');
+      toaster.show(
+        error?.message ||
+          t('failed_generate_post_set', 'Failed to generate the post set.'),
+        'warning'
+      );
       setStatusText('');
     } finally {
       setLoading(false);
@@ -340,7 +396,13 @@ export const MediaPostReviewModal: FC<{
     if (!response?.results.length) return;
 
     if (renderingPlanIds.length) {
-      toaster.show('Wait for image creation to finish before applying the post set.', 'warning');
+      toaster.show(
+        t(
+          'wait_for_image_creation',
+          'Wait for image creation to finish before applying the post set.'
+        ),
+        'warning'
+      );
       return;
     }
 
@@ -425,7 +487,10 @@ export const MediaPostReviewModal: FC<{
       }
     } else if (!appliedCount) {
       toaster.show(
-        'No selected account matches the generated platforms. Update the Accounts tab before applying.',
+        t(
+          'no_matching_selected_account',
+          'No selected account matches the generated platforms. Update the Accounts tab before applying.'
+        ),
         'warning'
       );
       return;
@@ -433,8 +498,13 @@ export const MediaPostReviewModal: FC<{
 
     toaster.show(
       appliedCount
-        ? `Post set applied to ${appliedCount} selected account${appliedCount === 1 ? '' : 's'}.`
-        : 'Post set applied to the current post.',
+        ? appliedCount === 1
+          ? t('post_set_applied_one_account', 'Post set applied to one selected account.')
+          : `${t('post_set_applied_to', 'Post set applied to')} ${appliedCount} ${t(
+              'selected_accounts',
+              'selected accounts.'
+            )}`
+        : t('post_set_applied_current_post', 'Post set applied to the current post.'),
       'success'
     );
     onClose();
@@ -455,6 +525,7 @@ export const MediaPostReviewModal: FC<{
     setGlobalValueMedia,
     setGlobalValueText,
     setInternalValue,
+    t,
     toaster,
   ]);
 
@@ -465,10 +536,10 @@ export const MediaPostReviewModal: FC<{
   );
 
   const tabs: Array<{ id: ReviewTab; label: string }> = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'posts', label: 'Text' },
-    { id: 'images', label: 'Images' },
-    { id: 'accounts', label: 'Accounts' },
+    { id: 'overview', label: t('overview', 'Overview') },
+    { id: 'posts', label: t('text', 'Text') },
+    { id: 'images', label: t('images', 'Images') },
+    { id: 'accounts', label: t('accounts', 'Accounts') },
   ];
 
   return (
@@ -477,12 +548,20 @@ export const MediaPostReviewModal: FC<{
         <>
           <div className="text-[14px] text-gray-400">
             {mediaType === 'video'
-              ? 'Create platform-specific text and image assets from this video.'
-              : 'Create grounded platform copy from the attached media.'}
+              ? t(
+                  'video_post_set_generation_hint',
+                  'Create platform-specific text and image assets from this video.'
+                )
+              : t(
+                  'image_post_set_generation_hint',
+                  'Create grounded platform copy from the attached media.'
+                )}
           </div>
 
           <div className="flex flex-col gap-[8px]">
-            <div className="text-[13px] font-[600]">Platforms</div>
+            <div className="text-[13px] font-[600]">
+              {t('platforms', 'Platforms')}
+            </div>
             <div className="grid grid-cols-3 gap-[8px]">
               {COPY_PLATFORMS.map((platform) => (
                 <label
@@ -503,8 +582,11 @@ export const MediaPostReviewModal: FC<{
           <Textarea
             disableForm
             name="audience"
-            label="Audience (optional)"
-            placeholder="Who should this post resonate with?"
+            label={t('audience_optional', 'Audience (optional)')}
+            placeholder={t(
+              'audience_placeholder',
+              'Who should this post resonate with?'
+            )}
             value={audience}
             onChange={(event) => setAudience(event.target.value)}
           />
@@ -513,7 +595,7 @@ export const MediaPostReviewModal: FC<{
             <Select
               disableForm
               name="goal"
-              label="Goal"
+              label={t('goal', 'Goal')}
               value={goal}
               onChange={(event) =>
                 setGoal(
@@ -521,15 +603,15 @@ export const MediaPostReviewModal: FC<{
                 )
               }
             >
-              <option value="attract">Attract</option>
-              <option value="nurture">Nurture</option>
-              <option value="position">Position</option>
-              <option value="convert">Convert</option>
+              <option value="attract">{t('attract', 'Attract')}</option>
+              <option value="nurture">{t('nurture', 'Nurture')}</option>
+              <option value="position">{t('position', 'Position')}</option>
+              <option value="convert">{t('convert', 'Convert')}</option>
             </Select>
             <Select
               disableForm
               name="ctaStrength"
-              label="CTA strength"
+              label={t('cta_strength', 'CTA strength')}
               value={ctaStrength}
               onChange={(event) =>
                 setCtaStrength(
@@ -537,18 +619,21 @@ export const MediaPostReviewModal: FC<{
                 )
               }
             >
-              <option value="none">None</option>
-              <option value="soft">Soft</option>
-              <option value="medium">Medium</option>
-              <option value="direct">Direct</option>
+              <option value="none">{t('none', 'None')}</option>
+              <option value="soft">{t('soft', 'Soft')}</option>
+              <option value="medium">{t('medium', 'Medium')}</option>
+              <option value="direct">{t('direct', 'Direct')}</option>
             </Select>
           </div>
 
           <Textarea
             disableForm
             name="ctaAction"
-            label="CTA action (optional)"
-            placeholder="Example: visit the site, reply, or book a demo"
+            label={t('cta_action_optional', 'CTA action (optional)')}
+            placeholder={t(
+              'cta_action_placeholder',
+              'Example: visit the site, reply, or book a demo'
+            )}
             value={ctaAction}
             onChange={(event) => setCtaAction(event.target.value)}
           />
@@ -557,8 +642,11 @@ export const MediaPostReviewModal: FC<{
             <Textarea
               disableForm
               name="transcript"
-              label="Transcript (optional)"
-              placeholder="Leave blank to use automatic transcription."
+              label={t('transcript_optional', 'Transcript (optional)')}
+              placeholder={t(
+                'transcript_automatic_placeholder',
+                'Leave blank to use automatic transcription.'
+              )}
               value={transcript}
               onChange={(event) => setTranscript(event.target.value)}
             />
@@ -567,17 +655,27 @@ export const MediaPostReviewModal: FC<{
           <Textarea
             disableForm
             name="knowledgeFacts"
-            label="Knowledge base facts (optional)"
-            placeholder="Add one verified fact per line."
+            label={t(
+              'knowledge_base_facts_optional',
+              'Knowledge base facts (optional)'
+            )}
+            placeholder={t(
+              'verified_fact_per_line_placeholder',
+              'Add one verified fact per line.'
+            )}
             value={knowledgeFacts}
             onChange={(event) => setKnowledgeFacts(event.target.value)}
           />
 
-          {statusText ? <div className="text-[13px] text-gray-400">{statusText}</div> : null}
+          {statusText ? (
+            <div className="text-[13px] text-gray-400">{statusText}</div>
+          ) : null}
           <div className="flex justify-end gap-[8px]">
-            <Button secondary onClick={onClose}>Cancel</Button>
+            <Button secondary onClick={onClose}>
+              {t('cancel', 'Cancel')}
+            </Button>
             <Button loading={loading} disabled={!platforms.length} onClick={generate}>
-              Generate post set
+              {t('generate_post_set', 'Generate post set')}
             </Button>
           </div>
         </>
@@ -620,24 +718,33 @@ export const MediaPostReviewModal: FC<{
                   );
                   const reviewOnly = preservesPrimaryVideo(mediaType, result.platform);
                   return (
-                    <div key={result.platform} className="rounded-[12px] bg-newBgColorInner p-[14px]">
+                    <div
+                      key={result.platform}
+                      className="rounded-[12px] bg-newBgColorInner p-[14px]"
+                    >
                       <div className="flex items-center justify-between gap-[12px]">
                         <div>
                           <div className="font-[600]">{platformLabels[result.platform]}</div>
                           <div className="text-[12px] text-gray-400">
-                            {accounts.length} selected account{accounts.length === 1 ? '' : 's'}
+                            {accounts.length}{' '}
+                            {accounts.length === 1
+                              ? t('selected_account', 'selected account')
+                              : t('selected_accounts_label', 'selected accounts')}
                           </div>
                         </div>
                         <div className="text-[12px] text-gray-400">
                           {plan
                             ? rendered?.status === 'completed'
                               ? reviewOnly
-                                ? `${imageTypeLabels[plan.type]} preview ready`
-                                : `${imageTypeLabels[plan.type]} ready`
+                                ? `${imageTypeLabel(plan.type)} ${t(
+                                    'preview_ready',
+                                    'preview ready'
+                                  )}`
+                                : `${imageTypeLabel(plan.type)} ${t('ready', 'ready')}`
                               : renderingPlanIds.includes(plan.id)
-                                ? 'Creating image...'
-                                : 'Image needs attention'
-                            : 'Text only'}
+                                ? t('creating_image', 'Creating image...')
+                                : t('image_needs_attention', 'Image needs attention')
+                            : t('text_only', 'Text only')}
                         </div>
                       </div>
                       <div className="mt-[8px] line-clamp-3 whitespace-pre-wrap text-[13px]">
@@ -652,10 +759,15 @@ export const MediaPostReviewModal: FC<{
             {tab === 'posts' && (
               <div className="flex flex-col gap-[12px]">
                 {response.results.map((result) => (
-                  <div key={result.platform} className="flex flex-col gap-[8px] rounded-[12px] bg-newBgColorInner p-[14px]">
+                  <div
+                    key={result.platform}
+                    className="flex flex-col gap-[8px] rounded-[12px] bg-newBgColorInner p-[14px]"
+                  >
                     <div className="flex items-center justify-between">
                       <div className="font-[600]">{platformLabels[result.platform]}</div>
-                      <div className="text-[12px] text-gray-400">{result.charCount} chars</div>
+                      <div className="text-[12px] text-gray-400">
+                        {result.charCount} {t('chars', 'chars')}
+                      </div>
                     </div>
                     <textarea
                       className="min-h-[160px] rounded-[8px] border border-fifth bg-input p-[14px] text-inputText outline-none"
@@ -685,25 +797,35 @@ export const MediaPostReviewModal: FC<{
               <div className="flex flex-col gap-[12px]">
                 {!response.imagePlans.length && (
                   <div className="rounded-[12px] bg-newBgColorInner p-[18px] text-[13px] text-gray-400">
-                    No image asset was recommended for this post set.
+                    {t(
+                      'no_image_asset_recommended',
+                      'No image asset was recommended for this post set.'
+                    )}
                   </div>
                 )}
                 {response.imagePlans.map((plan) => {
                   const rendered = renderedAssets[plan.id];
                   const reviewOnly = preservesPrimaryVideo(mediaType, plan.platform);
-                  const enabled =
-                    !reviewOnly && enabledPlanIds.includes(plan.id);
+                  const enabled = !reviewOnly && enabledPlanIds.includes(plan.id);
                   const isRendering = renderingPlanIds.includes(plan.id);
                   return (
-                    <div key={plan.id} className="grid grid-cols-[220px_1fr] gap-[14px] rounded-[12px] bg-newBgColorInner p-[14px]">
+                    <div
+                      key={plan.id}
+                      className="grid grid-cols-[220px_1fr] gap-[14px] rounded-[12px] bg-newBgColorInner p-[14px]"
+                    >
                       <div className="flex min-h-[160px] items-center justify-center overflow-hidden rounded-[10px] bg-newSettings">
                         {rendered?.status === 'completed' && rendered.media?.path ? (
-                          <img src={rendered.media.path} alt={plan.altText} className="h-full w-full object-cover" />
+                          <img
+                            src={rendered.media.path}
+                            alt={plan.altText}
+                            className="h-full w-full object-cover"
+                          />
                         ) : (
                           <div className="px-[16px] text-center text-[12px] text-gray-400">
                             {isRendering
-                              ? 'Creating image...'
-                              : rendered?.error?.message || 'Image not available'}
+                              ? t('creating_image', 'Creating image...')
+                              : rendered?.error?.message ||
+                                t('image_not_available', 'Image not available')}
                           </div>
                         )}
                       </div>
@@ -712,7 +834,7 @@ export const MediaPostReviewModal: FC<{
                           <div>
                             <div className="font-[600]">{platformLabels[plan.platform]}</div>
                             <div className="text-[12px] text-gray-400">
-                              {imageTypeLabels[plan.type]} · {plan.aspectRatio}
+                              {imageTypeLabel(plan.type)} · {plan.aspectRatio}
                             </div>
                           </div>
                           <Checkbox
@@ -726,22 +848,39 @@ export const MediaPostReviewModal: FC<{
                                   : [...current, plan.id]
                               )
                             }
-                            label={reviewOnly ? 'Keep source video' : 'Use image'}
+                            label={
+                              reviewOnly
+                                ? t('keep_source_video', 'Keep source video')
+                                : t('use_image', 'Use image')
+                            }
                           />
                         </div>
-                        <div className="text-[13px]">{plan.headline || plan.visualSummary}</div>
+                        <div className="text-[13px]">
+                          {plan.headline || plan.visualSummary}
+                        </div>
                         <div className="text-[12px] text-gray-400">{plan.rationale}</div>
                         {reviewOnly && (
                           <div className="text-[12px] text-gray-400">
-                            This thumbnail is review-only until YouTube thumbnail upload is supported. The uploaded video will remain attached.
+                            {t(
+                              'youtube_thumbnail_review_only',
+                              'This thumbnail is review-only until YouTube thumbnail upload is supported. The uploaded video will remain attached.'
+                            )}
                           </div>
                         )}
                         {plan.warnings.map((warning) => (
-                          <div key={warning} className="text-[12px] text-orange-300">{warning}</div>
+                          <div key={warning} className="text-[12px] text-orange-300">
+                            {warning}
+                          </div>
                         ))}
                         <div className="mt-auto flex gap-[8px]">
-                          <Button secondary loading={isRendering} onClick={() => renderPlans([plan])}>
-                            {rendered?.status === 'completed' ? 'Regenerate' : 'Retry'}
+                          <Button
+                            secondary
+                            loading={isRendering}
+                            onClick={() => renderPlans([plan])}
+                          >
+                            {rendered?.status === 'completed'
+                              ? t('regenerate', 'Regenerate')
+                              : t('retry', 'Retry')}
                           </Button>
                           <Button
                             secondary
@@ -752,7 +891,7 @@ export const MediaPostReviewModal: FC<{
                               )
                             }
                           >
-                            Remove
+                            {t('remove', 'Remove')}
                           </Button>
                         </div>
                       </div>
@@ -769,13 +908,22 @@ export const MediaPostReviewModal: FC<{
                     item.integration.identifier
                   );
                   return (
-                    <label key={item.integration.id} className="flex items-center justify-between rounded-[10px] bg-newBgColorInner px-[14px] py-[12px]">
+                    <label
+                      key={item.integration.id}
+                      className="flex items-center justify-between rounded-[10px] bg-newBgColorInner px-[14px] py-[12px]"
+                    >
                       <div className="flex items-center gap-[10px]">
                         {item.integration.picture ? (
-                          <img src={item.integration.picture} alt="" className="h-[34px] w-[34px] rounded-full object-cover" />
+                          <img
+                            src={item.integration.picture}
+                            alt=""
+                            className="h-[34px] w-[34px] rounded-full object-cover"
+                          />
                         ) : null}
                         <div>
-                          <div className="text-[13px] font-[600]">{item.integration.name}</div>
+                          <div className="text-[13px] font-[600]">
+                            {item.integration.name}
+                          </div>
                           <div className="text-[12px] text-gray-400">
                             {platform ? platformLabels[platform] : item.integration.display}
                           </div>
@@ -791,7 +939,7 @@ export const MediaPostReviewModal: FC<{
                               : [...current, item.integration.id]
                           )
                         }
-                        label="Include"
+                        label={t('include', 'Include')}
                       />
                     </label>
                   );
@@ -801,9 +949,13 @@ export const MediaPostReviewModal: FC<{
           </div>
 
           <div className="flex justify-between gap-[8px] border-t border-fifth pt-[12px]">
-            <Button secondary onClick={() => setResponse(null)}>Start over</Button>
+            <Button secondary onClick={() => setResponse(null)}>
+              {t('start_over', 'Start over')}
+            </Button>
             <div className="flex gap-[8px]">
-              <Button secondary onClick={onClose}>Close</Button>
+              <Button secondary onClick={onClose}>
+                {t('close', 'Close')}
+              </Button>
               <Button
                 disabled={
                   Boolean(renderingPlanIds.length) ||
@@ -811,7 +963,7 @@ export const MediaPostReviewModal: FC<{
                 }
                 onClick={applyPostSet}
               >
-                Apply post set
+                {t('apply_post_set', 'Apply post set')}
               </Button>
             </div>
           </div>
