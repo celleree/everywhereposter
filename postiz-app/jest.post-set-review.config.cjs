@@ -7,6 +7,7 @@ module.exports = {
   clearMocks: true,
   testTimeout: 20000,
   setupFiles: ['reflect-metadata'],
+  setupFilesAfterEnv: ['<rootDir>/tests/frontend/jest.setup.ts'],
   testMatch: ['<rootDir>/tests/frontend/**/*.spec.tsx'],
   transform: {
     '^.+\\.[tj]sx?$': [
