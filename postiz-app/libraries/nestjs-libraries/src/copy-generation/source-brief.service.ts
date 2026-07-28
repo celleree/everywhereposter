@@ -250,7 +250,7 @@ export class SourceBriefService {
             visualSummary = videoInsights.visualSummary?.trim() || visualSummary;
             visualFacts = normalizedFacts;
             coreMessage = videoInsights.coreMessage?.trim() || coreMessage;
-            sourceConfidenceParts.push(videoInsights.sourceConfidence || 0.65);
+            sourceConfidenceParts.push(videoInsights.sourceConfidence ?? 0.65);
           } else {
             warnings.push({
               code: 'VIDEO_VISUAL_ANALYSIS_EMPTY',
