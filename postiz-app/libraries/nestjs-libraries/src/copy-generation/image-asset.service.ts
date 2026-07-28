@@ -168,11 +168,13 @@ export class ImageAssetService {
   ) {
     const prompt = `${plan.visualPrompt!.trim()}\n\nCreate a clean platform-ready image. Do not render captions, headlines, logos, watermarks, or unsupported text.`;
     const vertical = plan.aspectRatio === '4:5' || plan.aspectRatio === '9:16';
+    const horizontal = plan.aspectRatio === '16:9';
     const generated = await this._mediaService.generateImage(
       prompt,
       org,
       false,
-      vertical
+      vertical,
+      horizontal
     );
     if (!generated) throw new Error('The image provider returned no image.');
 
