@@ -3,16 +3,28 @@ import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions
 import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
-import { Organization } from '@prisma/client';
-import dayjs from 'dayjs';
+import { Organization, Prisma } from '@prisma/client';
+import dayjs, { Dayjs } from 'dayjs';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+
+type OrganizationSubscription = {
+  subscriptionTier?: string | null;
+  createdAt?: Date | string | null;
+};
+
+type CreditWindow = {
+  from: Dayjs;
+  limit: number;
+};
 
 @Injectable()
 export class SubscriptionService {
   constructor(
     private readonly _subscriptionRepository: SubscriptionRepository,
     private readonly _integrationService: IntegrationService,
-    private readonly _organizationService: OrganizationService
+    private readonly _organizationService: OrganizationService,
+    private readonly _transaction?: PrismaTransaction
   ) {}
 
   getSubscriptionByOrganizationId(organizationId: string) {
@@ -27,6 +39,34 @@ export class SubscriptionService {
     func: () => Promise<T>
   ): Promise<T> {
     return this._subscriptionRepository.useCredit(organization, type, func);
+  }
+
+  async useCreditWithinLimit<T>(
+    organization: Organization,
+    type = 'ai_images',
+    func: () => Promise<T>
+  ): Promise<{ allowed: true; value: T } | { allowed: false }> {
+    const window = await this.getCreditWindow(organization, type);
+    if (window.limit <= 0) {
+      return { allowed: false };
+    }
+
+    const reservation = await this.reserveCredit(
+      organization.id,
+      type,
+      window.from,
+      window.limit
+    );
+    if (!reservation) {
+      return { allowed: false };
+    }
+
+    try {
+      return { allowed: true, value: await func() };
+    } catch (error) {
+      await this.releaseCredit(reservation.id);
+      throw error;
+    }
   }
 
   getCode(code: string) {
@@ -217,33 +257,19 @@ export class SubscriptionService {
   }
 
   async checkCredits(organization: Organization, checkType = 'ai_images') {
-    // @ts-ignore
-    const type = organization?.subscription?.subscriptionTier || 'FREE';
-
-    if (type === 'FREE') {
+    const window = await this.getCreditWindow(organization, checkType);
+    if (window.limit <= 0) {
       return { credits: 0 };
     }
 
-    // @ts-ignore
-    let date = dayjs(organization.subscription.createdAt);
-    while (date.isBefore(dayjs())) {
-      date = date.add(1, 'month');
-    }
-
-    const checkFromMonth = date.subtract(1, 'month');
-    const imageGenerationCount =
-      checkType === 'ai_images'
-        ? pricing[type].image_generation_count
-        : pricing[type].generate_videos;
-
     const totalUse = await this._subscriptionRepository.getCreditsFrom(
       organization.id,
-      checkFromMonth,
+      window.from,
       checkType
     );
 
     return {
-      credits: imageGenerationCount - totalUse,
+      credits: window.limit - totalUse,
     };
   }
 
@@ -273,6 +299,119 @@ export class SubscriptionService {
       null,
       undefined,
       orgId
+    );
+  }
+
+  private async getCreditWindow(
+    organization: Organization,
+    checkType: string
+  ): Promise<CreditWindow> {
+    const suppliedSubscription = (
+      organization as Organization & { subscription?: OrganizationSubscription | null }
+    ).subscription;
+    const subscription = suppliedSubscription?.createdAt
+      ? suppliedSubscription
+      : await this._subscriptionRepository.getSubscription(organization.id);
+    const tier =
+      subscription?.subscriptionTier ||
+      suppliedSubscription?.subscriptionTier ||
+      'FREE';
+    const plan = pricing[tier] || pricing.FREE;
+
+    if (tier === 'FREE' || !subscription?.createdAt) {
+      return { from: dayjs(), limit: 0 };
+    }
+
+    let date = dayjs(subscription.createdAt);
+    if (!date.isValid()) {
+      return { from: dayjs(), limit: 0 };
+    }
+
+    const now = dayjs();
+    while (date.isBefore(now)) {
+      date = date.add(1, 'month');
+    }
+
+    return {
+      from: date.subtract(1, 'month'),
+      limit:
+        checkType === 'ai_images'
+          ? plan.image_generation_count
+          : plan.generate_videos,
+    };
+  }
+
+  private async reserveCredit(
+    organizationId: string,
+    type: string,
+    from: Dayjs,
+    limit: number
+  ) {
+    if (!this._transaction) {
+      throw new Error('Credit reservation transaction is unavailable.');
+    }
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await this._transaction.model.$transaction(
+          async (transaction) => {
+            const current = await transaction.credits.aggregate({
+              where: {
+                organizationId,
+                type,
+                createdAt: {
+                  gte: from.toDate(),
+                },
+              },
+              _sum: {
+                credits: true,
+              },
+            });
+
+            if ((current._sum.credits || 0) >= limit) {
+              return null;
+            }
+
+            return transaction.credits.create({
+              data: {
+                organizationId,
+                credits: 1,
+                type,
+              },
+              select: {
+                id: true,
+              },
+            });
+          },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          }
+        );
+      } catch (error) {
+        const code =
+          error && typeof error === 'object' && 'code' in error
+            ? String((error as { code?: unknown }).code || '')
+            : '';
+        if (code !== 'P2034' || attempt === 2) {
+          throw error;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private async releaseCredit(id: string) {
+    if (!this._transaction) {
+      throw new Error('Credit reservation transaction is unavailable.');
+    }
+
+    await this._transaction.model.$transaction((transaction) =>
+      transaction.credits.deleteMany({
+        where: {
+          id,
+        },
+      })
     );
   }
 }

@@ -35,21 +35,41 @@ export class MediaService {
   async generateImage(
     prompt: string,
     org: Organization,
-    generatePromptFirst?: boolean
+    generatePromptFirst?: boolean,
+    isVertical = false,
+    isHorizontal = false
   ) {
-    const generating = await this._subscriptionService.useCredit(
+    const generate = async () => {
+      if (generatePromptFirst) {
+        prompt = await this._openAi.generatePromptForPicture(prompt);
+        console.log('Prompt:', prompt);
+      }
+      return this._openAi.generateImage(
+        prompt,
+        !!generatePromptFirst,
+        isVertical,
+        isHorizontal
+      );
+    };
+
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      return this._subscriptionService.useCredit(org, 'ai_images', generate);
+    }
+
+    const reservation = await this._subscriptionService.useCreditWithinLimit(
       org,
       'ai_images',
-      async () => {
-        if (generatePromptFirst) {
-          prompt = await this._openAi.generatePromptForPicture(prompt);
-          console.log('Prompt:', prompt);
-        }
-        return this._openAi.generateImage(prompt, !!generatePromptFirst);
-      }
+      generate
     );
 
-    return generating;
+    if (!reservation.allowed) {
+      throw new SubscriptionException({
+        action: AuthorizationActions.Create,
+        section: Sections.AI,
+      });
+    }
+
+    return reservation.value;
   }
 
   saveFile(
