@@ -53,6 +53,11 @@ const imageTypeLabels: Record<ImagePlanItem['type'], string> = {
   thumbnail: 'Thumbnail',
 };
 
+const preservesPrimaryVideo = (
+  mediaType: 'image' | 'video',
+  platform: CopyPlatform
+) => mediaType === 'video' && platform === 'youtube';
+
 type ReviewTab = 'overview' | 'posts' | 'images' | 'accounts';
 
 const loadDefaultPlatforms = (integrations: Integrations[]) =>
@@ -189,6 +194,11 @@ export const MediaPostReviewModal: FC<{
     async (plans: ImagePlanItem[]) => {
       if (!plans.length) return;
       const planIds = plans.map((plan) => plan.id);
+      const reviewOnlyPlanIds = new Set(
+        plans
+          .filter((plan) => preservesPrimaryVideo(mediaType, plan.platform))
+          .map((plan) => plan.id)
+      );
       setRenderingPlanIds((current) => Array.from(new Set([...current, ...planIds])));
 
       try {
@@ -209,7 +219,12 @@ export const MediaPostReviewModal: FC<{
             new Set([
               ...current,
               ...result.results
-                .filter((item) => item.status === 'completed' && item.media)
+                .filter(
+                  (item) =>
+                    item.status === 'completed' &&
+                    item.media &&
+                    !reviewOnlyPlanIds.has(item.planId)
+                )
                 .map((item) => item.planId),
             ])
           )
@@ -230,7 +245,7 @@ export const MediaPostReviewModal: FC<{
         );
       }
     },
-    [fetch, mediaId, toaster]
+    [fetch, mediaId, mediaType, toaster]
   );
 
   const generate = useCallback(async () => {
@@ -334,7 +349,9 @@ export const MediaPostReviewModal: FC<{
       const draft = editedDrafts[result.platform] ?? result.draft;
       const plan = response.imagePlans.find((item) => item.platform === result.platform);
       const rendered = plan ? renderedAssets[plan.id] : undefined;
+      const preserveSourceVideo = preservesPrimaryVideo(mediaType, result.platform);
       const replacementMedia =
+        !preserveSourceVideo &&
         plan &&
         enabledPlanIds.includes(plan.id) &&
         rendered?.status === 'completed' &&
@@ -390,7 +407,9 @@ export const MediaPostReviewModal: FC<{
         (item) => item.platform === firstResult.platform
       );
       const firstRendered = firstPlan ? renderedAssets[firstPlan.id] : undefined;
+      const preserveSourceVideo = preservesPrimaryVideo(mediaType, firstResult.platform);
       const replacementMedia =
+        !preserveSourceVideo &&
         firstPlan &&
         enabledPlanIds.includes(firstPlan.id) &&
         firstRendered?.status === 'completed' &&
@@ -426,6 +445,7 @@ export const MediaPostReviewModal: FC<{
     enabledPlanIds,
     global,
     internal,
+    mediaType,
     onClose,
     postIndex,
     renderedAssets,
@@ -598,6 +618,7 @@ export const MediaPostReviewModal: FC<{
                       mapIntegrationIdentifierToCopyPlatform(item.integration.identifier) ===
                         result.platform
                   );
+                  const reviewOnly = preservesPrimaryVideo(mediaType, result.platform);
                   return (
                     <div key={result.platform} className="rounded-[12px] bg-newBgColorInner p-[14px]">
                       <div className="flex items-center justify-between gap-[12px]">
@@ -610,7 +631,9 @@ export const MediaPostReviewModal: FC<{
                         <div className="text-[12px] text-gray-400">
                           {plan
                             ? rendered?.status === 'completed'
-                              ? `${imageTypeLabels[plan.type]} ready`
+                              ? reviewOnly
+                                ? `${imageTypeLabels[plan.type]} preview ready`
+                                : `${imageTypeLabels[plan.type]} ready`
                               : renderingPlanIds.includes(plan.id)
                                 ? 'Creating image...'
                                 : 'Image needs attention'
@@ -667,7 +690,9 @@ export const MediaPostReviewModal: FC<{
                 )}
                 {response.imagePlans.map((plan) => {
                   const rendered = renderedAssets[plan.id];
-                  const enabled = enabledPlanIds.includes(plan.id);
+                  const reviewOnly = preservesPrimaryVideo(mediaType, plan.platform);
+                  const enabled =
+                    !reviewOnly && enabledPlanIds.includes(plan.id);
                   const isRendering = renderingPlanIds.includes(plan.id);
                   return (
                     <div key={plan.id} className="grid grid-cols-[220px_1fr] gap-[14px] rounded-[12px] bg-newBgColorInner p-[14px]">
@@ -693,7 +718,7 @@ export const MediaPostReviewModal: FC<{
                           <Checkbox
                             disableForm
                             checked={enabled}
-                            disabled={rendered?.status !== 'completed'}
+                            disabled={reviewOnly || rendered?.status !== 'completed'}
                             onChange={() =>
                               setEnabledPlanIds((current) =>
                                 current.includes(plan.id)
@@ -701,11 +726,16 @@ export const MediaPostReviewModal: FC<{
                                   : [...current, plan.id]
                               )
                             }
-                            label="Use image"
+                            label={reviewOnly ? 'Keep source video' : 'Use image'}
                           />
                         </div>
                         <div className="text-[13px]">{plan.headline || plan.visualSummary}</div>
                         <div className="text-[12px] text-gray-400">{plan.rationale}</div>
+                        {reviewOnly && (
+                          <div className="text-[12px] text-gray-400">
+                            This thumbnail is review-only until YouTube thumbnail upload is supported. The uploaded video will remain attached.
+                          </div>
+                        )}
                         {plan.warnings.map((warning) => (
                           <div key={warning} className="text-[12px] text-orange-300">{warning}</div>
                         ))}
@@ -715,7 +745,7 @@ export const MediaPostReviewModal: FC<{
                           </Button>
                           <Button
                             secondary
-                            disabled={!enabled}
+                            disabled={!enabled || reviewOnly}
                             onClick={() =>
                               setEnabledPlanIds((current) =>
                                 current.filter((id) => id !== plan.id)
