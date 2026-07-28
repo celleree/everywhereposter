@@ -44,6 +44,7 @@ import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-gener
 import { SourceBriefService } from '@gitroom/nestjs-libraries/copy-generation/source-brief.service';
 import { AntiGenericService } from '@gitroom/nestjs-libraries/copy-generation/anti-generic.service';
 import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
+import { ImagePlanService } from '@gitroom/nestjs-libraries/copy-generation/image-plan.service';
 import { KnowledgeBaseRepository } from '@gitroom/nestjs-libraries/database/prisma/knowledge-base/knowledge-base.repository';
 import { KnowledgeBaseService } from '@gitroom/nestjs-libraries/database/prisma/knowledge-base/knowledge-base.service';
 import { HistoricalImportRepository } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.repository';
@@ -100,6 +101,7 @@ import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/pris
     CopyGenerationModelService,
     SourceBriefService,
     AntiGenericService,
+    ImagePlanService,
     CopyGenerationService,
     KnowledgeBaseRepository,
     KnowledgeBaseService,

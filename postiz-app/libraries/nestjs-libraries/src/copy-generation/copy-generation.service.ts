@@ -8,6 +8,7 @@ import {
   CopyGenerationWarning,
   GenerateMediaCopyResponse,
   GenerateMediaCopyResult,
+  ImagePlanItem,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
 import {
   CopyPlatform,
@@ -20,17 +21,18 @@ import {
   SourceBriefService,
 } from '@gitroom/nestjs-libraries/copy-generation/source-brief.service';
 import {
-  AntiGenericScore,
   AntiGenericService,
 } from '@gitroom/nestjs-libraries/copy-generation/anti-generic.service';
 import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.model.service';
+import { ImagePlanService } from '@gitroom/nestjs-libraries/copy-generation/image-plan.service';
 
 @Injectable()
 export class CopyGenerationService {
   constructor(
     private readonly _sourceBriefService: SourceBriefService,
     private readonly _antiGenericService: AntiGenericService,
-    private readonly _copyGenerationModelService: CopyGenerationModelService
+    private readonly _copyGenerationModelService: CopyGenerationModelService,
+    private readonly _imagePlanService?: ImagePlanService
   ) {}
 
   async *generate(
@@ -62,6 +64,7 @@ export class CopyGenerationService {
         sourceConfidence: sourceBrief.sourceConfidence,
         warnings: sourceBrief.warnings,
         results: [],
+        imagePlans: [],
       };
 
       yield {
@@ -235,6 +238,39 @@ export class CopyGenerationService {
       }
     }
 
+    let imagePlans: ImagePlanItem[] = [];
+    if (sourceBrief.media.mediaType === 'video' && this._imagePlanService) {
+      yield {
+        name: 'image-plan-started',
+        data: {
+          platforms: body.platforms,
+        },
+      };
+
+      try {
+        imagePlans = await this._imagePlanService.generate(
+          sourceBrief,
+          body.platforms
+        );
+        yield {
+          name: 'image-plan-complete',
+          data: {
+            count: imagePlans.length,
+            platforms: imagePlans.map((plan) => plan.platform),
+          },
+        };
+      } catch (error: any) {
+        topLevelWarnings.push({
+          code: 'IMAGE_PLAN_GENERATION_FAILED',
+          message: `Image planning failed: ${error?.message || 'Unknown error'}`,
+        });
+        yield {
+          name: 'image-plan-failed',
+          data: {},
+        };
+      }
+    }
+
     const response: GenerateMediaCopyResponse = {
       requestId,
       status:
@@ -246,6 +282,7 @@ export class CopyGenerationService {
       sourceConfidence: sourceBrief.sourceConfidence,
       warnings: uniqBy(topLevelWarnings, (warning) => `${warning.code}:${warning.message}`),
       results,
+      imagePlans,
     };
 
     yield {
