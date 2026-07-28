@@ -18,9 +18,9 @@ describe('Checkbox', () => {
 
     const checkbox = screen.getByRole('checkbox', { name: 'Keep source video' });
 
-    expect(checkbox).toHaveAttribute('aria-checked', 'false');
-    expect(checkbox).toHaveAttribute('aria-disabled', 'true');
-    expect(checkbox).toHaveAttribute('tabindex', '-1');
+    expect(checkbox.getAttribute('aria-checked')).toBe('false');
+    expect(checkbox.getAttribute('aria-disabled')).toBe('true');
+    expect(checkbox.getAttribute('tabindex')).toBe('-1');
 
     fireEvent.click(checkbox);
     fireEvent.keyDown(checkbox, { key: 'Enter' });
@@ -43,8 +43,8 @@ describe('Checkbox', () => {
 
     const checkbox = screen.getByRole('checkbox', { name: 'Use image' });
 
-    expect(checkbox).not.toHaveAttribute('aria-disabled');
-    expect(checkbox).toHaveAttribute('tabindex', '0');
+    expect(checkbox.getAttribute('aria-disabled')).toBeNull();
+    expect(checkbox.getAttribute('tabindex')).toBe('0');
 
     fireEvent.click(checkbox);
     fireEvent.keyDown(checkbox, { key: 'Enter' });
