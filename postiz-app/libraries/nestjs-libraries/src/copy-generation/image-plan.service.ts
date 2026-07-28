@@ -26,6 +26,7 @@ const IMAGE_PLAN_TYPES = [
 ] as const;
 
 const IMAGE_PLAN_ASPECT_RATIOS = ['1:1', '4:5', '16:9', '9:16'] as const;
+const IMAGE_PLAN_TIMESTAMP_TOLERANCE_SECONDS = 0.25;
 
 const ImagePlanDraftSchema = z.object({
   type: z.enum(IMAGE_PLAN_TYPES),
@@ -96,7 +97,7 @@ Rules:
 - Prefer a quote_card when the message is stronger as controlled typography. The application will render the text, so visualPrompt must not ask an image model to draw words.
 - Use ai_visual only when a supporting concept image adds meaning and can be generated without inventing source facts.
 - Use thumbnail mainly for YouTube or when a platform genuinely needs a cover-style asset.
-- video_frame and thumbnail require one of the supplied scene timestamps.
+- video_frame and thumbnail require one of the supplied scene timestamps. Copy that timestamp exactly; minor numeric rounding beyond 0.25 seconds will be rejected.
 - quote_card should include a concise headline. sourceQuote is optional and may only contain wording actually supplied in the brief.
 - ai_visual requires a concrete visualPrompt and must avoid unsupported brand marks, people, proof, or results.
 - Write useful alt text.
@@ -175,12 +176,21 @@ Create the smallest useful platform-specific image plan.`,
         return null;
       }
 
-      sourceTimestampSeconds = availableTimestamps.reduce((nearest, candidate) =>
+      const nearestTimestamp = availableTimestamps.reduce((nearest, candidate) =>
         Math.abs(candidate - draft.sourceTimestampSeconds!) <
         Math.abs(nearest - draft.sourceTimestampSeconds!)
           ? candidate
           : nearest
       );
+
+      if (
+        Math.abs(nearestTimestamp - draft.sourceTimestampSeconds) >
+        IMAGE_PLAN_TIMESTAMP_TOLERANCE_SECONDS
+      ) {
+        return null;
+      }
+
+      sourceTimestampSeconds = nearestTimestamp;
     }
 
     const headline = draft.headline.trim();
