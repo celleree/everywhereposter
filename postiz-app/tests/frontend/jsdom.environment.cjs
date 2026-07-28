@@ -1,15 +1,12 @@
-const Module = require('module');
+const canvasPath = require.resolve('canvas');
 
-const originalLoad = Module._load;
-Module._load = function loadWithoutNativeCanvas(request, parent, isMain) {
-  if (request === 'canvas') {
-    return null;
-  }
-
-  return originalLoad.call(this, request, parent, isMain);
+require.cache[canvasPath] = {
+  id: canvasPath,
+  filename: canvasPath,
+  loaded: true,
+  exports: null,
+  children: [],
+  paths: [],
 };
 
-const JsdomEnvironment = require('jest-environment-jsdom').TestEnvironment;
-Module._load = originalLoad;
-
-module.exports = JsdomEnvironment;
+module.exports = require('jest-environment-jsdom').TestEnvironment;
