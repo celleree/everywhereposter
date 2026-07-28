@@ -78,11 +78,27 @@ jobs:
           ffmpeg -version
           ffprobe -version
 
-      - name: Type-check frontend
-        run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit
-
       - name: Test generated post-set review workflow
         run: pnpm exec jest --config jest.post-set-review.config.cjs --runInBand
+
+      - name: Type-check frontend
+        id: frontend-typecheck
+        continue-on-error: true
+        run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit > frontend-typecheck.log 2>&1
+
+      - name: Upload frontend typecheck diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-typecheck-${{ github.run_id }}
+          path: postiz-app/frontend-typecheck.log
+          if-no-files-found: error
+
+      - name: Enforce frontend typecheck
+        if: steps.frontend-typecheck.outcome == 'failure'
+        run: |
+          cat frontend-typecheck.log
+          exit 1
 
       - name: Type-check backend
         run: pnpm exec tsc -p apps/backend/tsconfig.build.json --noEmit
