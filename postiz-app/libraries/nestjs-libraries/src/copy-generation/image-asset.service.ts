@@ -372,23 +372,48 @@ export class ImageAssetService {
   }
 
   private wrapText(value: string, maxCharacters: number, maxLines: number) {
+    if (maxCharacters < 1 || maxLines < 1) return [''];
+
     const words = value.trim().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+    const tokens = words.flatMap((word) => {
+      if (word.length <= maxCharacters) return [word];
+
+      const chunks: string[] = [];
+      for (let index = 0; index < word.length; index += maxCharacters) {
+        chunks.push(word.slice(index, index + maxCharacters));
+      }
+      return chunks;
+    });
     const lines: string[] = [];
     let current = '';
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word;
-      if (candidate.length <= maxCharacters || !current) {
+    let consumed = 0;
+
+    for (const token of tokens) {
+      const candidate = current ? `${current} ${token}` : token;
+      if (candidate.length <= maxCharacters) {
         current = candidate;
-      } else {
-        lines.push(current);
-        current = word;
-        if (lines.length === maxLines - 1) break;
+        consumed += 1;
+        continue;
       }
+
+      if (current) {
+        lines.push(current);
+        if (lines.length >= maxLines) {
+          current = '';
+          break;
+        }
+      }
+
+      current = token;
+      consumed += 1;
+      if (lines.length === maxLines - 1) break;
     }
+
     if (current && lines.length < maxLines) lines.push(current);
-    const used = lines.join(' ').split(' ').filter(Boolean).length;
-    if (used < words.length && lines.length) {
-      lines[lines.length - 1] = `${lines[lines.length - 1].replace(/[.\s]+$/, '')}…`;
+    if (consumed < tokens.length && lines.length) {
+      const lastIndex = lines.length - 1;
+      const lastLine = lines[lastIndex].replace(/[.\s]+$/, '');
+      lines[lastIndex] = `${lastLine.slice(0, Math.max(0, maxCharacters - 1))}…`;
     }
     return lines.length ? lines : [''];
   }
