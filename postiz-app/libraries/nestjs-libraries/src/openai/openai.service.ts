@@ -18,13 +18,23 @@ const VoicePrompt = z.object({
 
 @Injectable()
 export class OpenaiService {
-  async generateImage(prompt: string, isUrl: boolean, isVertical = false) {
+  async generateImage(
+    prompt: string,
+    isUrl: boolean,
+    isVertical = false,
+    isHorizontal = false
+  ) {
+    const size = isVertical
+      ? '1024x1792'
+      : isHorizontal
+      ? '1792x1024'
+      : undefined;
     const generate = (
       await openai.images.generate({
         prompt,
         response_format: isUrl ? 'url' : 'b64_json',
         model: 'dall-e-3',
-        ...(isVertical ? { size: '1024x1792' } : {}),
+        ...(size ? { size } : {}),
       })
     ).data[0];
 
