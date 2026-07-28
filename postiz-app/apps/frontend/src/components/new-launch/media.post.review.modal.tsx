@@ -11,6 +11,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import {
   CopyPlatform,
   COPY_PLATFORMS,
@@ -121,17 +122,19 @@ export const MediaPostReviewModal: FC<{
   const toaster = useToaster();
   const {
     selectedIntegrations,
+    global,
+    internal,
     setGlobalValueText,
     setGlobalValueMedia,
-    upsertInternalValueText,
-    setInternalValueMedia,
+    setInternalValue,
   } = useLaunchStore(
     useShallow((state) => ({
       selectedIntegrations: state.selectedIntegrations,
+      global: state.global,
+      internal: state.internal,
       setGlobalValueText: state.setGlobalValueText,
       setGlobalValueMedia: state.setGlobalValueMedia,
-      upsertInternalValueText: state.upsertInternalValueText,
-      setInternalValueMedia: state.setInternalValueMedia,
+      setInternalValue: state.setInternalValue,
     }))
   );
 
@@ -319,6 +322,11 @@ export const MediaPostReviewModal: FC<{
   const applyPostSet = useCallback(() => {
     if (!response?.results.length) return;
 
+    if (renderingPlanIds.length) {
+      toaster.show('Wait for image creation to finish before applying the post set.', 'warning');
+      return;
+    }
+
     let appliedCount = 0;
     for (const result of response.results) {
       const draft = editedDrafts[result.platform] ?? result.draft;
@@ -339,15 +347,37 @@ export const MediaPostReviewModal: FC<{
       );
 
       for (const match of matches) {
-        upsertInternalValueText(match.integration.id, postIndex, draft);
-        if (replacementMedia) {
-          setInternalValueMedia(match.integration.id, postIndex, replacementMedia);
-        }
+        const existingValues =
+          internal.find((item) => item.integration.id === match.integration.id)
+            ?.integrationValue || global;
+        const rowCount = Math.max(existingValues.length, global.length, postIndex + 1);
+        const nextValues = Array.from({ length: rowCount }, (_, index) => {
+          const sourceValue =
+            existingValues[index] ||
+            global[index] || {
+              id: makeId(10),
+              content: '',
+              delay: 0,
+              media: [],
+            };
+
+          if (index !== postIndex) {
+            return sourceValue;
+          }
+
+          return {
+            ...sourceValue,
+            content: draft,
+            ...(replacementMedia ? { media: replacementMedia } : {}),
+          };
+        });
+
+        setInternalValue(match.integration.id, nextValues);
         appliedCount += 1;
       }
     }
 
-    if (!appliedCount) {
+    if (!selectedIntegrations.length) {
       const firstResult = response.results[0];
       const firstPlan = response.imagePlans.find(
         (item) => item.platform === firstResult.platform
@@ -367,6 +397,12 @@ export const MediaPostReviewModal: FC<{
       if (replacementMedia) {
         setGlobalValueMedia(postIndex, replacementMedia);
       }
+    } else if (!appliedCount) {
+      toaster.show(
+        'No selected account matches the generated platforms. Update the Accounts tab before applying.',
+        'warning'
+      );
+      return;
     }
 
     toaster.show(
@@ -380,16 +416,18 @@ export const MediaPostReviewModal: FC<{
     activeAccountIds,
     editedDrafts,
     enabledPlanIds,
+    global,
+    internal,
     onClose,
     postIndex,
     renderedAssets,
+    renderingPlanIds,
     response,
     selectedIntegrations,
     setGlobalValueMedia,
     setGlobalValueText,
-    setInternalValueMedia,
+    setInternalValue,
     toaster,
-    upsertInternalValueText,
   ]);
 
   const platformPlan = useCallback(
@@ -728,7 +766,13 @@ export const MediaPostReviewModal: FC<{
             <Button secondary onClick={() => setResponse(null)}>Start over</Button>
             <div className="flex gap-[8px]">
               <Button secondary onClick={onClose}>Close</Button>
-              <Button disabled={!activeAccountIds.length && Boolean(selectedIntegrations.length)} onClick={applyPostSet}>
+              <Button
+                disabled={
+                  Boolean(renderingPlanIds.length) ||
+                  (!activeAccountIds.length && Boolean(selectedIntegrations.length))
+                }
+                onClick={applyPostSet}
+              >
                 Apply post set
               </Button>
             </div>
