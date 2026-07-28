@@ -37,12 +37,9 @@ export const startCopyGenerationHeartbeat = (
       return;
     }
 
-    res.write(
-      JSON.stringify({
-        name: 'copy-generation-heartbeat',
-        data: { timestamp: Date.now() },
-      }) + '\n'
-    );
+    // A blank NDJSON line keeps the response active without surfacing a
+    // progress event. Both copy-generation stream parsers ignore blank lines.
+    res.write('\n');
   }, COPY_GENERATION_HEARTBEAT_MS);
 
   res.once('close', stop);
