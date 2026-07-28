@@ -36,7 +36,8 @@ export class MediaService {
     prompt: string,
     org: Organization,
     generatePromptFirst?: boolean,
-    isVertical = false
+    isVertical = false,
+    isHorizontal = false
   ) {
     const generate = async () => {
       if (generatePromptFirst) {
@@ -46,7 +47,8 @@ export class MediaService {
       return this._openAi.generateImage(
         prompt,
         !!generatePromptFirst,
-        isVertical
+        isVertical,
+        isHorizontal
       );
     };
 
