@@ -3,7 +3,7 @@ const { compilerOptions } = require('./tsconfig.base.json');
 
 module.exports = {
   rootDir: __dirname,
-  testEnvironment: 'jsdom',
+  testEnvironment: '<rootDir>/tests/frontend/jsdom.environment.cjs',
   clearMocks: true,
   testTimeout: 20000,
   setupFiles: ['reflect-metadata'],
