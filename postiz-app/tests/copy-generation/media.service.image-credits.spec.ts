@@ -2,7 +2,6 @@ import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/me
 import {
   AuthorizationActions,
   Sections,
-  SubscriptionException,
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 const org = {
@@ -40,15 +39,17 @@ describe('MediaService image credits', () => {
   it('rejects exhausted image balances before invoking the provider', async () => {
     subscriptionService.checkCredits.mockResolvedValue({ credits: 0 });
 
-    await expect(
-      createService().generateImage('A grounded visual prompt', org)
-    ).rejects.toMatchObject({
-      response: {
-        action: AuthorizationActions.Create,
-        section: Sections.AI,
-      },
-    } satisfies Partial<SubscriptionException>);
+    let rejection: any;
+    try {
+      await createService().generateImage('A grounded visual prompt', org);
+    } catch (error) {
+      rejection = error;
+    }
 
+    expect(rejection?.getResponse()).toEqual({
+      action: AuthorizationActions.Create,
+      section: Sections.AI,
+    });
     expect(subscriptionService.checkCredits).toHaveBeenCalledWith(
       org,
       'ai_images'
