@@ -183,6 +183,35 @@ describe('SourceBriefService video grounding', () => {
     );
   });
 
+  it('preserves zero confidence for silent scene-only video grounding', async () => {
+    const { service } = createService({
+      transcribeVideo: jest.fn().mockResolvedValue({ text: '' }),
+      analyzeVideoFrames: jest.fn().mockResolvedValue({
+        visualSummary: 'A product appears in a representative frame.',
+        facts: [],
+        unknowns: [],
+        coreMessage: 'The product is shown on screen.',
+        sourceConfidence: 0,
+        scenes: [
+          {
+            timestampSeconds: 3,
+            description: 'A product appears on screen.',
+            visibleText: '',
+            usefulForPosting: true,
+          },
+        ],
+      }),
+    });
+
+    const result = await service.build('org-1', {
+      ...request,
+      transcript: undefined,
+    } as any);
+
+    expect(result.blocked).toBe(false);
+    expect(result.sourceConfidence).toBe(0.1);
+  });
+
   it('continues with transcript grounding when visual analysis fails', async () => {
     const { service } = createService({
       analyzeVideoFrames: jest
