@@ -20,8 +20,8 @@ describe('MediaService image credits', () => {
     generatePromptForPicture: jest.fn(),
   };
   const subscriptionService = {
-    checkCredits: jest.fn(),
     useCredit: jest.fn(),
+    useCreditWithinLimit: jest.fn(),
   };
   const videoManager = {};
 
@@ -47,7 +47,9 @@ describe('MediaService image credits', () => {
   });
 
   it('rejects exhausted image balances before invoking the provider when billing is enabled', async () => {
-    subscriptionService.checkCredits.mockResolvedValue({ credits: 0 });
+    subscriptionService.useCreditWithinLimit.mockResolvedValue({
+      allowed: false,
+    });
 
     let rejection: any;
     try {
@@ -60,19 +62,21 @@ describe('MediaService image credits', () => {
       action: AuthorizationActions.Create,
       section: Sections.AI,
     });
-    expect(subscriptionService.checkCredits).toHaveBeenCalledWith(
+    expect(subscriptionService.useCreditWithinLimit).toHaveBeenCalledWith(
       org,
-      'ai_images'
+      'ai_images',
+      expect.any(Function)
     );
     expect(subscriptionService.useCredit).not.toHaveBeenCalled();
     expect(openAi.generateImage).not.toHaveBeenCalled();
   });
 
-  it('records usage and invokes the provider when image credits remain', async () => {
-    subscriptionService.checkCredits.mockResolvedValue({ credits: 2 });
-    subscriptionService.useCredit.mockImplementation(
-      async (_organization: unknown, _type: string, operation: () => Promise<any>) =>
-        operation()
+  it('invokes the provider through the atomic reservation when credits remain', async () => {
+    subscriptionService.useCreditWithinLimit.mockImplementation(
+      async (_organization: unknown, _type: string, operation: () => Promise<any>) => ({
+        allowed: true,
+        value: await operation(),
+      })
     );
     openAi.generateImage.mockResolvedValue('base64-image');
 
@@ -80,15 +84,12 @@ describe('MediaService image credits', () => {
       createService().generateImage('A grounded visual prompt', org, false, true)
     ).resolves.toBe('base64-image');
 
-    expect(subscriptionService.checkCredits).toHaveBeenCalledWith(
-      org,
-      'ai_images'
-    );
-    expect(subscriptionService.useCredit).toHaveBeenCalledWith(
+    expect(subscriptionService.useCreditWithinLimit).toHaveBeenCalledWith(
       org,
       'ai_images',
       expect.any(Function)
     );
+    expect(subscriptionService.useCredit).not.toHaveBeenCalled();
     expect(openAi.generateImage).toHaveBeenCalledWith(
       'A grounded visual prompt',
       false,
@@ -110,7 +111,7 @@ describe('MediaService image credits', () => {
       } as any)
     ).resolves.toBe('base64-image');
 
-    expect(subscriptionService.checkCredits).not.toHaveBeenCalled();
+    expect(subscriptionService.useCreditWithinLimit).not.toHaveBeenCalled();
     expect(subscriptionService.useCredit).toHaveBeenCalledWith(
       { id: 'self-hosted-org' },
       'ai_images',
