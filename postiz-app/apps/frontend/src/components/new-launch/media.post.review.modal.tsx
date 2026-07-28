@@ -482,7 +482,7 @@ export const MediaPostReviewModal: FC<{
         enabledPlanIds.includes(plan.id) &&
         rendered?.status === 'completed' &&
         rendered.media
-          ? [{ id: rendered.media.id, path: rendered.media.path }]
+          ? [{ ...rendered.media }]
           : undefined;
       const matches = selectedIntegrations.filter(
         (item) =>
@@ -540,7 +540,7 @@ export const MediaPostReviewModal: FC<{
         enabledPlanIds.includes(firstPlan.id) &&
         firstRendered?.status === 'completed' &&
         firstRendered.media
-          ? [{ id: firstRendered.media.id, path: firstRendered.media.path }]
+          ? [{ ...firstRendered.media }]
           : undefined;
       setGlobalValueText(
         postIndex,
