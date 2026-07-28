@@ -28,6 +28,34 @@ export interface CopyGenerationVisualScene {
   usefulForPosting: boolean;
 }
 
+export type ImagePlanType =
+  | 'video_frame'
+  | 'quote_card'
+  | 'ai_visual'
+  | 'thumbnail';
+
+export type ImagePlanAspectRatio = '1:1' | '4:5' | '16:9' | '9:16';
+
+export interface ImagePlanItem {
+  id: string;
+  type: ImagePlanType;
+  platform: CopyPlatform;
+  purpose: string;
+  rationale: string;
+  aspectRatio: ImagePlanAspectRatio;
+  title?: string;
+  headline?: string;
+  subheadline?: string;
+  captionHint?: string;
+  sourceTimestampSeconds?: number;
+  sourceQuote?: string;
+  visualSummary: string;
+  visualPrompt?: string;
+  altText: string;
+  confidence: number;
+  warnings: string[];
+}
+
 export interface CopyGenerationBrief {
   source: {
     mediaType: 'image' | 'video';
@@ -82,6 +110,7 @@ export interface GenerateMediaCopyResponse {
   sourceConfidence: number;
   warnings: CopyGenerationWarning[];
   results: GenerateMediaCopyResult[];
+  imagePlans: ImagePlanItem[];
 }
 
 export interface CopyGenerationStreamEvent<T = any> {
