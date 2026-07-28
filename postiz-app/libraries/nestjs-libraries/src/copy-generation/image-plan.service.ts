@@ -40,7 +40,7 @@ const ImagePlanDraftSchema = z.object({
   headline: z.string().optional().default(''),
   subheadline: z.string().optional().default(''),
   captionHint: z.string().optional().default(''),
-  sourceTimestampSeconds: z.number().min(0).optional(),
+  sourceTimestampSeconds: z.number().min(0).nullable().default(null),
   sourceQuote: z.string().optional().default(''),
   visualSummary: z.string(),
   visualPrompt: z.string().optional().default(''),
