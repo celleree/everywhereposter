@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Full 40-character main-branch commit SHA to deploy
+        description: Full 40-character main-branch app commit SHA to deploy
         required: true
         type: string
       deployment_mode:
-        description: Release the current main commit or roll back to an earlier main commit
+        description: Release the latest built app state or roll back to an earlier main commit
         required: true
         default: release
         type: choice
@@ -73,9 +73,10 @@ jobs:
             exit 1
           fi
 
-          MAIN_SHA="$(git rev-parse origin/main)"
-          if [ "$DEPLOYMENT_MODE" = "release" ] && [ "$TARGET_SHA" != "$MAIN_SHA" ]; then
-            echo "ERROR: release mode only deploys the current main commit: $MAIN_SHA"
+          if [ "$DEPLOYMENT_MODE" = "release" ] && \
+            ! git diff --quiet "${TARGET_SHA}..origin/main" -- postiz-app; then
+            echo "ERROR: release mode rejected this SHA because newer main commits change postiz-app."
+            echo "Use the newest successful app-image SHA, or choose rollback for an intentional older release."
             exit 1
           fi
 
