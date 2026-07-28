@@ -13,6 +13,7 @@ const org = {
 } as any;
 
 describe('MediaService image credits', () => {
+  const originalStripeKey = process.env.STRIPE_PUBLISHABLE_KEY;
   const mediaRepository = {};
   const openAi = {
     generateImage: jest.fn(),
@@ -34,9 +35,18 @@ describe('MediaService image credits', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test_billing-enabled';
   });
 
-  it('rejects exhausted image balances before invoking the provider', async () => {
+  afterAll(() => {
+    if (originalStripeKey === undefined) {
+      delete process.env.STRIPE_PUBLISHABLE_KEY;
+    } else {
+      process.env.STRIPE_PUBLISHABLE_KEY = originalStripeKey;
+    }
+  });
+
+  it('rejects exhausted image balances before invoking the provider when billing is enabled', async () => {
     subscriptionService.checkCredits.mockResolvedValue({ credits: 0 });
 
     let rejection: any;
@@ -83,6 +93,33 @@ describe('MediaService image credits', () => {
       'A grounded visual prompt',
       false,
       true
+    );
+  });
+
+  it('preserves image generation when billing is disabled', async () => {
+    delete process.env.STRIPE_PUBLISHABLE_KEY;
+    subscriptionService.useCredit.mockImplementation(
+      async (_organization: unknown, _type: string, operation: () => Promise<any>) =>
+        operation()
+    );
+    openAi.generateImage.mockResolvedValue('base64-image');
+
+    await expect(
+      createService().generateImage('A self-hosted visual prompt', {
+        id: 'self-hosted-org',
+      } as any)
+    ).resolves.toBe('base64-image');
+
+    expect(subscriptionService.checkCredits).not.toHaveBeenCalled();
+    expect(subscriptionService.useCredit).toHaveBeenCalledWith(
+      { id: 'self-hosted-org' },
+      'ai_images',
+      expect.any(Function)
+    );
+    expect(openAi.generateImage).toHaveBeenCalledWith(
+      'A self-hosted visual prompt',
+      false,
+      false
     );
   });
 });
