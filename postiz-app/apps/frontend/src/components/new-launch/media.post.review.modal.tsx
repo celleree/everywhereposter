@@ -514,10 +514,12 @@ export const MediaPostReviewModal: FC<{
       );
 
       for (const match of matches) {
+        const liveSettings =
+          match.ref?.current?.getValues?.()?.settings ?? match.settings;
         const preserveSourceVideo = preservesAccountPrimaryVideo(
           mediaType,
           result.platform,
-          match.settings
+          liveSettings
         );
         const replacementMedia = preserveSourceVideo ? undefined : generatedMedia;
         const existingInternal = internal.find(
