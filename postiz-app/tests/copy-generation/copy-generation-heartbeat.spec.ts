@@ -39,7 +39,7 @@ describe('copy generation heartbeat', () => {
     jest.useRealTimers();
   });
 
-  it('writes an invisible blank line every 15 seconds and stops after cleanup', () => {
+  it('writes a parser-invisible keepalive marker every 15 seconds and stops after cleanup', () => {
     const { response } = createResponse();
     const heartbeat = startCopyGenerationHeartbeat(response);
 
@@ -48,7 +48,10 @@ describe('copy generation heartbeat', () => {
 
     jest.advanceTimersByTime(COPY_GENERATION_HEARTBEAT_MS);
     expect(response.write).toHaveBeenCalledTimes(1);
-    expect(response.write).toHaveBeenCalledWith('\n');
+    expect(response.write).toHaveBeenCalledWith(
+      expect.stringContaining('copy-generation-heartbeat')
+    );
+    expect(() => JSON.parse(response.write.mock.calls[0][0])).toThrow();
 
     heartbeat.stop();
     heartbeat.stop();
