@@ -12,8 +12,24 @@ jest.mock('openai', () => {
   };
 });
 
+jest.mock('openai/helpers/zod', () => {
+  const zodResponseFormat = jest.fn((schema: unknown, name: string) => ({
+    schema,
+    name,
+  }));
+
+  return { zodResponseFormat };
+});
+
 const getParseMock = () =>
   (jest.requireMock('openai') as { parse: jest.Mock }).parse;
+
+const getZodResponseFormatMock = () =>
+  (
+    jest.requireMock('openai/helpers/zod') as {
+      zodResponseFormat: jest.Mock;
+    }
+  ).zodResponseFormat;
 
 const sourceBrief = {
   media: {
@@ -77,13 +93,14 @@ describe('ImagePlanService nullable source timestamps', () => {
     jest.clearAllMocks();
   });
 
-  it('accepts null for non-frame plans and omits the timestamp from the result', async () => {
+  it('accepts null in the actual response schema for non-frame plans and omits it after normalization', async () => {
+    const draft = makeDraft({});
     getParseMock().mockResolvedValue({
       choices: [
         {
           message: {
             parsed: {
-              recommendedImages: [makeDraft({})],
+              recommendedImages: [draft],
             },
           },
         },
@@ -94,6 +111,12 @@ describe('ImagePlanService nullable source timestamps', () => {
       'linkedin',
     ]);
 
+    const responseSchema = getZodResponseFormatMock().mock.calls[0][0] as {
+      parse: (value: unknown) => any;
+    };
+    const schemaResult = responseSchema.parse({ recommendedImages: [draft] });
+
+    expect(schemaResult.recommendedImages[0].sourceTimestampSeconds).toBeNull();
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       type: 'quote_card',
