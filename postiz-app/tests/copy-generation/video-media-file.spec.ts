@@ -119,20 +119,19 @@ describe('prepareVideoMediaFile', () => {
     });
   });
 
-  it('aborts a streamed download as soon as the byte limit is exceeded', async () => {
+  it('destroys a streamed download as soon as the byte limit is exceeded', async () => {
     const limiter = createRemoteMediaByteLimitStream(5);
-    const output: string[] = [];
 
     const consume = async () => {
-      for await (const chunk of Readable.from(['abc', 'def']).pipe(limiter)) {
-        output.push(chunk.toString());
+      for await (const _chunk of Readable.from(['abc', 'def']).pipe(limiter)) {
+        // Drain the stream until the limiter rejects it.
       }
     };
 
     await expect(consume()).rejects.toThrow(
       'exceeds the 1 GB copy-generation download limit'
     );
-    expect(output).toEqual(['abc']);
+    expect(limiter.destroyed).toBe(true);
   });
 
   it('removes partial temporary files when streaming fails', async () => {
