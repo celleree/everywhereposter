@@ -76,6 +76,18 @@ const preservesPrimaryVideo = (
   platform: CopyPlatform
 ) => mediaType === 'video' && platform === 'youtube';
 
+const preservesAccountPrimaryVideo = (
+  mediaType: 'image' | 'video',
+  platform: CopyPlatform,
+  settings?: { post_type?: unknown; is_trial_reel?: unknown }
+) =>
+  preservesPrimaryVideo(mediaType, platform) ||
+  (mediaType === 'video' &&
+    platform === 'instagram' &&
+    (settings?.post_type === 'reel' ||
+      settings?.is_trial_reel === true ||
+      settings?.is_trial_reel === 'true'));
+
 const getApiErrorMessage = (payload: unknown): string | undefined => {
   if (typeof payload === 'string') {
     return payload.trim() || undefined;
@@ -475,9 +487,7 @@ export const MediaPostReviewModal: FC<{
       const draft = editedDrafts[result.platform] ?? result.draft;
       const plan = response.imagePlans.find((item) => item.platform === result.platform);
       const rendered = plan ? renderedAssets[plan.id] : undefined;
-      const preserveSourceVideo = preservesPrimaryVideo(mediaType, result.platform);
-      const replacementMedia =
-        !preserveSourceVideo &&
+      const generatedMedia =
         plan &&
         enabledPlanIds.includes(plan.id) &&
         rendered?.status === 'completed' &&
@@ -492,6 +502,12 @@ export const MediaPostReviewModal: FC<{
       );
 
       for (const match of matches) {
+        const preserveSourceVideo = preservesAccountPrimaryVideo(
+          mediaType,
+          result.platform,
+          match.settings
+        );
+        const replacementMedia = preserveSourceVideo ? undefined : generatedMedia;
         const existingInternal = internal.find(
           (item) => item.integration.id === match.integration.id
         );
