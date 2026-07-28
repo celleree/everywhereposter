@@ -3,29 +3,28 @@ const { compilerOptions } = require('./tsconfig.base.json');
 
 module.exports = {
   rootDir: __dirname,
-  testEnvironment: 'node',
+  testEnvironment: '<rootDir>/tests/frontend/jsdom.environment.cjs',
   clearMocks: true,
   testTimeout: 20000,
   setupFiles: ['reflect-metadata'],
-  testMatch: ['<rootDir>/tests/copy-generation/**/*.spec.ts'],
+  setupFilesAfterEnv: ['<rootDir>/tests/frontend/jest.setup.ts'],
+  testMatch: ['<rootDir>/tests/frontend/**/*.spec.tsx'],
   transform: {
-    '^.+\\.ts$': [
+    '^.+\\.[tj]sx?$': [
       'ts-jest',
       {
         tsconfig: {
           ...compilerOptions,
           module: 'commonjs',
+          jsx: 'react-jsx',
           isolatedModules: true,
         },
         diagnostics: false,
       },
     ],
   },
-  moduleNameMapper: {
-    '^nostr-tools$': '<rootDir>/tests/copy-generation/mocks/nostr-tools.ts',
-    ...pathsToModuleNameMapper(compilerOptions.paths, {
-      prefix: '<rootDir>/',
-    }),
-  },
+  moduleNameMapper: pathsToModuleNameMapper(compilerOptions.paths, {
+    prefix: '<rootDir>/',
+  }),
   modulePathIgnorePatterns: ['<rootDir>/node_modules', '<rootDir>/apps/.*/dist'],
 };

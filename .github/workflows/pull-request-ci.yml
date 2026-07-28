@@ -71,15 +71,46 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install FFmpeg tools
+      - name: Verify FFmpeg tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
           ffmpeg -version
           ffprobe -version
 
+      - name: Test generated post-set review workflow
+        id: post-set-test
+        continue-on-error: true
+        run: pnpm exec jest --config jest.post-set-review.config.cjs --runInBand > post-set-test.log 2>&1
+
       - name: Type-check frontend
-        run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit
+        id: frontend-typecheck
+        continue-on-error: true
+        run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit > frontend-typecheck.log 2>&1
+
+      - name: Upload focused workflow diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-set-diagnostics-${{ github.run_id }}
+          path: |
+            postiz-app/post-set-test.log
+            postiz-app/frontend-typecheck.log
+          if-no-files-found: error
+
+      - name: Enforce generated post-set review workflow
+        if: steps.post-set-test.outcome == 'failure'
+        run: |
+          cat post-set-test.log
+          exit 1
+
+      - name: Enforce frontend typecheck
+        if: steps.frontend-typecheck.outcome == 'failure'
+        run: |
+          cat frontend-typecheck.log
+          exit 1
 
       - name: Type-check backend
         run: pnpm exec tsc -p apps/backend/tsconfig.build.json --noEmit
@@ -103,7 +134,23 @@ jobs:
         run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/video-frame-extraction.integration.spec.ts
 
       - name: Run copy-generation tests
-        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand
+        id: copy-generation-tests
+        continue-on-error: true
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand > copy-generation-test.log 2>&1
+
+      - name: Upload copy-generation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: copy-generation-diagnostics-${{ github.run_id }}
+          path: postiz-app/copy-generation-test.log
+          if-no-files-found: error
+
+      - name: Enforce copy-generation tests
+        if: steps.copy-generation-tests.outcome == 'failure'
+        run: |
+          cat copy-generation-test.log
+          exit 1
 
       - name: Run knowledge-base tests
         run: pnpm exec jest --config jest.knowledge-base.config.cjs --runInBand
