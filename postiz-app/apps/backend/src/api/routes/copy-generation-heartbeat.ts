@@ -37,9 +37,9 @@ export const startCopyGenerationHeartbeat = (
       return;
     }
 
-    // A blank NDJSON line keeps the response active without surfacing a
-    // progress event. Both copy-generation stream parsers ignore blank lines.
-    res.write('\n');
+    // Keep the response active without emitting a JSON progress event. Both
+    // copy-generation stream parsers intentionally ignore non-JSON lines.
+    res.write(': copy-generation-heartbeat\n');
   }, COPY_GENERATION_HEARTBEAT_MS);
 
   res.once('close', stop);
