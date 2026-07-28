@@ -132,7 +132,23 @@ jobs:
         run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/video-frame-extraction.integration.spec.ts
 
       - name: Run copy-generation tests
-        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand
+        id: copy-generation-tests
+        continue-on-error: true
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand > copy-generation-test.log 2>&1
+
+      - name: Upload copy-generation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: copy-generation-diagnostics-${{ github.run_id }}
+          path: postiz-app/copy-generation-test.log
+          if-no-files-found: error
+
+      - name: Enforce copy-generation tests
+        if: steps.copy-generation-tests.outcome == 'failure'
+        run: |
+          cat copy-generation-test.log
+          exit 1
 
       - name: Run knowledge-base tests
         run: pnpm exec jest --config jest.knowledge-base.config.cjs --runInBand
