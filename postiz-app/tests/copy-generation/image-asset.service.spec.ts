@@ -190,10 +190,10 @@ describe('ImageAssetService', () => {
     expect(metadata.height).toBe(1920);
   });
 
-  it('normalizes an AI visual to the requested output ratio', async () => {
+  it('requests a landscape source for a 16:9 AI visual', async () => {
     const generated = await sharp({
       create: {
-        width: 1024,
+        width: 1792,
         height: 1024,
         channels: 3,
         background: '#111827',
@@ -221,7 +221,8 @@ describe('ImageAssetService', () => {
       expect.stringContaining('one video branching'),
       org,
       false,
-      false
+      false,
+      true
     );
     expect(result.results[0]).toMatchObject({ width: 1600, height: 900 });
   });
