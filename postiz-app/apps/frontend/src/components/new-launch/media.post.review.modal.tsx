@@ -324,12 +324,13 @@ export const MediaPostReviewModal: FC<{
       const draft = editedDrafts[result.platform] ?? result.draft;
       const plan = response.imagePlans.find((item) => item.platform === result.platform);
       const rendered = plan ? renderedAssets[plan.id] : undefined;
-      const media =
-        plan && enabledPlanIds.includes(plan.id) && rendered?.status === 'completed'
-          ? rendered.media
-            ? [{ id: rendered.media.id, path: rendered.media.path }]
-            : []
-          : [];
+      const replacementMedia =
+        plan &&
+        enabledPlanIds.includes(plan.id) &&
+        rendered?.status === 'completed' &&
+        rendered.media
+          ? [{ id: rendered.media.id, path: rendered.media.path }]
+          : undefined;
       const matches = selectedIntegrations.filter(
         (item) =>
           activeAccountIds.includes(item.integration.id) &&
@@ -339,7 +340,9 @@ export const MediaPostReviewModal: FC<{
 
       for (const match of matches) {
         upsertInternalValueText(match.integration.id, postIndex, draft);
-        setInternalValueMedia(match.integration.id, postIndex, media);
+        if (replacementMedia) {
+          setInternalValueMedia(match.integration.id, postIndex, replacementMedia);
+        }
         appliedCount += 1;
       }
     }
@@ -350,18 +353,20 @@ export const MediaPostReviewModal: FC<{
         (item) => item.platform === firstResult.platform
       );
       const firstRendered = firstPlan ? renderedAssets[firstPlan.id] : undefined;
-      const media =
+      const replacementMedia =
         firstPlan &&
         enabledPlanIds.includes(firstPlan.id) &&
         firstRendered?.status === 'completed' &&
         firstRendered.media
           ? [{ id: firstRendered.media.id, path: firstRendered.media.path }]
-          : [];
+          : undefined;
       setGlobalValueText(
         postIndex,
         editedDrafts[firstResult.platform] ?? firstResult.draft
       );
-      setGlobalValueMedia(postIndex, media);
+      if (replacementMedia) {
+        setGlobalValueMedia(postIndex, replacementMedia);
+      }
     }
 
     toaster.show(
@@ -527,6 +532,14 @@ export const MediaPostReviewModal: FC<{
             ))}
           </div>
 
+          {response.warnings.length > 0 && (
+            <div className="flex flex-col gap-[4px] rounded-[8px] border border-[#5A2F2F] bg-[#2A2020] px-[12px] py-[10px] text-[13px]">
+              {response.warnings.map((warning) => (
+                <div key={`${warning.code}-${warning.message}`}>{warning.message}</div>
+              ))}
+            </div>
+          )}
+
           <div className="max-h-[66vh] overflow-y-auto pe-[6px]">
             {tab === 'overview' && (
               <div className="flex flex-col gap-[10px]">
@@ -585,6 +598,15 @@ export const MediaPostReviewModal: FC<{
                         }))
                       }
                     />
+                    {result.warnings.length > 0 && (
+                      <div className="flex flex-col gap-[4px] text-[12px] text-orange-300">
+                        {result.warnings.map((warning) => (
+                          <div key={`${result.platform}-${warning.code}-${warning.message}`}>
+                            {warning.message}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
