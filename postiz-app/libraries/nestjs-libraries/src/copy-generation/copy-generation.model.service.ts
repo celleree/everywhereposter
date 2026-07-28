@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { execFile } from 'child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdtemp, readFile, rm } from 'fs/promises';
 import { basename, join } from 'path';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import OpenAI, { toFile } from 'openai';
+import type { ChatCompletionContentPart } from 'openai/resources/chat/completions';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import {
@@ -18,6 +19,12 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
 });
 const execFileAsync = promisify(execFile);
+
+const FFPROBE_TIMEOUT_MS = 15_000;
+const FFMPEG_FRAME_TIMEOUT_MS = 30_000;
+const FFMPEG_AUDIO_TIMEOUT_MS = 60_000;
+const VIDEO_ANALYSIS_TIMEOUT_MS = 60_000;
+const TRANSCRIPTION_TIMEOUT_MS = 120_000;
 
 const VoiceProfileSchema = z.object({
   sentenceLength: z.enum(['short', 'mixed', 'long']).default('mixed'),
@@ -35,6 +42,22 @@ const ImageInsightsSchema = z.object({
   unknowns: z.array(z.string()).default([]),
   coreMessage: z.string(),
   sourceConfidence: z.number().min(0).max(1).default(0.65),
+});
+
+const VideoSceneSchema = z.object({
+  timestampSeconds: z.number().min(0),
+  description: z.string(),
+  visibleText: z.string().default(''),
+  usefulForPosting: z.boolean().default(true),
+});
+
+const VideoInsightsSchema = z.object({
+  visualSummary: z.string(),
+  facts: z.array(z.string()).default([]),
+  unknowns: z.array(z.string()).default([]),
+  coreMessage: z.string(),
+  sourceConfidence: z.number().min(0).max(1).default(0.65),
+  scenes: z.array(VideoSceneSchema).default([]),
 });
 
 const TranscriptInsightsSchema = z.object({
@@ -56,6 +79,42 @@ const PlatformDraftSchema = z.object({
 const RewriteDraftSchema = z.object({
   draft: z.string(),
 });
+
+interface ExtractedVideoFrame {
+  timestampSeconds: number;
+  buffer: Buffer;
+}
+
+export const buildFrameTimestamps = (durationSeconds: number) => {
+  const fractions =
+    durationSeconds <= 3
+      ? [0.5]
+      : durationSeconds <= 10
+      ? [0.12, 0.5, 0.88]
+      : durationSeconds <= 20
+      ? [0.08, 0.35, 0.65, 0.9]
+      : [0.06, 0.22, 0.38, 0.54, 0.7, 0.88];
+
+  return Array.from(
+    new Set(
+      fractions.map((fraction) =>
+        Number(Math.max(0, durationSeconds * fraction).toFixed(3))
+      )
+    )
+  );
+};
+
+export const findNearestTimestamp = (timestamp: number, timestamps: number[]) => {
+  if (!timestamps.length) {
+    throw new Error('At least one sampled timestamp is required.');
+  }
+
+  return timestamps.reduce((nearest, candidate) =>
+    Math.abs(candidate - timestamp) < Math.abs(nearest - timestamp)
+      ? candidate
+      : nearest
+  );
+};
 
 @Injectable()
 export class CopyGenerationModelService {
@@ -116,12 +175,139 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
     );
   }
 
+  async analyzeVideoFrames(params: {
+    inputPath: string;
+    mimeType: string;
+    transcriptText?: string;
+    altText?: string | null;
+    originalName?: string | null;
+  }) {
+    const frames = await this.extractVideoFrames(params.inputPath);
+
+    if (!frames.length) {
+      throw new Error('Video frame extraction returned no usable frames.');
+    }
+
+    const frameContent: ChatCompletionContentPart[] = frames.flatMap(
+      (frame, index): ChatCompletionContentPart[] => [
+        {
+          type: 'text',
+          text: `Frame ${index + 1} sampled at ${frame.timestampSeconds.toFixed(2)} seconds.`,
+        },
+        {
+          type: 'image_url',
+          image_url: {
+            url: `data:image/jpeg;base64,${frame.buffer.toString('base64')}`,
+            detail: 'low',
+          },
+        },
+      ]
+    );
+    const userContent: ChatCompletionContentPart[] = [
+      {
+        type: 'text',
+        text: `Video MIME type: ${params.mimeType}
+Existing alt text: ${params.altText || 'none'}
+Original name: ${params.originalName || 'unknown'}
+Associated transcript: ${params.transcriptText?.slice(0, 12000) || 'none'}
+
+Analyze the sampled frames below as one video.`,
+      },
+      ...frameContent,
+    ];
+
+    const parsed = await this.requestVideoInsights(userContent);
+
+    if (!parsed) {
+      return VideoInsightsSchema.parse({
+        visualSummary: params.altText || 'Uploaded video',
+        facts: [],
+        unknowns: ['The sampled video frames could not be summarized reliably.'],
+        coreMessage:
+          params.transcriptText?.slice(0, 180) ||
+          params.altText ||
+          'Share the clearest useful point from the uploaded video.',
+        sourceConfidence: 0.35,
+        scenes: [],
+      });
+    }
+
+    const sampledTimestamps = frames.map((frame) => frame.timestampSeconds);
+    const sceneKeys = new Set<string>();
+    const scenes = parsed.scenes.flatMap((scene) => {
+      const description = scene.description?.trim();
+      if (!description || !Number.isFinite(scene.timestampSeconds)) {
+        return [];
+      }
+
+      const timestampSeconds = findNearestTimestamp(
+        scene.timestampSeconds,
+        sampledTimestamps
+      );
+      const key = `${timestampSeconds}:${description.toLowerCase()}`;
+      if (sceneKeys.has(key)) {
+        return [];
+      }
+      sceneKeys.add(key);
+
+      return [
+        {
+          ...scene,
+          timestampSeconds,
+          description,
+          visibleText: scene.visibleText?.trim() || '',
+        },
+      ];
+    });
+
+    return {
+      ...parsed,
+      scenes: scenes.slice(0, frames.length),
+    };
+  }
+
+  protected async requestVideoInsights(userContent: ChatCompletionContentPart[]) {
+    const analysis = await openai.chat.completions.parse(
+      {
+        model: 'gpt-4.1',
+        messages: [
+          {
+            role: 'system',
+            content: `You analyze representative frames sampled across a user-provided video so other models can create grounded social posts and image concepts.
+
+Rules:
+- Use only details supported by the supplied frames and associated transcript.
+- Treat timestamps as labels for the supplied images. Never invent a timestamp.
+- Describe recurring subjects, actions, objects, settings, demonstrations, and visible on-screen text.
+- Do not identify a person, brand, location, product, or result unless the frames, visible text, or transcript clearly support it.
+- Extract 3-8 concrete visual facts. Put uncertain details in unknowns instead of guessing.
+- Return a concise visual summary that explains what the video visibly shows across the sampled frames.
+- Create scene entries only for supplied frames that could help with a social post, cover, thumbnail, quote card, or supporting image.
+- Record visibleText only when it is confidently readable. Otherwise return an empty string.
+- The core message may combine the transcript and visuals, but it must not add claims that neither source supports.
+- Avoid generic marketing language.`,
+          },
+          {
+            role: 'user',
+            content: userContent,
+          },
+        ],
+        response_format: zodResponseFormat(VideoInsightsSchema, 'videoInsights'),
+      },
+      {
+        timeout: VIDEO_ANALYSIS_TIMEOUT_MS,
+      }
+    );
+
+    return analysis.choices[0].message.parsed;
+  }
+
   async transcribeVideo(params: {
-    buffer: Buffer;
+    inputPath: string;
     mimeType: string;
     originalName?: string | null;
   }) {
-    const audioBuffer = await this.extractAudio(params.buffer, params.originalName);
+    const audioBuffer = await this.extractAudio(params.inputPath);
     const file = await toFile(
       audioBuffer,
       `${basename(params.originalName || 'uploaded-video', '.mp4')}.mp3`,
@@ -130,25 +316,25 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
       }
     );
 
-    return openai.audio.transcriptions.create({
-      file,
-      model: 'gpt-4o-mini-transcribe',
-    });
+    return openai.audio.transcriptions.create(
+      {
+        file,
+        model: 'gpt-4o-mini-transcribe',
+      },
+      {
+        timeout: TRANSCRIPTION_TIMEOUT_MS,
+      }
+    );
   }
 
-  private async extractAudio(buffer: Buffer, originalName?: string | null) {
+  private async extractAudio(inputPath: string) {
     const workingDirectory = await mkdtemp(
       join(tmpdir(), 'postiz-transcription-')
-    );
-    const inputPath = join(
-      workingDirectory,
-      basename(originalName || 'uploaded-video.mp4')
     );
     const outputPath = join(workingDirectory, 'audio.mp3');
 
     try {
-      await writeFile(inputPath, buffer);
-      await execFileAsync(
+      await this.runMediaCommand(
         'ffmpeg',
         [
           '-hide_banner',
@@ -169,6 +355,7 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
         ],
         {
           maxBuffer: 1024 * 1024,
+          timeout: FFMPEG_AUDIO_TIMEOUT_MS,
         }
       );
 
@@ -181,6 +368,104 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
     } finally {
       await rm(workingDirectory, { recursive: true, force: true });
     }
+  }
+
+  private async extractVideoFrames(
+    inputPath: string
+  ): Promise<ExtractedVideoFrame[]> {
+    const workingDirectory = await mkdtemp(join(tmpdir(), 'postiz-video-frames-'));
+
+    try {
+      let timestamps = [0];
+      try {
+        const duration = await this.probeVideoDuration(inputPath);
+        timestamps = buildFrameTimestamps(duration);
+      } catch {
+        timestamps = [0];
+      }
+
+      const frames: ExtractedVideoFrame[] = [];
+
+      for (const [index, timestampSeconds] of timestamps.entries()) {
+        const outputPath = join(workingDirectory, `frame-${index + 1}.jpg`);
+
+        try {
+          await this.runMediaCommand(
+            'ffmpeg',
+            [
+              '-hide_banner',
+              '-loglevel',
+              'error',
+              '-ss',
+              timestampSeconds.toFixed(3),
+              '-i',
+              inputPath,
+              '-frames:v',
+              '1',
+              '-an',
+              '-vf',
+              'scale=1280:-2:force_original_aspect_ratio=decrease,format=yuvj420p',
+              '-q:v',
+              '4',
+              '-y',
+              outputPath,
+            ],
+            {
+              maxBuffer: 2 * 1024 * 1024,
+              timeout: FFMPEG_FRAME_TIMEOUT_MS,
+            }
+          );
+
+          const frameBuffer = await readFile(outputPath);
+          if (frameBuffer.byteLength) {
+            frames.push({
+              timestampSeconds,
+              buffer: frameBuffer,
+            });
+          }
+        } catch {
+          // Keep any other representative frames when one timestamp is unreadable.
+        }
+      }
+
+      return frames;
+    } finally {
+      await rm(workingDirectory, { recursive: true, force: true });
+    }
+  }
+
+  private async probeVideoDuration(inputPath: string) {
+    const { stdout } = await this.runMediaCommand(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        inputPath,
+      ],
+      {
+        maxBuffer: 1024 * 1024,
+        timeout: FFPROBE_TIMEOUT_MS,
+      }
+    );
+    const duration = Number.parseFloat(`${stdout}`.trim());
+
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error('Video duration could not be determined.');
+    }
+
+    return duration;
+  }
+
+  protected runMediaCommand(
+    command: string,
+    args: string[],
+    options: { maxBuffer: number; timeout: number }
+  ) {
+    return execFileAsync(command, args, options);
   }
 
   async summarizeTranscript(transcript: string) {

@@ -8,6 +8,31 @@ const renderOptionalList = (title: string, items: string[]) => {
   return `${title}\n${items.map((item) => `- ${item}`).join('\n')}`;
 };
 
+const formatSceneTimestamp = (timestampSeconds: number) => {
+  const normalized = Math.max(0, timestampSeconds);
+  return `${Number.isInteger(normalized) ? normalized : normalized.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}s`;
+};
+
+const renderUsefulScenes = (brief: CopyGenerationBrief) => {
+  const scenes = (brief.source.scenes || [])
+    .filter(
+      (scene) =>
+        scene.usefulForPosting === true &&
+        Number.isFinite(scene.timestampSeconds) &&
+        scene.description.trim().length > 0
+    )
+    .slice(0, 6)
+    .map((scene) => {
+      const description = scene.description.trim();
+      const visibleText = scene.visibleText.trim();
+      return `[${formatSceneTimestamp(scene.timestampSeconds)}] ${description}${
+        visibleText ? ` | Visible text: "${visibleText}"` : ''
+      }`;
+    });
+
+  return renderOptionalList('Useful sampled scenes:', scenes);
+};
+
 const buildPostFormatInstruction = (brief: CopyGenerationBrief) => {
   if (brief.platform.name === 'instagram') {
     return 'Caption mode: write a media-grounded caption. Let the visual/video carry context; do not turn it into a standalone text essay.';
@@ -43,6 +68,7 @@ Source grounding:
 - Media type: ${brief.source.mediaType}
 - Visual summary: ${brief.source.visualSummary}
 ${brief.source.transcriptSummary ? `- Transcript summary: ${brief.source.transcriptSummary}` : ''}
+${renderUsefulScenes(brief)}
 ${renderOptionalList('Grounding facts:', brief.source.facts)}
 ${renderOptionalList('Unknowns to avoid inventing:', brief.source.unknowns)}
 ${renderOptionalList('Knowledge base facts:', brief.personalization.knowledgeBaseFacts)}

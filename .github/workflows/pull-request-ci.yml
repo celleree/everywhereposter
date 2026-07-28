@@ -42,6 +42,18 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify working tree and pull request diff
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git status --short
+          git diff --check "$BASE_SHA...$HEAD_SHA"
+          git diff --stat "$BASE_SHA...$HEAD_SHA"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -59,6 +71,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install FFmpeg tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version
+          ffprobe -version
+
       - name: Type-check frontend
         run: pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit
 
@@ -67,6 +86,21 @@ jobs:
 
       - name: Type-check orchestrator
         run: pnpm exec tsc -p apps/orchestrator/tsconfig.build.json --noEmit
+
+      - name: Test video media acquisition
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/video-media-file.spec.ts
+
+      - name: Test video frame model processing
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/copy-generation.model.service.spec.ts
+
+      - name: Test source brief grounding
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/source-brief.service.spec.ts
+
+      - name: Test copy stream heartbeat
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/posts.controller.copy-heartbeat.spec.ts
+
+      - name: Test real FFmpeg frame extraction
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/video-frame-extraction.integration.spec.ts
 
       - name: Run copy-generation tests
         run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand
