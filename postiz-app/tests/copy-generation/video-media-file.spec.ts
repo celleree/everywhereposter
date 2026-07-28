@@ -1,5 +1,9 @@
 import { Readable } from 'stream';
-import { prepareVideoMediaFile } from '@gitroom/nestjs-libraries/copy-generation/video-media-file';
+import {
+  createRemoteMediaByteLimitStream,
+  prepareVideoMediaFile,
+  REMOTE_MEDIA_MAX_BYTES,
+} from '@gitroom/nestjs-libraries/copy-generation/video-media-file';
 
 jest.mock('axios', () => ({
   __esModule: true,
@@ -51,11 +55,11 @@ describe('prepareVideoMediaFile', () => {
     expect(rm).not.toHaveBeenCalled();
   });
 
-  it('streams remote media to a unique temporary file instead of buffering it', async () => {
+  it('streams remote media through a byte limiter to a unique temporary file', async () => {
     const responseStream = Readable.from(['large-video-chunk']);
     const destination = { destination: true };
     mkdtemp.mockResolvedValue('/tmp/postiz-video-source-abc');
-    axios.mockResolvedValue({ data: responseStream });
+    axios.mockResolvedValue({ data: responseStream, headers: {} });
     createWriteStream.mockReturnValue(destination);
     pipeline.mockResolvedValue(undefined);
 
@@ -68,6 +72,7 @@ describe('prepareVideoMediaFile', () => {
       expect.objectContaining({
         responseType: 'stream',
         timeout: 120_000,
+        maxContentLength: REMOTE_MEDIA_MAX_BYTES,
       })
     );
     expect(axios.mock.calls[0][0].responseType).not.toBe('arraybuffer');
@@ -75,7 +80,11 @@ describe('prepareVideoMediaFile', () => {
       '/tmp/postiz-video-source-abc/uploaded.mp4',
       { flags: 'wx' }
     );
-    expect(pipeline).toHaveBeenCalledWith(responseStream, destination);
+    expect(pipeline).toHaveBeenCalledWith(
+      responseStream,
+      expect.anything(),
+      destination
+    );
     expect(result.inputPath).toBe(
       '/tmp/postiz-video-source-abc/uploaded.mp4'
     );
@@ -88,9 +97,47 @@ describe('prepareVideoMediaFile', () => {
     });
   });
 
+  it('rejects an oversized content-length before writing the response body', async () => {
+    const responseStream = Readable.from(['oversized']);
+    const destroy = jest.spyOn(responseStream, 'destroy');
+    mkdtemp.mockResolvedValue('/tmp/postiz-video-source-oversized');
+    axios.mockResolvedValue({
+      data: responseStream,
+      headers: { 'content-length': `${REMOTE_MEDIA_MAX_BYTES + 1}` },
+    });
+
+    await expect(
+      prepareVideoMediaFile('https://cdn.example.com/video.mp4', 'video.mp4')
+    ).rejects.toThrow('exceeds the 1 GB copy-generation download limit');
+
+    expect(destroy).toHaveBeenCalled();
+    expect(pipeline).not.toHaveBeenCalled();
+    expect(createWriteStream).not.toHaveBeenCalled();
+    expect(rm).toHaveBeenCalledWith('/tmp/postiz-video-source-oversized', {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it('aborts a streamed download as soon as the byte limit is exceeded', async () => {
+    const limiter = createRemoteMediaByteLimitStream(5);
+    const output: string[] = [];
+
+    const consume = async () => {
+      for await (const chunk of Readable.from(['abc', 'def']).pipe(limiter)) {
+        output.push(chunk.toString());
+      }
+    };
+
+    await expect(consume()).rejects.toThrow(
+      'exceeds the 1 GB copy-generation download limit'
+    );
+    expect(output).toEqual(['abc']);
+  });
+
   it('removes partial temporary files when streaming fails', async () => {
     mkdtemp.mockResolvedValue('/tmp/postiz-video-source-failed');
-    axios.mockResolvedValue({ data: Readable.from(['partial']) });
+    axios.mockResolvedValue({ data: Readable.from(['partial']), headers: {} });
     pipeline.mockRejectedValue(new Error('stream interrupted'));
 
     await expect(
