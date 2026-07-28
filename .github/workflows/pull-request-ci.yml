@@ -245,4 +245,4 @@ jobs:
           push: false
           tags: publish-everywhere/postiz-app:ci-${{ github.sha }}
           cache-from: type=gha,scope=pull-request-ci
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,scope=pull-request-ci
