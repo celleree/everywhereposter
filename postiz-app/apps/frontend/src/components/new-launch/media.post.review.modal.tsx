@@ -76,6 +76,47 @@ const preservesPrimaryVideo = (
   platform: CopyPlatform
 ) => mediaType === 'video' && platform === 'youtube';
 
+const getApiErrorMessage = (payload: unknown): string | undefined => {
+  if (typeof payload === 'string') {
+    return payload.trim() || undefined;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+
+  const { message, error } = payload as {
+    message?: unknown;
+    error?: unknown;
+  };
+
+  if (typeof message === 'string' && message.trim()) {
+    return message;
+  }
+
+  if (Array.isArray(message)) {
+    const messages = message.filter(
+      (item): item is string => typeof item === 'string' && Boolean(item.trim())
+    );
+    if (messages.length) {
+      return messages.join(' ');
+    }
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  if (error && typeof error === 'object') {
+    const nestedMessage = (error as { message?: unknown }).message;
+    if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
+      return nestedMessage;
+    }
+  }
+
+  return undefined;
+};
+
 type ReviewTab = 'overview' | 'posts' | 'images' | 'accounts';
 
 const loadDefaultPlatforms = (integrations: Integrations[]) =>
@@ -232,7 +273,30 @@ export const MediaPostReviewModal: FC<{
           method: 'POST',
           body: JSON.stringify({ mediaId, imagePlans: plans }),
         });
-        const result = (await request.json()) as RenderImagePlansResponse;
+        const payload: unknown = await request.json().catch(() => null);
+        const fallbackMessage = t(
+          'failed_create_image_assets',
+          'Failed to create image assets.'
+        );
+
+        if (!request.ok) {
+          throw new Error(getApiErrorMessage(payload) || fallbackMessage);
+        }
+
+        if (
+          !payload ||
+          typeof payload !== 'object' ||
+          !Array.isArray((payload as { results?: unknown }).results)
+        ) {
+          throw new Error(
+            t(
+              'invalid_image_render_response',
+              'Image creation returned an invalid response.'
+            )
+          );
+        }
+
+        const result = payload as RenderImagePlansResponse;
         setRenderedAssets((current) => ({
           ...current,
           ...result.results.reduce(
