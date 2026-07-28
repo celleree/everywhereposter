@@ -38,6 +38,18 @@ export class MediaService {
     generatePromptFirst?: boolean,
     isVertical = false
   ) {
+    const totalCredits = await this._subscriptionService.checkCredits(
+      org,
+      'ai_images'
+    );
+
+    if (totalCredits.credits <= 0) {
+      throw new SubscriptionException({
+        action: AuthorizationActions.Create,
+        section: Sections.AI,
+      });
+    }
+
     const generating = await this._subscriptionService.useCredit(
       org,
       'ai_images',
