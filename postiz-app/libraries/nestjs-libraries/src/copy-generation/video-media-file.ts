@@ -3,6 +3,7 @@ import { createWriteStream } from 'fs';
 import { access, mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { basename, join } from 'path';
+import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 
 export interface PreparedVideoMediaFile {
@@ -12,6 +13,31 @@ export interface PreparedVideoMediaFile {
 }
 
 const REMOTE_MEDIA_TIMEOUT_MS = 120_000;
+export const REMOTE_MEDIA_MAX_BYTES = 1000 * 1024 * 1024;
+
+const createRemoteMediaTooLargeError = () =>
+  new Error('Remote video exceeds the 1 GB copy-generation download limit.');
+
+export const createRemoteMediaByteLimitStream = (
+  maxBytes = REMOTE_MEDIA_MAX_BYTES
+) => {
+  let downloadedBytes = 0;
+
+  return new Transform({
+    transform(chunk, encoding, callback) {
+      downloadedBytes += Buffer.isBuffer(chunk)
+        ? chunk.length
+        : Buffer.byteLength(chunk, encoding);
+
+      if (downloadedBytes > maxBytes) {
+        callback(createRemoteMediaTooLargeError());
+        return;
+      }
+
+      callback(null, chunk);
+    },
+  });
+};
 
 const getRemoteFileName = (path: string, originalName?: string | null) => {
   const originalBaseName = basename(originalName || '');
@@ -55,9 +81,23 @@ export const prepareVideoMediaFile = async (
       responseType: 'stream',
       timeout: REMOTE_MEDIA_TIMEOUT_MS,
       maxRedirects: 5,
+      maxContentLength: REMOTE_MEDIA_MAX_BYTES,
     });
+    const contentLength = Number(response.headers?.['content-length']);
 
-    await pipeline(response.data, createWriteStream(inputPath, { flags: 'wx' }));
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > REMOTE_MEDIA_MAX_BYTES
+    ) {
+      response.data.destroy();
+      throw createRemoteMediaTooLargeError();
+    }
+
+    await pipeline(
+      response.data,
+      createRemoteMediaByteLimitStream(),
+      createWriteStream(inputPath, { flags: 'wx' })
+    );
 
     return {
       inputPath,
