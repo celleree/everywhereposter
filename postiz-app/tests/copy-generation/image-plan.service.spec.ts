@@ -86,7 +86,7 @@ describe('ImagePlanService', () => {
                   headline: '',
                   subheadline: '',
                   captionHint: 'Use beside the LinkedIn text post.',
-                  sourceTimestampSeconds: 17.9,
+                  sourceTimestampSeconds: 18.2,
                   sourceQuote: '',
                   visualSummary: 'Founder pointing toward the dashboard.',
                   visualPrompt: '',
