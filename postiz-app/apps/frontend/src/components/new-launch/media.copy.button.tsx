@@ -6,6 +6,12 @@ import { Button } from '@gitroom/react/form/button';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { MediaPostReviewModal } from '@gitroom/frontend/components/new-launch/media.post.review.modal';
 
+const VIDEO_FILE_EXTENSION_PATTERN =
+  /\.(?:mp4|m4v|mpeg|mpg|mpe|mov|qt|webm)(?:$|[?#])/i;
+
+const isVideoMediaPath = (path?: string) =>
+  Boolean(path && VIDEO_FILE_EXTENSION_PATTERN.test(path));
+
 export const MediaCopyButton: FC<{
   media: { id: string; path: string }[];
   postIndex: number;
@@ -13,14 +19,7 @@ export const MediaCopyButton: FC<{
   const t = useT();
   const modals = useModals();
   const firstMedia = media?.[0];
-  const mediaPath = firstMedia?.path?.toLowerCase?.() || '';
-  const mediaType =
-    mediaPath.includes('.mp4') ||
-    mediaPath.includes('.mov') ||
-    mediaPath.includes('.webm') ||
-    mediaPath.includes('.m4v')
-      ? 'video'
-      : 'image';
+  const mediaType = isVideoMediaPath(firstMedia?.path) ? 'video' : 'image';
 
   const openModal = useCallback(() => {
     if (!firstMedia?.id) return;
