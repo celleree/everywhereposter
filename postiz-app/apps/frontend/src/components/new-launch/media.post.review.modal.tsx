@@ -80,13 +80,25 @@ const preservesAccountPrimaryVideo = (
   mediaType: 'image' | 'video',
   platform: CopyPlatform,
   settings?: { post_type?: unknown; is_trial_reel?: unknown }
-) =>
-  preservesPrimaryVideo(mediaType, platform) ||
-  (mediaType === 'video' &&
-    platform === 'instagram' &&
-    (settings?.post_type === 'reel' ||
-      settings?.is_trial_reel === true ||
-      settings?.is_trial_reel === 'true'));
+) => {
+  if (preservesPrimaryVideo(mediaType, platform)) {
+    return true;
+  }
+
+  if (mediaType !== 'video' || platform !== 'instagram') {
+    return false;
+  }
+
+  if (
+    settings?.post_type === 'reel' ||
+    settings?.is_trial_reel === true ||
+    settings?.is_trial_reel === 'true'
+  ) {
+    return true;
+  }
+
+  return settings?.post_type !== 'post' && settings?.post_type !== 'story';
+};
 
 const getApiErrorMessage = (payload: unknown): string | undefined => {
   if (typeof payload === 'string') {
