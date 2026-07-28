@@ -127,6 +127,7 @@ export const MediaPostReviewModal: FC<{
     setGlobalValueText,
     setGlobalValueMedia,
     setInternalValue,
+    addInternalValue,
   } = useLaunchStore(
     useShallow((state) => ({
       selectedIntegrations: state.selectedIntegrations,
@@ -135,6 +136,7 @@ export const MediaPostReviewModal: FC<{
       setGlobalValueText: state.setGlobalValueText,
       setGlobalValueMedia: state.setGlobalValueMedia,
       setInternalValue: state.setInternalValue,
+      addInternalValue: state.addInternalValue,
     }))
   );
 
@@ -347,9 +349,10 @@ export const MediaPostReviewModal: FC<{
       );
 
       for (const match of matches) {
-        const existingValues =
-          internal.find((item) => item.integration.id === match.integration.id)
-            ?.integrationValue || global;
+        const existingInternal = internal.find(
+          (item) => item.integration.id === match.integration.id
+        );
+        const existingValues = existingInternal?.integrationValue || global;
         const rowCount = Math.max(existingValues.length, global.length, postIndex + 1);
         const nextValues = Array.from({ length: rowCount }, (_, index) => {
           const sourceValue =
@@ -372,7 +375,11 @@ export const MediaPostReviewModal: FC<{
           };
         });
 
-        setInternalValue(match.integration.id, nextValues);
+        if (existingInternal) {
+          setInternalValue(match.integration.id, nextValues);
+        } else {
+          addInternalValue(postIndex, match.integration.id, nextValues);
+        }
         appliedCount += 1;
       }
     }
@@ -414,6 +421,7 @@ export const MediaPostReviewModal: FC<{
     onClose();
   }, [
     activeAccountIds,
+    addInternalValue,
     editedDrafts,
     enabledPlanIds,
     global,
