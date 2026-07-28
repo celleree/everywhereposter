@@ -53,8 +53,18 @@ export const Checkbox = forwardRef<
       <div
         ref={ref}
         {...disableForm ? {} : form.register(props.name!)}
+        role="checkbox"
+        aria-label={label}
+        aria-checked={Boolean(val)}
         aria-disabled={disabled || undefined}
+        tabIndex={disabled ? -1 : 0}
         onClick={changeStatus}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            changeStatus();
+          }
+        }}
         className={clsx(
           'rounded-[4px] select-none w-[24px] h-[24px] justify-center items-center flex text-white',
           disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
