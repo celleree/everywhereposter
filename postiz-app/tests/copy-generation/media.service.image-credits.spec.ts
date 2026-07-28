@@ -93,7 +93,8 @@ describe('MediaService image credits', () => {
     expect(openAi.generateImage).toHaveBeenCalledWith(
       'A grounded visual prompt',
       false,
-      true
+      true,
+      false
     );
   });
 
@@ -119,6 +120,7 @@ describe('MediaService image credits', () => {
     );
     expect(openAi.generateImage).toHaveBeenCalledWith(
       'A self-hosted visual prompt',
+      false,
       false,
       false
     );
