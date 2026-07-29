@@ -5,6 +5,7 @@ import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { Button } from '@gitroom/react/form/button';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { MediaPostReviewModal } from '@gitroom/frontend/components/new-launch/media.post.review.modal';
+import { ReferenceImageLibrary } from '@gitroom/frontend/components/new-launch/reference.image.library';
 
 const VIDEO_FILE_EXTENSION_PATTERN =
   /\.(?:mp4|m4v|mpeg|mpg|mpe|mov|qt|webm)(?:$|[?#])/i;
@@ -38,14 +39,31 @@ export const MediaCopyButton: FC<{
     });
   }, [firstMedia?.id, mediaType, modals, postIndex, t]);
 
+  const openReferenceLibrary = useCallback(() => {
+    modals.openModal({
+      title: t('visual_references', 'Visual References'),
+      size: 900,
+      children: (close) => <ReferenceImageLibrary onClose={close} />,
+    });
+  }, [modals, t]);
+
   return (
-    <Button
-      secondary
-      className="!h-[30px] !px-[10px] text-[12px] rounded-[6px]"
-      disabled={!firstMedia?.id}
-      onClick={openModal}
-    >
-      {t('generate_post_set', 'Generate post set')}
-    </Button>
+    <div className="flex items-center gap-[6px]">
+      <Button
+        secondary
+        className="!h-[30px] !px-[10px] text-[12px] rounded-[6px]"
+        onClick={openReferenceLibrary}
+      >
+        {t('visual_references', 'Visual references')}
+      </Button>
+      <Button
+        secondary
+        className="!h-[30px] !px-[10px] text-[12px] rounded-[6px]"
+        disabled={!firstMedia?.id}
+        onClick={openModal}
+      >
+        {t('generate_post_set', 'Generate post set')}
+      </Button>
+    </div>
   );
 };

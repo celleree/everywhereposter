@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
@@ -13,6 +13,10 @@ import {
   ImagePlanAspectRatio,
   ImagePlanItem,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
+import {
+  ReferenceImageContext,
+  ReferenceImageService,
+} from '@gitroom/nestjs-libraries/database/prisma/reference-images/reference-image.service';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
@@ -27,6 +31,18 @@ const IMAGE_PLAN_TYPES = [
 
 const IMAGE_PLAN_ASPECT_RATIOS = ['1:1', '4:5', '16:9', '9:16'] as const;
 const IMAGE_PLAN_TIMESTAMP_TOLERANCE_SECONDS = 0.25;
+const SUPPORTED_REFERENCE_IMAGE_PATTERN = /\.(?:png|jpe?g|webp)(?:$|[?#])/i;
+const PRIVATE_HOST_SUFFIXES = [
+  '.localhost',
+  '.local',
+  '.internal',
+  '.localdomain',
+  '.lan',
+  '.home',
+  '.home.arpa',
+  '.test',
+  '.invalid',
+] as const;
 const UNGROUNDED_SOURCE_QUOTE_WARNING =
   'Source quote was omitted because it could not be verified against the source brief.';
 
@@ -68,6 +84,10 @@ const DEFAULT_ASPECT_RATIO: Record<CopyPlatform, ImagePlanAspectRatio> = {
 
 @Injectable()
 export class ImagePlanService {
+  private readonly _logger = new Logger(ImagePlanService.name);
+
+  constructor(private readonly _referenceImageService?: ReferenceImageService) {}
+
   async generate(
     sourceBrief: SourceBriefResult,
     platforms: CopyPlatform[]
@@ -81,34 +101,12 @@ export class ImagePlanService {
       (scene) => scene.usefulForPosting
     );
     const availableTimestamps = scenes.map((scene) => scene.timestampSeconds);
+    const references =
+      (await this._referenceImageService?.getActiveForSourceMedia(
+        sourceBrief.media.id
+      )) || [];
 
-    const response = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
-      messages: [
-        {
-          role: 'system',
-          content: `You create a structured image plan from a grounded uploaded-video brief.
-
-You are planning assets only. Do not claim that any image has been rendered or generated.
-
-Rules:
-- Return at most one recommended image for each selected platform.
-- Use only facts, scenes, visible text, transcript, transcript summary, and core message supplied by the user.
-- Never invent a person, product, location, result, quote, or timestamp.
-- Prefer an authentic video_frame when a useful scene clearly supports the post.
-- Prefer a quote_card when the message is stronger as controlled typography. The application will render the text, so visualPrompt must not ask an image model to draw words.
-- Use ai_visual only when a supporting concept image adds meaning and can be generated without inventing source facts.
-- Use thumbnail mainly for YouTube or when a platform genuinely needs a cover-style asset.
-- video_frame and thumbnail require one of the supplied scene timestamps. Copy that timestamp exactly; minor numeric rounding beyond 0.25 seconds will be rejected.
-- quote_card should include a concise headline. sourceQuote is optional and may only contain wording actually supplied in the transcript, core message, facts, or scenes.
-- ai_visual requires a concrete visualPrompt and must avoid unsupported brand marks, people, proof, or results.
-- Write useful alt text.
-- Put accuracy or source limitations in warnings.
-- Match the platform's native visual format instead of copying one recommendation everywhere.`,
-        },
-        {
-          role: 'user',
-          content: `Selected platforms:
+    const userText = `Selected platforms:
 ${selectedPlatforms.join(', ')}
 
 Core message:
@@ -143,7 +141,62 @@ ${
     : '- none; do not recommend video_frame or thumbnail'
 }
 
-Create the smallest useful platform-specific image plan.`,
+Visual references:
+${this.describeReferences(references)}
+
+Create the smallest useful platform-specific image plan.`;
+
+    const userContent: any[] = [{ type: 'text', text: userText }];
+    for (const reference of references) {
+      userContent.push({
+        type: 'text',
+        text: `Visual reference ${reference.id}: ${reference.name}${
+          reference.isPrimary ? ' (primary reference)' : ''
+        }. Study visual structure only; use its layout, spacing, composition, palette direction, typography direction, and mood as guidance. Do not copy its people, logos, wording, trademarks, or distinctive protected artwork.`,
+      });
+      if (
+        this.isPublicReferenceUrl(reference.path) &&
+        this.isSupportedVisionReference(reference)
+      ) {
+        userContent.push({
+          type: 'image_url',
+          image_url: { url: reference.path, detail: 'low' },
+        });
+      }
+    }
+
+    const response = await openai.chat.completions.parse({
+      model: 'gpt-4.1',
+      messages: [
+        {
+          role: 'system',
+          content: `You create a structured image plan from a grounded uploaded-video brief.
+
+You are planning assets only. Do not claim that any image has been rendered or generated.
+
+Rules:
+- Return at most one recommended image for each selected platform.
+- Use only facts, scenes, visible text, transcript, transcript summary, and core message supplied by the user.
+- Never invent a person, product, location, result, quote, or timestamp.
+- Prefer an authentic video_frame when a useful scene clearly supports the post.
+- Prefer a quote_card when the message is stronger as controlled typography. The application will render the text, so visualPrompt must not ask an image model to draw words.
+- Use ai_visual only when a supporting concept image adds meaning and can be generated without inventing source facts.
+- Use thumbnail mainly for YouTube or when a platform genuinely needs a cover-style asset.
+- video_frame and thumbnail require one of the supplied scene timestamps. Copy that timestamp exactly; minor numeric rounding beyond 0.25 seconds will be rejected.
+- quote_card should include a concise headline. sourceQuote is optional and may only contain wording actually supplied in the transcript, core message, facts, or scenes.
+- ai_visual requires a concrete visualPrompt and must avoid unsupported brand marks, people, proof, or results.
+- Write useful alt text.
+- Put accuracy or source limitations in warnings.
+- Match the platform's native visual format instead of copying one recommendation everywhere.
+- When visual references are supplied, use the primary reference most strongly and the others as supporting direction.
+- Translate reference layout, spacing, palette direction, composition, typography direction, and mood into the rationale, visualSummary, and visualPrompt.
+- Never copy reference wording, logos, people, trademarks, screenshots, or distinctive protected artwork.
+- The current video's facts and subjects always override the visual references.
+- When reference-guided styling is important, prefer an ai_visual whose prompt clearly describes the derived visual direction without naming or reproducing the source reference.`,
+        },
+        {
+          role: 'user',
+          content: userContent,
         },
       ],
       response_format: zodResponseFormat(
@@ -153,8 +206,7 @@ Create the smallest useful platform-specific image plan.`,
     });
 
     const drafts = response.choices[0].message.parsed?.recommendedImages || [];
-
-    return uniqBy(
+    const plans = uniqBy(
       drafts
         .filter((draft) => selectedPlatforms.includes(draft.platform))
         .map((draft) =>
@@ -162,6 +214,116 @@ Create the smallest useful platform-specific image plan.`,
         )
         .filter((item): item is ImagePlanItem => Boolean(item)),
       (item) => item.platform
+    );
+
+    if (plans.length && references.length) {
+      try {
+        await this._referenceImageService?.markUsedForSourceMedia(
+          sourceBrief.media.id,
+          references,
+          plans.map((plan) => plan.platform)
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this._logger.warn(`Could not record reference image usage: ${message}`);
+      }
+    }
+
+    return plans;
+  }
+
+  private describeReferences(references: ReferenceImageContext[]) {
+    if (!references.length) {
+      return '- none; use the grounded video brief and platform defaults';
+    }
+
+    return references
+      .map(
+        (reference) =>
+          `- id=${reference.id}${reference.isPrimary ? ' primary=true' : ''}; name=${
+            reference.name
+          }; brand=${reference.brand || 'unspecified'}; aspectRatio=${
+            reference.aspectRatio || 'unspecified'
+          }; tags=${reference.tags.join(', ') || 'none'}; styleNotes=${
+            reference.styleNotes || 'none'
+          }`
+      )
+      .join('\n');
+  }
+
+  private isSupportedVisionReference(reference: ReferenceImageContext) {
+    return SUPPORTED_REFERENCE_IMAGE_PATTERN.test(
+      reference.originalName || reference.path
+    );
+  }
+
+  private isPublicReferenceUrl(value: string) {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return false;
+      }
+
+      const hostname = url.hostname
+        .toLowerCase()
+        .replace(/^\[|\]$/g, '')
+        .replace(/\.$/, '');
+      if (
+        !hostname ||
+        hostname === 'localhost' ||
+        PRIVATE_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix)) ||
+        (!hostname.includes('.') && !hostname.includes(':'))
+      ) {
+        return false;
+      }
+
+      return !this.isPrivateIpv4(hostname) && !this.isPrivateIpv6(hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  private isPrivateIpv4(hostname: string) {
+    const parts = hostname.split('.');
+    if (parts.length !== 4) return false;
+    const octets = parts.map((part) => Number(part));
+    if (
+      octets.some(
+        (octet, index) =>
+          !Number.isInteger(octet) ||
+          octet < 0 ||
+          octet > 255 ||
+          String(octet) !== parts[index]
+      )
+    ) {
+      return false;
+    }
+
+    const [first, second] = octets;
+    return (
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      (first === 100 && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 198 && (second === 18 || second === 19)) ||
+      first >= 224
+    );
+  }
+
+  private isPrivateIpv6(hostname: string) {
+    if (!hostname.includes(':')) return false;
+
+    const normalized = hostname.toLowerCase();
+    return (
+      normalized === '::' ||
+      normalized === '::1' ||
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      /^fe[89ab]/.test(normalized) ||
+      normalized.startsWith('::ffff:')
     );
   }
 
