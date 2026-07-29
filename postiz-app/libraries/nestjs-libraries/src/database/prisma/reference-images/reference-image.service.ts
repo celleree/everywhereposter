@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -44,6 +45,8 @@ export type UpdateReferenceImageInput = Partial<
 
 @Injectable()
 export class ReferenceImageService {
+  private readonly _logger = new Logger(ReferenceImageService.name);
+
   constructor(private readonly _repository: ReferenceImageRepository) {}
 
   async list(orgId: string, includeArchived = false) {
@@ -129,6 +132,11 @@ export class ReferenceImageService {
         );
         if (!current) {
           throw new NotFoundException('Reference image was not found.');
+        }
+        if (current.archivedAt) {
+          throw new BadRequestException(
+            'Restore archived references before updating them.'
+          );
         }
 
         const next: ReferenceImageState = {
@@ -232,6 +240,17 @@ export class ReferenceImageService {
 
         const state = this.toState(current);
         delete state.archivedAt;
+
+        if (state.isPrimary) {
+          state.isActive = true;
+        }
+        if (state.isActive) {
+          await this.assertActiveLimit(orgId, transaction);
+        }
+        if (state.isPrimary) {
+          await this.clearPrimary(orgId, id, transaction);
+        }
+
         const saved = await this._repository.updateReference(state, transaction);
         if (!saved) {
           throw new NotFoundException('Reference image was not found.');
@@ -270,9 +289,14 @@ export class ReferenceImageService {
     references: ReferenceImageContext[],
     platforms: string[]
   ) {
-    const source = await this._repository.getMediaWithOrganization(mediaId);
-    if (!source) return;
-    await this.markUsed(source.organizationId, references, platforms);
+    try {
+      const source = await this._repository.getMediaWithOrganization(mediaId);
+      if (!source) return;
+      await this.markUsed(source.organizationId, references, platforms);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this._logger.warn(`Could not record reference image usage: ${message}`);
+    }
   }
 
   async markUsed(
