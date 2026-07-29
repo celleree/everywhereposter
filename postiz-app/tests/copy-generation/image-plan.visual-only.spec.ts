@@ -15,6 +15,21 @@ jest.mock('openai', () => {
 const getParseMock = () =>
   (jest.requireMock('openai') as { parse: jest.Mock }).parse;
 
+const getMessageText = (content: unknown) => {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter(
+      (part): part is { type: 'text'; text: string } =>
+        Boolean(part) &&
+        typeof part === 'object' &&
+        (part as { type?: unknown }).type === 'text' &&
+        typeof (part as { text?: unknown }).text === 'string'
+    )
+    .map((part) => part.text)
+    .join('\n');
+};
+
 describe('ImagePlanService visual-only videos', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -98,6 +113,8 @@ describe('ImagePlanService visual-only videos', () => {
     });
 
     const request = getParseMock().mock.calls[0][0];
-    expect(request.messages[1].content).toContain('Transcript:\nnone');
+    expect(getMessageText(request.messages[1].content)).toContain(
+      'Transcript:\nnone'
+    );
   });
 });
