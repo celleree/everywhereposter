@@ -308,10 +308,11 @@ describe('ReferenceImageService metadata isolation', () => {
         mediaId: 'media-1',
         isActive: true,
         isPrimary: true,
-        archivedAt: undefined,
       }),
       transaction
     );
+    const [restoredState] = repository.updateReference.mock.calls[0];
+    expect(restoredState).not.toHaveProperty('archivedAt');
     expect(result).toMatchObject({
       isActive: true,
       isPrimary: true,
