@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
@@ -73,6 +73,8 @@ const DEFAULT_ASPECT_RATIO: Record<CopyPlatform, ImagePlanAspectRatio> = {
 
 @Injectable()
 export class ImagePlanService {
+  private readonly _logger = new Logger(ImagePlanService.name);
+
   constructor(private readonly _referenceImageService?: ReferenceImageService) {}
 
   async generate(
@@ -204,11 +206,16 @@ Rules:
     );
 
     if (plans.length && references.length) {
-      await this._referenceImageService?.markUsedForSourceMedia(
-        sourceBrief.media.id,
-        references,
-        plans.map((plan) => plan.platform)
-      );
+      try {
+        await this._referenceImageService?.markUsedForSourceMedia(
+          sourceBrief.media.id,
+          references,
+          plans.map((plan) => plan.platform)
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this._logger.warn(`Could not record reference image usage: ${message}`);
+      }
     }
 
     return plans;
