@@ -30,6 +30,52 @@ const getMessageText = (content: unknown) => {
     .join('\n');
 };
 
+const getImageUrls = (content: unknown) => {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter(
+      (part): part is { type: 'image_url'; image_url: { url: string } } =>
+        Boolean(part) &&
+        typeof part === 'object' &&
+        (part as { type?: unknown }).type === 'image_url' &&
+        typeof (part as { image_url?: { url?: unknown } }).image_url?.url === 'string'
+    )
+    .map((part) => part.image_url.url);
+};
+
+const createSourceBrief = () => ({
+  media: {
+    id: 'media-visual-only',
+    path: 'https://example.com/silent-video.mp4',
+    originalName: 'silent-video.mp4',
+    alt: null,
+    mediaType: 'video' as const,
+    mimeType: 'video/mp4',
+  },
+  source: {
+    mediaType: 'video' as const,
+    visualSummary: 'A product dashboard is shown without spoken narration.',
+    transcriptSummary: '',
+    facts: ['A product dashboard is visible.'],
+    unknowns: [],
+    scenes: [
+      {
+        timestampSeconds: 6,
+        description: 'A product dashboard fills the frame.',
+        visibleText: 'Publish',
+        usefulForPosting: true,
+      },
+    ],
+  },
+  transcript: undefined,
+  storedKnowledgeBaseFacts: [],
+  overlapReferenceTexts: [],
+  sourceConfidence: 0.84,
+  coreMessage: 'The product makes publishing easier.',
+  warnings: [],
+  blocked: false,
+});
+
 describe('ImagePlanService visual-only videos', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -67,42 +113,10 @@ describe('ImagePlanService visual-only videos', () => {
       ],
     });
 
-    const sourceBrief = {
-      media: {
-        id: 'media-visual-only',
-        path: 'https://example.com/silent-video.mp4',
-        originalName: 'silent-video.mp4',
-        alt: null,
-        mediaType: 'video' as const,
-        mimeType: 'video/mp4',
-      },
-      source: {
-        mediaType: 'video' as const,
-        visualSummary: 'A product dashboard is shown without spoken narration.',
-        transcriptSummary: '',
-        facts: ['A product dashboard is visible.'],
-        unknowns: [],
-        scenes: [
-          {
-            timestampSeconds: 6,
-            description: 'A product dashboard fills the frame.',
-            visibleText: 'Publish',
-            usefulForPosting: true,
-          },
-        ],
-      },
-      transcript: undefined,
-      storedKnowledgeBaseFacts: [],
-      overlapReferenceTexts: [],
-      sourceConfidence: 0.84,
-      coreMessage: 'The product makes publishing easier.',
-      warnings: [],
-      blocked: false,
-    };
-
-    const result = await new ImagePlanService().generate(sourceBrief as any, [
-      'instagram',
-    ]);
+    const result = await new ImagePlanService().generate(
+      createSourceBrief() as any,
+      ['instagram']
+    );
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -116,5 +130,43 @@ describe('ImagePlanService visual-only videos', () => {
     expect(getMessageText(request.messages[1].content)).toContain(
       'Transcript:\nnone'
     );
+  });
+
+  it('does not attach unsupported legacy reference formats to the vision request', async () => {
+    getParseMock().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            parsed: {
+              recommendedImages: [],
+            },
+          },
+        },
+      ],
+    });
+    const referenceService = {
+      getActiveForSourceMedia: jest.fn().mockResolvedValue([
+        {
+          id: 'reference-tiff',
+          name: 'Legacy TIFF reference',
+          path: 'https://example.com/reference.tiff',
+          originalName: 'reference.tiff',
+          tags: ['editorial'],
+          isPrimary: false,
+        },
+      ]),
+      markUsedForSourceMedia: jest.fn(),
+    };
+
+    await new ImagePlanService(referenceService as any).generate(
+      createSourceBrief() as any,
+      ['instagram']
+    );
+
+    const request = getParseMock().mock.calls[0][0];
+    expect(getMessageText(request.messages[1].content)).toContain(
+      'Legacy TIFF reference'
+    );
+    expect(getImageUrls(request.messages[1].content)).toEqual([]);
   });
 });
