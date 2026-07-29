@@ -33,6 +33,7 @@ permissions:
 jobs:
   validate:
     name: Validate release
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       target_sha: ${{ steps.target.outputs.sha }}
@@ -74,8 +75,10 @@ jobs:
           fi
 
           if [ "$DEPLOYMENT_MODE" = "release" ] && \
-            ! git diff --quiet "${TARGET_SHA}..origin/main" -- postiz-app; then
-            echo "ERROR: release mode rejected this SHA because newer main commits change postiz-app."
+            ! git diff --quiet "${TARGET_SHA}..origin/main" -- \
+              postiz-app \
+              .github/workflows/build-postiz-ghcr.yml; then
+            echo "ERROR: release mode rejected this SHA because newer main commits change app image inputs."
             echo "Use the newest successful app-image SHA, or choose rollback for an intentional older release."
             exit 1
           fi
@@ -90,7 +93,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          RUNS_JSON="$(gh api -X GET \
+          RUNS_JSON="$(gh api --paginate --slurp -X GET \
             "repos/$GITHUB_REPOSITORY/actions/workflows/build-postiz-ghcr.yml/runs" \
             -f branch=main \
             -f event=push \
@@ -98,7 +101,7 @@ jobs:
             -f per_page=100)"
 
           if ! jq -e --arg sha "$TARGET_SHA" \
-            '.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")' \
+            '.[] | .workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")' \
             <<<"$RUNS_JSON" >/dev/null; then
             echo "ERROR: no successful Build EverywherePoster image run exists for $TARGET_SHA."
             exit 1
@@ -116,6 +119,7 @@ jobs:
 
   deploy:
     name: Deploy to Hetzner
+    if: github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -163,7 +167,7 @@ jobs:
             "$SSH_USER@$SSH_HOST" \
             "install -d -m 700 '$REMOTE_DOCKER_CONFIG' && DOCKER_CONFIG='$REMOTE_DOCKER_CONFIG' docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin"
 
-      - name: Synchronize main and deploy the exact image
+      - name: Synchronize main, revalidate, and deploy the exact image
         run: |
           set -euo pipefail
           ssh \
@@ -172,12 +176,13 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            bash -s -- "$TARGET_SHA" "$PRUNE_UNUSED_IMAGES" "$REMOTE_DOCKER_CONFIG" <<'REMOTE'
+            bash -s -- "$TARGET_SHA" "$DEPLOYMENT_MODE" "$PRUNE_UNUSED_IMAGES" "$REMOTE_DOCKER_CONFIG" <<'REMOTE'
           set -euo pipefail
 
           TARGET_SHA="$1"
-          PRUNE_UNUSED_IMAGES="$2"
-          DOCKER_CONFIG="$3"
+          DEPLOYMENT_MODE="$2"
+          PRUNE_UNUSED_IMAGES="$3"
+          DOCKER_CONFIG="$4"
           REPO_DIR="/home/arund/publish-everywhere-git"
 
           export DOCKER_CONFIG
@@ -195,6 +200,24 @@ jobs:
             echo "ERROR: the production checkout is not synchronized with origin/main."
             exit 1
           }
+
+          if ! git cat-file -e "${TARGET_SHA}^{commit}" 2>/dev/null; then
+            echo "ERROR: requested commit no longer exists in repository history."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+            echo "ERROR: requested commit is no longer part of main history."
+            exit 1
+          fi
+
+          if [ "$DEPLOYMENT_MODE" = "release" ] && \
+            ! git diff --quiet "${TARGET_SHA}..origin/main" -- \
+              postiz-app \
+              .github/workflows/build-postiz-ghcr.yml; then
+            echo "ERROR: main changed app image inputs after validation; refusing a stale release."
+            exit 1
+          fi
 
           PRUNE_UNUSED_IMAGES="$PRUNE_UNUSED_IMAGES" \
             bash scripts/deploy-production.sh "$TARGET_SHA"
