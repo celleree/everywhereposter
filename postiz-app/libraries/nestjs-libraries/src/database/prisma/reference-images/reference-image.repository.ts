@@ -48,7 +48,15 @@ export interface ReferenceImageState {
 
 type ReferenceImageRow = Omit<
   StoredReferenceImage,
-  'tags' | 'lastPlatforms' | 'brand' | 'aspectRatio' | 'styleNotes' | 'archivedAt' | 'lastUsedAt' | 'originalName' | 'alt'
+  | 'tags'
+  | 'lastPlatforms'
+  | 'brand'
+  | 'aspectRatio'
+  | 'styleNotes'
+  | 'archivedAt'
+  | 'lastUsedAt'
+  | 'originalName'
+  | 'alt'
 > & {
   tags: unknown;
   lastPlatforms: unknown;
@@ -156,8 +164,8 @@ export class ReferenceImageRepository {
         media."path",
         media."type" AS "mediaType",
         media."alt"
-      FROM "ReferenceImage" reference
-      INNER JOIN "Media" media ON media."id" = reference."mediaId"
+      FROM "everywhereposter"."ReferenceImage" reference
+      INNER JOIN public."Media" media ON media."id" = reference."mediaId"
       WHERE reference."organizationId" = ${orgId}
         AND reference."mediaId" = ${mediaId}
         AND media."deletedAt" IS NULL
@@ -191,8 +199,8 @@ export class ReferenceImageRepository {
         media."path",
         media."type" AS "mediaType",
         media."alt"
-      FROM "ReferenceImage" reference
-      INNER JOIN "Media" media ON media."id" = reference."mediaId"
+      FROM "everywhereposter"."ReferenceImage" reference
+      INNER JOIN public."Media" media ON media."id" = reference."mediaId"
       WHERE reference."organizationId" = ${orgId}
         AND media."deletedAt" IS NULL
       ORDER BY reference."createdAt" DESC
@@ -206,7 +214,7 @@ export class ReferenceImageRepository {
   ) {
     const rows = await transaction.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
       SELECT COUNT(*)::bigint AS "count"
-      FROM "ReferenceImage"
+      FROM "everywhereposter"."ReferenceImage"
       WHERE "organizationId" = ${orgId}
         AND "isActive" = TRUE
         AND "archivedAt" IS NULL
@@ -219,7 +227,7 @@ export class ReferenceImageRepository {
     transaction: ReferenceImageTransaction
   ) {
     await transaction.$executeRaw(Prisma.sql`
-      INSERT INTO "ReferenceImage" (
+      INSERT INTO "everywhereposter"."ReferenceImage" (
         "mediaId",
         "organizationId",
         "name",
@@ -261,7 +269,7 @@ export class ReferenceImageRepository {
     transaction: ReferenceImageTransaction
   ) {
     await transaction.$executeRaw(Prisma.sql`
-      UPDATE "ReferenceImage"
+      UPDATE "everywhereposter"."ReferenceImage"
       SET
         "name" = ${state.name},
         "tags" = CAST(${JSON.stringify(state.tags)} AS jsonb),
@@ -287,11 +295,13 @@ export class ReferenceImageRepository {
     transaction: ReferenceImageTransaction
   ) {
     return transaction.$executeRaw(Prisma.sql`
-      UPDATE "ReferenceImage"
+      UPDATE "everywhereposter"."ReferenceImage"
       SET "isPrimary" = FALSE, "updatedAt" = CURRENT_TIMESTAMP
       WHERE "organizationId" = ${orgId}
         AND "isPrimary" = TRUE
-        ${exceptMediaId ? Prisma.sql`AND "mediaId" <> ${exceptMediaId}` : Prisma.empty}
+        ${exceptMediaId
+          ? Prisma.sql`AND "mediaId" <> ${exceptMediaId}`
+          : Prisma.empty}
     `);
   }
 
@@ -302,7 +312,7 @@ export class ReferenceImageRepository {
     transaction: ReferenceImageTransaction
   ) {
     await transaction.$executeRaw(Prisma.sql`
-      UPDATE "ReferenceImage"
+      UPDATE "everywhereposter"."ReferenceImage"
       SET
         "usageCount" = "usageCount" + 1,
         "lastUsedAt" = CURRENT_TIMESTAMP,
@@ -324,8 +334,11 @@ export class ReferenceImageRepository {
   }
 
   private async createTable() {
+    await this._prismaService.$executeRawUnsafe(
+      'CREATE SCHEMA IF NOT EXISTS "everywhereposter"'
+    );
     await this._prismaService.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "ReferenceImage" (
+      CREATE TABLE IF NOT EXISTS "everywhereposter"."ReferenceImage" (
         "mediaId" TEXT PRIMARY KEY,
         "organizationId" TEXT NOT NULL,
         "name" TEXT NOT NULL,
@@ -342,20 +355,20 @@ export class ReferenceImageRepository {
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT "ReferenceImage_mediaId_fkey"
-          FOREIGN KEY ("mediaId") REFERENCES "Media"("id")
+          FOREIGN KEY ("mediaId") REFERENCES public."Media"("id")
           ON DELETE CASCADE ON UPDATE CASCADE,
         CONSTRAINT "ReferenceImage_organizationId_fkey"
-          FOREIGN KEY ("organizationId") REFERENCES "Organization"("id")
+          FOREIGN KEY ("organizationId") REFERENCES public."Organization"("id")
           ON DELETE CASCADE ON UPDATE CASCADE
       )
     `);
     await this._prismaService.$executeRawUnsafe(`
       CREATE INDEX IF NOT EXISTS "ReferenceImage_organizationId_archivedAt_idx"
-      ON "ReferenceImage"("organizationId", "archivedAt")
+      ON "everywhereposter"."ReferenceImage"("organizationId", "archivedAt")
     `);
     await this._prismaService.$executeRawUnsafe(`
       CREATE INDEX IF NOT EXISTS "ReferenceImage_organizationId_isActive_idx"
-      ON "ReferenceImage"("organizationId", "isActive")
+      ON "everywhereposter"."ReferenceImage"("organizationId", "isActive")
     `);
   }
 
