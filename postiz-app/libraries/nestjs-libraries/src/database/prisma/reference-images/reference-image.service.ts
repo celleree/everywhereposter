@@ -11,6 +11,7 @@ import {
 } from '@gitroom/nestjs-libraries/database/prisma/reference-images/reference-image.repository';
 
 const MAX_ACTIVE_REFERENCES = 4;
+const SUPPORTED_REFERENCE_IMAGE_PATTERN = /\.(?:png|jpe?g|webp)(?:$|[?#])/i;
 
 export type ReferenceImageAspectRatio = '1:1' | '4:5' | '16:9' | '9:16';
 
@@ -18,6 +19,7 @@ export interface ReferenceImageContext {
   id: string;
   name: string;
   path: string;
+  originalName?: string;
   tags: string[];
   brand?: string;
   aspectRatio?: ReferenceImageAspectRatio;
@@ -63,6 +65,11 @@ export class ReferenceImageService {
         if (media.type !== 'image') {
           throw new BadRequestException('Only image files can be saved as references.');
         }
+        if (!this.isSupportedVisionReference(media.originalName || media.path)) {
+          throw new BadRequestException(
+            'Reference images must be PNG, JPEG, or WebP files.'
+          );
+        }
         if (
           await this._repository.getReference(orgId, input.mediaId, transaction)
         ) {
@@ -71,6 +78,11 @@ export class ReferenceImageService {
           );
         }
 
+        const requestedActive = Boolean(input.isActive || input.isPrimary);
+        const activeCount = requestedActive
+          ? await this._repository.countActive(orgId, transaction)
+          : 0;
+        const canActivate = !requestedActive || activeCount < MAX_ACTIVE_REFERENCES;
         const brand = this.cleanOptional(input.brand, 120);
         const styleNotes = this.cleanOptional(input.styleNotes, 1000);
         const reference: ReferenceImageState = {
@@ -84,15 +96,12 @@ export class ReferenceImageService {
           ...(brand ? { brand } : {}),
           ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
           ...(styleNotes ? { styleNotes } : {}),
-          isActive: Boolean(input.isActive || input.isPrimary),
-          isPrimary: Boolean(input.isPrimary),
+          isActive: requestedActive && canActivate,
+          isPrimary: Boolean(input.isPrimary && canActivate),
           usageCount: 0,
           lastPlatforms: [],
         };
 
-        if (reference.isActive) {
-          await this.assertActiveLimit(orgId, transaction);
-        }
         if (reference.isPrimary) {
           await this.clearPrimary(orgId, undefined, transaction);
         }
@@ -155,6 +164,9 @@ export class ReferenceImageService {
           lastPlatforms: current.lastPlatforms,
         };
 
+        if (input.isActive === false) {
+          next.isPrimary = false;
+        }
         if (next.isPrimary) {
           next.isActive = true;
           await this.clearPrimary(orgId, id, transaction);
@@ -244,6 +256,7 @@ export class ReferenceImageService {
         id: item.id,
         name: item.name,
         path: item.path,
+        ...(item.originalName ? { originalName: item.originalName } : {}),
         tags: item.tags,
         ...(item.brand ? { brand: item.brand } : {}),
         ...(item.aspectRatio ? { aspectRatio: item.aspectRatio } : {}),
@@ -359,6 +372,10 @@ export class ReferenceImageService {
         : {}),
       lastPlatforms: reference.lastPlatforms,
     };
+  }
+
+  private isSupportedVisionReference(value: string) {
+    return SUPPORTED_REFERENCE_IMAGE_PATTERN.test(value);
   }
 
   private cleanTags(tags?: string[]) {
