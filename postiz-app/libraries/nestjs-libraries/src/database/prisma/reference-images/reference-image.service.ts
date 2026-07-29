@@ -78,6 +78,8 @@ export class ReferenceImageService {
       throw new BadRequestException('This image is already in the reference library.');
     }
 
+    const brand = this.cleanOptional(input.brand, 120);
+    const styleNotes = this.cleanOptional(input.styleNotes, 1000);
     const metadata: ReferenceImageMetadata = {
       version: 1,
       kind: 'reference-image',
@@ -86,13 +88,9 @@ export class ReferenceImageService {
         120
       ),
       tags: this.cleanTags(input.tags),
-      ...(this.cleanOptional(input.brand, 120)
-        ? { brand: this.cleanOptional(input.brand, 120) }
-        : {}),
+      ...(brand ? { brand } : {}),
       ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
-      ...(this.cleanOptional(input.styleNotes, 1000)
-        ? { styleNotes: this.cleanOptional(input.styleNotes, 1000) }
-        : {}),
+      ...(styleNotes ? { styleNotes } : {}),
       isActive: Boolean(input.isActive || input.isPrimary),
       isPrimary: Boolean(input.isPrimary),
       usageCount: 0,
@@ -215,6 +213,16 @@ export class ReferenceImageService {
         ...(item.styleNotes ? { styleNotes: item.styleNotes } : {}),
         isPrimary: item.isPrimary,
       }));
+  }
+
+  async markUsedForSourceMedia(
+    mediaId: string,
+    references: ReferenceImageContext[],
+    platforms: string[]
+  ) {
+    const source = await this._repository.getMediaWithOrganization(mediaId);
+    if (!source) return;
+    await this.markUsed(source.organizationId, references, platforms);
   }
 
   async markUsed(
