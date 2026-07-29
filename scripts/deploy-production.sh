@@ -30,6 +30,13 @@ cd "$REPO_ROOT"
 TARGET_IMAGE="${IMAGE_REPOSITORY}:${TARGET_SHA}"
 PREVIOUS_IMAGE_ID=""
 
+if [ "$PRUNE_UNUSED_IMAGES" != "true" ] && [ "$PRUNE_UNUSED_IMAGES" != "false" ]; then
+  fail "PRUNE_UNUSED_IMAGES must be true or false."
+fi
+
+docker pull "$TARGET_IMAGE"
+EXPECTED_IMAGE_ID="$(docker image inspect "$TARGET_IMAGE" --format '{{.Id}}')"
+
 if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
   PREVIOUS_CONTAINER_RUNNING="$(docker inspect "$CONTAINER_NAME" --format '{{.State.Running}}')"
 
@@ -37,8 +44,15 @@ if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     PREVIOUS_IMAGE_ID="$(docker inspect "$CONTAINER_NAME" --format '{{.Image}}')"
     docker image inspect "$PREVIOUS_IMAGE_ID" >/dev/null 2>&1 || \
       fail "The running ${CONTAINER_NAME} container image is unavailable locally."
-    docker tag "$PREVIOUS_IMAGE_ID" "$ROLLBACK_IMAGE"
-    printf 'Retained running container image %s as %s.\n' "$PREVIOUS_IMAGE_ID" "$ROLLBACK_IMAGE"
+
+    if [ "$PREVIOUS_IMAGE_ID" = "$EXPECTED_IMAGE_ID" ]; then
+      printf 'The requested image %s is already running; preserving %s unchanged.\n' \
+        "$EXPECTED_IMAGE_ID" "$ROLLBACK_IMAGE"
+      PREVIOUS_IMAGE_ID=""
+    else
+      docker tag "$PREVIOUS_IMAGE_ID" "$ROLLBACK_IMAGE"
+      printf 'Retained running container image %s as %s.\n' "$PREVIOUS_IMAGE_ID" "$ROLLBACK_IMAGE"
+    fi
   else
     printf 'The existing %s container is not running; preserving the current %s tag unchanged.\n' \
       "$CONTAINER_NAME" "$ROLLBACK_IMAGE"
@@ -47,12 +61,8 @@ fi
 
 if [ "$PRUNE_UNUSED_IMAGES" = "true" ]; then
   docker image prune -af
-elif [ "$PRUNE_UNUSED_IMAGES" != "false" ]; then
-  fail "PRUNE_UNUSED_IMAGES must be true or false."
 fi
 
-docker pull "$TARGET_IMAGE"
-EXPECTED_IMAGE_ID="$(docker image inspect "$TARGET_IMAGE" --format '{{.Id}}')"
 docker tag "$TARGET_IMAGE" "$RUNTIME_IMAGE"
 
 docker compose up -d --no-build --no-deps --force-recreate "$SERVICE_NAME"
