@@ -74,6 +74,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          ffmpeg -version
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
