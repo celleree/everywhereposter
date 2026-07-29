@@ -30,10 +30,19 @@ cd "$REPO_ROOT"
 TARGET_IMAGE="${IMAGE_REPOSITORY}:${TARGET_SHA}"
 PREVIOUS_IMAGE_ID=""
 
-if docker image inspect "$RUNTIME_IMAGE" >/dev/null 2>&1; then
-  PREVIOUS_IMAGE_ID="$(docker image inspect "$RUNTIME_IMAGE" --format '{{.Id}}')"
-  docker tag "$RUNTIME_IMAGE" "$ROLLBACK_IMAGE"
-  printf 'Retained rollback image %s as %s.\n' "$PREVIOUS_IMAGE_ID" "$ROLLBACK_IMAGE"
+if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+  PREVIOUS_CONTAINER_RUNNING="$(docker inspect "$CONTAINER_NAME" --format '{{.State.Running}}')"
+
+  if [ "$PREVIOUS_CONTAINER_RUNNING" = "true" ]; then
+    PREVIOUS_IMAGE_ID="$(docker inspect "$CONTAINER_NAME" --format '{{.Image}}')"
+    docker image inspect "$PREVIOUS_IMAGE_ID" >/dev/null 2>&1 || \
+      fail "The running ${CONTAINER_NAME} container image is unavailable locally."
+    docker tag "$PREVIOUS_IMAGE_ID" "$ROLLBACK_IMAGE"
+    printf 'Retained running container image %s as %s.\n' "$PREVIOUS_IMAGE_ID" "$ROLLBACK_IMAGE"
+  else
+    printf 'The existing %s container is not running; preserving the current %s tag unchanged.\n' \
+      "$CONTAINER_NAME" "$ROLLBACK_IMAGE"
+  fi
 fi
 
 if [ "$PRUNE_UNUSED_IMAGES" = "true" ]; then
@@ -65,4 +74,4 @@ fi
 docker logs --tail 120 "$CONTAINER_NAME"
 printf 'DEPLOYED_SHA=%s\n' "$TARGET_SHA"
 printf 'DEPLOYED_IMAGE_ID=%s\n' "$RUNNING_IMAGE_ID"
-printf 'ROLLBACK_IMAGE_ID=%s\n' "${PREVIOUS_IMAGE_ID:-not-available}"
+printf 'ROLLBACK_IMAGE_ID=%s\n' "${PREVIOUS_IMAGE_ID:-not-updated}"
