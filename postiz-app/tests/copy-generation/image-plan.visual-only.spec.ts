@@ -210,6 +210,14 @@ describe('ImagePlanService visual-only videos', () => {
           tags: [],
           isPrimary: true,
         },
+        {
+          id: 'reference-public-prefix',
+          name: 'Public prefix reference',
+          path: 'https://fc.example.com/reference.png',
+          originalName: 'reference.png',
+          tags: [],
+          isPrimary: false,
+        },
       ]),
       markUsedForSourceMedia: jest.fn(),
     };
@@ -224,8 +232,10 @@ describe('ImagePlanService visual-only videos', () => {
     expect(messageText).toContain('Local reference');
     expect(messageText).toContain('Private network reference');
     expect(messageText).toContain('Public reference');
+    expect(messageText).toContain('Public prefix reference');
     expect(getImageUrls(request.messages[1].content)).toEqual([
       'https://cdn.example.com/reference.jpg',
+      'https://fc.example.com/reference.png',
     ]);
   });
 
