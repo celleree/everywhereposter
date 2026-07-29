@@ -214,10 +214,12 @@ export class ReferenceImageRepository {
   ) {
     const rows = await transaction.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
       SELECT COUNT(*)::bigint AS "count"
-      FROM "everywhereposter"."ReferenceImage"
-      WHERE "organizationId" = ${orgId}
-        AND "isActive" = TRUE
-        AND "archivedAt" IS NULL
+      FROM "everywhereposter"."ReferenceImage" reference
+      INNER JOIN public."Media" media ON media."id" = reference."mediaId"
+      WHERE reference."organizationId" = ${orgId}
+        AND reference."isActive" = TRUE
+        AND reference."archivedAt" IS NULL
+        AND media."deletedAt" IS NULL
     `);
     return Number(rows[0]?.count || 0);
   }
