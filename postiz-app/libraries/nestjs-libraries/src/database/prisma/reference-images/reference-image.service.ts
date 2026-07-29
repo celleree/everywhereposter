@@ -6,6 +6,7 @@ import {
 import {
   REFERENCE_IMAGE_METADATA_PREFIX,
   ReferenceImageRepository,
+  ReferenceImageTransaction,
 } from '@gitroom/nestjs-libraries/database/prisma/reference-images/reference-image.repository';
 
 const MAX_ACTIVE_REFERENCES = 4;
@@ -59,139 +60,163 @@ export class ReferenceImageService {
   constructor(private readonly _repository: ReferenceImageRepository) {}
 
   async list(orgId: string, includeArchived = false) {
-    const media = await this._repository.list(orgId);
-    return media
-      .map((item) => this.toResponse(item))
-      .filter((item): item is NonNullable<typeof item> => Boolean(item))
-      .filter((item) => includeArchived || !item.archivedAt);
+    return this.listFromRepository(orgId, includeArchived);
   }
 
   async create(orgId: string, input: CreateReferenceImageInput) {
-    const media = await this._repository.getMedia(orgId, input.mediaId);
-    if (!media) {
-      throw new NotFoundException('Uploaded reference image was not found.');
-    }
-    if (media.type !== 'image') {
-      throw new BadRequestException('Only image files can be saved as references.');
-    }
-    if (this.parseMetadata(media.alt)) {
-      throw new BadRequestException('This image is already in the reference library.');
-    }
-
-    const brand = this.cleanOptional(input.brand, 120);
-    const styleNotes = this.cleanOptional(input.styleNotes, 1000);
-    const metadata: ReferenceImageMetadata = {
-      version: 1,
-      kind: 'reference-image',
-      name: this.cleanText(
-        input.name || media.originalName || media.name || 'Visual reference',
-        120
-      ),
-      tags: this.cleanTags(input.tags),
-      ...(brand ? { brand } : {}),
-      ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
-      ...(styleNotes ? { styleNotes } : {}),
-      isActive: Boolean(input.isActive || input.isPrimary),
-      isPrimary: Boolean(input.isPrimary),
-      usageCount: 0,
-    };
-
-    if (metadata.isActive) {
-      await this.assertActiveLimit(orgId);
-    }
-    if (metadata.isPrimary) {
-      await this.clearPrimary(orgId);
-    }
-
-    const saved = await this._repository.updateMetadata(
+    return this._repository.withOrganizationMutationLock(
       orgId,
-      media.id,
-      this.serializeMetadata(metadata)
+      async (transaction) => {
+        const media = await this._repository.getMedia(
+          orgId,
+          input.mediaId,
+          transaction
+        );
+        if (!media) {
+          throw new NotFoundException('Uploaded reference image was not found.');
+        }
+        if (media.type !== 'image') {
+          throw new BadRequestException('Only image files can be saved as references.');
+        }
+        if (this.parseMetadata(media.alt)) {
+          throw new BadRequestException('This image is already in the reference library.');
+        }
+
+        const brand = this.cleanOptional(input.brand, 120);
+        const styleNotes = this.cleanOptional(input.styleNotes, 1000);
+        const metadata: ReferenceImageMetadata = {
+          version: 1,
+          kind: 'reference-image',
+          name: this.cleanText(
+            input.name || media.originalName || media.name || 'Visual reference',
+            120
+          ),
+          tags: this.cleanTags(input.tags),
+          ...(brand ? { brand } : {}),
+          ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
+          ...(styleNotes ? { styleNotes } : {}),
+          isActive: Boolean(input.isActive || input.isPrimary),
+          isPrimary: Boolean(input.isPrimary),
+          usageCount: 0,
+        };
+
+        if (metadata.isActive) {
+          await this.assertActiveLimit(orgId, transaction);
+        }
+        if (metadata.isPrimary) {
+          await this.clearPrimary(orgId, undefined, transaction);
+        }
+
+        const saved = await this._repository.updateMetadata(
+          orgId,
+          media.id,
+          this.serializeMetadata(metadata),
+          transaction
+        );
+        return this.toResponse(saved);
+      }
     );
-    return this.toResponse(saved);
   }
 
   async update(orgId: string, id: string, input: UpdateReferenceImageInput) {
-    const media = await this._repository.getMedia(orgId, id);
-    const current = media ? this.parseMetadata(media.alt) : undefined;
-    if (!media || !current) {
-      throw new NotFoundException('Reference image was not found.');
-    }
-
-    const next: ReferenceImageMetadata = {
-      ...current,
-      ...(typeof input.name === 'string'
-        ? { name: this.cleanText(input.name, 120) }
-        : {}),
-      ...(Array.isArray(input.tags) ? { tags: this.cleanTags(input.tags) } : {}),
-      ...(typeof input.brand === 'string'
-        ? { brand: this.cleanOptional(input.brand, 120) }
-        : {}),
-      ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
-      ...(typeof input.styleNotes === 'string'
-        ? { styleNotes: this.cleanOptional(input.styleNotes, 1000) }
-        : {}),
-      ...(typeof input.isActive === 'boolean'
-        ? { isActive: input.isActive }
-        : {}),
-      ...(typeof input.isPrimary === 'boolean'
-        ? { isPrimary: input.isPrimary }
-        : {}),
-    };
-
-    if (next.isPrimary) {
-      next.isActive = true;
-      await this.clearPrimary(orgId, id);
-    }
-    if (!next.isActive) {
-      next.isPrimary = false;
-    }
-    if (!current.isActive && next.isActive) {
-      await this.assertActiveLimit(orgId);
-    }
-
-    const saved = await this._repository.updateMetadata(
+    return this._repository.withOrganizationMutationLock(
       orgId,
-      id,
-      this.serializeMetadata(next)
+      async (transaction) => {
+        const media = await this._repository.getMedia(orgId, id, transaction);
+        const current = media ? this.parseMetadata(media.alt) : undefined;
+        if (!media || !current) {
+          throw new NotFoundException('Reference image was not found.');
+        }
+
+        const next: ReferenceImageMetadata = {
+          ...current,
+          ...(typeof input.name === 'string'
+            ? { name: this.cleanText(input.name, 120) }
+            : {}),
+          ...(Array.isArray(input.tags) ? { tags: this.cleanTags(input.tags) } : {}),
+          ...(typeof input.brand === 'string'
+            ? { brand: this.cleanOptional(input.brand, 120) }
+            : {}),
+          ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
+          ...(typeof input.styleNotes === 'string'
+            ? { styleNotes: this.cleanOptional(input.styleNotes, 1000) }
+            : {}),
+          ...(typeof input.isActive === 'boolean'
+            ? { isActive: input.isActive }
+            : {}),
+          ...(typeof input.isPrimary === 'boolean'
+            ? { isPrimary: input.isPrimary }
+            : {}),
+        };
+
+        if (next.isPrimary) {
+          next.isActive = true;
+          await this.clearPrimary(orgId, id, transaction);
+        }
+        if (!next.isActive) {
+          next.isPrimary = false;
+        }
+        if (!current.isActive && next.isActive) {
+          await this.assertActiveLimit(orgId, transaction);
+        }
+
+        const saved = await this._repository.updateMetadata(
+          orgId,
+          id,
+          this.serializeMetadata(next),
+          transaction
+        );
+        return this.toResponse(saved);
+      }
     );
-    return this.toResponse(saved);
   }
 
   async archive(orgId: string, id: string) {
-    const media = await this._repository.getMedia(orgId, id);
-    const current = media ? this.parseMetadata(media.alt) : undefined;
-    if (!media || !current) {
-      throw new NotFoundException('Reference image was not found.');
-    }
-
-    const saved = await this._repository.updateMetadata(
+    return this._repository.withOrganizationMutationLock(
       orgId,
-      id,
-      this.serializeMetadata({
-        ...current,
-        isActive: false,
-        isPrimary: false,
-        archivedAt: new Date().toISOString(),
-      })
+      async (transaction) => {
+        const media = await this._repository.getMedia(orgId, id, transaction);
+        const current = media ? this.parseMetadata(media.alt) : undefined;
+        if (!media || !current) {
+          throw new NotFoundException('Reference image was not found.');
+        }
+
+        const saved = await this._repository.updateMetadata(
+          orgId,
+          id,
+          this.serializeMetadata({
+            ...current,
+            isActive: false,
+            isPrimary: false,
+            archivedAt: new Date().toISOString(),
+          }),
+          transaction
+        );
+        return this.toResponse(saved);
+      }
     );
-    return this.toResponse(saved);
   }
 
   async restore(orgId: string, id: string) {
-    const media = await this._repository.getMedia(orgId, id);
-    const current = media ? this.parseMetadata(media.alt) : undefined;
-    if (!media || !current) {
-      throw new NotFoundException('Reference image was not found.');
-    }
-
-    const { archivedAt: _archivedAt, ...rest } = current;
-    const saved = await this._repository.updateMetadata(
+    return this._repository.withOrganizationMutationLock(
       orgId,
-      id,
-      this.serializeMetadata(rest)
+      async (transaction) => {
+        const media = await this._repository.getMedia(orgId, id, transaction);
+        const current = media ? this.parseMetadata(media.alt) : undefined;
+        if (!media || !current) {
+          throw new NotFoundException('Reference image was not found.');
+        }
+
+        const { archivedAt: _archivedAt, ...rest } = current;
+        const saved = await this._repository.updateMetadata(
+          orgId,
+          id,
+          this.serializeMetadata(rest),
+          transaction
+        );
+        return this.toResponse(saved);
+      }
     );
-    return this.toResponse(saved);
   }
 
   async getActiveForSourceMedia(mediaId: string): Promise<ReferenceImageContext[]> {
@@ -230,28 +255,53 @@ export class ReferenceImageService {
     references: ReferenceImageContext[],
     platforms: string[]
   ) {
-    await Promise.all(
-      references.map(async (reference) => {
-        const media = await this._repository.getMedia(orgId, reference.id);
-        const metadata = media ? this.parseMetadata(media.alt) : undefined;
-        if (!media || !metadata) return;
+    await this._repository.withOrganizationMutationLock(
+      orgId,
+      async (transaction) => {
+        for (const reference of references) {
+          const media = await this._repository.getMedia(
+            orgId,
+            reference.id,
+            transaction
+          );
+          const metadata = media ? this.parseMetadata(media.alt) : undefined;
+          if (!media || !metadata) continue;
 
-        await this._repository.updateMetadata(
-          orgId,
-          reference.id,
-          this.serializeMetadata({
-            ...metadata,
-            usageCount: metadata.usageCount + 1,
-            lastUsedAt: new Date().toISOString(),
-            lastPlatforms: Array.from(new Set(platforms)),
-          })
-        );
-      })
+          await this._repository.updateMetadata(
+            orgId,
+            reference.id,
+            this.serializeMetadata({
+              ...metadata,
+              usageCount: metadata.usageCount + 1,
+              lastUsedAt: new Date().toISOString(),
+              lastPlatforms: Array.from(new Set(platforms)),
+            }),
+            transaction
+          );
+        }
+      }
     );
   }
 
-  private async assertActiveLimit(orgId: string) {
-    const active = (await this.list(orgId)).filter((item) => item.isActive);
+  private async listFromRepository(
+    orgId: string,
+    includeArchived = false,
+    transaction?: ReferenceImageTransaction
+  ) {
+    const media = await this._repository.list(orgId, transaction);
+    return media
+      .map((item) => this.toResponse(item))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .filter((item) => includeArchived || !item.archivedAt);
+  }
+
+  private async assertActiveLimit(
+    orgId: string,
+    transaction: ReferenceImageTransaction
+  ) {
+    const active = (await this.listFromRepository(orgId, false, transaction)).filter(
+      (item) => item.isActive
+    );
     if (active.length >= MAX_ACTIVE_REFERENCES) {
       throw new BadRequestException(
         `You can activate up to ${MAX_ACTIVE_REFERENCES} reference images at once.`
@@ -259,22 +309,25 @@ export class ReferenceImageService {
     }
   }
 
-  private async clearPrimary(orgId: string, exceptId?: string) {
-    const references = await this.list(orgId, true);
-    await Promise.all(
-      references
-        .filter((item) => item.isPrimary && item.id !== exceptId)
-        .map(async (item) => {
-          const media = await this._repository.getMedia(orgId, item.id);
-          const metadata = media ? this.parseMetadata(media.alt) : undefined;
-          if (!metadata) return;
-          await this._repository.updateMetadata(
-            orgId,
-            item.id,
-            this.serializeMetadata({ ...metadata, isPrimary: false })
-          );
-        })
-    );
+  private async clearPrimary(
+    orgId: string,
+    exceptId: string | undefined,
+    transaction: ReferenceImageTransaction
+  ) {
+    const references = await this.listFromRepository(orgId, true, transaction);
+    for (const item of references) {
+      if (!item.isPrimary || item.id === exceptId) continue;
+
+      const media = await this._repository.getMedia(orgId, item.id, transaction);
+      const metadata = media ? this.parseMetadata(media.alt) : undefined;
+      if (!metadata) continue;
+      await this._repository.updateMetadata(
+        orgId,
+        item.id,
+        this.serializeMetadata({ ...metadata, isPrimary: false }),
+        transaction
+      );
+    }
   }
 
   private toResponse(media: {
