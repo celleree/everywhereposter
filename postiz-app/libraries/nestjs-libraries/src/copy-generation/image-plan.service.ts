@@ -144,7 +144,7 @@ Create the smallest useful platform-specific image plan.`;
         }. Study visual structure only; use its layout, spacing, composition, palette direction, typography direction, and mood as guidance. Do not copy its people, logos, wording, trademarks, or distinctive protected artwork.`,
       });
       if (
-        /^https?:\/\//i.test(reference.path) &&
+        this.isPublicReferenceUrl(reference.path) &&
         this.isSupportedVisionReference(reference)
       ) {
         userContent.push({
@@ -243,6 +243,76 @@ Rules:
   private isSupportedVisionReference(reference: ReferenceImageContext) {
     return SUPPORTED_REFERENCE_IMAGE_PATTERN.test(
       reference.originalName || reference.path
+    );
+  }
+
+  private isPublicReferenceUrl(value: string) {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return false;
+      }
+
+      const hostname = url.hostname
+        .toLowerCase()
+        .replace(/^\[|\]$/g, '')
+        .replace(/\.$/, '');
+      if (
+        !hostname ||
+        hostname === 'localhost' ||
+        hostname.endsWith('.localhost') ||
+        hostname.endsWith('.local') ||
+        hostname.endsWith('.internal') ||
+        (!hostname.includes('.') && !hostname.includes(':'))
+      ) {
+        return false;
+      }
+
+      return !this.isPrivateIpv4(hostname) && !this.isPrivateIpv6(hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  private isPrivateIpv4(hostname: string) {
+    const parts = hostname.split('.');
+    if (parts.length !== 4) return false;
+    const octets = parts.map((part) => Number(part));
+    if (
+      octets.some(
+        (octet, index) =>
+          !Number.isInteger(octet) ||
+          octet < 0 ||
+          octet > 255 ||
+          String(octet) !== parts[index]
+      )
+    ) {
+      return false;
+    }
+
+    const [first, second] = octets;
+    return (
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      (first === 100 && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 198 && (second === 18 || second === 19)) ||
+      first >= 224
+    );
+  }
+
+  private isPrivateIpv6(hostname: string) {
+    const normalized = hostname.toLowerCase();
+    return (
+      normalized === '::' ||
+      normalized === '::1' ||
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      /^fe[89ab]/.test(normalized) ||
+      normalized.startsWith('::ffff:')
     );
   }
 
