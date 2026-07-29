@@ -6,22 +6,23 @@ It does not build on Hetzner, modify database state, restart unrelated services,
 
 ## What the workflow does
 
-1. Requires a manual `workflow_dispatch` run.
+1. Requires a manual `workflow_dispatch` run from `main`.
 2. Accepts a full 40-character commit SHA from `main`.
-3. In `release` mode, requires that no newer `main` commit changes `postiz-app` after the requested SHA.
+3. In `release` mode, requires that no newer `main` commit changes `postiz-app` or the production image workflow after the requested SHA.
 4. In `rollback` mode, allows an earlier commit that is still part of `main` history.
-5. Verifies a successful production-image workflow run exists for the requested SHA.
+5. Searches all successful production-image workflow pages for the requested SHA.
 6. Verifies the exact full-SHA image exists in GHCR.
 7. Connects to Hetzner using a dedicated SSH key and pinned host key.
 8. Uses a temporary server-side Docker credential directory and removes it after the run.
 9. Refuses to deploy if the production checkout is dirty.
 10. Synchronizes the server checkout to `origin/main` without force-resetting it.
-11. Retains the current runtime image as `publish-everywhere/postiz-app:previous`.
-12. Pulls and tags the requested full-SHA image.
-13. Recreates only the `postiz` service.
-14. Confirms the container is running from the requested image ID.
-15. Prints the latest container logs and checks the public URL.
-16. Records the run in GitHub's `production` environment deployment history.
+11. Revalidates ancestry and release freshness immediately before deployment.
+12. Retains the current runtime image as `publish-everywhere/postiz-app:previous`.
+13. Pulls and tags the requested full-SHA image.
+14. Recreates only the `postiz` service.
+15. Confirms the container is running from the requested image ID.
+16. Prints the latest container logs and checks the public URL.
+17. Records the run in GitHub's `production` environment deployment history.
 
 The workflow does not replace release-specific browser testing. Upload, composer, platform-routing, scheduling, and publishing behavior still need manual verification when those areas change.
 
@@ -42,9 +43,10 @@ In the repository:
 1. Open **Settings**.
 2. Open **Environments**.
 3. Create an environment named exactly `production`.
-4. Restrict deployment branches to `main` when that option is available.
+4. Set **Deployment branches and tags** to **Selected branches and tags**.
+5. Add a branch rule for exactly `main`.
 
-Required-reviewer rules are not available for private repositories on every GitHub plan. The workflow is therefore manual-dispatch-only even when no environment approval rule is available.
+The `main` deployment-branch rule is mandatory because the environment contains production SSH credentials. Required-reviewer rules are not available for private repositories on every GitHub plan, so the workflow remains manual-dispatch-only even when no environment approval rule is available.
 
 ### 2. Add production variables
 
@@ -100,7 +102,7 @@ Do not use `StrictHostKeyChecking=no`. The workflow intentionally fails if the s
 ## First deployment
 
 1. Merge the deployment-workflow pull request into `main`.
-2. Identify the newest successful `Build EverywherePoster image` run whose SHA contains the current `postiz-app` state.
+2. Identify the newest successful `Build EverywherePoster image` run whose SHA contains the current app-image state.
 3. Open **Actions**.
 4. Select **Deploy EverywherePoster production**.
 5. Select **Run workflow** from `main`.
@@ -112,13 +114,13 @@ Do not use `StrictHostKeyChecking=no`. The workflow intentionally fails if the s
 11. Complete the release-specific browser verification checklist.
 12. Update `docs/RELEASE-LEDGER.md` after the deployment is manually verified.
 
-A workflow-only or documentation-only merge may advance `main` without producing a new app image. In that case, release the newest successful image SHA. Release mode permits this only when the commits after that SHA do not change `postiz-app`.
+A workflow-only or documentation-only merge may advance `main` without producing a new app image. In that case, release the newest successful image SHA. Release mode permits this only when commits after that SHA do not change `postiz-app` or `.github/workflows/build-postiz-ghcr.yml`.
 
 ## Normal releases
 
-Use `release` mode with the newest successful app-image SHA. It is usually the current `main` SHA, but it can be an earlier `main` SHA when later commits change only workflows, scripts, or documentation.
+Use `release` mode with the newest successful app-image SHA. It is usually the current `main` SHA, but it can be an earlier `main` SHA when later commits change only non-image inputs such as deployment documentation.
 
-Release mode rejects the requested SHA when any newer `main` commit changes `postiz-app`. Use `rollback` only when intentionally returning to an older app version.
+Release mode rejects the requested SHA when any newer `main` commit changes `postiz-app` or `.github/workflows/build-postiz-ghcr.yml`. The same validation runs again on Hetzner immediately before deployment. Use `rollback` only when intentionally returning to an older app version.
 
 Do not use the `latest` image tag for deployment. The workflow always deploys:
 
