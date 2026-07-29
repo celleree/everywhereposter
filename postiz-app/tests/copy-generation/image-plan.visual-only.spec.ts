@@ -172,6 +172,63 @@ describe('ImagePlanService visual-only videos', () => {
     expect(getImageUrls(request.messages[1].content)).toEqual([]);
   });
 
+  it('omits localhost and private-network references from image inputs', async () => {
+    getParseMock().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            parsed: {
+              recommendedImages: [],
+            },
+          },
+        },
+      ],
+    });
+    const referenceService = {
+      getActiveForSourceMedia: jest.fn().mockResolvedValue([
+        {
+          id: 'reference-localhost',
+          name: 'Local reference',
+          path: 'http://localhost:4200/uploads/reference.png',
+          originalName: 'reference.png',
+          tags: [],
+          isPrimary: false,
+        },
+        {
+          id: 'reference-private',
+          name: 'Private network reference',
+          path: 'http://192.168.1.20/reference.webp',
+          originalName: 'reference.webp',
+          tags: [],
+          isPrimary: false,
+        },
+        {
+          id: 'reference-public',
+          name: 'Public reference',
+          path: 'https://cdn.example.com/reference.jpg',
+          originalName: 'reference.jpg',
+          tags: [],
+          isPrimary: true,
+        },
+      ]),
+      markUsedForSourceMedia: jest.fn(),
+    };
+
+    await new ImagePlanService(referenceService as any).generate(
+      createSourceBrief() as any,
+      ['instagram']
+    );
+
+    const request = getParseMock().mock.calls[0][0];
+    const messageText = getMessageText(request.messages[1].content);
+    expect(messageText).toContain('Local reference');
+    expect(messageText).toContain('Private network reference');
+    expect(messageText).toContain('Public reference');
+    expect(getImageUrls(request.messages[1].content)).toEqual([
+      'https://cdn.example.com/reference.jpg',
+    ]);
+  });
+
   it('returns generated plans when reference usage tracking fails', async () => {
     getParseMock().mockResolvedValue(createGroundedFrameResponse());
     const referenceService = {
