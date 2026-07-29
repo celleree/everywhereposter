@@ -68,8 +68,11 @@ describe('ReferenceImageService metadata isolation', () => {
   it('creates reference state separately and never writes Media.alt', async () => {
     const transaction = {};
     const repository = {
-      withOrganizationMutationLock: jest.fn(async (_orgId, callback) =>
-        callback(transaction)
+      withOrganizationMutationLock: jest.fn(
+        async (
+          _orgId: string,
+          callback: (currentTransaction: object) => Promise<unknown>
+        ) => callback(transaction)
       ),
       getMedia: jest.fn().mockResolvedValue({
         id: 'media-1',
