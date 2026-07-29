@@ -1,15 +1,44 @@
+import { Prisma } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
-import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import {
+  PrismaRepository,
+  PrismaService,
+} from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 
 export const REFERENCE_IMAGE_METADATA_PREFIX =
   '__everywhereposter_reference_image_v1__:';
 
+export type ReferenceImageTransaction = Prisma.TransactionClient;
+
 @Injectable()
 export class ReferenceImageRepository {
-  constructor(private readonly _media: PrismaRepository<'media'>) {}
+  constructor(
+    private readonly _media: PrismaRepository<'media'>,
+    private readonly _prismaService: PrismaService
+  ) {}
 
-  getMedia(orgId: string, mediaId: string) {
-    return this._media.model.media.findFirst({
+  withOrganizationMutationLock<T>(
+    orgId: string,
+    callback: (transaction: ReferenceImageTransaction) => Promise<T>
+  ) {
+    return this._prismaService.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('everywhereposter-reference-images'),
+          hashtext(${orgId})
+        )
+      `;
+
+      return callback(transaction);
+    });
+  }
+
+  getMedia(
+    orgId: string,
+    mediaId: string,
+    transaction?: ReferenceImageTransaction
+  ) {
+    return this.getMediaModel(transaction).findFirst({
       where: {
         id: mediaId,
         organizationId: orgId,
@@ -28,8 +57,11 @@ export class ReferenceImageRepository {
     });
   }
 
-  getMediaWithOrganization(mediaId: string) {
-    return this._media.model.media.findFirst({
+  getMediaWithOrganization(
+    mediaId: string,
+    transaction?: ReferenceImageTransaction
+  ) {
+    return this.getMediaModel(transaction).findFirst({
       where: {
         id: mediaId,
         deletedAt: null,
@@ -41,8 +73,8 @@ export class ReferenceImageRepository {
     });
   }
 
-  list(orgId: string) {
-    return this._media.model.media.findMany({
+  list(orgId: string, transaction?: ReferenceImageTransaction) {
+    return this.getMediaModel(transaction).findMany({
       where: {
         organizationId: orgId,
         deletedAt: null,
@@ -67,8 +99,13 @@ export class ReferenceImageRepository {
     });
   }
 
-  updateMetadata(orgId: string, mediaId: string, alt: string) {
-    return this._media.model.media.update({
+  updateMetadata(
+    orgId: string,
+    mediaId: string,
+    alt: string,
+    transaction?: ReferenceImageTransaction
+  ) {
+    return this.getMediaModel(transaction).update({
       where: {
         id: mediaId,
         organizationId: orgId,
@@ -87,5 +124,10 @@ export class ReferenceImageRepository {
         updatedAt: true,
       },
     });
+  }
+
+  private getMediaModel(transaction?: ReferenceImageTransaction) {
+    return (transaction?.media ||
+      this._media.model.media) as ReferenceImageTransaction['media'];
   }
 }
