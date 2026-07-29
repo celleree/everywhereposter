@@ -4,30 +4,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  REFERENCE_IMAGE_METADATA_PREFIX,
   ReferenceImageRepository,
+  ReferenceImageState,
   ReferenceImageTransaction,
+  StoredReferenceImage,
 } from '@gitroom/nestjs-libraries/database/prisma/reference-images/reference-image.repository';
 
 const MAX_ACTIVE_REFERENCES = 4;
 
 export type ReferenceImageAspectRatio = '1:1' | '4:5' | '16:9' | '9:16';
-
-export interface ReferenceImageMetadata {
-  version: 1;
-  kind: 'reference-image';
-  name: string;
-  tags: string[];
-  brand?: string;
-  aspectRatio?: ReferenceImageAspectRatio;
-  styleNotes?: string;
-  isActive: boolean;
-  isPrimary: boolean;
-  archivedAt?: string;
-  usageCount: number;
-  lastUsedAt?: string;
-  lastPlatforms?: string[];
-}
 
 export interface ReferenceImageContext {
   id: string;
@@ -78,15 +63,19 @@ export class ReferenceImageService {
         if (media.type !== 'image') {
           throw new BadRequestException('Only image files can be saved as references.');
         }
-        if (this.parseMetadata(media.alt)) {
-          throw new BadRequestException('This image is already in the reference library.');
+        if (
+          await this._repository.getReference(orgId, input.mediaId, transaction)
+        ) {
+          throw new BadRequestException(
+            'This image is already in the reference library.'
+          );
         }
 
         const brand = this.cleanOptional(input.brand, 120);
         const styleNotes = this.cleanOptional(input.styleNotes, 1000);
-        const metadata: ReferenceImageMetadata = {
-          version: 1,
-          kind: 'reference-image',
+        const reference: ReferenceImageState = {
+          mediaId: media.id,
+          organizationId: orgId,
           name: this.cleanText(
             input.name || media.originalName || media.name || 'Visual reference',
             120
@@ -98,21 +87,23 @@ export class ReferenceImageService {
           isActive: Boolean(input.isActive || input.isPrimary),
           isPrimary: Boolean(input.isPrimary),
           usageCount: 0,
+          lastPlatforms: [],
         };
 
-        if (metadata.isActive) {
+        if (reference.isActive) {
           await this.assertActiveLimit(orgId, transaction);
         }
-        if (metadata.isPrimary) {
+        if (reference.isPrimary) {
           await this.clearPrimary(orgId, undefined, transaction);
         }
 
-        const saved = await this._repository.updateMetadata(
-          orgId,
-          media.id,
-          this.serializeMetadata(metadata),
+        const saved = await this._repository.createReference(
+          reference,
           transaction
         );
+        if (!saved) {
+          throw new NotFoundException('Reference image could not be saved.');
+        }
         return this.toResponse(saved);
       }
     );
@@ -122,31 +113,46 @@ export class ReferenceImageService {
     return this._repository.withOrganizationMutationLock(
       orgId,
       async (transaction) => {
-        const media = await this._repository.getMedia(orgId, id, transaction);
-        const current = media ? this.parseMetadata(media.alt) : undefined;
-        if (!media || !current) {
+        const current = await this._repository.getReference(
+          orgId,
+          id,
+          transaction
+        );
+        if (!current) {
           throw new NotFoundException('Reference image was not found.');
         }
 
-        const next: ReferenceImageMetadata = {
-          ...current,
-          ...(typeof input.name === 'string'
-            ? { name: this.cleanText(input.name, 120) }
-            : {}),
-          ...(Array.isArray(input.tags) ? { tags: this.cleanTags(input.tags) } : {}),
-          ...(typeof input.brand === 'string'
-            ? { brand: this.cleanOptional(input.brand, 120) }
-            : {}),
-          ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
-          ...(typeof input.styleNotes === 'string'
-            ? { styleNotes: this.cleanOptional(input.styleNotes, 1000) }
-            : {}),
-          ...(typeof input.isActive === 'boolean'
-            ? { isActive: input.isActive }
-            : {}),
-          ...(typeof input.isPrimary === 'boolean'
-            ? { isPrimary: input.isPrimary }
-            : {}),
+        const next: ReferenceImageState = {
+          mediaId: current.mediaId,
+          organizationId: current.organizationId,
+          name:
+            typeof input.name === 'string'
+              ? this.cleanText(input.name, 120)
+              : current.name,
+          tags: Array.isArray(input.tags)
+            ? this.cleanTags(input.tags)
+            : current.tags,
+          brand:
+            typeof input.brand === 'string'
+              ? this.cleanOptional(input.brand, 120)
+              : current.brand,
+          aspectRatio: input.aspectRatio || current.aspectRatio,
+          styleNotes:
+            typeof input.styleNotes === 'string'
+              ? this.cleanOptional(input.styleNotes, 1000)
+              : current.styleNotes,
+          isActive:
+            typeof input.isActive === 'boolean'
+              ? input.isActive
+              : current.isActive,
+          isPrimary:
+            typeof input.isPrimary === 'boolean'
+              ? input.isPrimary
+              : current.isPrimary,
+          archivedAt: current.archivedAt,
+          usageCount: current.usageCount,
+          lastUsedAt: current.lastUsedAt,
+          lastPlatforms: current.lastPlatforms,
         };
 
         if (next.isPrimary) {
@@ -160,12 +166,10 @@ export class ReferenceImageService {
           await this.assertActiveLimit(orgId, transaction);
         }
 
-        const saved = await this._repository.updateMetadata(
-          orgId,
-          id,
-          this.serializeMetadata(next),
-          transaction
-        );
+        const saved = await this._repository.updateReference(next, transaction);
+        if (!saved) {
+          throw new NotFoundException('Reference image was not found.');
+        }
         return this.toResponse(saved);
       }
     );
@@ -175,23 +179,27 @@ export class ReferenceImageService {
     return this._repository.withOrganizationMutationLock(
       orgId,
       async (transaction) => {
-        const media = await this._repository.getMedia(orgId, id, transaction);
-        const current = media ? this.parseMetadata(media.alt) : undefined;
-        if (!media || !current) {
+        const current = await this._repository.getReference(
+          orgId,
+          id,
+          transaction
+        );
+        if (!current) {
           throw new NotFoundException('Reference image was not found.');
         }
 
-        const saved = await this._repository.updateMetadata(
-          orgId,
-          id,
-          this.serializeMetadata({
-            ...current,
+        const saved = await this._repository.updateReference(
+          {
+            ...this.toState(current),
             isActive: false,
             isPrimary: false,
-            archivedAt: new Date().toISOString(),
-          }),
+            archivedAt: new Date(),
+          },
           transaction
         );
+        if (!saved) {
+          throw new NotFoundException('Reference image was not found.');
+        }
         return this.toResponse(saved);
       }
     );
@@ -201,25 +209,29 @@ export class ReferenceImageService {
     return this._repository.withOrganizationMutationLock(
       orgId,
       async (transaction) => {
-        const media = await this._repository.getMedia(orgId, id, transaction);
-        const current = media ? this.parseMetadata(media.alt) : undefined;
-        if (!media || !current) {
+        const current = await this._repository.getReference(
+          orgId,
+          id,
+          transaction
+        );
+        if (!current) {
           throw new NotFoundException('Reference image was not found.');
         }
 
-        const { archivedAt: _archivedAt, ...rest } = current;
-        const saved = await this._repository.updateMetadata(
-          orgId,
-          id,
-          this.serializeMetadata(rest),
-          transaction
-        );
+        const state = this.toState(current);
+        delete state.archivedAt;
+        const saved = await this._repository.updateReference(state, transaction);
+        if (!saved) {
+          throw new NotFoundException('Reference image was not found.');
+        }
         return this.toResponse(saved);
       }
     );
   }
 
-  async getActiveForSourceMedia(mediaId: string): Promise<ReferenceImageContext[]> {
+  async getActiveForSourceMedia(
+    mediaId: string
+  ): Promise<ReferenceImageContext[]> {
     const source = await this._repository.getMediaWithOrganization(mediaId);
     if (!source) return [];
 
@@ -258,24 +270,12 @@ export class ReferenceImageService {
     await this._repository.withOrganizationMutationLock(
       orgId,
       async (transaction) => {
+        const uniquePlatforms = Array.from(new Set(platforms));
         for (const reference of references) {
-          const media = await this._repository.getMedia(
+          await this._repository.incrementUsage(
             orgId,
             reference.id,
-            transaction
-          );
-          const metadata = media ? this.parseMetadata(media.alt) : undefined;
-          if (!media || !metadata) continue;
-
-          await this._repository.updateMetadata(
-            orgId,
-            reference.id,
-            this.serializeMetadata({
-              ...metadata,
-              usageCount: metadata.usageCount + 1,
-              lastUsedAt: new Date().toISOString(),
-              lastPlatforms: Array.from(new Set(platforms)),
-            }),
+            uniquePlatforms,
             transaction
           );
         }
@@ -288,91 +288,77 @@ export class ReferenceImageService {
     includeArchived = false,
     transaction?: ReferenceImageTransaction
   ) {
-    const media = await this._repository.list(orgId, transaction);
-    return media
-      .map((item) => this.toResponse(item))
-      .filter((item): item is NonNullable<typeof item> => Boolean(item))
-      .filter((item) => includeArchived || !item.archivedAt);
+    const references = await this._repository.list(orgId, transaction);
+    return references
+      .filter((item) => includeArchived || !item.archivedAt)
+      .map((item) => this.toResponse(item));
   }
 
   private async assertActiveLimit(
     orgId: string,
     transaction: ReferenceImageTransaction
   ) {
-    const active = (await this.listFromRepository(orgId, false, transaction)).filter(
-      (item) => item.isActive
-    );
-    if (active.length >= MAX_ACTIVE_REFERENCES) {
+    const activeCount = await this._repository.countActive(orgId, transaction);
+    if (activeCount >= MAX_ACTIVE_REFERENCES) {
       throw new BadRequestException(
         `You can activate up to ${MAX_ACTIVE_REFERENCES} reference images at once.`
       );
     }
   }
 
-  private async clearPrimary(
+  private clearPrimary(
     orgId: string,
     exceptId: string | undefined,
     transaction: ReferenceImageTransaction
   ) {
-    const references = await this.listFromRepository(orgId, true, transaction);
-    for (const item of references) {
-      if (!item.isPrimary || item.id === exceptId) continue;
-
-      const media = await this._repository.getMedia(orgId, item.id, transaction);
-      const metadata = media ? this.parseMetadata(media.alt) : undefined;
-      if (!metadata) continue;
-      await this._repository.updateMetadata(
-        orgId,
-        item.id,
-        this.serializeMetadata({ ...metadata, isPrimary: false }),
-        transaction
-      );
-    }
+    return this._repository.clearPrimary(orgId, exceptId, transaction);
   }
 
-  private toResponse(media: {
-    id: string;
-    name: string;
-    originalName: string | null;
-    path: string;
-    alt: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }) {
-    const metadata = this.parseMetadata(media.alt);
-    if (!metadata) return;
+  private toState(reference: StoredReferenceImage): ReferenceImageState {
     return {
-      id: media.id,
-      mediaId: media.id,
-      path: media.path,
-      originalName: media.originalName,
-      createdAt: media.createdAt,
-      updatedAt: media.updatedAt,
-      ...metadata,
+      mediaId: reference.mediaId,
+      organizationId: reference.organizationId,
+      name: reference.name,
+      tags: reference.tags,
+      brand: reference.brand,
+      aspectRatio: reference.aspectRatio,
+      styleNotes: reference.styleNotes,
+      isActive: reference.isActive,
+      isPrimary: reference.isPrimary,
+      archivedAt: reference.archivedAt,
+      usageCount: reference.usageCount,
+      lastUsedAt: reference.lastUsedAt,
+      lastPlatforms: reference.lastPlatforms,
     };
   }
 
-  private parseMetadata(value?: string | null): ReferenceImageMetadata | undefined {
-    if (!value?.startsWith(REFERENCE_IMAGE_METADATA_PREFIX)) return;
-    try {
-      const parsed = JSON.parse(
-        value.slice(REFERENCE_IMAGE_METADATA_PREFIX.length)
-      ) as ReferenceImageMetadata;
-      if (parsed?.version !== 1 || parsed?.kind !== 'reference-image') return;
-      return {
-        ...parsed,
-        tags: Array.isArray(parsed.tags) ? parsed.tags : [],
-        isActive: Boolean(parsed.isActive),
-        isPrimary: Boolean(parsed.isPrimary),
-        usageCount: Number.isFinite(parsed.usageCount) ? parsed.usageCount : 0,
-      };
-    } catch {
-      return;
-    }
-  }
-
-  private serializeMetadata(metadata: ReferenceImageMetadata) {
-    return `${REFERENCE_IMAGE_METADATA_PREFIX}${JSON.stringify(metadata)}`;
+  private toResponse(reference: StoredReferenceImage) {
+    return {
+      id: reference.mediaId,
+      mediaId: reference.mediaId,
+      path: reference.path,
+      originalName: reference.originalName || null,
+      alt: reference.alt || null,
+      createdAt: reference.createdAt,
+      updatedAt: reference.updatedAt,
+      name: reference.name,
+      tags: reference.tags,
+      ...(reference.brand ? { brand: reference.brand } : {}),
+      ...(reference.aspectRatio
+        ? { aspectRatio: reference.aspectRatio as ReferenceImageAspectRatio }
+        : {}),
+      ...(reference.styleNotes ? { styleNotes: reference.styleNotes } : {}),
+      isActive: reference.isActive,
+      isPrimary: reference.isPrimary,
+      ...(reference.archivedAt
+        ? { archivedAt: reference.archivedAt.toISOString() }
+        : {}),
+      usageCount: reference.usageCount,
+      ...(reference.lastUsedAt
+        ? { lastUsedAt: reference.lastUsedAt.toISOString() }
+        : {}),
+      lastPlatforms: reference.lastPlatforms,
+    };
   }
 
   private cleanTags(tags?: string[]) {
