@@ -9,11 +9,18 @@ SERVICE_NAME="${SERVICE_NAME:-postiz}"
 CONTAINER_NAME="${CONTAINER_NAME:-postiz}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-45}"
 PRUNE_UNUSED_IMAGES="${PRUNE_UNUSED_IMAGES:-false}"
+ROLLBACK_GUARD_CONTAINER="${ROLLBACK_GUARD_CONTAINER:-everywhereposter-rollback-prune-guard}"
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
 }
+
+cleanup_rollback_guard() {
+  docker rm -f "$ROLLBACK_GUARD_CONTAINER" >/dev/null 2>&1 || true
+}
+
+trap cleanup_rollback_guard EXIT
 
 case "$TARGET_SHA" in
   ''|*[!0-9a-f]*) fail "TARGET_SHA must be a lowercase 40-character commit SHA." ;;
@@ -32,6 +39,19 @@ PREVIOUS_IMAGE_ID=""
 
 if [ "$PRUNE_UNUSED_IMAGES" != "true" ] && [ "$PRUNE_UNUSED_IMAGES" != "false" ]; then
   fail "PRUNE_UNUSED_IMAGES must be true or false."
+fi
+
+if [ "$PRUNE_UNUSED_IMAGES" = "true" ]; then
+  cleanup_rollback_guard
+
+  if docker image inspect "$ROLLBACK_IMAGE" >/dev/null 2>&1; then
+    docker create --name "$ROLLBACK_GUARD_CONTAINER" "$ROLLBACK_IMAGE" >/dev/null
+    printf 'Protected %s from pruning with temporary container %s.\n' \
+      "$ROLLBACK_IMAGE" "$ROLLBACK_GUARD_CONTAINER"
+  fi
+
+  docker image prune -af
+  cleanup_rollback_guard
 fi
 
 docker pull "$TARGET_IMAGE"
@@ -57,10 +77,6 @@ if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     printf 'The existing %s container is not running; preserving the current %s tag unchanged.\n' \
       "$CONTAINER_NAME" "$ROLLBACK_IMAGE"
   fi
-fi
-
-if [ "$PRUNE_UNUSED_IMAGES" = "true" ]; then
-  docker image prune -af
 fi
 
 docker tag "$TARGET_IMAGE" "$RUNTIME_IMAGE"
