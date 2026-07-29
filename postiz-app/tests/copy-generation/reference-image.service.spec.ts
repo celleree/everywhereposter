@@ -21,6 +21,14 @@ const storedReference = {
   alt: 'A founder presenting a product dashboard.',
 };
 
+const withTransaction = (transaction: object) =>
+  jest.fn(
+    async (
+      _orgId: string,
+      callback: (currentTransaction: object) => Promise<unknown>
+    ) => callback(transaction)
+  );
+
 describe('ReferenceImageService metadata isolation', () => {
   it('returns the media accessibility text without replacing it with reference metadata', async () => {
     const repository = {
@@ -68,16 +76,12 @@ describe('ReferenceImageService metadata isolation', () => {
   it('creates reference state separately and never writes Media.alt', async () => {
     const transaction = {};
     const repository = {
-      withOrganizationMutationLock: jest.fn(
-        async (
-          _orgId: string,
-          callback: (currentTransaction: object) => Promise<unknown>
-        ) => callback(transaction)
-      ),
+      withOrganizationMutationLock: withTransaction(transaction),
       getMedia: jest.fn().mockResolvedValue({
         id: 'media-1',
         name: 'reference.png',
         originalName: 'reference.png',
+        path: 'https://example.com/reference.png',
         type: 'image',
         alt: 'Existing accessible description.',
       }),
@@ -119,5 +123,110 @@ describe('ReferenceImageService metadata isolation', () => {
         )
       )
     ).toBe(false);
+  });
+
+  it('rejects reference formats that cannot be sent to the vision model', async () => {
+    const transaction = {};
+    const repository = {
+      withOrganizationMutationLock: withTransaction(transaction),
+      getMedia: jest.fn().mockResolvedValue({
+        id: 'media-tiff',
+        name: 'reference.tiff',
+        originalName: 'reference.tiff',
+        path: 'https://example.com/reference.tiff',
+        type: 'image',
+      }),
+      getReference: jest.fn(),
+    };
+    const service = new ReferenceImageService(repository as any);
+
+    await expect(
+      service.create('org-1', {
+        mediaId: 'media-tiff',
+        isActive: true,
+      })
+    ).rejects.toThrow('Reference images must be PNG, JPEG, or WebP files.');
+
+    expect(repository.getReference).not.toHaveBeenCalled();
+  });
+
+  it('saves an overflow upload inactive when four references are already active', async () => {
+    const transaction = {};
+    const repository = {
+      withOrganizationMutationLock: withTransaction(transaction),
+      getMedia: jest.fn().mockResolvedValue({
+        id: 'media-5',
+        name: 'fifth-reference.webp',
+        originalName: 'fifth-reference.webp',
+        path: 'https://example.com/fifth-reference.webp',
+        type: 'image',
+      }),
+      getReference: jest.fn().mockResolvedValue(undefined),
+      countActive: jest.fn().mockResolvedValue(4),
+      clearPrimary: jest.fn(),
+      createReference: jest.fn().mockImplementation(async (state) => ({
+        ...storedReference,
+        ...state,
+        mediaName: 'fifth-reference.webp',
+        originalName: 'fifth-reference.webp',
+        path: 'https://example.com/fifth-reference.webp',
+      })),
+    };
+    const service = new ReferenceImageService(repository as any);
+
+    const result = await service.create('org-1', {
+      mediaId: 'media-5',
+      isActive: true,
+      isPrimary: true,
+    });
+
+    expect(repository.createReference).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaId: 'media-5',
+        isActive: false,
+        isPrimary: false,
+      }),
+      transaction
+    );
+    expect(repository.clearPrimary).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      id: 'media-5',
+      isActive: false,
+      isPrimary: false,
+    });
+  });
+
+  it('clears primary status when an active primary reference is deactivated', async () => {
+    const transaction = {};
+    const repository = {
+      withOrganizationMutationLock: withTransaction(transaction),
+      getReference: jest.fn().mockResolvedValue(storedReference),
+      clearPrimary: jest.fn(),
+      countActive: jest.fn(),
+      updateReference: jest.fn().mockImplementation(async (state) => ({
+        ...storedReference,
+        ...state,
+      })),
+    };
+    const service = new ReferenceImageService(repository as any);
+
+    const result = await service.update('org-1', 'media-1', {
+      isActive: false,
+    });
+
+    expect(repository.updateReference).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaId: 'media-1',
+        isActive: false,
+        isPrimary: false,
+      }),
+      transaction
+    );
+    expect(repository.clearPrimary).not.toHaveBeenCalled();
+    expect(repository.countActive).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      isActive: false,
+      isPrimary: false,
+    });
   });
 });
