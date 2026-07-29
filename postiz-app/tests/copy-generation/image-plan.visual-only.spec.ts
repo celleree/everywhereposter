@@ -76,42 +76,44 @@ const createSourceBrief = () => ({
   blocked: false,
 });
 
+const createGroundedFrameResponse = () => ({
+  choices: [
+    {
+      message: {
+        parsed: {
+          recommendedImages: [
+            {
+              type: 'video_frame',
+              platform: 'instagram',
+              purpose: 'Show the product interface from the source video.',
+              rationale: 'The frame contains grounded visual evidence.',
+              aspectRatio: '4:5',
+              title: '',
+              headline: '',
+              subheadline: '',
+              captionHint: '',
+              sourceTimestampSeconds: 6,
+              sourceQuote: 'Publish',
+              visualSummary: 'A dashboard with a visible Publish button.',
+              visualPrompt: '',
+              altText: 'A dashboard showing a Publish button.',
+              confidence: 0.85,
+              warnings: [],
+            },
+          ],
+        },
+      },
+    },
+  ],
+});
+
 describe('ImagePlanService visual-only videos', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   it('creates a grounded frame plan when transcript is unavailable', async () => {
-    getParseMock().mockResolvedValue({
-      choices: [
-        {
-          message: {
-            parsed: {
-              recommendedImages: [
-                {
-                  type: 'video_frame',
-                  platform: 'instagram',
-                  purpose: 'Show the product interface from the source video.',
-                  rationale: 'The frame contains grounded visual evidence.',
-                  aspectRatio: '4:5',
-                  title: '',
-                  headline: '',
-                  subheadline: '',
-                  captionHint: '',
-                  sourceTimestampSeconds: 6,
-                  sourceQuote: 'Publish',
-                  visualSummary: 'A dashboard with a visible Publish button.',
-                  visualPrompt: '',
-                  altText: 'A dashboard showing a Publish button.',
-                  confidence: 0.85,
-                  warnings: [],
-                },
-              ],
-            },
-          },
-        },
-      ],
-    });
+    getParseMock().mockResolvedValue(createGroundedFrameResponse());
 
     const result = await new ImagePlanService().generate(
       createSourceBrief() as any,
@@ -168,5 +170,41 @@ describe('ImagePlanService visual-only videos', () => {
       'Legacy TIFF reference'
     );
     expect(getImageUrls(request.messages[1].content)).toEqual([]);
+  });
+
+  it('returns generated plans when reference usage tracking fails', async () => {
+    getParseMock().mockResolvedValue(createGroundedFrameResponse());
+    const referenceService = {
+      getActiveForSourceMedia: jest.fn().mockResolvedValue([
+        {
+          id: 'reference-png',
+          name: 'Editorial reference',
+          path: 'https://example.com/reference.png',
+          originalName: 'reference.png',
+          tags: ['editorial'],
+          isPrimary: true,
+        },
+      ]),
+      markUsedForSourceMedia: jest
+        .fn()
+        .mockRejectedValue(new Error('database temporarily unavailable')),
+    };
+
+    const result = await new ImagePlanService(referenceService as any).generate(
+      createSourceBrief() as any,
+      ['instagram']
+    );
+
+    expect(referenceService.markUsedForSourceMedia).toHaveBeenCalledWith(
+      'media-visual-only',
+      expect.any(Array),
+      ['instagram']
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: 'video_frame',
+      platform: 'instagram',
+      sourceTimestampSeconds: 6,
+    });
   });
 });
