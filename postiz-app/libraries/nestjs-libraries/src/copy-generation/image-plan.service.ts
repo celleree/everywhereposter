@@ -31,6 +31,7 @@ const IMAGE_PLAN_TYPES = [
 
 const IMAGE_PLAN_ASPECT_RATIOS = ['1:1', '4:5', '16:9', '9:16'] as const;
 const IMAGE_PLAN_TIMESTAMP_TOLERANCE_SECONDS = 0.25;
+const SUPPORTED_REFERENCE_IMAGE_PATTERN = /\.(?:png|jpe?g|webp)(?:$|[?#])/i;
 const UNGROUNDED_SOURCE_QUOTE_WARNING =
   'Source quote was omitted because it could not be verified against the source brief.';
 
@@ -140,7 +141,10 @@ Create the smallest useful platform-specific image plan.`;
           reference.isPrimary ? ' (primary reference)' : ''
         }. Study visual structure only; use its layout, spacing, composition, palette direction, typography direction, and mood as guidance. Do not copy its people, logos, wording, trademarks, or distinctive protected artwork.`,
       });
-      if (/^https?:\/\//i.test(reference.path)) {
+      if (
+        /^https?:\/\//i.test(reference.path) &&
+        this.isSupportedVisionReference(reference)
+      ) {
         userContent.push({
           type: 'image_url',
           image_url: { url: reference.path, detail: 'low' },
@@ -227,6 +231,12 @@ Rules:
           }`
       )
       .join('\n');
+  }
+
+  private isSupportedVisionReference(reference: ReferenceImageContext) {
+    return SUPPORTED_REFERENCE_IMAGE_PATTERN.test(
+      reference.originalName || reference.path
+    );
   }
 
   private normalizeDraft(
