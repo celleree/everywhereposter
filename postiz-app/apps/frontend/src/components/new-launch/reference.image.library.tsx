@@ -11,6 +11,7 @@ interface ReferenceImage {
   mediaId: string;
   path: string;
   originalName?: string | null;
+  alt?: string | null;
   name: string;
   tags: string[];
   brand?: string;
@@ -22,6 +23,13 @@ interface ReferenceImage {
   usageCount: number;
   lastUsedAt?: string;
 }
+
+const SUPPORTED_REFERENCE_FILE_PATTERN = /\.(?:png|jpe?g|webp)$/i;
+const SUPPORTED_REFERENCE_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+]);
 
 const getErrorMessage = async (response: Response) => {
   const payload = await response.json().catch(() => null);
@@ -38,6 +46,7 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
   const [references, setReferences] = useState<ReferenceImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState('');
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
@@ -48,7 +57,7 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch('/reference-images');
+      const response = await fetch('/reference-images?includeArchived=true');
       if (!response.ok) throw new Error(await getErrorMessage(response));
       const payload = await response.json();
       setReferences(Array.isArray(payload) ? payload : []);
@@ -63,15 +72,37 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
     void load();
   }, [load]);
 
+  const activeCount = useMemo(
+    () => references.filter((item) => item.isActive && !item.archivedAt).length,
+    [references]
+  );
+
+  const savedCount = useMemo(
+    () => references.filter((item) => !item.archivedAt).length,
+    [references]
+  );
+
+  const archivedCount = references.length - savedCount;
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return references;
-    return references.filter((reference) =>
-      [reference.name, reference.brand, reference.styleNotes, ...reference.tags]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(query))
-    );
-  }, [references, search]);
+    return references
+      .filter((reference) =>
+        showArchived ? Boolean(reference.archivedAt) : !reference.archivedAt
+      )
+      .filter((reference) => {
+        if (!query) return true;
+        return [
+          reference.name,
+          reference.alt,
+          reference.brand,
+          reference.styleNotes,
+          ...reference.tags,
+        ]
+          .filter(Boolean)
+          .some((value) => value!.toLowerCase().includes(query));
+      });
+  }, [references, search, showArchived]);
 
   const upload = useCallback(async () => {
     const file = fileInputRef.current?.files?.[0];
@@ -79,8 +110,18 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
       toaster.show(t('select_reference_image', 'Select an image first.'), 'warning');
       return;
     }
-    if (!file.type.startsWith('image/')) {
-      toaster.show(t('reference_images_only', 'Visual references must be image files.'), 'warning');
+    const mimeType = file.type.toLowerCase();
+    if (
+      !SUPPORTED_REFERENCE_FILE_PATTERN.test(file.name) ||
+      (mimeType && !SUPPORTED_REFERENCE_MIME_TYPES.has(mimeType))
+    ) {
+      toaster.show(
+        t(
+          'reference_image_formats',
+          'Visual references must be PNG, JPEG, or WebP files.'
+        ),
+        'warning'
+      );
       return;
     }
 
@@ -108,10 +149,11 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
             .filter(Boolean),
           aspectRatio: aspectRatio || undefined,
           styleNotes: styleNotes.trim() || undefined,
-          isActive: true,
+          isActive: activeCount < 4,
         }),
       });
       if (!saveResponse.ok) throw new Error(await getErrorMessage(saveResponse));
+      const saved = await saveResponse.json();
 
       setName('');
       setBrand('');
@@ -119,14 +161,23 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
       setAspectRatio('');
       setStyleNotes('');
       if (fileInputRef.current) fileInputRef.current.value = '';
+      setShowArchived(false);
       await load();
-      toaster.show(t('reference_saved', 'Visual reference saved.'), 'success');
+      toaster.show(
+        saved?.isActive
+          ? t('reference_saved', 'Visual reference saved.')
+          : t(
+              'reference_saved_inactive',
+              'Visual reference saved inactive because four references are already active.'
+            ),
+        'success'
+      );
     } catch (error: any) {
       toaster.show(error?.message || 'Could not save the visual reference.', 'warning');
     } finally {
       setSaving(false);
     }
-  }, [aspectRatio, brand, fetch, load, name, styleNotes, t, tags, toaster]);
+  }, [activeCount, aspectRatio, brand, fetch, load, name, styleNotes, t, tags, toaster]);
 
   const update = useCallback(
     async (id: string, body: Partial<ReferenceImage>) => {
@@ -157,6 +208,22 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
     [fetch, load, toaster]
   );
 
+  const restore = useCallback(
+    async (id: string) => {
+      try {
+        const response = await fetch(`/reference-images/${id}/restore`, {
+          method: 'POST',
+        });
+        if (!response.ok) throw new Error(await getErrorMessage(response));
+        await load();
+        toaster.show(t('reference_restored', 'Visual reference restored.'), 'success');
+      } catch (error: any) {
+        toaster.show(error?.message || 'Could not restore the visual reference.', 'warning');
+      }
+    },
+    [fetch, load, t, toaster]
+  );
+
   const inputClass =
     'w-full rounded-[8px] border border-fifth bg-newBgColorInner px-[10px] py-[9px] text-[13px] text-textColor outline-none';
 
@@ -171,7 +238,12 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
 
       <div className="grid grid-cols-2 gap-[12px] rounded-[12px] bg-newBgColor p-[14px]">
         <div className="col-span-2">
-          <input ref={fileInputRef} type="file" accept="image/*" className={inputClass} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+            className={inputClass}
+          />
         </div>
         <input
           className={inputClass}
@@ -224,16 +296,37 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
             {t('saved_visual_references', 'Saved visual references')}
           </div>
           <div className="text-[12px] text-gray-400">
-            {references.filter((item) => item.isActive).length}/4{' '}
-            {t('active_references', 'active')}
+            {activeCount}/4 {t('active_references', 'active')}
           </div>
         </div>
-        <input
-          className={`${inputClass} max-w-[260px]`}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={t('search_references', 'Search references')}
-        />
+        <div className="flex items-center gap-[8px]">
+          <div className="flex rounded-[8px] bg-newBgColor p-[3px] text-[11px]">
+            <button
+              type="button"
+              className={`rounded-[6px] px-[9px] py-[6px] ${
+                !showArchived ? 'bg-newBgColorInner text-textColor' : 'text-gray-400'
+              }`}
+              onClick={() => setShowArchived(false)}
+            >
+              {t('saved', 'Saved')} ({savedCount})
+            </button>
+            <button
+              type="button"
+              className={`rounded-[6px] px-[9px] py-[6px] ${
+                showArchived ? 'bg-newBgColorInner text-textColor' : 'text-gray-400'
+              }`}
+              onClick={() => setShowArchived(true)}
+            >
+              {t('archived', 'Archived')} ({archivedCount})
+            </button>
+          </div>
+          <input
+            className={`${inputClass} max-w-[240px]`}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t('search_references', 'Search references')}
+          />
+        </div>
       </div>
 
       <div className="max-h-[420px] overflow-y-auto pe-[4px]">
@@ -243,7 +336,9 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
           </div>
         ) : filtered.length === 0 ? (
           <div className="rounded-[10px] bg-newBgColorInner px-[14px] py-[24px] text-center text-[13px] text-gray-400">
-            {t('no_visual_references', 'No visual references saved yet.')}
+            {showArchived
+              ? t('no_archived_visual_references', 'No archived visual references.')
+              : t('no_visual_references', 'No visual references saved yet.')}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-[10px]">
@@ -254,11 +349,11 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
                   reference.isPrimary
                     ? 'border-purple-500 bg-newBgColor'
                     : 'border-fifth bg-newBgColorInner'
-                }`}
+                } ${reference.archivedAt ? 'opacity-80' : ''}`}
               >
                 <img
                   src={reference.path}
-                  alt={reference.name}
+                  alt={reference.alt || reference.name}
                   className="h-[150px] w-full rounded-[8px] object-cover"
                 />
                 <div className="mt-[8px] flex items-start justify-between gap-[8px]">
@@ -280,31 +375,43 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
                   </div>
                 ) : null}
                 <div className="mt-[9px] flex flex-wrap gap-[6px]">
-                  <button
-                    type="button"
-                    className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px]"
-                    onClick={() => update(reference.id, { isActive: !reference.isActive })}
-                  >
-                    {reference.isActive
-                      ? t('deactivate', 'Deactivate')
-                      : t('activate', 'Activate')}
-                  </button>
-                  {!reference.isPrimary ? (
+                  {reference.archivedAt ? (
                     <button
                       type="button"
                       className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px]"
-                      onClick={() => update(reference.id, { isPrimary: true })}
+                      onClick={() => restore(reference.id)}
                     >
-                      {t('make_primary', 'Make primary')}
+                      {t('restore', 'Restore')}
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px] text-gray-400"
-                    onClick={() => archive(reference.id)}
-                  >
-                    {t('archive', 'Archive')}
-                  </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px]"
+                        onClick={() => update(reference.id, { isActive: !reference.isActive })}
+                      >
+                        {reference.isActive
+                          ? t('deactivate', 'Deactivate')
+                          : t('activate', 'Activate')}
+                      </button>
+                      {!reference.isPrimary ? (
+                        <button
+                          type="button"
+                          className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px]"
+                          onClick={() => update(reference.id, { isPrimary: true })}
+                        >
+                          {t('make_primary', 'Make primary')}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px] text-gray-400"
+                        onClick={() => archive(reference.id)}
+                      >
+                        {t('archive', 'Archive')}
+                      </button>
+                    </>
+                  )}
                 </div>
                 {reference.usageCount > 0 ? (
                   <div className="mt-[7px] text-[10px] text-gray-500">
