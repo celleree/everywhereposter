@@ -229,4 +229,124 @@ describe('ReferenceImageService metadata isolation', () => {
       isPrimary: false,
     });
   });
+
+  it('rejects updates to archived references until they are restored', async () => {
+    const transaction = {};
+    const repository = {
+      withOrganizationMutationLock: withTransaction(transaction),
+      getReference: jest.fn().mockResolvedValue({
+        ...storedReference,
+        isActive: false,
+        isPrimary: false,
+        archivedAt: new Date('2026-07-29T13:00:00.000Z'),
+      }),
+      updateReference: jest.fn(),
+      clearPrimary: jest.fn(),
+      countActive: jest.fn(),
+    };
+    const service = new ReferenceImageService(repository as any);
+
+    await expect(
+      service.update('org-1', 'media-1', { isActive: true })
+    ).rejects.toThrow('Restore archived references before updating them.');
+
+    expect(repository.updateReference).not.toHaveBeenCalled();
+    expect(repository.clearPrimary).not.toHaveBeenCalled();
+    expect(repository.countActive).not.toHaveBeenCalled();
+  });
+
+  it('revalidates the active limit before restoring legacy active state', async () => {
+    const transaction = {};
+    const repository = {
+      withOrganizationMutationLock: withTransaction(transaction),
+      getReference: jest.fn().mockResolvedValue({
+        ...storedReference,
+        archivedAt: new Date('2026-07-29T13:00:00.000Z'),
+      }),
+      countActive: jest.fn().mockResolvedValue(4),
+      clearPrimary: jest.fn(),
+      updateReference: jest.fn(),
+    };
+    const service = new ReferenceImageService(repository as any);
+
+    await expect(service.restore('org-1', 'media-1')).rejects.toThrow(
+      'You can activate up to 4 reference images at once.'
+    );
+
+    expect(repository.countActive).toHaveBeenCalledWith('org-1', transaction);
+    expect(repository.clearPrimary).not.toHaveBeenCalled();
+    expect(repository.updateReference).not.toHaveBeenCalled();
+  });
+
+  it('revalidates and replaces the visible primary when restoring a legacy primary', async () => {
+    const transaction = {};
+    const repository = {
+      withOrganizationMutationLock: withTransaction(transaction),
+      getReference: jest.fn().mockResolvedValue({
+        ...storedReference,
+        archivedAt: new Date('2026-07-29T13:00:00.000Z'),
+      }),
+      countActive: jest.fn().mockResolvedValue(3),
+      clearPrimary: jest.fn().mockResolvedValue(undefined),
+      updateReference: jest.fn().mockImplementation(async (state) => ({
+        ...storedReference,
+        ...state,
+      })),
+    };
+    const service = new ReferenceImageService(repository as any);
+
+    const result = await service.restore('org-1', 'media-1');
+
+    expect(repository.countActive).toHaveBeenCalledWith('org-1', transaction);
+    expect(repository.clearPrimary).toHaveBeenCalledWith(
+      'org-1',
+      'media-1',
+      transaction
+    );
+    expect(repository.updateReference).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaId: 'media-1',
+        isActive: true,
+        isPrimary: true,
+        archivedAt: undefined,
+      }),
+      transaction
+    );
+    expect(result).toMatchObject({
+      isActive: true,
+      isPrimary: true,
+    });
+    expect(result.archivedAt).toBeUndefined();
+  });
+
+  it('treats usage tracking failures as best-effort', async () => {
+    const repository = {
+      getMediaWithOrganization: jest.fn().mockResolvedValue({
+        id: 'source-media',
+        organizationId: 'org-1',
+      }),
+      withOrganizationMutationLock: jest
+        .fn()
+        .mockRejectedValue(new Error('database temporarily unavailable')),
+    };
+    const service = new ReferenceImageService(repository as any);
+
+    await expect(
+      service.markUsedForSourceMedia(
+        'source-media',
+        [
+          {
+            id: 'media-1',
+            name: 'Editorial reference',
+            path: 'https://example.com/reference.png',
+            tags: ['editorial'],
+            isPrimary: true,
+          },
+        ],
+        ['instagram']
+      )
+    ).resolves.toBeUndefined();
+
+    expect(repository.withOrganizationMutationLock).toHaveBeenCalledTimes(1);
+  });
 });
