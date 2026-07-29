@@ -32,6 +32,17 @@ const IMAGE_PLAN_TYPES = [
 const IMAGE_PLAN_ASPECT_RATIOS = ['1:1', '4:5', '16:9', '9:16'] as const;
 const IMAGE_PLAN_TIMESTAMP_TOLERANCE_SECONDS = 0.25;
 const SUPPORTED_REFERENCE_IMAGE_PATTERN = /\.(?:png|jpe?g|webp)(?:$|[?#])/i;
+const PRIVATE_HOST_SUFFIXES = [
+  '.localhost',
+  '.local',
+  '.internal',
+  '.localdomain',
+  '.lan',
+  '.home',
+  '.home.arpa',
+  '.test',
+  '.invalid',
+] as const;
 const UNGROUNDED_SOURCE_QUOTE_WARNING =
   'Source quote was omitted because it could not be verified against the source brief.';
 
@@ -260,9 +271,7 @@ Rules:
       if (
         !hostname ||
         hostname === 'localhost' ||
-        hostname.endsWith('.localhost') ||
-        hostname.endsWith('.local') ||
-        hostname.endsWith('.internal') ||
+        PRIVATE_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix)) ||
         (!hostname.includes('.') && !hostname.includes(':'))
       ) {
         return false;
@@ -305,6 +314,8 @@ Rules:
   }
 
   private isPrivateIpv6(hostname: string) {
+    if (!hostname.includes(':')) return false;
+
     const normalized = hostname.toLowerCase();
     return (
       normalized === '::' ||
