@@ -41,8 +41,8 @@ export const MediaCopyButton: FC<{
 
   const openReferenceLibrary = useCallback(() => {
     modals.openModal({
-      title: t('visual_references', 'Visual References'),
-      size: 900,
+      title: t('image_reference_library', 'Image Reference Library'),
+      size: 1000,
       children: (close) => <ReferenceImageLibrary onClose={close} />,
     });
   }, [modals, t]);
@@ -54,7 +54,7 @@ export const MediaCopyButton: FC<{
         className="!h-[30px] !px-[10px] text-[12px] rounded-[6px]"
         onClick={openReferenceLibrary}
       >
-        {t('visual_references', 'Visual references')}
+        {t('image_references', 'Image references')}
       </Button>
       <Button
         secondary
