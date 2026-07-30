@@ -1,10 +1,20 @@
 'use client';
 
-import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  ChangeEvent,
+  FC,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Button } from '@gitroom/react/form/button';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
+import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 
 interface ReferenceImage {
   id: string;
@@ -24,6 +34,7 @@ interface ReferenceImage {
   lastUsedAt?: string;
 }
 
+const MAX_SELECTED_REFERENCES = 4;
 const SUPPORTED_REFERENCE_FILE_PATTERN = /\.(?:png|jpe?g|webp)$/i;
 const SUPPORTED_REFERENCE_MIME_TYPES = new Set([
   'image/png',
@@ -35,38 +46,42 @@ const getErrorMessage = async (response: Response) => {
   const payload = await response.json().catch(() => null);
   if (typeof payload?.message === 'string') return payload.message;
   if (Array.isArray(payload?.message)) return payload.message.join(' ');
-  return 'The reference image request failed.';
+  return 'The image reference request failed.';
 };
 
 export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) => {
   const fetch = useFetch();
-  const toaster = useToaster();
+  const { show: showToast } = useToaster();
   const t = useT();
+  const mediaDirectory = useMediaDirectory();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [references, setReferences] = useState<ReferenceImage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [busyId, setBusyId] = useState<string>();
+  const [loadError, setLoadError] = useState<string>();
   const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState('');
-  const [name, setName] = useState('');
-  const [brand, setBrand] = useState('');
-  const [tags, setTags] = useState('');
-  const [aspectRatio, setAspectRatio] = useState('');
-  const [styleNotes, setStyleNotes] = useState('');
+  const [openMenuId, setOpenMenuId] = useState<string>();
+  const [editingId, setEditingId] = useState<string>();
+  const [editingTitle, setEditingTitle] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(undefined);
     try {
       const response = await fetch('/reference-images?includeArchived=true');
       if (!response.ok) throw new Error(await getErrorMessage(response));
       const payload = await response.json();
       setReferences(Array.isArray(payload) ? payload : []);
-    } catch (error: any) {
-      toaster.show(error?.message || 'Could not load visual references.', 'warning');
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : 'Could not load image references.'
+      );
     } finally {
       setLoading(false);
     }
-  }, [fetch, toaster]);
+  }, [fetch]);
 
   useEffect(() => {
     void load();
@@ -94,6 +109,7 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
         if (!query) return true;
         return [
           reference.name,
+          reference.originalName,
           reference.alt,
           reference.brand,
           reference.styleNotes,
@@ -104,207 +120,295 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
       });
   }, [references, search, showArchived]);
 
-  const upload = useCallback(async () => {
-    const file = fileInputRef.current?.files?.[0];
-    if (!file) {
-      toaster.show(t('select_reference_image', 'Select an image first.'), 'warning');
-      return;
-    }
-    const mimeType = file.type.toLowerCase();
-    if (
-      !SUPPORTED_REFERENCE_FILE_PATTERN.test(file.name) ||
-      (mimeType && !SUPPORTED_REFERENCE_MIME_TYPES.has(mimeType))
-    ) {
-      toaster.show(
-        t(
-          'reference_image_formats',
-          'Visual references must be PNG, JPEG, or WebP files.'
-        ),
-        'warning'
-      );
-      return;
-    }
+  const replaceReference = useCallback((saved: ReferenceImage) => {
+    setReferences((current) =>
+      current.map((reference) =>
+        reference.id === saved.id ? saved : reference
+      )
+    );
+  }, []);
 
-    setSaving(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const uploadResponse = await fetch('/media/upload-simple', {
-        method: 'POST',
-        body: formData,
-      });
-      if (!uploadResponse.ok) throw new Error(await getErrorMessage(uploadResponse));
-      const media = await uploadResponse.json();
-      if (!media?.id) throw new Error('The uploaded image did not return a media ID.');
-
-      const saveResponse = await fetch('/reference-images', {
-        method: 'POST',
-        body: JSON.stringify({
-          mediaId: media.id,
-          name: name.trim() || file.name,
-          brand: brand.trim() || undefined,
-          tags: tags
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter(Boolean),
-          aspectRatio: aspectRatio || undefined,
-          styleNotes: styleNotes.trim() || undefined,
-          isActive: activeCount < 4,
-        }),
-      });
-      if (!saveResponse.ok) throw new Error(await getErrorMessage(saveResponse));
-      const saved = await saveResponse.json();
-
-      setName('');
-      setBrand('');
-      setTags('');
-      setAspectRatio('');
-      setStyleNotes('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      setShowArchived(false);
-      await load();
-      toaster.show(
-        saved?.isActive
-          ? t('reference_saved', 'Visual reference saved.')
-          : t(
-              'reference_saved_inactive',
-              'Visual reference saved inactive because four references are already active.'
-            ),
-        'success'
-      );
-    } catch (error: any) {
-      toaster.show(error?.message || 'Could not save the visual reference.', 'warning');
-    } finally {
-      setSaving(false);
-    }
-  }, [activeCount, aspectRatio, brand, fetch, load, name, styleNotes, t, tags, toaster]);
-
-  const update = useCallback(
+  const updateReference = useCallback(
     async (id: string, body: Partial<ReferenceImage>) => {
+      const response = await fetch(`/reference-images/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await getErrorMessage(response));
+      const saved = (await response.json()) as ReferenceImage;
+      replaceReference(saved);
+      return saved;
+    },
+    [fetch, replaceReference]
+  );
+
+  const uploadFiles = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files || []);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (!files.length) return;
+
+      const validFiles = files.filter((file) => {
+        const mimeType = file.type.toLowerCase();
+        return (
+          SUPPORTED_REFERENCE_FILE_PATTERN.test(file.name) &&
+          (!mimeType || SUPPORTED_REFERENCE_MIME_TYPES.has(mimeType))
+        );
+      });
+
+      if (validFiles.length !== files.length) {
+        showToast(
+          t(
+            'reference_image_formats',
+            'Image references must be PNG, JPEG, or WebP files.'
+          ),
+          'warning'
+        );
+      }
+      if (!validFiles.length) return;
+
+      setUploading(true);
+      let uploadedCount = 0;
+      let lastError: string | undefined;
+
+      for (const file of validFiles) {
+        let uploadedMediaId: string | undefined;
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          const uploadResponse = await fetch('/media/upload-simple', {
+            method: 'POST',
+            body: formData,
+          });
+          if (!uploadResponse.ok) {
+            throw new Error(await getErrorMessage(uploadResponse));
+          }
+          const media = await uploadResponse.json();
+          uploadedMediaId = media?.id;
+          if (!uploadedMediaId) {
+            throw new Error('The uploaded image did not return a media ID.');
+          }
+
+          const saveResponse = await fetch('/reference-images', {
+            method: 'POST',
+            body: JSON.stringify({
+              mediaId: uploadedMediaId,
+              name: file.name,
+              tags: [],
+              isActive: false,
+            }),
+          });
+          if (!saveResponse.ok) {
+            throw new Error(await getErrorMessage(saveResponse));
+          }
+          const saved = (await saveResponse.json()) as ReferenceImage;
+          setReferences((current) => [
+            saved,
+            ...current.filter((reference) => reference.id !== saved.id),
+          ]);
+          uploadedCount += 1;
+        } catch (error) {
+          lastError =
+            error instanceof Error ? error.message : 'Could not upload the image reference.';
+          if (uploadedMediaId) {
+            await fetch(`/media/${uploadedMediaId}`, { method: 'DELETE' }).catch(
+              () => undefined
+            );
+          }
+        }
+      }
+
+      setUploading(false);
+      setShowArchived(false);
+
+      if (uploadedCount > 0) {
+        showToast(
+          uploadedCount === 1
+            ? t('reference_saved', 'Image reference uploaded.')
+            : `${uploadedCount} ${t('references_saved', 'image references uploaded.')}`,
+          'success'
+        );
+      }
+      if (lastError) showToast(lastError, 'warning');
+    },
+    [fetch, showToast, t]
+  );
+
+  const toggleReference = useCallback(
+    async (reference: ReferenceImage) => {
+      if (reference.archivedAt || busyId) return;
+      if (!reference.isActive && activeCount >= MAX_SELECTED_REFERENCES) {
+        showToast(
+          t(
+            'reference_selection_limit',
+            'You can select up to four image references.'
+          ),
+          'warning'
+        );
+        return;
+      }
+
+      setBusyId(reference.id);
       try {
-        const response = await fetch(`/reference-images/${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(body),
+        await updateReference(reference.id, {
+          isActive: !reference.isActive,
+        });
+      } catch (error) {
+        showToast(
+          error instanceof Error ? error.message : 'Could not update the selection.',
+          'warning'
+        );
+      } finally {
+        setBusyId(undefined);
+      }
+    },
+    [activeCount, busyId, showToast, t, updateReference]
+  );
+
+  const archiveReference = useCallback(
+    async (reference: ReferenceImage) => {
+      setBusyId(reference.id);
+      setOpenMenuId(undefined);
+      try {
+        const response = await fetch(`/reference-images/${reference.id}`, {
+          method: 'DELETE',
         });
         if (!response.ok) throw new Error(await getErrorMessage(response));
-        await load();
-      } catch (error: any) {
-        toaster.show(error?.message || 'Could not update the visual reference.', 'warning');
+        const saved = (await response.json()) as ReferenceImage;
+        replaceReference(saved);
+        showToast(t('reference_archived', 'Image reference archived.'), 'success');
+      } catch (error) {
+        showToast(
+          error instanceof Error ? error.message : 'Could not archive the image reference.',
+          'warning'
+        );
+      } finally {
+        setBusyId(undefined);
       }
     },
-    [fetch, load, toaster]
+    [fetch, replaceReference, showToast, t]
   );
 
-  const archive = useCallback(
-    async (id: string) => {
+  const restoreReference = useCallback(
+    async (reference: ReferenceImage) => {
+      setBusyId(reference.id);
+      setOpenMenuId(undefined);
       try {
-        const response = await fetch(`/reference-images/${id}`, { method: 'DELETE' });
-        if (!response.ok) throw new Error(await getErrorMessage(response));
-        await load();
-      } catch (error: any) {
-        toaster.show(error?.message || 'Could not archive the visual reference.', 'warning');
-      }
-    },
-    [fetch, load, toaster]
-  );
-
-  const restore = useCallback(
-    async (id: string) => {
-      try {
-        const response = await fetch(`/reference-images/${id}/restore`, {
+        const response = await fetch(`/reference-images/${reference.id}/restore`, {
           method: 'POST',
         });
         if (!response.ok) throw new Error(await getErrorMessage(response));
-        await load();
-        toaster.show(t('reference_restored', 'Visual reference restored.'), 'success');
-      } catch (error: any) {
-        toaster.show(error?.message || 'Could not restore the visual reference.', 'warning');
+        const saved = (await response.json()) as ReferenceImage;
+        replaceReference(saved);
+        showToast(t('reference_restored', 'Image reference restored.'), 'success');
+      } catch (error) {
+        showToast(
+          error instanceof Error ? error.message : 'Could not restore the image reference.',
+          'warning'
+        );
+      } finally {
+        setBusyId(undefined);
       }
     },
-    [fetch, load, t, toaster]
+    [fetch, replaceReference, showToast, t]
   );
 
-  const inputClass =
-    'w-full rounded-[8px] border border-fifth bg-newBgColorInner px-[10px] py-[9px] text-[13px] text-textColor outline-none';
+  const removeReference = useCallback(
+    async (reference: ReferenceImage) => {
+      setOpenMenuId(undefined);
+      const confirmed = await deleteDialog(
+        t(
+          'remove_image_reference_confirmation',
+          'Remove this image reference from your library?'
+        )
+      );
+      if (!confirmed) return;
+
+      setBusyId(reference.id);
+      try {
+        const response = await fetch(`/media/${reference.mediaId}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) throw new Error(await getErrorMessage(response));
+        setReferences((current) =>
+          current.filter((item) => item.id !== reference.id)
+        );
+        showToast(
+          t('reference_removed', 'Image reference removed from the library.'),
+          'success'
+        );
+      } catch (error) {
+        showToast(
+          error instanceof Error
+            ? error.message
+            : 'Could not remove the image reference from the library.',
+          'warning'
+        );
+      } finally {
+        setBusyId(undefined);
+      }
+    },
+    [fetch, showToast, t]
+  );
+
+  const beginTitleEdit = useCallback((reference: ReferenceImage) => {
+    setOpenMenuId(undefined);
+    setEditingId(reference.id);
+    setEditingTitle(reference.name);
+  }, []);
+
+  const cancelTitleEdit = useCallback(() => {
+    setEditingId(undefined);
+    setEditingTitle('');
+  }, []);
+
+  const saveTitle = useCallback(
+    async (reference: ReferenceImage) => {
+      const nextTitle = editingTitle.trim();
+      if (!nextTitle || nextTitle === reference.name) {
+        cancelTitleEdit();
+        return;
+      }
+
+      setBusyId(reference.id);
+      try {
+        await updateReference(reference.id, { name: nextTitle });
+        cancelTitleEdit();
+      } catch (error) {
+        showToast(
+          error instanceof Error ? error.message : 'Could not update the title.',
+          'warning'
+        );
+      } finally {
+        setBusyId(undefined);
+      }
+    },
+    [cancelTitleEdit, editingTitle, showToast, updateReference]
+  );
 
   return (
-    <div className="flex min-w-[720px] max-w-[860px] flex-col gap-[16px] text-textColor">
-      <div className="text-[13px] text-gray-400">
-        {t(
-          'reference_image_library_hint',
-          'Upload examples of the visual direction you want. Active references guide future image plans; the primary reference has the strongest influence.'
-        )}
-      </div>
+    <div
+      className="flex min-h-[590px] min-w-[820px] max-w-[1000px] flex-col text-textColor"
+      onClick={() => setOpenMenuId(undefined)}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={uploadFiles}
+      />
 
-      <div className="grid grid-cols-2 gap-[12px] rounded-[12px] bg-newBgColor p-[14px]">
-        <div className="col-span-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
-            className={inputClass}
-          />
-        </div>
-        <input
-          className={inputClass}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder={t('reference_name', 'Reference name')}
-        />
-        <input
-          className={inputClass}
-          value={brand}
-          onChange={(event) => setBrand(event.target.value)}
-          placeholder={t('brand_optional', 'Brand or account (optional)')}
-        />
-        <input
-          className={inputClass}
-          value={tags}
-          onChange={(event) => setTags(event.target.value)}
-          placeholder={t('reference_tags', 'Tags, separated by commas')}
-        />
-        <select
-          className={inputClass}
-          value={aspectRatio}
-          onChange={(event) => setAspectRatio(event.target.value)}
-        >
-          <option value="">{t('aspect_ratio_optional', 'Aspect ratio (optional)')}</option>
-          <option value="1:1">1:1</option>
-          <option value="4:5">4:5</option>
-          <option value="16:9">16:9</option>
-          <option value="9:16">9:16</option>
-        </select>
-        <textarea
-          className={`${inputClass} col-span-2 min-h-[72px]`}
-          value={styleNotes}
-          onChange={(event) => setStyleNotes(event.target.value)}
-          placeholder={t(
-            'style_notes_optional',
-            'Style notes (optional): layout, spacing, typography, composition, or mood to follow.'
-          )}
-        />
-        <div className="col-span-2 flex justify-end">
-          <Button loading={saving} onClick={upload}>
-            {t('upload_reference', 'Upload reference')}
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between gap-[12px]">
-        <div>
-          <div className="text-[14px] font-[600]">
-            {t('saved_visual_references', 'Saved visual references')}
-          </div>
-          <div className="text-[12px] text-gray-400">
-            {activeCount}/4 {t('active_references', 'active')}
-          </div>
-        </div>
-        <div className="flex items-center gap-[8px]">
-          <div className="flex rounded-[8px] bg-newBgColor p-[3px] text-[11px]">
+      <div className="mb-[14px] flex items-center justify-between gap-[14px]">
+        <div className="flex items-center gap-[10px]">
+          <div className="flex rounded-[8px] bg-newBgColor p-[3px] text-[12px]">
             <button
               type="button"
-              className={`rounded-[6px] px-[9px] py-[6px] ${
-                !showArchived ? 'bg-newBgColorInner text-textColor' : 'text-gray-400'
+              className={`rounded-[6px] px-[11px] py-[7px] ${
+                !showArchived
+                  ? 'bg-newBgColorInner text-textColor'
+                  : 'text-gray-400'
               }`}
               onClick={() => setShowArchived(false)}
             >
@@ -312,119 +416,212 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
             </button>
             <button
               type="button"
-              className={`rounded-[6px] px-[9px] py-[6px] ${
-                showArchived ? 'bg-newBgColorInner text-textColor' : 'text-gray-400'
+              className={`rounded-[6px] px-[11px] py-[7px] ${
+                showArchived
+                  ? 'bg-newBgColorInner text-textColor'
+                  : 'text-gray-400'
               }`}
               onClick={() => setShowArchived(true)}
             >
               {t('archived', 'Archived')} ({archivedCount})
             </button>
           </div>
-          <input
-            className={`${inputClass} max-w-[240px]`}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t('search_references', 'Search references')}
-          />
+          {!showArchived ? (
+            <div className="text-[12px] text-gray-400">
+              {activeCount}/{MAX_SELECTED_REFERENCES}{' '}
+              {t('selected_references', 'selected')}
+            </div>
+          ) : null}
         </div>
+
+        <input
+          className="w-[260px] rounded-[8px] border border-fifth bg-newBgColorInner px-[11px] py-[8px] text-[13px] text-textColor outline-none"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t('search_references', 'Search image references')}
+        />
       </div>
 
-      <div className="max-h-[420px] overflow-y-auto pe-[4px]">
-        {loading ? (
-          <div className="py-[30px] text-center text-[13px] text-gray-400">
-            {t('loading', 'Loading...')}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-[10px] bg-newBgColorInner px-[14px] py-[24px] text-center text-[13px] text-gray-400">
-            {showArchived
-              ? t('no_archived_visual_references', 'No archived visual references.')
-              : t('no_visual_references', 'No visual references saved yet.')}
+      <div className="flex-1 overflow-y-auto rounded-[12px] bg-newTextColor/[0.02] p-[10px]">
+        {loadError ? (
+          <div className="flex h-full min-h-[430px] flex-col items-center justify-center gap-[12px] text-center">
+            <div className="text-[14px] text-gray-400">{loadError}</div>
+            <Button secondary onClick={load}>
+              {t('retry', 'Retry')}
+            </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-[10px]">
-            {filtered.map((reference) => (
-              <div
-                key={reference.id}
-                className={`rounded-[12px] border p-[10px] ${
-                  reference.isPrimary
-                    ? 'border-purple-500 bg-newBgColor'
-                    : 'border-fifth bg-newBgColorInner'
-                } ${reference.archivedAt ? 'opacity-80' : ''}`}
+          <div className="grid grid-cols-4 gap-[10px]">
+            {!showArchived ? (
+              <button
+                type="button"
+                disabled={uploading}
+                className="group relative aspect-square overflow-hidden rounded-[10px] border border-dashed border-fifth bg-newBgColorInner transition hover:border-gray-500 hover:bg-newBgColor disabled:cursor-wait"
+                onClick={() => fileInputRef.current?.click()}
               >
-                <img
-                  src={reference.path}
-                  alt={reference.alt || reference.name}
-                  className="h-[150px] w-full rounded-[8px] object-cover"
-                />
-                <div className="mt-[8px] flex items-start justify-between gap-[8px]">
-                  <div className="min-w-0">
-                    <div className="truncate text-[13px] font-[600]">{reference.name}</div>
-                    <div className="text-[11px] text-gray-400">
-                      {reference.brand || reference.aspectRatio || t('visual_reference', 'Visual reference')}
-                    </div>
-                  </div>
-                  {reference.isPrimary ? (
-                    <span className="rounded-full bg-purple-500/20 px-[7px] py-[3px] text-[10px] text-purple-300">
-                      {t('primary', 'Primary')}
-                    </span>
-                  ) : null}
-                </div>
-                {reference.styleNotes ? (
-                  <div className="mt-[6px] line-clamp-2 text-[11px] text-gray-400">
-                    {reference.styleNotes}
-                  </div>
-                ) : null}
-                <div className="mt-[9px] flex flex-wrap gap-[6px]">
-                  {reference.archivedAt ? (
-                    <button
-                      type="button"
-                      className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px]"
-                      onClick={() => restore(reference.id)}
-                    >
-                      {t('restore', 'Restore')}
-                    </button>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-[8px] text-gray-400">
+                  {uploading ? (
+                    <div className="h-[24px] w-[24px] animate-spin rounded-full border-[3px] border-gray-500 border-t-transparent" />
                   ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px]"
-                        onClick={() => update(reference.id, { isActive: !reference.isActive })}
-                      >
-                        {reference.isActive
-                          ? t('deactivate', 'Deactivate')
-                          : t('activate', 'Activate')}
-                      </button>
-                      {!reference.isPrimary ? (
+                    <div className="text-[38px] font-[200] leading-none">+</div>
+                  )}
+                  <div className="text-[12px]">
+                    {uploading
+                      ? t('uploading', 'Uploading...')
+                      : t('add_reference', 'Add image reference')}
+                  </div>
+                </div>
+              </button>
+            ) : null}
+
+            {loading
+              ? [...new Array(showArchived ? 8 : 7)].map((_, index) => (
+                  <div
+                    key={index}
+                    className="aspect-square animate-pulse rounded-[10px] bg-newSep"
+                  />
+                ))
+              : filtered.map((reference) => {
+                  const selected = reference.isActive && !reference.archivedAt;
+                  const selectionNumber = references
+                    .filter((item) => item.isActive && !item.archivedAt)
+                    .findIndex((item) => item.id === reference.id);
+
+                  return (
+                    <div
+                      key={reference.id}
+                      className={`group relative aspect-square overflow-visible rounded-[10px] border-[3px] transition ${
+                        selected ? 'border-ai' : 'border-transparent'
+                      } ${reference.archivedAt ? 'opacity-75' : 'cursor-pointer'}`}
+                      onClick={() => void toggleReference(reference)}
+                    >
+                      <div className="relative h-full w-full overflow-hidden rounded-[7px] bg-newBgColorInner">
+                        <img
+                          src={mediaDirectory.set(reference.path)}
+                          alt={reference.alt || reference.name}
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[48%] bg-gradient-to-t from-black/85 to-transparent" />
+
+                        {selected ? (
+                          <div className="absolute bottom-[8px] end-[8px] z-[20] flex h-[25px] min-w-[25px] items-center justify-center rounded-full bg-btnPrimary px-[7px] text-[12px] font-[600] text-white">
+                            {selectionNumber + 1}
+                          </div>
+                        ) : null}
+
+                        {busyId === reference.id ? (
+                          <div className="absolute inset-0 z-[30] flex items-center justify-center bg-black/45">
+                            <div className="h-[24px] w-[24px] animate-spin rounded-full border-[3px] border-white border-t-transparent" />
+                          </div>
+                        ) : null}
+
                         <button
                           type="button"
-                          className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px]"
-                          onClick={() => update(reference.id, { isPrimary: true })}
+                          aria-label={t('reference_options', 'Image reference options')}
+                          className="absolute end-[7px] top-[7px] z-[40] flex h-[30px] w-[30px] items-center justify-center rounded-[7px] bg-black/65 text-[20px] leading-none text-white opacity-0 transition hover:bg-black/85 group-hover:opacity-100"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setOpenMenuId((current) =>
+                              current === reference.id ? undefined : reference.id
+                            );
+                          }}
                         >
-                          {t('make_primary', 'Make primary')}
+                          ⋯
                         </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="rounded-[6px] bg-newBgColor px-[8px] py-[5px] text-[11px] text-gray-400"
-                        onClick={() => archive(reference.id)}
-                      >
-                        {t('archive', 'Archive')}
-                      </button>
-                    </>
-                  )}
-                </div>
-                {reference.usageCount > 0 ? (
-                  <div className="mt-[7px] text-[10px] text-gray-500">
-                    {t('used_in_generations', 'Used in generations')}: {reference.usageCount}
-                  </div>
-                ) : null}
-              </div>
-            ))}
+
+                        {openMenuId === reference.id ? (
+                          <div
+                            className="absolute end-[7px] top-[40px] z-[50] min-w-[140px] overflow-hidden rounded-[8px] border border-fifth bg-newBgColorInner py-[4px] text-[12px] shadow-xl"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {!reference.archivedAt ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="block w-full px-[11px] py-[8px] text-start hover:bg-newBgColor"
+                                  onClick={() => beginTitleEdit(reference)}
+                                >
+                                  {t('edit_title', 'Edit title')}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="block w-full px-[11px] py-[8px] text-start hover:bg-newBgColor"
+                                  onClick={() => void archiveReference(reference)}
+                                >
+                                  {t('archive', 'Archive')}
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                className="block w-full px-[11px] py-[8px] text-start hover:bg-newBgColor"
+                                onClick={() => void restoreReference(reference)}
+                              >
+                                {t('restore', 'Restore')}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="block w-full px-[11px] py-[8px] text-start text-red-400 hover:bg-newBgColor"
+                              onClick={() => void removeReference(reference)}
+                            >
+                              {t('remove_from_library', 'Remove from library')}
+                            </button>
+                          </div>
+                        ) : null}
+
+                        <div className="absolute inset-x-[9px] bottom-[8px] z-[10] pe-[34px]">
+                          {editingId === reference.id ? (
+                            <input
+                              autoFocus
+                              value={editingTitle}
+                              maxLength={120}
+                              className="w-full rounded-[6px] border border-white/20 bg-black/70 px-[7px] py-[5px] text-[12px] text-white outline-none"
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => setEditingTitle(event.target.value)}
+                              onBlur={() => void saveTitle(reference)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  void saveTitle(reference);
+                                }
+                                if (event.key === 'Escape') cancelTitleEdit();
+                              }}
+                            />
+                          ) : (
+                            <div className="truncate text-[12px] font-[600] text-white">
+                              {reference.name}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
           </div>
         )}
+
+        {!loading && !loadError && filtered.length === 0 ? (
+          <div className="pointer-events-none mt-[24px] text-center text-[13px] text-gray-500">
+            {showArchived
+              ? t('no_archived_visual_references', 'No archived image references.')
+              : search
+              ? t('no_matching_references', 'No matching image references.')
+              : t(
+                  'upload_first_reference',
+                  'Use the plus tile to upload your first image reference.'
+                )}
+          </div>
+        ) : null}
       </div>
 
-      <div className="flex justify-end">
+      <div className="mt-[14px] flex items-center justify-between">
+        <div className="text-[12px] text-gray-500">
+          {t(
+            'reference_selection_hint',
+            'Select up to four images to guide the next generated post set.'
+          )}
+        </div>
         <Button secondary onClick={onClose}>
           {t('done', 'Done')}
         </Button>
