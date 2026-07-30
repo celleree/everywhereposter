@@ -313,13 +313,13 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
     [fetch, replaceReference, showToast, t]
   );
 
-  const deleteReference = useCallback(
+  const removeReference = useCallback(
     async (reference: ReferenceImage) => {
       setOpenMenuId(undefined);
       const confirmed = await deleteDialog(
         t(
-          'delete_image_reference_confirmation',
-          'Delete this image reference permanently?'
+          'remove_image_reference_confirmation',
+          'Remove this image reference from your library?'
         )
       );
       if (!confirmed) return;
@@ -333,10 +333,15 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
         setReferences((current) =>
           current.filter((item) => item.id !== reference.id)
         );
-        showToast(t('reference_deleted', 'Image reference deleted.'), 'success');
+        showToast(
+          t('reference_removed', 'Image reference removed from the library.'),
+          'success'
+        );
       } catch (error) {
         showToast(
-          error instanceof Error ? error.message : 'Could not delete the image reference.',
+          error instanceof Error
+            ? error.message
+            : 'Could not remove the image reference from the library.',
           'warning'
         );
       } finally {
@@ -558,9 +563,9 @@ export const ReferenceImageLibrary: FC<{ onClose: () => void }> = ({ onClose }) 
                             <button
                               type="button"
                               className="block w-full px-[11px] py-[8px] text-start text-red-400 hover:bg-newBgColor"
-                              onClick={() => void deleteReference(reference)}
+                              onClick={() => void removeReference(reference)}
                             >
-                              {t('delete', 'Delete')}
+                              {t('remove_from_library', 'Remove from library')}
                             </button>
                           </div>
                         ) : null}
