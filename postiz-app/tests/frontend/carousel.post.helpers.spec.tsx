@@ -56,7 +56,7 @@ describe('carousel post helpers', () => {
       aspectRatio: '4:5',
     });
     expect(slides.some((slide) => slide.role === 'visual')).toBe(true);
-    expect(new Set(slides.map((slide) => slide.carouselId))).toHaveSize(1);
+    expect(new Set(slides.map((slide) => slide.carouselId)).size).toBe(1);
   });
 
   it('does not build carousels for video-only platforms', () => {
