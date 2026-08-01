@@ -8,11 +8,16 @@ jest.mock('@gitroom/nestjs-libraries/services/make.is', () => {
 import {
   buildCarouselSlides,
   CAROUSEL_MAX_SLIDES,
+  CAROUSEL_RENDER_BATCH_SIZE,
   CAROUSEL_SLIDE_TEXT_MAX_LENGTH,
+  chunkCarouselRenderPlans,
+  getGeneratedCarouselPlatforms,
   isCarouselPlatform,
   isCarouselSlideTextEditable,
   limitCarouselSlideText,
+  normalizeCarouselIntegrationSettings,
   reindexCarouselSlides,
+  updateCarouselPlatformSelection,
 } from '../../apps/frontend/src/components/new-launch/carousel.post.helpers';
 
 const result = {
@@ -85,6 +90,54 @@ describe('carousel post helpers', () => {
 
     expect(limited).toHaveLength(CAROUSEL_SLIDE_TEXT_MAX_LENGTH);
     expect(limited).toBe(input.slice(0, CAROUSEL_SLIDE_TEXT_MAX_LENGTH));
+  });
+
+  it('batches rendered plans within the API limit', () => {
+    const plans = Array.from(
+      { length: CAROUSEL_RENDER_BATCH_SIZE * 2 + 1 },
+      (_, index) => index
+    );
+
+    expect(chunkCarouselRenderPlans(plans).map((batch) => batch.length)).toEqual([
+      CAROUSEL_RENDER_BATCH_SIZE,
+      CAROUSEL_RENDER_BATCH_SIZE,
+      1,
+    ]);
+  });
+
+  it('keeps only platforms with successful generated slides', () => {
+    expect(
+      getGeneratedCarouselPlatforms({
+        linkedin: buildCarouselSlides(result, basePlan),
+        instagram: [],
+        x: buildCarouselSlides({ ...result, platform: 'x' }, basePlan),
+      })
+    ).toEqual(['linkedin', 'x']);
+  });
+
+  it('allows only one platform without selected accounts', () => {
+    expect(
+      updateCarouselPlatformSelection(['linkedin'], 'instagram', false)
+    ).toEqual(['instagram']);
+    expect(
+      updateCarouselPlatformSelection(['linkedin'], 'instagram', true)
+    ).toEqual(['linkedin', 'instagram']);
+  });
+
+  it('normalizes incompatible Instagram carousel settings', () => {
+    expect(
+      normalizeCarouselIntegrationSettings('instagram', {
+        post_type: 'reel',
+        is_trial_reel: true,
+        collaborators: [{ label: 'creator' }],
+      })
+    ).toMatchObject({
+      post_type: 'post',
+      post_type_explicit: true,
+      is_trial_reel: false,
+      graduation_strategy: 'MANUAL',
+      collaborators: [],
+    });
   });
 
   it('does not build carousels for video-only platforms', () => {
