@@ -7,21 +7,19 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { MediaPostReviewModal } from '@gitroom/frontend/components/new-launch/media.post.review.modal';
 import { MediaCarouselReviewModal } from '@gitroom/frontend/components/new-launch/media.carousel.review.modal';
 import { ReferenceImageLibrary } from '@gitroom/frontend/components/new-launch/reference.image.library';
-
-const VIDEO_FILE_EXTENSION_PATTERN =
-  /\.(?:mp4|m4v|mpeg|mpg|mpe|mov|qt|webm)(?:$|[?#])/i;
-
-const isVideoMediaPath = (path?: string) =>
-  Boolean(path && VIDEO_FILE_EXTENSION_PATTERN.test(path));
+import {
+  isVideoMedia,
+  MediaCopyItem,
+} from '@gitroom/frontend/components/new-launch/media.copy.helpers';
 
 export const MediaCopyButton: FC<{
-  media: { id: string; path: string }[];
+  media: MediaCopyItem[];
   postIndex: number;
 }> = ({ media, postIndex }) => {
   const t = useT();
   const modals = useModals();
   const firstMedia = media?.[0];
-  const mediaType = isVideoMediaPath(firstMedia?.path) ? 'video' : 'image';
+  const mediaType = isVideoMedia(firstMedia) ? 'video' : 'image';
 
   const openModal = useCallback(() => {
     if (!firstMedia?.id) return;
