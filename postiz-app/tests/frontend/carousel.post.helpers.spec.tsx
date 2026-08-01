@@ -8,8 +8,10 @@ jest.mock('@gitroom/nestjs-libraries/services/make.is', () => {
 import {
   buildCarouselSlides,
   CAROUSEL_MAX_SLIDES,
+  CAROUSEL_SLIDE_TEXT_MAX_LENGTH,
   isCarouselPlatform,
   isCarouselSlideTextEditable,
+  limitCarouselSlideText,
   reindexCarouselSlides,
 } from '../../apps/frontend/src/components/new-launch/carousel.post.helpers';
 
@@ -75,6 +77,14 @@ describe('carousel post helpers', () => {
     expect(isCarouselSlideTextEditable({ type: 'thumbnail' })).toBe(true);
     expect(isCarouselSlideTextEditable({ type: 'video_frame' })).toBe(false);
     expect(isCarouselSlideTextEditable({ type: 'ai_visual' })).toBe(false);
+  });
+
+  it('caps edited slide text at the render DTO limit', () => {
+    const input = 'x'.repeat(CAROUSEL_SLIDE_TEXT_MAX_LENGTH + 25);
+    const limited = limitCarouselSlideText(input);
+
+    expect(limited).toHaveLength(CAROUSEL_SLIDE_TEXT_MAX_LENGTH);
+    expect(limited).toBe(input.slice(0, CAROUSEL_SLIDE_TEXT_MAX_LENGTH));
   });
 
   it('does not build carousels for video-only platforms', () => {
