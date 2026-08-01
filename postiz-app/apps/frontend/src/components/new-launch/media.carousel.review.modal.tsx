@@ -25,10 +25,14 @@ import {
   CAROUSEL_SLIDE_TEXT_MAX_LENGTH,
   CarouselPlatform,
   CarouselSlidePlan,
+  chunkCarouselRenderPlans,
+  getGeneratedCarouselPlatforms,
   isCarouselPlatform,
   isCarouselSlideTextEditable,
   limitCarouselSlideText,
+  normalizeCarouselIntegrationSettings,
   reindexCarouselSlides,
+  updateCarouselPlatformSelection,
 } from '@gitroom/frontend/components/new-launch/carousel.post.helpers';
 
 const parseGenerationStream = async (request: Response) => {
@@ -88,6 +92,7 @@ export const MediaCarouselReviewModal: FC<{
     setGlobalValueMedia,
     setInternalValue,
     addInternalValue,
+    setSelectedIntegrations,
   } = useLaunchStore(
     useShallow((state) => ({
       selectedIntegrations: state.selectedIntegrations,
@@ -97,11 +102,13 @@ export const MediaCarouselReviewModal: FC<{
       setGlobalValueMedia: state.setGlobalValueMedia,
       setInternalValue: state.setInternalValue,
       addInternalValue: state.addInternalValue,
+      setSelectedIntegrations: state.setSelectedIntegrations,
     }))
   );
 
+  const hasSelectedAccounts = selectedIntegrations.length > 0;
   const availablePlatforms = useMemo<CarouselPlatform[]>(() => {
-    if (!selectedIntegrations.length) return [...CAROUSEL_PLATFORMS];
+    if (!hasSelectedAccounts) return [...CAROUSEL_PLATFORMS];
     return Array.from(
       new Set(
         selectedIntegrations
@@ -111,9 +118,11 @@ export const MediaCarouselReviewModal: FC<{
           .filter(isCarouselPlatform)
       )
     );
-  }, [selectedIntegrations]);
+  }, [hasSelectedAccounts, selectedIntegrations]);
 
-  const [platforms, setPlatforms] = useState<CarouselPlatform[]>(availablePlatforms);
+  const [platforms, setPlatforms] = useState<CarouselPlatform[]>(() =>
+    hasSelectedAccounts ? availablePlatforms : availablePlatforms.slice(0, 1)
+  );
   const [audience, setAudience] = useState('');
   const [goal, setGoal] = useState<
     'attract' | 'nurture' | 'position' | 'convert'
@@ -133,7 +142,11 @@ export const MediaCarouselReviewModal: FC<{
     Record<string, RenderedImagePlanResult>
   >({});
 
-  useEffect(() => setPlatforms(availablePlatforms), [availablePlatforms]);
+  useEffect(() => {
+    setPlatforms(
+      hasSelectedAccounts ? availablePlatforms : availablePlatforms.slice(0, 1)
+    );
+  }, [availablePlatforms, hasSelectedAccounts]);
 
   const renderSlides = useCallback(
     async (plans: CarouselSlidePlan[]) => {
@@ -144,41 +157,49 @@ export const MediaCarouselReviewModal: FC<{
       );
 
       try {
-        const request = await fetch('/image-assets/render', {
-          method: 'POST',
-          body: JSON.stringify({ mediaId, imagePlans: plans }),
-        });
-        const payload = (await request
-          .json()
-          .catch(() => null)) as RenderImagePlansResponse | null;
-        if (!request.ok || !payload?.results) {
-          throw new Error('Failed to render carousel slides.');
+        const results: RenderedImagePlanResult[] = [];
+        let requestFailureCount = 0;
+
+        for (const batch of chunkCarouselRenderPlans(plans)) {
+          try {
+            const request = await fetch('/image-assets/render', {
+              method: 'POST',
+              body: JSON.stringify({ mediaId, imagePlans: batch }),
+            });
+            const payload = (await request
+              .json()
+              .catch(() => null)) as RenderImagePlansResponse | null;
+            if (!request.ok || !payload?.results) {
+              throw new Error('Failed to render carousel slide batch.');
+            }
+            results.push(...payload.results);
+          } catch {
+            requestFailureCount += batch.length;
+          }
         }
 
-        setRendered((current) => ({
-          ...current,
-          ...payload.results.reduce(
-            (all, item) => ({ ...all, [item.planId]: item }),
-            {} as Record<string, RenderedImagePlanResult>
-          ),
-        }));
+        if (results.length) {
+          setRendered((current) => ({
+            ...current,
+            ...results.reduce(
+              (all, item) => ({ ...all, [item.planId]: item }),
+              {} as Record<string, RenderedImagePlanResult>
+            ),
+          }));
+        }
 
-        const failures = payload.results.filter(
+        const failedResultCount = results.filter(
           (item) => item.status === 'failed'
-        );
-        if (failures.length) {
+        ).length;
+        const failureCount = failedResultCount + requestFailureCount;
+        if (failureCount) {
           toaster.show(
-            `${failures.length} carousel slide${
-              failures.length === 1 ? '' : 's'
-            } failed to render.`,
+            `${failureCount} carousel slide${
+              failureCount === 1 ? '' : 's'
+            } failed to render. Regenerate the affected slides.`,
             'warning'
           );
         }
-      } catch (error: any) {
-        toaster.show(
-          error?.message || 'Failed to render carousel slides.',
-          'warning'
-        );
       } finally {
         setRenderingIds((current) =>
           current.filter((id) => !ids.includes(id))
@@ -194,6 +215,7 @@ export const MediaCarouselReviewModal: FC<{
       return;
     }
 
+    const requestedPlatforms = [...platforms];
     setLoading(true);
     setSlides({});
     setRendered({});
@@ -203,7 +225,7 @@ export const MediaCarouselReviewModal: FC<{
         method: 'POST',
         body: JSON.stringify({
           mediaId,
-          platforms,
+          platforms: requestedPlatforms,
           audience: audience || undefined,
           goal,
           ctaPreference: {
@@ -240,9 +262,28 @@ export const MediaCarouselReviewModal: FC<{
         },
         {} as Partial<Record<CarouselPlatform, CarouselSlidePlan[]>>
       );
+      const generatedPlatforms = getGeneratedCarouselPlatforms(nextSlides);
 
+      if (!generatedPlatforms.length) {
+        throw new Error('No carousel platforms generated successfully.');
+      }
+
+      const skippedPlatforms = requestedPlatforms.filter(
+        (platform) => !generatedPlatforms.includes(platform)
+      );
       setDrafts(nextDrafts);
       setSlides(nextSlides);
+      setPlatforms(generatedPlatforms);
+
+      if (skippedPlatforms.length) {
+        toaster.show(
+          `Skipped ${skippedPlatforms
+            .map((platform) => CAROUSEL_PLATFORM_LABELS[platform])
+            .join(', ')} because generation failed. The successful carousels can still be applied.`,
+          'warning'
+        );
+      }
+
       await renderSlides(Object.values(nextSlides).flat());
     } catch (error: any) {
       toaster.show(
@@ -320,7 +361,22 @@ export const MediaCarouselReviewModal: FC<{
       return;
     }
 
-    for (const platform of platforms) {
+    const activePlatforms = getGeneratedCarouselPlatforms(slides).filter(
+      (platform) => platforms.includes(platform)
+    );
+    if (!activePlatforms.length) {
+      toaster.show('No completed carousel platforms are available.', 'warning');
+      return;
+    }
+    if (!hasSelectedAccounts && activePlatforms.length !== 1) {
+      toaster.show(
+        'Choose one platform version when applying to the global post.',
+        'warning'
+      );
+      return;
+    }
+
+    for (const platform of activePlatforms) {
       const platformSlides = slides[platform] || [];
       if (platformSlides.length < 2) {
         toaster.show(
@@ -344,8 +400,25 @@ export const MediaCarouselReviewModal: FC<{
       }
     }
 
+    if (hasSelectedAccounts && activePlatforms.includes('instagram')) {
+      setSelectedIntegrations(
+        selectedIntegrations.map((item) => {
+          const platform = mapIntegrationIdentifierToCopyPlatform(
+            item.integration.identifier
+          );
+          return {
+            selectedIntegrations: item.integration,
+            settings: normalizeCarouselIntegrationSettings(
+              platform,
+              item.settings
+            ),
+          };
+        })
+      );
+    }
+
     let applied = 0;
-    for (const platform of platforms) {
+    for (const platform of activePlatforms) {
       const media = (slides[platform] || []).map((slide) => ({
         ...rendered[slide.id].media!,
       }));
@@ -389,12 +462,12 @@ export const MediaCarouselReviewModal: FC<{
       }
     }
 
-    if (!selectedIntegrations.length && platforms[0]) {
-      const firstPlatform = platforms[0];
-      setGlobalValueText(postIndex, drafts[firstPlatform] || '');
+    if (!hasSelectedAccounts) {
+      const platform = activePlatforms[0];
+      setGlobalValueText(postIndex, drafts[platform] || '');
       setGlobalValueMedia(
         postIndex,
-        (slides[firstPlatform] || []).map((slide) => ({
+        (slides[platform] || []).map((slide) => ({
           ...rendered[slide.id].media!,
         }))
       );
@@ -419,6 +492,7 @@ export const MediaCarouselReviewModal: FC<{
     addInternalValue,
     drafts,
     global,
+    hasSelectedAccounts,
     internal,
     onClose,
     platforms,
@@ -429,6 +503,7 @@ export const MediaCarouselReviewModal: FC<{
     setGlobalValueMedia,
     setGlobalValueText,
     setInternalValue,
+    setSelectedIntegrations,
     slides,
     toaster,
   ]);
@@ -443,6 +518,12 @@ export const MediaCarouselReviewModal: FC<{
             Generate an ordered, editable image carousel from the uploaded
             video. Only platforms with multi-image publishing are shown.
           </div>
+          {!hasSelectedAccounts && (
+            <div className="rounded-[8px] bg-newBgColorInner px-[12px] py-[9px] text-[12px] text-gray-400">
+              No accounts are selected. Choose one platform version to apply to
+              the global post.
+            </div>
+          )}
 
           <div className="grid grid-cols-3 gap-[8px]">
             {CAROUSEL_PLATFORMS.map((platform) => {
@@ -458,9 +539,11 @@ export const MediaCarouselReviewModal: FC<{
                     disabled={!available}
                     onChange={() =>
                       setPlatforms((current) =>
-                        current.includes(platform)
-                          ? current.filter((item) => item !== platform)
-                          : [...current, platform]
+                        updateCarouselPlatformSelection(
+                          current,
+                          platform,
+                          hasSelectedAccounts
+                        )
                       )
                     }
                     label={CAROUSEL_PLATFORM_LABELS[platform]}
@@ -711,6 +794,11 @@ export const MediaCarouselReviewModal: FC<{
               onClick={() => {
                 setSlides({});
                 setRendered({});
+                setPlatforms(
+                  hasSelectedAccounts
+                    ? availablePlatforms
+                    : availablePlatforms.slice(0, 1)
+                );
               }}
             >
               Start over
