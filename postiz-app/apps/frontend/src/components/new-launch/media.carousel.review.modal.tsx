@@ -598,20 +598,28 @@ export const MediaCarouselReviewModal: FC<{
                           <textarea
                             className="mb-[8px] min-h-[84px] w-full rounded-[7px] border border-fifth bg-input p-[8px] text-[12px] text-inputText outline-none"
                             value={slide.headline || slide.visualSummary}
-                            onChange={(event) =>
+                            disabled={isRendering}
+                            onChange={(event) => {
+                              const nextText = event.target.value;
+                              setRendered((current) => {
+                                if (!current[slide.id]) return current;
+                                const next = { ...current };
+                                delete next[slide.id];
+                                return next;
+                              });
                               updateSlides(platform, (current) =>
                                 current.map((item, itemIndex) =>
                                   itemIndex === index
                                     ? {
                                         ...item,
-                                        headline: event.target.value,
-                                        visualSummary: event.target.value,
-                                        altText: event.target.value,
+                                        headline: nextText,
+                                        visualSummary: nextText,
+                                        altText: nextText,
                                       }
                                     : item
                                 )
-                              )
-                            }
+                              );
+                            }}
                           />
 
                           <div className="grid grid-cols-2 gap-[6px]">
