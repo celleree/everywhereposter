@@ -26,6 +26,10 @@ export type CarouselSlidePlan = ImagePlanItem & {
   role: CarouselRole;
 };
 
+export type BuildCarouselSlidesOptions = {
+  includeCta?: boolean;
+};
+
 export const CAROUSEL_MAX_SLIDES = 4;
 
 export const CAROUSEL_PLATFORM_LABELS: Record<CarouselPlatform, string> = {
@@ -52,6 +56,10 @@ export const isCarouselPlatform = (
   Boolean(
     platform && CAROUSEL_PLATFORMS.includes(platform as CarouselPlatform)
   );
+
+export const isCarouselSlideTextEditable = (
+  slide: Pick<ImagePlanItem, 'type'>
+) => slide.type === 'quote_card' || slide.type === 'thumbnail';
 
 const cleanText = (value?: string, maximum = 110) => {
   const normalized = (value || '').replace(/\s+/g, ' ').trim();
@@ -111,7 +119,8 @@ export const reindexCarouselSlides = (slides: CarouselSlidePlan[]) =>
 
 export const buildCarouselSlides = (
   result: GenerateMediaCopyResult,
-  basePlan?: ImagePlanItem
+  basePlan?: ImagePlanItem,
+  options: BuildCarouselSlidesOptions = {}
 ): CarouselSlidePlan[] => {
   if (!isCarouselPlatform(result.platform)) return [];
 
@@ -128,7 +137,10 @@ export const buildCarouselSlides = (
   const takeaway = cleanText(
     segments[2] || segments[segments.length - 1] || supportingPoint
   );
-  const cta = cleanText(result.cta || segments[segments.length - 1]);
+  const includeCta = options.includeCta ?? true;
+  const cta = includeCta
+    ? cleanText(result.cta || segments[segments.length - 1])
+    : '';
 
   const slides: CarouselSlidePlan[] = [
     quoteCard({
