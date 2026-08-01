@@ -9,6 +9,7 @@ import {
   buildCarouselSlides,
   CAROUSEL_MAX_SLIDES,
   isCarouselPlatform,
+  isCarouselSlideTextEditable,
   reindexCarouselSlides,
 } from '../../apps/frontend/src/components/new-launch/carousel.post.helpers';
 
@@ -57,6 +58,23 @@ describe('carousel post helpers', () => {
     });
     expect(slides.some((slide) => slide.role === 'visual')).toBe(true);
     expect(new Set(slides.map((slide) => slide.carouselId)).size).toBe(1);
+  });
+
+  it('does not add a CTA slide when CTA generation is disabled', () => {
+    const slides = buildCarouselSlides(
+      { ...result, cta: '' },
+      basePlan,
+      { includeCta: false }
+    );
+
+    expect(slides.some((slide) => slide.role === 'cta')).toBe(false);
+  });
+
+  it('only marks render plans that consume text as editable', () => {
+    expect(isCarouselSlideTextEditable({ type: 'quote_card' })).toBe(true);
+    expect(isCarouselSlideTextEditable({ type: 'thumbnail' })).toBe(true);
+    expect(isCarouselSlideTextEditable({ type: 'video_frame' })).toBe(false);
+    expect(isCarouselSlideTextEditable({ type: 'ai_visual' })).toBe(false);
   });
 
   it('does not build carousels for video-only platforms', () => {
