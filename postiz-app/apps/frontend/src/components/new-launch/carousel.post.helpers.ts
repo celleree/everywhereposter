@@ -31,6 +31,7 @@ export type BuildCarouselSlidesOptions = {
 };
 
 export const CAROUSEL_MAX_SLIDES = 4;
+export const CAROUSEL_RENDER_BATCH_SIZE = 8;
 export const CAROUSEL_SLIDE_TEXT_MAX_LENGTH = 240;
 
 export const CAROUSEL_PLATFORM_LABELS: Record<CarouselPlatform, string> = {
@@ -64,6 +65,52 @@ export const isCarouselSlideTextEditable = (
 
 export const limitCarouselSlideText = (value: string) =>
   value.slice(0, CAROUSEL_SLIDE_TEXT_MAX_LENGTH);
+
+export const chunkCarouselRenderPlans = <T>(
+  plans: T[],
+  batchSize = CAROUSEL_RENDER_BATCH_SIZE
+) => {
+  const safeBatchSize = Math.max(1, batchSize);
+  return Array.from(
+    { length: Math.ceil(plans.length / safeBatchSize) },
+    (_, index) =>
+      plans.slice(index * safeBatchSize, (index + 1) * safeBatchSize)
+  );
+};
+
+export const getGeneratedCarouselPlatforms = (
+  slides: Partial<Record<CarouselPlatform, CarouselSlidePlan[]>>
+) =>
+  CAROUSEL_PLATFORMS.filter(
+    (platform) => Boolean(slides[platform]?.length)
+  );
+
+export const updateCarouselPlatformSelection = (
+  current: CarouselPlatform[],
+  platform: CarouselPlatform,
+  allowMultiple: boolean
+) => {
+  if (!allowMultiple) return [platform];
+  return current.includes(platform)
+    ? current.filter((item) => item !== platform)
+    : [...current, platform];
+};
+
+export const normalizeCarouselIntegrationSettings = (
+  platform: CopyPlatform | undefined,
+  settings: Record<string, any> = {}
+) => {
+  if (platform !== 'instagram') return settings;
+
+  return {
+    ...settings,
+    post_type: 'post',
+    post_type_explicit: true,
+    is_trial_reel: false,
+    graduation_strategy: 'MANUAL',
+    collaborators: [],
+  };
+};
 
 const cleanText = (value?: string, maximum = 110) => {
   const normalized = (value || '').replace(/\s+/g, ' ').trim();
