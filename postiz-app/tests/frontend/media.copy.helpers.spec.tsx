@@ -1,4 +1,7 @@
-import { isVideoMedia } from '../../apps/frontend/src/components/new-launch/media.copy.helpers';
+import {
+  isVideoMedia,
+  shouldHydrateMediaMetadata,
+} from '../../apps/frontend/src/components/new-launch/media.copy.helpers';
 
 describe('media copy video detection', () => {
   it('recognizes extensionless uploaded videos from stored media type', () => {
@@ -37,6 +40,31 @@ describe('media copy video detection', () => {
         id: 'image-1',
         path: 'https://media.example.com/photo.jpg',
         type: 'image',
+      })
+    ).toBe(false);
+  });
+
+  it('hydrates extensionless saved attachments whose metadata was stripped', () => {
+    expect(
+      shouldHydrateMediaMetadata({
+        id: 'saved-video-1',
+        path: 'https://media.example.com/opaque-upload-key',
+      })
+    ).toBe(true);
+  });
+
+  it('does not hydrate attachments that already identify their media type', () => {
+    expect(
+      shouldHydrateMediaMetadata({
+        id: 'saved-video-2',
+        path: 'https://media.example.com/opaque-upload-key',
+        type: 'video',
+      })
+    ).toBe(false);
+    expect(
+      shouldHydrateMediaMetadata({
+        id: 'saved-image-1',
+        path: 'https://media.example.com/photo.jpg',
       })
     ).toBe(false);
   });
