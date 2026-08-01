@@ -22,10 +22,12 @@ import {
   CAROUSEL_MAX_SLIDES,
   CAROUSEL_PLATFORMS,
   CAROUSEL_PLATFORM_LABELS,
+  CAROUSEL_SLIDE_TEXT_MAX_LENGTH,
   CarouselPlatform,
   CarouselSlidePlan,
   isCarouselPlatform,
   isCarouselSlideTextEditable,
+  limitCarouselSlideText,
   reindexCarouselSlides,
 } from '@gitroom/frontend/components/new-launch/carousel.post.helpers';
 
@@ -574,6 +576,7 @@ export const MediaCarouselReviewModal: FC<{
                       const asset = rendered[slide.id];
                       const isRendering = renderingIds.includes(slide.id);
                       const isTextEditable = isCarouselSlideTextEditable(slide);
+                      const slideText = slide.headline || slide.visualSummary;
                       return (
                         <div
                           key={slide.id}
@@ -600,32 +603,43 @@ export const MediaCarouselReviewModal: FC<{
                           </div>
 
                           {isTextEditable ? (
-                            <textarea
-                              className="mb-[8px] min-h-[84px] w-full rounded-[7px] border border-fifth bg-input p-[8px] text-[12px] text-inputText outline-none"
-                              value={slide.headline || slide.visualSummary}
-                              disabled={isRendering}
-                              onChange={(event) => {
-                                const nextText = event.target.value;
-                                setRendered((current) => {
-                                  if (!current[slide.id]) return current;
-                                  const next = { ...current };
-                                  delete next[slide.id];
-                                  return next;
-                                });
-                                updateSlides(platform, (current) =>
-                                  current.map((item, itemIndex) =>
-                                    itemIndex === index
-                                      ? {
-                                          ...item,
-                                          headline: nextText,
-                                          visualSummary: nextText,
-                                          altText: nextText,
-                                        }
-                                      : item
-                                  )
-                                );
-                              }}
-                            />
+                            <>
+                              <textarea
+                                className="min-h-[84px] w-full rounded-[7px] border border-fifth bg-input p-[8px] text-[12px] text-inputText outline-none"
+                                value={slideText}
+                                maxLength={CAROUSEL_SLIDE_TEXT_MAX_LENGTH}
+                                disabled={isRendering}
+                                onChange={(event) => {
+                                  const nextText = limitCarouselSlideText(
+                                    event.target.value
+                                  );
+                                  if (nextText === slideText) return;
+
+                                  setRendered((current) => {
+                                    if (!current[slide.id]) return current;
+                                    const next = { ...current };
+                                    delete next[slide.id];
+                                    return next;
+                                  });
+                                  updateSlides(platform, (current) =>
+                                    current.map((item, itemIndex) =>
+                                      itemIndex === index
+                                        ? {
+                                            ...item,
+                                            headline: nextText,
+                                            visualSummary: nextText,
+                                            altText: nextText,
+                                          }
+                                        : item
+                                    )
+                                  );
+                                }}
+                              />
+                              <div className="mb-[8px] text-right text-[11px] text-gray-400">
+                                {slideText.length}/
+                                {CAROUSEL_SLIDE_TEXT_MAX_LENGTH}
+                              </div>
+                            </>
                           ) : (
                             <div className="mb-[8px] min-h-[84px] rounded-[7px] border border-fifth bg-input p-[8px] text-[12px] text-gray-400">
                               This visual type does not render slide text. Use
