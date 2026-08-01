@@ -31,6 +31,7 @@ export type BuildCarouselSlidesOptions = {
 };
 
 export const CAROUSEL_MAX_SLIDES = 4;
+export const CAROUSEL_SLIDE_TEXT_MAX_LENGTH = 240;
 
 export const CAROUSEL_PLATFORM_LABELS: Record<CarouselPlatform, string> = {
   linkedin: 'LinkedIn',
@@ -60,6 +61,9 @@ export const isCarouselPlatform = (
 export const isCarouselSlideTextEditable = (
   slide: Pick<ImagePlanItem, 'type'>
 ) => slide.type === 'quote_card' || slide.type === 'thumbnail';
+
+export const limitCarouselSlideText = (value: string) =>
+  value.slice(0, CAROUSEL_SLIDE_TEXT_MAX_LENGTH);
 
 const cleanText = (value?: string, maximum = 110) => {
   const normalized = (value || '').replace(/\s+/g, ' ').trim();
