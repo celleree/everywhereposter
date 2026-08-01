@@ -10,6 +10,7 @@ export type MediaCopyItem = {
 
 const VIDEO_FILE_EXTENSION_PATTERN =
   /\.(?:mp4|m4v|mpeg|mpg|mpe|mov|qt|webm)(?:$|[?#])/i;
+const FILE_EXTENSION_PATTERN = /\.[a-z0-9]{2,8}(?:$|[?#])/i;
 
 export const isVideoMedia = (media?: Partial<MediaCopyItem>) => {
   if (!media) return false;
@@ -28,3 +29,16 @@ export const isVideoMedia = (media?: Partial<MediaCopyItem>) => {
     VIDEO_FILE_EXTENSION_PATTERN.test(value || '')
   );
 };
+
+export const shouldHydrateMediaMetadata = (
+  media?: Partial<MediaCopyItem>
+) =>
+  Boolean(
+    media?.id &&
+      !media.type &&
+      !media.mimeType &&
+      !media.mimetype &&
+      !media.name &&
+      !media.originalName &&
+      !FILE_EXTENSION_PATTERN.test(media.path || '')
+  );
