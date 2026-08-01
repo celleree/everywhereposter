@@ -240,6 +240,14 @@ export class MediaController {
     return this._mediaService.generateVideoAllowed(org, type);
   }
 
+  @Get('/:id')
+  getMediaById(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._mediaService.getMediaByOrganizationIdAndId(org.id, id);
+  }
+
   private assertLocalUploadExists(publicPath: string) {
     if (process.env.STORAGE_PROVIDER !== 'local') {
       return undefined;

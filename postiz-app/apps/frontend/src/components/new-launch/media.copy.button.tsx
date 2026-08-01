@@ -1,27 +1,68 @@
 'use client';
 
-import React, { FC, useCallback } from 'react';
+import React, { FC, useCallback, useEffect, useState } from 'react';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { Button } from '@gitroom/react/form/button';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { MediaPostReviewModal } from '@gitroom/frontend/components/new-launch/media.post.review.modal';
 import { MediaCarouselReviewModal } from '@gitroom/frontend/components/new-launch/media.carousel.review.modal';
 import { ReferenceImageLibrary } from '@gitroom/frontend/components/new-launch/reference.image.library';
-
-const VIDEO_FILE_EXTENSION_PATTERN =
-  /\.(?:mp4|m4v|mpeg|mpg|mpe|mov|qt|webm)(?:$|[?#])/i;
-
-const isVideoMediaPath = (path?: string) =>
-  Boolean(path && VIDEO_FILE_EXTENSION_PATTERN.test(path));
+import {
+  isVideoMedia,
+  MediaCopyItem,
+  shouldHydrateMediaMetadata,
+} from '@gitroom/frontend/components/new-launch/media.copy.helpers';
 
 export const MediaCopyButton: FC<{
-  media: { id: string; path: string }[];
+  media: MediaCopyItem[];
   postIndex: number;
 }> = ({ media, postIndex }) => {
   const t = useT();
+  const fetch = useFetch();
   const modals = useModals();
   const firstMedia = media?.[0];
-  const mediaType = isVideoMediaPath(firstMedia?.path) ? 'video' : 'image';
+  const [hydratedMedia, setHydratedMedia] = useState<MediaCopyItem>();
+
+  useEffect(() => {
+    let active = true;
+    setHydratedMedia(undefined);
+
+    if (!shouldHydrateMediaMetadata(firstMedia)) {
+      return () => {
+        active = false;
+      };
+    }
+
+    void fetch(`/media/${encodeURIComponent(firstMedia!.id)}`)
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = (await response.json()) as MediaCopyItem | null;
+        if (active && payload?.id === firstMedia!.id) {
+          setHydratedMedia(payload);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [
+    fetch,
+    firstMedia?.id,
+    firstMedia?.mimeType,
+    firstMedia?.mimetype,
+    firstMedia?.name,
+    firstMedia?.originalName,
+    firstMedia?.path,
+    firstMedia?.type,
+  ]);
+
+  const resolvedMedia =
+    hydratedMedia?.id === firstMedia?.id
+      ? { ...firstMedia, ...hydratedMedia }
+      : firstMedia;
+  const mediaType = isVideoMedia(resolvedMedia) ? 'video' : 'image';
 
   const openModal = useCallback(() => {
     if (!firstMedia?.id) return;
