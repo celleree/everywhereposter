@@ -5,6 +5,7 @@ import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { Button } from '@gitroom/react/form/button';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { MediaPostReviewModal } from '@gitroom/frontend/components/new-launch/media.post.review.modal';
+import { MediaCarouselReviewModal } from '@gitroom/frontend/components/new-launch/media.carousel.review.modal';
 import { ReferenceImageLibrary } from '@gitroom/frontend/components/new-launch/reference.image.library';
 
 const VIDEO_FILE_EXTENSION_PATTERN =
@@ -39,6 +40,22 @@ export const MediaCopyButton: FC<{
     });
   }, [firstMedia?.id, mediaType, modals, postIndex, t]);
 
+  const openCarouselModal = useCallback(() => {
+    if (!firstMedia?.id || mediaType !== 'video') return;
+
+    modals.openModal({
+      title: t('generate_carousel', 'Generate Carousel'),
+      size: 1080,
+      children: (close) => (
+        <MediaCarouselReviewModal
+          mediaId={firstMedia.id}
+          postIndex={postIndex}
+          onClose={close}
+        />
+      ),
+    });
+  }, [firstMedia?.id, mediaType, modals, postIndex, t]);
+
   const openReferenceLibrary = useCallback(() => {
     modals.openModal({
       title: t('image_reference_library', 'Image Reference Library'),
@@ -63,6 +80,14 @@ export const MediaCopyButton: FC<{
         onClick={openModal}
       >
         {t('generate_post_set', 'Generate post set')}
+      </Button>
+      <Button
+        secondary
+        className="!h-[30px] !px-[10px] text-[12px] rounded-[6px]"
+        disabled={!firstMedia?.id || mediaType !== 'video'}
+        onClick={openCarouselModal}
+      >
+        {t('generate_carousel', 'Generate carousel')}
       </Button>
     </div>
   );
