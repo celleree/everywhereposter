@@ -25,6 +25,7 @@ import {
   CarouselPlatform,
   CarouselSlidePlan,
   isCarouselPlatform,
+  isCarouselSlideTextEditable,
   reindexCarouselSlides,
 } from '@gitroom/frontend/components/new-launch/carousel.post.helpers';
 
@@ -230,7 +231,9 @@ export const MediaCarouselReviewModal: FC<{
           const basePlan = response.imagePlans.find(
             (plan) => plan.platform === result.platform
           );
-          all[result.platform] = buildCarouselSlides(result, basePlan);
+          all[result.platform] = buildCarouselSlides(result, basePlan, {
+            includeCta: ctaStrength !== 'none',
+          });
           return all;
         },
         {} as Partial<Record<CarouselPlatform, CarouselSlidePlan[]>>
@@ -570,6 +573,7 @@ export const MediaCarouselReviewModal: FC<{
                     {(slides[platform] || []).map((slide, index) => {
                       const asset = rendered[slide.id];
                       const isRendering = renderingIds.includes(slide.id);
+                      const isTextEditable = isCarouselSlideTextEditable(slide);
                       return (
                         <div
                           key={slide.id}
@@ -595,32 +599,40 @@ export const MediaCarouselReviewModal: FC<{
                             )}
                           </div>
 
-                          <textarea
-                            className="mb-[8px] min-h-[84px] w-full rounded-[7px] border border-fifth bg-input p-[8px] text-[12px] text-inputText outline-none"
-                            value={slide.headline || slide.visualSummary}
-                            disabled={isRendering}
-                            onChange={(event) => {
-                              const nextText = event.target.value;
-                              setRendered((current) => {
-                                if (!current[slide.id]) return current;
-                                const next = { ...current };
-                                delete next[slide.id];
-                                return next;
-                              });
-                              updateSlides(platform, (current) =>
-                                current.map((item, itemIndex) =>
-                                  itemIndex === index
-                                    ? {
-                                        ...item,
-                                        headline: nextText,
-                                        visualSummary: nextText,
-                                        altText: nextText,
-                                      }
-                                    : item
-                                )
-                              );
-                            }}
-                          />
+                          {isTextEditable ? (
+                            <textarea
+                              className="mb-[8px] min-h-[84px] w-full rounded-[7px] border border-fifth bg-input p-[8px] text-[12px] text-inputText outline-none"
+                              value={slide.headline || slide.visualSummary}
+                              disabled={isRendering}
+                              onChange={(event) => {
+                                const nextText = event.target.value;
+                                setRendered((current) => {
+                                  if (!current[slide.id]) return current;
+                                  const next = { ...current };
+                                  delete next[slide.id];
+                                  return next;
+                                });
+                                updateSlides(platform, (current) =>
+                                  current.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          headline: nextText,
+                                          visualSummary: nextText,
+                                          altText: nextText,
+                                        }
+                                      : item
+                                  )
+                                );
+                              }}
+                            />
+                          ) : (
+                            <div className="mb-[8px] min-h-[84px] rounded-[7px] border border-fifth bg-input p-[8px] text-[12px] text-gray-400">
+                              This visual type does not render slide text. Use
+                              Regenerate to refresh the image without changing
+                              its caption.
+                            </div>
+                          )}
 
                           <div className="grid grid-cols-2 gap-[6px]">
                             <Button
