@@ -8,6 +8,7 @@ import {
   GuidedComposerStep,
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
+import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
@@ -48,6 +49,7 @@ export const GuidedComposerShell: FC<{
   children: ReactNode;
 }> = ({ children }) => {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const locked = useLaunchStore((state) => state.locked);
   const {
     composerStep,
     setComposerStep,
@@ -115,7 +117,7 @@ export const GuidedComposerShell: FC<{
                     <button
                       type="button"
                       aria-current={isActive ? 'step' : undefined}
-                      disabled={isFuture}
+                      disabled={isFuture || (locked && !isActive)}
                       onClick={() => setComposerStep(step)}
                       className={clsx(
                         'flex min-w-[145px] items-center gap-[10px] rounded-[12px] border px-[12px] py-[10px] text-left transition-colors disabled:cursor-not-allowed mobile:min-w-[132px]',
@@ -177,7 +179,7 @@ export const GuidedComposerShell: FC<{
         <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-[12px] mobile:flex-col-reverse mobile:items-stretch">
           <button
             type="button"
-            disabled={currentStepIndex === 0}
+            disabled={currentStepIndex === 0 || locked}
             onClick={previousComposerStep}
             className="flex h-[44px] min-w-[120px] items-center justify-center rounded-[8px] bg-btnSimple px-[18px] text-[14px] font-[700] disabled:cursor-not-allowed disabled:opacity-40 mobile:w-full"
           >
@@ -187,8 +189,9 @@ export const GuidedComposerShell: FC<{
           {nextStep ? (
             <button
               type="button"
+              disabled={locked}
               onClick={nextComposerStep}
-              className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white mobile:w-full"
+              className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50 mobile:w-full"
             >
               Continue to {GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}
             </button>
