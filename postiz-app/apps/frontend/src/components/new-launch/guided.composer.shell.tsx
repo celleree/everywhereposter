@@ -35,14 +35,16 @@ export const GUIDED_COMPOSER_STEP_DETAILS: Record<
 };
 
 export const shouldUseGuidedComposerShell = ({
+  enabled,
   existingIntegration,
   isCreateSet,
   dummy,
 }: {
+  enabled?: boolean;
   existingIntegration?: string;
   isCreateSet?: boolean;
   dummy?: boolean;
-}) => !existingIntegration && !isCreateSet && !dummy;
+}) => enabled === true && !existingIntegration && !isCreateSet && !dummy;
 
 export const GuidedComposerShell: FC<{
   children: ReactNode;
