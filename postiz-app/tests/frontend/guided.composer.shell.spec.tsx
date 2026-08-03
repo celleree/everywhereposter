@@ -76,6 +76,26 @@ describe('guided composer shell', () => {
     expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
   });
 
+  it('moves focus to the active step heading', () => {
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    expect(document.activeElement).toBe(
+      screen.getByRole('heading', { name: 'Upload' })
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to Destinations' })
+    );
+
+    expect(document.activeElement).toBe(
+      screen.getByRole('heading', { name: 'Destinations', level: 1 })
+    );
+  });
+
   it('preserves local upload composer state between steps', () => {
     render(
       <GuidedComposerShell>
@@ -176,6 +196,31 @@ describe('guided composer shell', () => {
       screen.getByRole('button', { name: 'Publish' }).hasAttribute('disabled')
     ).toBe(true);
     expect(screen.queryByRole('button', { name: /Continue to/ })).toBeNull();
+  });
+
+  it('resets guided state when the modal closes from a later step', () => {
+    const store = useGuidedComposerStore.getState();
+    store.setAdditionalContext('Audience and offer details');
+    store.setCaptionMode('adapt-by-platform');
+    store.setSourceCaption('Original caption');
+
+    const { unmount } = render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to Destinations' })
+    );
+    unmount();
+
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      composerStep: 'upload',
+      additionalContext: '',
+      captionMode: 'generate',
+      sourceCaption: '',
+    });
   });
 
   it('keeps the unfinished shell disabled unless explicitly enabled', () => {
