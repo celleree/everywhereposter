@@ -5,10 +5,12 @@ import {
   shouldUseGuidedComposerShell,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
+import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
 describe('guided composer shell', () => {
   beforeEach(() => {
     useGuidedComposerStore.getState().resetGuidedComposer();
+    useLaunchStore.getState().setLocked(false);
   });
 
   it('renders the upload step around the existing composer content', () => {
@@ -52,6 +54,32 @@ describe('guided composer shell', () => {
 
     expect(screen.getByText('Existing composer content')).toBeTruthy();
     expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
+  });
+
+  it('keeps the upload step mounted while media is uploading', () => {
+    useLaunchStore.getState().setLocked(true);
+
+    render(
+      <GuidedComposerShell>
+        <div>Upload progress and cancel controls</div>
+      </GuidedComposerShell>
+    );
+
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Destinations',
+    });
+    const destinationsStep = screen.getByRole('button', {
+      name: /Destinations Step 2 of 4/,
+    });
+
+    expect(continueButton.hasAttribute('disabled')).toBe(true);
+    expect(destinationsStep.hasAttribute('disabled')).toBe(true);
+
+    fireEvent.click(continueButton);
+    fireEvent.click(destinationsStep);
+
+    expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
+    expect(screen.getByText('Upload progress and cancel controls')).toBeTruthy();
   });
 
   it('renders a placeholder for later phases without rendering upload content', () => {
