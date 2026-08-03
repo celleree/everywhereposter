@@ -123,6 +123,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
     setTags,
     setEditor,
     setRepeater,
+    locked,
   } = useLaunchStore(
     useShallow((state) => ({
       reset: state.reset,
@@ -134,6 +135,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
       setTags: state.setTags,
       setEditor: state.setEditor,
       setRepeater: state.setRepeater,
+      locked: state.locked,
     }))
   );
 
@@ -233,7 +235,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
         {`#support-discord {display: none !important;}`}
       </style>
       {guidedComposerEnabled ? (
-        <GuidedComposerShell>{manageModal}</GuidedComposerShell>
+        <GuidedComposerShell locked={locked}>{manageModal}</GuidedComposerShell>
       ) : (
         manageModal
       )}
