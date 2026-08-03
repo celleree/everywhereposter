@@ -28,6 +28,7 @@ export interface AddEditModalProps {
   padding?: string;
   customClose?: () => void;
   standaloneCreate?: boolean;
+  enableGuidedComposerShell?: boolean;
   onlyValues?: Array<{
     content: string;
     id?: string;
@@ -224,6 +225,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
 
   const manageModal = <ManageModal {...props} />;
   const guidedComposerEnabled = shouldUseGuidedComposerShell({
+    enabled: props.enableGuidedComposerShell,
     existingIntegration: existingData.integration,
     isCreateSet: !!props.addEditSets,
     dummy: !!props.dummy,
