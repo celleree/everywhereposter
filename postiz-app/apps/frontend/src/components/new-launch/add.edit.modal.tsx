@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import { FC, useEffect } from 'react';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { ManageModal } from '@gitroom/frontend/components/new-launch/manage.modal';
+import { GuidedComposerShell } from '@gitroom/frontend/components/new-launch/guided.composer.shell';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import { useShallow } from 'zustand/react/shallow';
 import { useExistingData } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
@@ -216,12 +217,20 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
     return null;
   }
 
+  const manageModal = <ManageModal {...props} />;
+  const shouldUseGuidedComposer =
+    !existingData.integration && !props.addEditSets && !props.dummy;
+
   return (
     <>
       <style>
         {`#support-discord {display: none !important;}`}
       </style>
-      <ManageModal {...props} />
+      {shouldUseGuidedComposer ? (
+        <GuidedComposerShell>{manageModal}</GuidedComposerShell>
+      ) : (
+        manageModal
+      )}
     </>
   );
 };
