@@ -5,12 +5,10 @@ import {
   shouldUseGuidedComposerShell,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
-import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
 describe('guided composer shell', () => {
   beforeEach(() => {
     useGuidedComposerStore.getState().resetGuidedComposer();
-    useLaunchStore.getState().setLocked(false);
   });
 
   it('renders the upload step around the existing composer content', () => {
@@ -57,10 +55,8 @@ describe('guided composer shell', () => {
   });
 
   it('keeps the upload step mounted while media is uploading', () => {
-    useLaunchStore.getState().setLocked(true);
-
     render(
-      <GuidedComposerShell>
+      <GuidedComposerShell locked>
         <div>Upload progress and cancel controls</div>
       </GuidedComposerShell>
     );
