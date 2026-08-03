@@ -167,9 +167,14 @@ export const GuidedComposerShell: FC<{
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        {composerStep === 'upload' ? (
-          children
-        ) : (
+        <div
+          data-testid="guided-composer-upload-content"
+          hidden={composerStep !== 'upload'}
+          className="h-full min-h-full"
+        >
+          {children}
+        </div>
+        {composerStep !== 'upload' && (
           <GuidedComposerPlaceholder step={composerStep} />
         )}
       </main>
