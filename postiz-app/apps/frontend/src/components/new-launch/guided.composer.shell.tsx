@@ -34,6 +34,16 @@ export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   },
 };
 
+export const shouldUseGuidedComposerShell = ({
+  existingIntegration,
+  isCreateSet,
+  dummy,
+}: {
+  existingIntegration?: string;
+  isCreateSet?: boolean;
+  dummy?: boolean;
+}) => !existingIntegration && !isCreateSet && !dummy;
+
 export const GuidedComposerShell: FC<{
   children: ReactNode;
 }> = ({ children }) => {
@@ -98,20 +108,22 @@ export const GuidedComposerShell: FC<{
                 const details = GUIDED_COMPOSER_STEP_DETAILS[step];
                 const isActive = step === composerStep;
                 const isComplete = index < currentStepIndex;
+                const isFuture = index > currentStepIndex;
 
                 return (
                   <li key={step} className="flex items-center gap-[8px]">
                     <button
                       type="button"
                       aria-current={isActive ? 'step' : undefined}
+                      disabled={isFuture}
                       onClick={() => setComposerStep(step)}
                       className={clsx(
-                        'flex min-w-[145px] items-center gap-[10px] rounded-[12px] border px-[12px] py-[10px] text-left transition-colors mobile:min-w-[132px]',
+                        'flex min-w-[145px] items-center gap-[10px] rounded-[12px] border px-[12px] py-[10px] text-left transition-colors disabled:cursor-not-allowed mobile:min-w-[132px]',
                         isActive
                           ? 'border-ai bg-newBgLineColor'
                           : isComplete
-                          ? 'border-ai/50 bg-newBgColor'
-                          : 'border-newBorder bg-newBgColor [@media(hover:hover)]:hover:border-ai/50'
+                          ? 'border-ai/50 bg-newBgColor [@media(hover:hover)]:hover:border-ai'
+                          : 'border-newBorder bg-newBgColor opacity-55'
                       )}
                     >
                       <span
