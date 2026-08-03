@@ -4,7 +4,7 @@ import 'reflect-metadata';
 
 import { AddProviderButton } from '@gitroom/frontend/components/launches/add.provider.component';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
-import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
+import { CreatePostComposer } from '@gitroom/frontend/components/create/create.post.composer';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -161,7 +161,7 @@ export const CreateComponent = () => {
         </div>
       </div>
       <div className="flex min-h-0 flex-1 mobile:block mobile:flex-none">
-        <AddEditModal
+        <CreatePostComposer
           key={`${selectedSetId || 'blank'}-${nextSlot}-${composerKey}`}
           allIntegrations={integrations.map((integration: any) => ({
             ...integration,
