@@ -8,7 +8,6 @@ import {
   GuidedComposerStep,
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
-import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
@@ -47,9 +46,9 @@ export const shouldUseGuidedComposerShell = ({
 
 export const GuidedComposerShell: FC<{
   children: ReactNode;
-}> = ({ children }) => {
+  locked?: boolean;
+}> = ({ children, locked = false }) => {
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const locked = useLaunchStore((state) => state.locked);
   const {
     composerStep,
     setComposerStep,
