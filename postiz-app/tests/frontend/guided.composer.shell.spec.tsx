@@ -42,8 +42,10 @@ describe('guided composer shell', () => {
     );
 
     expect(
-      screen.getByText('Choose the platforms and connected accounts for this post.')
-    ).toBeTruthy();
+      screen.getAllByText(
+        'Choose the platforms and connected accounts for this post.'
+      )
+    ).toHaveLength(2);
     expect(screen.queryByText('Existing composer content')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
@@ -62,8 +64,8 @@ describe('guided composer shell', () => {
     );
 
     expect(
-      screen.getByText('Review and refine each platform-specific version.')
-    ).toBeTruthy();
+      screen.getAllByText('Review and refine each platform-specific version.')
+    ).toHaveLength(2);
     expect(
       screen.getByText(
         'The existing controls for this stage will be connected in the next implementation phase.'
@@ -85,8 +87,10 @@ describe('guided composer shell', () => {
     );
 
     expect(
-      screen.getByText('Confirm the timing and destinations before publishing.')
-    ).toBeTruthy();
+      screen.getAllByText(
+        'Confirm the timing and destinations before publishing.'
+      )
+    ).toHaveLength(2);
     expect(
       screen.getByRole('button', { name: 'Publish' }).hasAttribute('disabled')
     ).toBe(true);
