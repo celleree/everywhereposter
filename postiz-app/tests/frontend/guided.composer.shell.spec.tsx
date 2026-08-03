@@ -1,10 +1,23 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import {
   GuidedComposerShell,
   shouldUseGuidedComposerShell,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
+
+const StatefulUploadComposer = () => {
+  const [queuedPreset, setQueuedPreset] = useState(false);
+
+  return (
+    <div>
+      <button type="button" onClick={() => setQueuedPreset(true)}>
+        Queue AI preset
+      </button>
+      <div>{queuedPreset ? 'AI preset queued' : 'No AI preset queued'}</div>
+    </div>
+  );
+};
 
 describe('guided composer shell', () => {
   beforeEach(() => {
@@ -46,12 +59,51 @@ describe('guided composer shell', () => {
         'Choose the platforms and connected accounts for this post.'
       )
     ).toHaveLength(2);
-    expect(screen.queryByText('Existing composer content')).toBeNull();
+    expect(
+      screen
+        .getByTestId('guided-composer-upload-content')
+        .hasAttribute('hidden')
+    ).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
     expect(screen.getByText('Existing composer content')).toBeTruthy();
+    expect(
+      screen
+        .getByTestId('guided-composer-upload-content')
+        .hasAttribute('hidden')
+    ).toBe(false);
     expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
+  });
+
+  it('preserves local upload composer state between steps', () => {
+    render(
+      <GuidedComposerShell>
+        <StatefulUploadComposer />
+      </GuidedComposerShell>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Queue AI preset' }));
+    expect(screen.getByText('AI preset queued')).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to Destinations' })
+    );
+
+    expect(
+      screen
+        .getByTestId('guided-composer-upload-content')
+        .hasAttribute('hidden')
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(screen.getByText('AI preset queued')).toBeTruthy();
+    expect(
+      screen
+        .getByTestId('guided-composer-upload-content')
+        .hasAttribute('hidden')
+    ).toBe(false);
   });
 
   it('keeps the upload step mounted while media is uploading', () => {
@@ -78,7 +130,7 @@ describe('guided composer shell', () => {
     expect(screen.getByText('Upload progress and cancel controls')).toBeTruthy();
   });
 
-  it('renders a placeholder for later phases without rendering upload content', () => {
+  it('renders a placeholder for later phases while hiding upload content', () => {
     useGuidedComposerStore.getState().setComposerStep('review');
 
     render(
@@ -98,7 +150,12 @@ describe('guided composer shell', () => {
     expect(
       screen.getByRole('button', { name: 'Continue to Publish' })
     ).toBeTruthy();
-    expect(screen.queryByText('Existing composer content')).toBeNull();
+    expect(screen.getByText('Existing composer content')).toBeTruthy();
+    expect(
+      screen
+        .getByTestId('guided-composer-upload-content')
+        .hasAttribute('hidden')
+    ).toBe(true);
   });
 
   it('shows the bounded final publish placeholder', () => {
