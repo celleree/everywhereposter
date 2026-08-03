@@ -5,6 +5,10 @@ import dayjs from 'dayjs';
 import { FC, useEffect } from 'react';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { ManageModal } from '@gitroom/frontend/components/new-launch/manage.modal';
+import {
+  GuidedComposerShell,
+  shouldUseGuidedComposerShell,
+} from '@gitroom/frontend/components/new-launch/guided.composer.shell';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import { useShallow } from 'zustand/react/shallow';
 import { useExistingData } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
@@ -24,6 +28,7 @@ export interface AddEditModalProps {
   padding?: string;
   customClose?: () => void;
   standaloneCreate?: boolean;
+  enableGuidedComposerShell?: boolean;
   onlyValues?: Array<{
     content: string;
     id?: string;
@@ -119,6 +124,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
     setTags,
     setEditor,
     setRepeater,
+    locked,
   } = useLaunchStore(
     useShallow((state) => ({
       reset: state.reset,
@@ -130,6 +136,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
       setTags: state.setTags,
       setEditor: state.setEditor,
       setRepeater: state.setRepeater,
+      locked: state.locked,
     }))
   );
 
@@ -216,12 +223,24 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
     return null;
   }
 
+  const manageModal = <ManageModal {...props} />;
+  const guidedComposerEnabled = shouldUseGuidedComposerShell({
+    enabled: props.enableGuidedComposerShell,
+    existingIntegration: existingData.integration,
+    isCreateSet: !!props.addEditSets,
+    dummy: !!props.dummy,
+  });
+
   return (
     <>
       <style>
         {`#support-discord {display: none !important;}`}
       </style>
-      <ManageModal {...props} />
+      {guidedComposerEnabled ? (
+        <GuidedComposerShell locked={locked}>{manageModal}</GuidedComposerShell>
+      ) : (
+        manageModal
+      )}
     </>
   );
 };

@@ -145,6 +145,8 @@ jobs:
           file: ./postiz-app/Dockerfile.dev
           platforms: linux/amd64
           push: true
+          build-args: |
+            NEXT_PUBLIC_GUIDED_COMPOSER_SHELL=${{ vars.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL || 'false' }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
