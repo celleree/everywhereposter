@@ -178,12 +178,21 @@ describe('guided composer shell', () => {
     expect(screen.queryByRole('button', { name: /Continue to/ })).toBeNull();
   });
 
-  it('enables the shell only for normal new-post creation', () => {
-    expect(shouldUseGuidedComposerShell({})).toBe(true);
+  it('keeps the unfinished shell disabled unless explicitly enabled', () => {
+    expect(shouldUseGuidedComposerShell({})).toBe(false);
+    expect(shouldUseGuidedComposerShell({ enabled: false })).toBe(false);
+    expect(shouldUseGuidedComposerShell({ enabled: true })).toBe(true);
     expect(
-      shouldUseGuidedComposerShell({ existingIntegration: 'integration-id' })
+      shouldUseGuidedComposerShell({
+        enabled: true,
+        existingIntegration: 'integration-id',
+      })
     ).toBe(false);
-    expect(shouldUseGuidedComposerShell({ isCreateSet: true })).toBe(false);
-    expect(shouldUseGuidedComposerShell({ dummy: true })).toBe(false);
+    expect(
+      shouldUseGuidedComposerShell({ enabled: true, isCreateSet: true })
+    ).toBe(false);
+    expect(
+      shouldUseGuidedComposerShell({ enabled: true, dummy: true })
+    ).toBe(false);
   });
 });
