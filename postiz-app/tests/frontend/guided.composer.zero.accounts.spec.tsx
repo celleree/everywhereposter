@@ -74,6 +74,22 @@ import {
 } from '../../apps/frontend/src/components/new-launch/add.edit.modal';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
+const connectedInstagram = {
+  id: 'instagram-account',
+  name: 'Founder Instagram',
+  identifier: 'instagram',
+  display: '@founder',
+  picture: '',
+  disabled: false,
+  inBetweenSteps: false,
+  editor: 'normal',
+  type: 'social',
+  changeProfilePicture: false,
+  additionalSettings: '',
+  changeNickName: false,
+  time: [],
+} as any;
+
 describe('guided composer zero-account AddEditModal path', () => {
   beforeEach(() => {
     useLaunchStore.getState().reset();
@@ -133,6 +149,62 @@ describe('guided composer zero-account AddEditModal path', () => {
 
     expect(screen.getByTestId('manage-modal')).toBeTruthy();
     expect(useLaunchStore.getState().integrations).toEqual([]);
+  });
+
+  it('reseeds destinations after an account connects without resetting the draft', async () => {
+    const { rerender } = render(
+      <AddEditModal
+        date={dayjs('2026-08-04T12:00:00Z')}
+        integrations={[]}
+        allIntegrations={[]}
+        reopenModal={() => {}}
+        mutate={() => {}}
+        standaloneCreate
+        enableGuidedComposerShell
+      />
+    );
+
+    await waitFor(() => {
+      expect(useLaunchStore.getState().global).toHaveLength(1);
+    });
+
+    useLaunchStore.getState().setGlobalValueText(0, 'Draft caption');
+    useLaunchStore.getState().setGlobalValueMedia(0, [
+      {
+        id: 'video-1',
+        path: 'https://media.example.com/video.mp4',
+      },
+    ]);
+
+    rerender(
+      <AddEditModal
+        date={dayjs('2026-08-04T12:00:00Z')}
+        integrations={[connectedInstagram]}
+        allIntegrations={[connectedInstagram]}
+        reopenModal={() => {}}
+        mutate={() => {}}
+        standaloneCreate
+        enableGuidedComposerShell
+      />
+    );
+
+    await waitFor(() => {
+      expect(
+        useLaunchStore.getState().integrations.map((integration) => integration.id)
+      ).toEqual(['instagram-account']);
+    });
+
+    expect(useLaunchStore.getState().global[0]).toMatchObject({
+      id: 'generated-post-id',
+      content: 'Draft caption',
+      media: [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+        },
+      ],
+    });
+    expect(screen.getByTestId('guided-composer-shell')).toBeTruthy();
   });
 
   it('keeps the previous empty guard for the normal composer', () => {
