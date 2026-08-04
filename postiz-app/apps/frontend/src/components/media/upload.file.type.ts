@@ -60,8 +60,27 @@ const VIDEO_SAMPLE_ENTRY_TYPES = new Set([
   'apcs',
 ]);
 
+const REQUIRED_CODEC_CONFIG_BOX = new Map<string, string>([
+  ['avc1', 'avcC'],
+  ['avc2', 'avcC'],
+  ['avc3', 'avcC'],
+  ['avc4', 'avcC'],
+  ['hvc1', 'hvcC'],
+  ['hev1', 'hvcC'],
+  ['vp08', 'vpcC'],
+  ['vp09', 'vpcC'],
+  ['av01', 'av1C'],
+  ['mp4v', 'esds'],
+  ['encv', 'sinf'],
+  ['dvav', 'avcC'],
+  ['dva1', 'avcC'],
+  ['dvhe', 'hvcC'],
+  ['dvh1', 'hvcC'],
+]);
+
 const MAX_FTYP_PAYLOAD_BYTES = 256;
 const MIN_VISUAL_SAMPLE_ENTRY_SIZE = 86;
+const VIDEO_DECODE_TIMEOUT_MS = 8_000;
 
 type UploadFileLike = {
   name?: string | null;
@@ -86,11 +105,17 @@ type SampleLocation = {
   size: number;
 };
 
-type VideoTrackEvidence = {
-  trackId?: number;
-  hasVideoHandler: boolean;
+type SampleTableEvidence = {
   hasVideoSampleEntry: boolean;
   classicSample?: SampleLocation;
+};
+
+type MediaBoxEvidence = SampleTableEvidence & {
+  hasVideoHandler: boolean;
+};
+
+type VideoTrackEvidence = MediaBoxEvidence & {
+  trackId?: number;
 };
 
 type FragmentSampleEvidence = {
@@ -279,6 +304,37 @@ const readFullBoxEntryCount = async (blob: Blob, box: BmffBox) => {
   ).getUint32(4);
 };
 
+const sampleEntryHasRequiredCodecConfig = async (
+  blob: Blob,
+  entryStart: number,
+  entryEnd: number,
+  entryType: string
+) => {
+  const requiredBox = REQUIRED_CODEC_CONFIG_BOX.get(entryType);
+
+  if (!requiredBox) {
+    return true;
+  }
+
+  let offset = entryStart + MIN_VISUAL_SAMPLE_ENTRY_SIZE;
+
+  while (offset < entryEnd) {
+    const box = await readBoxHeader(blob, offset, entryEnd);
+
+    if (!box) {
+      return false;
+    }
+
+    if (box.type === requiredBox && box.end > box.payloadStart) {
+      return true;
+    }
+
+    offset = box.end;
+  }
+
+  return false;
+};
+
 const stsdHasVideoSampleEntry = async (blob: Blob, box: BmffBox) => {
   const entryCount = await readFullBoxEntryCount(blob, box);
   let offset = box.payloadStart + 8;
@@ -295,10 +351,11 @@ const stsdHasVideoSampleEntry = async (blob: Blob, box: BmffBox) => {
     const entryType = readAscii(bytes, 4, 4);
     const width = view.getUint16(32);
     const height = view.getUint16(34);
+    const entryEnd = offset + entrySize;
 
     if (
       entrySize < MIN_VISUAL_SAMPLE_ENTRY_SIZE ||
-      offset + entrySize > box.end
+      entryEnd > box.end
     ) {
       return false;
     }
@@ -306,12 +363,18 @@ const stsdHasVideoSampleEntry = async (blob: Blob, box: BmffBox) => {
     if (
       VIDEO_SAMPLE_ENTRY_TYPES.has(entryType) &&
       width > 0 &&
-      height > 0
+      height > 0 &&
+      (await sampleEntryHasRequiredCodecConfig(
+        blob,
+        offset,
+        entryEnd,
+        entryType
+      ))
     ) {
       return true;
     }
 
-    offset += entrySize;
+    offset = entryEnd;
   }
 
   return false;
@@ -342,18 +405,34 @@ const readSampleSize = async (blob: Blob, box: BmffBox) => {
   };
 };
 
-const readCompactSampleCount = async (blob: Blob, box: BmffBox) => {
-  const bytes = await readBlobRange(blob, box.payloadStart, 12);
+const readCompactSampleSize = async (blob: Blob, box: BmffBox) => {
+  const bytes = await readBlobRange(blob, box.payloadStart, 14);
 
-  if (bytes.length < 12) {
-    return 0;
+  if (bytes.length < 13) {
+    return { sampleCount: 0, firstSampleSize: 0 };
   }
 
-  return new DataView(
-    bytes.buffer,
-    bytes.byteOffset,
-    bytes.byteLength
-  ).getUint32(8);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const fieldSize = bytes[7];
+  const sampleCount = view.getUint32(8);
+
+  if (!sampleCount) {
+    return { sampleCount: 0, firstSampleSize: 0 };
+  }
+
+  if (fieldSize === 4) {
+    return { sampleCount, firstSampleSize: bytes[12] >> 4 };
+  }
+
+  if (fieldSize === 8) {
+    return { sampleCount, firstSampleSize: bytes[12] };
+  }
+
+  if (fieldSize === 16 && bytes.length >= 14) {
+    return { sampleCount, firstSampleSize: view.getUint16(12) };
+  }
+
+  return { sampleCount: 0, firstSampleSize: 0 };
 };
 
 const readFirstChunkOffset = async (blob: Blob, box: BmffBox) => {
@@ -379,11 +458,44 @@ const readFirstChunkOffset = async (blob: Blob, box: BmffBox) => {
     : view.getUint32(8);
 };
 
+const hasValidSampleToChunk = async (blob: Blob, box: BmffBox) => {
+  const bytes = await readBlobRange(blob, box.payloadStart, 20);
+
+  if (bytes.length < 20) {
+    return false;
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  return (
+    view.getUint32(4) > 0 &&
+    view.getUint32(8) === 1 &&
+    view.getUint32(12) > 0 &&
+    view.getUint32(16) > 0
+  );
+};
+
+const hasValidTiming = async (blob: Blob, box: BmffBox) => {
+  const bytes = await readBlobRange(blob, box.payloadStart, 16);
+
+  if (bytes.length < 16) {
+    return false;
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  return (
+    view.getUint32(4) > 0 &&
+    view.getUint32(8) > 0 &&
+    view.getUint32(12) > 0
+  );
+};
+
 const sampleTableEvidence = async (
   blob: Blob,
   start: number,
   end: number
-) => {
+): Promise<SampleTableEvidence> => {
   let offset = start;
   let hasVideoSampleEntry = false;
   let sampleCount = 0;
@@ -406,13 +518,15 @@ const sampleTableEvidence = async (
       sampleCount = sampleSize.sampleCount;
       firstSampleSize = sampleSize.firstSampleSize;
     } else if (box.type === 'stz2') {
-      sampleCount = await readCompactSampleCount(blob, box);
+      const sampleSize = await readCompactSampleSize(blob, box);
+      sampleCount = sampleSize.sampleCount;
+      firstSampleSize = sampleSize.firstSampleSize;
     } else if (box.type === 'stco' || box.type === 'co64') {
       firstChunkOffset = await readFirstChunkOffset(blob, box);
     } else if (box.type === 'stsc') {
-      hasSampleToChunk = (await readFullBoxEntryCount(blob, box)) > 0;
+      hasSampleToChunk = await hasValidSampleToChunk(blob, box);
     } else if (box.type === 'stts') {
-      hasTiming = (await readFullBoxEntryCount(blob, box)) > 0;
+      hasTiming = await hasValidTiming(blob, box);
     }
 
     offset = box.end;
@@ -434,7 +548,7 @@ const mediaInformationEvidence = async (
   blob: Blob,
   start: number,
   end: number
-) => {
+): Promise<SampleTableEvidence> => {
   let offset = start;
   let hasVideoSampleEntry = false;
   let classicSample: SampleLocation | undefined;
@@ -462,7 +576,11 @@ const mediaInformationEvidence = async (
   return { hasVideoSampleEntry, classicSample };
 };
 
-const mediaBoxEvidence = async (blob: Blob, start: number, end: number) => {
+const mediaBoxEvidence = async (
+  blob: Blob,
+  start: number,
+  end: number
+): Promise<MediaBoxEvidence> => {
   let offset = start;
   let hasVideoHandler = false;
   let hasVideoSampleEntry = false;
@@ -855,6 +973,52 @@ export const hasSupportedMp4MovSignature = async (
   });
 };
 
+export const canBrowserDecodeVideo = async (
+  blob: Blob,
+  expectedType: string
+) => {
+  if (
+    typeof document === 'undefined' ||
+    typeof URL === 'undefined' ||
+    typeof URL.createObjectURL !== 'function'
+  ) {
+    return true;
+  }
+
+  const typedBlob =
+    blob.type === expectedType ? blob : new Blob([blob], { type: expectedType });
+  const objectUrl = URL.createObjectURL(typedBlob);
+  const video = document.createElement('video');
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+
+    const finish = (result: boolean) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      video.onloadeddata = null;
+      video.onerror = null;
+      URL.revokeObjectURL(objectUrl);
+      resolve(result);
+    };
+
+    const timeout = setTimeout(() => finish(false), VIDEO_DECODE_TIMEOUT_MS);
+
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.onloadeddata = () =>
+      finish(video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0);
+    video.onerror = () => finish(false);
+    video.src = objectUrl;
+    video.load();
+  });
+};
+
 export const inferUploadFileType = (file: UploadFileLike) =>
   (file.type || '').toLowerCase();
 
@@ -874,7 +1038,11 @@ export const resolveUploadFileType = async (
     return GENERIC_UPLOAD_MIME_TYPES.has(currentType) ? currentType : expectedType;
   }
 
-  return (await hasSupportedMp4MovSignature(blob, expectedType))
+  if (!(await hasSupportedMp4MovSignature(blob, expectedType))) {
+    return 'application/octet-stream';
+  }
+
+  return (await canBrowserDecodeVideo(blob, expectedType))
     ? expectedType
     : 'application/octet-stream';
 };
