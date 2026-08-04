@@ -1,6 +1,8 @@
 import React from 'react';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import dayjs from 'dayjs';
+
+let mockExistingData: any = {};
 
 jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
@@ -29,7 +31,7 @@ jest.mock('@gitroom/nestjs-libraries/services/make.is', () => ({
 jest.mock(
   '@gitroom/frontend/components/launches/helpers/use.existing.data',
   () => ({
-    useExistingData: () => ({}),
+    useExistingData: () => mockExistingData,
   })
 );
 
@@ -62,8 +64,13 @@ jest.mock(
           { 'data-testid': 'guided-composer-shell' },
           children
         ),
-      shouldUseGuidedComposerShell: ({ enabled }: { enabled?: boolean }) =>
-        enabled === true,
+      shouldUseGuidedComposerShell: ({
+        enabled,
+        existingIntegration,
+      }: {
+        enabled?: boolean;
+        existingIntegration?: string;
+      }) => enabled === true && !existingIntegration,
     };
   }
 );
@@ -103,6 +110,7 @@ const modalProps = {
 
 describe('guided composer selected destination reconciliation', () => {
   beforeEach(() => {
+    mockExistingData = {};
     useLaunchStore.getState().reset();
   });
 
@@ -163,5 +171,45 @@ describe('guided composer selected destination reconciliation', () => {
       expect(useLaunchStore.getState().selectedIntegrations).toEqual([]);
     });
     expect(useLaunchStore.getState().integrations[0].disabled).toBe(true);
+  });
+
+  it('preserves a disabled selected integration while editing an existing post', async () => {
+    mockExistingData = {
+      integration: disabledInstagram.id,
+      settings: { post_type: 'reel' },
+      posts: [
+        {
+          id: 'existing-post',
+          content: 'Existing caption',
+          delay: 0,
+          image: [],
+          tags: [],
+        },
+      ],
+    };
+
+    render(
+      <AddEditModal
+        {...modalProps}
+        standaloneCreate={false}
+        integrations={[disabledInstagram]}
+        allIntegrations={[disabledInstagram]}
+      />
+    );
+
+    await waitFor(() => {
+      expect(
+        useLaunchStore.getState().selectedIntegrations.map(
+          (selected) => selected.integration.id
+        )
+      ).toEqual(['instagram-account']);
+    });
+
+    expect(useLaunchStore.getState().selectedIntegrations[0].settings).toEqual({
+      post_type: 'reel',
+    });
+    expect(useLaunchStore.getState().integrations[0].disabled).toBe(true);
+    expect(screen.getByTestId('manage-modal')).toBeTruthy();
+    expect(screen.queryByTestId('guided-composer-shell')).toBeNull();
   });
 });
