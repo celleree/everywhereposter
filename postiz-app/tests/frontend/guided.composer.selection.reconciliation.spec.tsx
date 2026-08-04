@@ -89,7 +89,7 @@ const connectedInstagram = {
   editor: 'normal',
   type: 'social',
   changeProfilePicture: false,
-  additionalSettings: '',
+  additionalSettings: JSON.stringify({ maxCaptionLength: 2200 }),
   changeNickName: false,
   time: [],
 } as any;
@@ -171,6 +171,64 @@ describe('guided composer selected destination reconciliation', () => {
       expect(useLaunchStore.getState().selectedIntegrations).toEqual([]);
     });
     expect(useLaunchStore.getState().integrations[0].disabled).toBe(true);
+  });
+
+  it('refreshes retained selected integration metadata while preserving settings and ref', async () => {
+    const { rerender } = render(
+      <AddEditModal {...modalProps} allIntegrations={[connectedInstagram]} />
+    );
+
+    await waitFor(() => {
+      expect(useLaunchStore.getState().integrations).toHaveLength(1);
+    });
+
+    act(() => {
+      useLaunchStore.getState().setSelectedIntegrations([
+        {
+          selectedIntegrations: connectedInstagram,
+          settings: { post_type: 'reel', captionMode: 'manual' },
+        },
+      ]);
+    });
+
+    const originalSelection = useLaunchStore.getState().selectedIntegrations[0];
+    const originalRef = originalSelection.ref;
+    const originalSettings = originalSelection.settings;
+    const refreshedInstagram = {
+      ...connectedInstagram,
+      name: 'Reconnected Instagram',
+      display: '@reconnected',
+      identifier: 'instagram-standalone',
+      editor: 'markdown',
+      additionalSettings: JSON.stringify({ maxCaptionLength: 1800 }),
+    } as any;
+
+    rerender(
+      <AddEditModal
+        {...modalProps}
+        integrations={[refreshedInstagram]}
+        allIntegrations={[refreshedInstagram]}
+      />
+    );
+
+    await waitFor(() => {
+      const refreshedSelection =
+        useLaunchStore.getState().selectedIntegrations[0];
+      expect(refreshedSelection.integration).toBe(refreshedInstagram);
+    });
+
+    const refreshedSelection = useLaunchStore.getState().selectedIntegrations[0];
+    expect(refreshedSelection.integration.name).toBe('Reconnected Instagram');
+    expect(refreshedSelection.integration.display).toBe('@reconnected');
+    expect(refreshedSelection.integration.identifier).toBe(
+      'instagram-standalone'
+    );
+    expect(refreshedSelection.integration.editor).toBe('markdown');
+    expect(refreshedSelection.integration.additionalSettings).toBe(
+      JSON.stringify({ maxCaptionLength: 1800 })
+    );
+    expect(refreshedSelection.settings).toBe(originalSettings);
+    expect(refreshedSelection.ref).toBe(originalRef);
   });
 
   it('preserves a disabled selected integration while editing an existing post', async () => {
