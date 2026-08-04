@@ -196,7 +196,7 @@ describe('guided composer shell', () => {
     expect(screen.getByText('Upload progress and cancel controls')).toBeTruthy();
   });
 
-  it('requires an uploaded video before continuing', () => {
+  it('requires an uploaded MP4 or MOV before continuing', () => {
     useLaunchStore.getState().setGlobalValueMedia(0, []);
 
     render(
@@ -205,7 +205,34 @@ describe('guided composer shell', () => {
       </GuidedComposerShell>
     );
 
-    expect(screen.getByText('Upload a video to continue.')).toBeTruthy();
+    expect(
+      screen.getByText('Upload an MP4 or MOV video to continue.')
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole('button', { name: 'Continue to Destinations' })
+        .hasAttribute('disabled')
+    ).toBe(true);
+  });
+
+  it('does not treat an unsupported WebM library asset as a valid source', () => {
+    useLaunchStore.getState().setGlobalValueMedia(0, [
+      {
+        id: 'webm-video',
+        path: 'https://media.example.com/video.webm',
+        type: 'video',
+      } as any,
+    ]);
+
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    expect(
+      screen.getByText('Upload an MP4 or MOV video to continue.')
+    ).toBeTruthy();
     expect(
       screen
         .getByRole('button', { name: 'Continue to Destinations' })
@@ -266,7 +293,9 @@ describe('guided composer shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove media' }));
 
     expect(useLaunchStore.getState().global[0].media).toEqual([]);
-    expect(screen.getByText('Upload a video to continue.')).toBeTruthy();
+    expect(
+      screen.getByText('Upload an MP4 or MOV video to continue.')
+    ).toBeTruthy();
   });
 
   it('renders a placeholder for later phases while hiding upload content', () => {
