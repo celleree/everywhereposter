@@ -1,0 +1,217 @@
+name: Apply browser codec independence fix
+
+on:
+  push:
+    branches:
+      - fix/guided-browser-codec-independent
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply source and regression-test changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('postiz-app/apps/frontend/src/components/media/upload.file.type.ts')
+          source = source_path.read_text()
+          source = source.replace("const VIDEO_DECODE_TIMEOUT_MS = 8_000;\n", "")
+
+          decoder_start = source.find('export const canBrowserDecodeVideo = async (')
+          decoder_end = source.find('export const inferUploadFileType', decoder_start)
+          if decoder_start < 0 or decoder_end < 0:
+              raise SystemExit('browser decoder helper was not found')
+          source = source[:decoder_start] + source[decoder_end:]
+
+          old_resolver = """  if (!(await hasSupportedMp4MovSignature(blob, expectedType))) {
+            return 'application/octet-stream';
+          }
+
+          return (await canBrowserDecodeVideo(blob, expectedType))
+            ? expectedType
+            : 'application/octet-stream';
+          """
+          new_resolver = """  return (await hasSupportedMp4MovSignature(blob, expectedType))
+            ? expectedType
+            : 'application/octet-stream';
+          """
+          if old_resolver not in source:
+              raise SystemExit('decoder-gated resolver block was not found')
+          source_path.write_text(source.replace(old_resolver, new_resolver))
+
+          test_path = Path('postiz-app/tests/frontend/guided.composer.upload.details.spec.tsx')
+          test = test_path.read_text()
+          test = test.replace(
+              """import {
+            canBrowserDecodeVideo,
+            resolveUploadFileType,
+          } from '../../apps/frontend/src/components/media/upload.file.type';""",
+              """import { resolveUploadFileType } from '../../apps/frontend/src/components/media/upload.file.type';""",
+          )
+
+          old_codec = """  const codecConfig = includeCodecConfig
+            ? createBox(
+                'avcC',
+                new Uint8Array([
+                  1,
+                  0x42,
+                  0,
+                  0x1e,
+                  0xff,
+                  0xe1,
+                  0,
+                  2,
+                  0x67,
+                  0x42,
+                  1,
+                  0,
+                  2,
+                  0x68,
+                  0xce,
+                ])
+              )
+            : new Uint8Array();"""
+          new_codec = """  const codecConfig = includeCodecConfig
+            ? type === 'hvc1' || type === 'hev1'
+              ? createBox('hvcC', new Uint8Array([1]))
+              : createBox(
+                  'avcC',
+                  new Uint8Array([
+                    1,
+                    0x42,
+                    0,
+                    0x1e,
+                    0xff,
+                    0xe1,
+                    0,
+                    2,
+                    0x67,
+                    0x42,
+                    1,
+                    0,
+                    2,
+                    0x68,
+                    0xce,
+                  ])
+                )
+            : new Uint8Array();"""
+          if old_codec not in test:
+              raise SystemExit('AVC fixture codec block was not found')
+          test = test.replace(old_codec, new_codec)
+
+          test = test.replace(
+              """const createSampleTable = (
+            chunkOffset: number,
+            includeCodecConfig = true
+          ) => {""",
+              """const createSampleTable = (
+            chunkOffset: number,
+            includeCodecConfig = true,
+            sampleEntryType = 'avc1'
+          ) => {""",
+          )
+          test = test.replace(
+              "createVisualSampleEntry('avc1', includeCodecConfig)",
+              "createVisualSampleEntry(sampleEntryType, includeCodecConfig)",
+          )
+          test = test.replace(
+              """  includeVideoSamples = true,
+            includeCodecConfig = true
+          ) => {""",
+              """  includeVideoSamples = true,
+            includeCodecConfig = true,
+            sampleEntryType = 'avc1'
+          ) => {""",
+          )
+          test = test.replace(
+              "createSampleTable(ftyp.length + 8, includeCodecConfig)",
+              "createSampleTable(ftyp.length + 8, includeCodecConfig, sampleEntryType)",
+          )
+
+          decoder_test_start = test.find(
+              "  it('rejects a structurally valid file when the browser decoder cannot load a frame', async () => {"
+          )
+          decoder_test_end = test.find(
+              "\n\n  it('rejects arbitrary bytes renamed to MP4 or MOV with a generic MIME'",
+              decoder_test_start,
+          )
+          if decoder_test_start < 0 or decoder_test_end < 0:
+              raise SystemExit('decoder regression test was not found')
+
+          replacement_test = """  it('accepts structurally valid HEVC even when the local browser cannot decode it', async () => {
+            const hevc = new File(
+              [createIsoBmffBytes('isom', 'mp42', 'vide', true, true, 'hvc1')],
+              'hevc-source.mp4',
+              { type: 'application/octet-stream' }
+            );
+            const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(
+              URL,
+              'createObjectURL'
+            );
+            const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(
+              URL,
+              'revokeObjectURL'
+            );
+            const video = document.createElement('video');
+            const createElementSpy = jest
+              .spyOn(document, 'createElement')
+              .mockReturnValueOnce(video);
+
+            Object.defineProperty(URL, 'createObjectURL', {
+              configurable: true,
+              value: jest.fn(() => 'blob:unsupported-local-codec'),
+            });
+            Object.defineProperty(URL, 'revokeObjectURL', {
+              configurable: true,
+              value: jest.fn(),
+            });
+            Object.defineProperty(video, 'load', {
+              configurable: true,
+              value: () => video.onerror?.(new Event('error')),
+            });
+
+            try {
+              await expect(resolveUploadFileType(hevc)).resolves.toBe('video/mp4');
+              expect(createElementSpy).not.toHaveBeenCalled();
+            } finally {
+              createElementSpy.mockRestore();
+
+              if (originalCreateObjectUrl) {
+                Object.defineProperty(URL, 'createObjectURL', originalCreateObjectUrl);
+              } else {
+                delete (URL as typeof URL & { createObjectURL?: unknown })
+                  .createObjectURL;
+              }
+
+              if (originalRevokeObjectUrl) {
+                Object.defineProperty(URL, 'revokeObjectURL', originalRevokeObjectUrl);
+              } else {
+                delete (URL as typeof URL & { revokeObjectURL?: unknown })
+                  .revokeObjectURL;
+              }
+            }
+          });"""
+          test_path.write_text(
+              test[:decoder_test_start] + replacement_test + test[decoder_test_end:]
+          )
+          PY
+
+      - name: Commit temporary-branch result
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add postiz-app/apps/frontend/src/components/media/upload.file.type.ts \
+            postiz-app/tests/frontend/guided.composer.upload.details.spec.tsx
+          git commit -m "Avoid local browser codec upload gating"
+          git push origin HEAD:fix/guided-browser-codec-independent
