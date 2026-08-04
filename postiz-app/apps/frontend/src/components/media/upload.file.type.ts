@@ -53,11 +53,42 @@ const getExpectedVideoType = (file: UploadFileLike) => {
 const readAscii = (bytes: Uint8Array, start: number, length: number) =>
   String.fromCharCode(...bytes.slice(start, start + length));
 
+const readBlobBytes = async (blob: Blob) => {
+  const slice = blob.slice(0, 4096) as Blob & {
+    arrayBuffer?: () => Promise<ArrayBuffer>;
+  };
+
+  if (typeof slice.arrayBuffer === 'function') {
+    return new Uint8Array(await slice.arrayBuffer());
+  }
+
+  if (typeof FileReader === 'undefined') {
+    throw new Error('This browser cannot inspect the selected upload.');
+  }
+
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onerror = () => {
+      reject(reader.error || new Error('Unable to inspect the selected upload.'));
+    };
+    reader.onload = () => {
+      if (!(reader.result instanceof ArrayBuffer)) {
+        reject(new Error('Unable to inspect the selected upload.'));
+        return;
+      }
+
+      resolve(new Uint8Array(reader.result));
+    };
+    reader.readAsArrayBuffer(slice);
+  });
+};
+
 export const hasSupportedMp4MovSignature = async (
   blob: Blob,
   expectedType: string
 ) => {
-  const bytes = new Uint8Array(await blob.slice(0, 4096).arrayBuffer());
+  const bytes = await readBlobBytes(blob);
   let ftypOffset = -1;
 
   for (let index = 4; index <= bytes.length - 8; index += 1) {
