@@ -75,6 +75,12 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
 
   useEffect(() => {
     const nextIntegrations = props.allIntegrations || [];
+    setAllIntegrations(nextIntegrations);
+
+    if (!canRenderEmptyGuidedComposer(props)) {
+      return;
+    }
+
     const availableIntegrationIds = new Set(
       nextIntegrations
         .filter(
@@ -83,8 +89,6 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
         )
         .map((integration) => integration.id)
     );
-
-    setAllIntegrations(nextIntegrations);
 
     const staleSelections = useLaunchStore
       .getState()
