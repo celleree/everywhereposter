@@ -195,6 +195,10 @@ const readFtypBrands = async (blob: Blob, box: BmffBox) => {
 };
 
 const hasExpectedBrand = (brands: string[], expectedType: string) => {
+  if (!brands.length) {
+    return false;
+  }
+
   if (expectedType === 'video/quicktime') {
     return brands.some((brand) => MOV_VIDEO_BRANDS.has(brand));
   }
