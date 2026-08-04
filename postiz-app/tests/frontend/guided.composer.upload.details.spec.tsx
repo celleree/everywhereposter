@@ -14,6 +14,13 @@ jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
   }),
 }));
 
+jest.mock(
+  '@gitroom/frontend/components/new-launch/providers/high.order.provider',
+  () => ({
+    PostComment: { ALL: 'ALL' },
+  })
+);
+
 import {
   GUIDED_VIDEO_ACCEPT,
   GuidedComposerUploadDetails,
