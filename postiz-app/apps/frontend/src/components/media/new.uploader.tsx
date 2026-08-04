@@ -12,7 +12,7 @@ import Compressor from '@uppy/compressor';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
-import { inferUploadFileType } from '@gitroom/frontend/components/media/upload.file.type';
+import { resolveUploadFileType } from '@gitroom/frontend/components/media/upload.file.type';
 import { uniqBy } from 'lodash';
 
 export class CompressionWrapper<M = any, B = any> extends Compressor<any, any> {
@@ -84,109 +84,97 @@ export function useUppyUploader(props: {
 
     // check for valid file types it can be something like this image/*,video/mp4.
     // If it's an image, I need to replace image/* with image/png, image/jpeg, image/jpeg, image/gif (separately)
-    uppy2.addPreProcessor((fileIDs) => {
-      return new Promise<void>((resolve, reject) => {
-        const files = uppy2.getFiles();
-        const allowedTypes = allowedFileTypes
-          .split(',')
-          .map((type) => type.trim());
+    uppy2.addPreProcessor(async (fileIDs) => {
+      const files = uppy2.getFiles();
+      const allowedTypes = allowedFileTypes
+        .split(',')
+        .map((type) => type.trim());
 
-        // Expand generic types to specific ones
-        const expandedTypes = allowedTypes.flatMap((type) => {
-          if (type === 'image/*') {
-            return [
-              'image/png',
-              'image/jpeg',
-              'image/jpg',
-              'image/gif',
-              'image/webp',
-            ];
-          }
-          if (type === 'video/*') {
-            return ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/mov'];
-          }
-          if (type === 'video/mp4' && transloadit && transloadit.length > 0) {
-            return ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/mov'];
-          }
-          return [type];
-        });
+      // Expand generic types to specific ones
+      const expandedTypes = allowedTypes.flatMap((type) => {
+        if (type === 'image/*') {
+          return [
+            'image/png',
+            'image/jpeg',
+            'image/jpg',
+            'image/gif',
+            'image/webp',
+          ];
+        }
+        if (type === 'video/*') {
+          return ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/mov'];
+        }
+        if (type === 'video/mp4' && transloadit && transloadit.length > 0) {
+          return ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/mov'];
+        }
+        return [type];
+      });
 
-        for (const file of files) {
-          if (fileIDs.includes(file.id)) {
-            const fileType = inferUploadFileType(file);
+      for (const file of files) {
+        if (fileIDs.includes(file.id)) {
+          const fileType = await resolveUploadFileType(file);
 
-            // Check if file type is allowed
-            const isAllowed = expandedTypes.some((allowedType) => {
-              if (allowedType.endsWith('/*')) {
-                const baseType = allowedType.replace('/*', '/');
-                return fileType.startsWith(baseType);
-              }
-              return fileType === allowedType;
-            });
-
-            if (!isAllowed) {
-              const error = new Error(
-                `File type "${fileType}" is not allowed for file "${file.name}". Allowed types: ${allowedFileTypes}`
-              );
-              uppy2.log(error.message, 'error');
-              uppy2.info(error.message, 'error', 5000);
-              toast.show(
-                `File type "${fileType}" is not allowed. Allowed types: ${allowedFileTypes}`,
-                'warning'
-              );
-              uppy2.removeFile(file.id);
-              return reject(error);
+          // Check if file type is allowed
+          const isAllowed = expandedTypes.some((allowedType) => {
+            if (allowedType.endsWith('/*')) {
+              const baseType = allowedType.replace('/*', '/');
+              return fileType.startsWith(baseType);
             }
+            return fileType === allowedType;
+          });
+
+          if (!isAllowed) {
+            const error = new Error(
+              `File type "${fileType}" is not allowed for file "${file.name}". Allowed types: ${allowedFileTypes}`
+            );
+            uppy2.log(error.message, 'error');
+            uppy2.info(error.message, 'error', 5000);
+            toast.show(
+              `File type "${fileType}" is not allowed. Allowed types: ${allowedFileTypes}`,
+              'warning'
+            );
+            uppy2.removeFile(file.id);
+            throw error;
           }
         }
-
-        resolve();
-      });
+      }
     });
 
-    uppy2.addPreProcessor((fileIDs) => {
-      return new Promise<void>((resolve, reject) => {
-        const files = uppy2.getFiles();
+    uppy2.addPreProcessor(async (fileIDs) => {
+      const files = uppy2.getFiles();
 
-        for (const file of files) {
-          if (fileIDs.includes(file.id)) {
-            const fileType = inferUploadFileType(file);
-            const isImage = fileType.startsWith('image/');
-            const isVideo = fileType.startsWith('video/');
+      for (const file of files) {
+        if (fileIDs.includes(file.id)) {
+          const fileType = await resolveUploadFileType(file);
+          const isImage = fileType.startsWith('image/');
+          const isVideo = fileType.startsWith('video/');
 
-            const maxImageSize = 30 * 1024 * 1024; // 30MB
-            const maxVideoSize = 1000 * 1024 * 1024; // 1GB
+          const maxImageSize = 30 * 1024 * 1024; // 30MB
+          const maxVideoSize = 1000 * 1024 * 1024; // 1GB
 
-            if (isImage && file.size > maxImageSize) {
-              const error = new Error(
-                `Image file "${file.name}" is too large. Maximum size allowed is 30MB.`
-              );
-              uppy2.log(error.message, 'error');
-              uppy2.info(error.message, 'error', 5000);
-              toast.show(
-                `Image file is too large. Maximum size allowed is 30MB.`
-              );
-              uppy2.removeFile(file.id); // Remove file from queue
-              return reject(error);
-            }
+          if (isImage && file.size > maxImageSize) {
+            const error = new Error(
+              `Image file "${file.name}" is too large. Maximum size allowed is 30MB.`
+            );
+            uppy2.log(error.message, 'error');
+            uppy2.info(error.message, 'error', 5000);
+            toast.show(`Image file is too large. Maximum size allowed is 30MB.`);
+            uppy2.removeFile(file.id); // Remove file from queue
+            throw error;
+          }
 
-            if (isVideo && file.size > maxVideoSize) {
-              const error = new Error(
-                `Video file "${file.name}" is too large. Maximum size allowed is 1GB.`
-              );
-              uppy2.log(error.message, 'error');
-              uppy2.info(error.message, 'error', 5000);
-              toast.show(
-                `Video file is too large. Maximum size allowed is 1GB.`
-              );
-              uppy2.removeFile(file.id); // Remove file from queue
-              return reject(error);
-            }
+          if (isVideo && file.size > maxVideoSize) {
+            const error = new Error(
+              `Video file "${file.name}" is too large. Maximum size allowed is 1GB.`
+            );
+            uppy2.log(error.message, 'error');
+            uppy2.info(error.message, 'error', 5000);
+            toast.show(`Video file is too large. Maximum size allowed is 1GB.`);
+            uppy2.removeFile(file.id); // Remove file from queue
+            throw error;
           }
         }
-
-        resolve();
-      });
+      }
     });
 
     const { plugin, options } = getUppyUploadPlugin(
@@ -277,7 +265,11 @@ export function useUppyUploader(props: {
       if (transloadit.length > 0) {
         // @ts-ignore
         const allRes = result.transloadit[0].results;
-        const toSave = uniqBy<{ name: string; originalName: string; order: number }>(
+        const toSave = uniqBy<{
+          name: string;
+          originalName: string;
+          order: number;
+        }>(
           // @ts-ignore
           Object.values(allRes).flatMap((p: any[]) => {
             return p.flatMap((item) => ({
