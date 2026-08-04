@@ -39,6 +39,22 @@ export interface AddEditModalProps {
   }>;
 }
 
+export const canRenderEmptyGuidedComposer = (
+  props: Pick<
+    AddEditModalProps,
+    | 'enableGuidedComposerShell'
+    | 'standaloneCreate'
+    | 'addEditSets'
+    | 'dummy'
+    | 'set'
+  >
+) =>
+  props.enableGuidedComposerShell === true &&
+  props.standaloneCreate === true &&
+  !props.addEditSets &&
+  !props.dummy &&
+  !props.set?.posts?.length;
+
 export const AddEditModal: FC<AddEditModalProps> = (props) => {
   const { setAllIntegrations, setDate, setIsCreateSet, setDummy } =
     useLaunchStore(
@@ -58,7 +74,7 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
     setIsCreateSet(!!props.addEditSets);
   }, []);
 
-  if (!integrations.length) {
+  if (!integrations.length && !canRenderEmptyGuidedComposer(props)) {
     return null;
   }
 
