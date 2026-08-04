@@ -74,7 +74,37 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
   }, []);
 
   useEffect(() => {
-    setAllIntegrations(props.allIntegrations || []);
+    const nextIntegrations = props.allIntegrations || [];
+    const availableIntegrationIds = new Set(
+      nextIntegrations
+        .filter(
+          (integration) =>
+            !integration.disabled && !integration.inBetweenSteps
+        )
+        .map((integration) => integration.id)
+    );
+
+    setAllIntegrations(nextIntegrations);
+
+    const staleSelections = useLaunchStore
+      .getState()
+      .selectedIntegrations.filter(
+        (selected) => !availableIntegrationIds.has(selected.integration.id)
+      );
+
+    staleSelections.forEach((selected) => {
+      const store = useLaunchStore.getState();
+      const selectionStillExists = store.selectedIntegrations.some(
+        (current) => current.integration.id === selected.integration.id
+      );
+
+      if (selectionStillExists) {
+        store.addOrRemoveSelectedIntegration(
+          selected.integration,
+          selected.settings
+        );
+      }
+    });
   }, [props.allIntegrations, setAllIntegrations]);
 
   if (!integrations.length && !canRenderEmptyGuidedComposer(props)) {
