@@ -8,10 +8,64 @@ import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 
-const formatPlatformName = (identifier: string) =>
+type GuidedPlatformIdentity = {
+  key: string;
+  label: string;
+};
+
+const GUIDED_PLATFORM_IDENTITIES: Record<string, GuidedPlatformIdentity> = {
+  devto: { key: 'devto', label: 'Dev.to' },
+  x: { key: 'x', label: 'X' },
+  linkedin: { key: 'linkedin', label: 'LinkedIn' },
+  'linkedin-page': { key: 'linkedin', label: 'LinkedIn' },
+  reddit: { key: 'reddit', label: 'Reddit' },
+  medium: { key: 'medium', label: 'Medium' },
+  hashnode: { key: 'hashnode', label: 'Hashnode' },
+  facebook: { key: 'facebook', label: 'Facebook' },
+  instagram: { key: 'instagram', label: 'Instagram' },
+  'instagram-standalone': { key: 'instagram', label: 'Instagram' },
+  youtube: { key: 'youtube', label: 'YouTube' },
+  tiktok: { key: 'tiktok', label: 'TikTok' },
+  pinterest: { key: 'pinterest', label: 'Pinterest' },
+  dribbble: { key: 'dribbble', label: 'Dribbble' },
+  threads: { key: 'threads', label: 'Threads' },
+  discord: { key: 'discord', label: 'Discord' },
+  slack: { key: 'slack', label: 'Slack' },
+  kick: { key: 'kick', label: 'Kick' },
+  twitch: { key: 'twitch', label: 'Twitch' },
+  mastodon: { key: 'mastodon', label: 'Mastodon' },
+  bluesky: { key: 'bluesky', label: 'Bluesky' },
+  lemmy: { key: 'lemmy', label: 'Lemmy' },
+  wrapcast: { key: 'wrapcast', label: 'Warpcast' },
+  telegram: { key: 'telegram', label: 'Telegram' },
+  nostr: { key: 'nostr', label: 'Nostr' },
+  vk: { key: 'vk', label: 'VK' },
+  wordpress: { key: 'wordpress', label: 'WordPress' },
+  listmonk: { key: 'listmonk', label: 'Listmonk' },
+  gmb: { key: 'gmb', label: 'Google Business' },
+  moltbook: { key: 'moltbook', label: 'Moltbook' },
+  skool: { key: 'skool', label: 'Skool' },
+  whop: { key: 'whop', label: 'Whop' },
+  mewe: { key: 'mewe', label: 'MeWe' },
+};
+
+const formatUnknownPlatformName = (identifier: string) =>
   identifier
     .replace(/[-_]+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase());
+
+export const getGuidedPlatformIdentity = (
+  identifier?: string
+): GuidedPlatformIdentity => {
+  const normalizedIdentifier = identifier || 'other';
+
+  return (
+    GUIDED_PLATFORM_IDENTITIES[normalizedIdentifier] || {
+      key: normalizedIdentifier,
+      label: formatUnknownPlatformName(normalizedIdentifier),
+    }
+  );
+};
 
 export const getGuidedAvailableIntegrations = (
   integrations: Integrations[]
@@ -52,15 +106,26 @@ export const GuidedComposerDestinations: FC<{
     selectedIds.has(integration.id)
   ).length;
   const groupedIntegrations = useMemo(() => {
-    const groups = new Map<string, Integrations[]>();
+    const groups = new Map<
+      string,
+      { identity: GuidedPlatformIdentity; integrations: Integrations[] }
+    >();
 
     availableIntegrations.forEach((integration) => {
-      const platform = integration.identifier || 'other';
-      groups.set(platform, [...(groups.get(platform) || []), integration]);
+      const identity = getGuidedPlatformIdentity(integration.identifier);
+      const existingGroup = groups.get(identity.key);
+
+      groups.set(identity.key, {
+        identity,
+        integrations: [
+          ...(existingGroup?.integrations || []),
+          integration,
+        ],
+      });
     });
 
-    return Array.from(groups.entries()).sort(([left], [right]) =>
-      left.localeCompare(right)
+    return Array.from(groups.values()).sort((left, right) =>
+      left.identity.label.localeCompare(right.identity.label)
     );
   }, [availableIntegrations]);
 
@@ -132,11 +197,11 @@ export const GuidedComposerDestinations: FC<{
           </div>
         ) : (
           <div className="mt-[24px] flex flex-col gap-[26px]">
-            {groupedIntegrations.map(([platform, platformIntegrations]) => (
-              <section key={platform}>
+            {groupedIntegrations.map(({ identity, integrations: platformIntegrations }) => (
+              <section key={identity.key}>
                 <div className="mb-[10px] flex items-center justify-between gap-[12px]">
                   <h3 className="text-[14px] font-[700] text-white">
-                    {formatPlatformName(platform)}
+                    {identity.label}
                   </h3>
                   <span className="text-[11px] text-textColor/50">
                     {platformIntegrations.length}{' '}
@@ -150,9 +215,9 @@ export const GuidedComposerDestinations: FC<{
                     const existingSettings = selectedIntegrations.find(
                       (item) => item.integration.id === integration.id
                     )?.settings;
-                    const platformName = formatPlatformName(
-                      integration.identifier || 'other'
-                    );
+                    const platformName = getGuidedPlatformIdentity(
+                      integration.identifier
+                    ).label;
 
                     return (
                       <button
@@ -181,7 +246,7 @@ export const GuidedComposerDestinations: FC<{
                           <ImageWithFallback
                             fallbackSrc="/no-picture.jpg"
                             src={integration.picture || '/no-picture.jpg'}
-                            alt={integration.identifier}
+                            alt={integration.name}
                             width={52}
                             height={52}
                             className={clsx(
