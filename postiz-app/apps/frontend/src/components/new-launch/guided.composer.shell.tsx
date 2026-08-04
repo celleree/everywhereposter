@@ -9,6 +9,7 @@ import {
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import { GuidedComposerUploadDetails } from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
+import { GuidedComposerDestinations } from '@gitroom/frontend/components/new-launch/guided.composer.destinations';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
@@ -54,7 +55,13 @@ export const GuidedComposerShell: FC<{
   locked?: boolean;
 }> = ({ children, locked = false }) => {
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const global = useLaunchStore((state) => state.global);
+  const { global, integrations, selectedIntegrations } = useLaunchStore(
+    useShallow((state) => ({
+      global: state.global,
+      integrations: state.integrations,
+      selectedIntegrations: state.selectedIntegrations,
+    }))
+  );
   const {
     composerStep,
     captionMode,
@@ -89,13 +96,37 @@ export const GuidedComposerShell: FC<{
   const hasSourceCaption = sourceCaption.trim().length > 0;
   const uploadStepValid =
     hasUploadedVideo && (!needsSourceCaption || hasSourceCaption);
+  const availableDestinationIds = useMemo(
+    () =>
+      new Set(
+        integrations
+          .filter(
+            (integration) =>
+              !integration.disabled && !integration.inBetweenSteps
+          )
+          .map((integration) => integration.id)
+      ),
+    [integrations]
+  );
+  const selectedDestinationCount = selectedIntegrations.filter((selected) =>
+    availableDestinationIds.has(selected.integration.id)
+  ).length;
+  const destinationStepValid = selectedDestinationCount > 0;
   const continueDisabled =
-    locked || (composerStep === 'upload' && !uploadStepValid);
+    locked ||
+    (composerStep === 'upload' && !uploadStepValid) ||
+    (composerStep === 'destinations' && !destinationStepValid);
   const uploadValidationMessage = !hasUploadedVideo
     ? 'Upload an MP4 or MOV video to continue.'
     : needsSourceCaption && !hasSourceCaption
     ? 'Enter your caption to continue.'
     : '';
+  const continueValidationMessage =
+    composerStep === 'upload'
+      ? uploadValidationMessage
+      : composerStep === 'destinations' && !destinationStepValid
+      ? 'Select at least one destination to continue.'
+      : '';
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -221,7 +252,10 @@ export const GuidedComposerShell: FC<{
           </div>
           <GuidedComposerUploadDetails disabled={locked} />
         </div>
-        {composerStep !== 'upload' && (
+        {composerStep === 'destinations' && (
+          <GuidedComposerDestinations disabled={locked} />
+        )}
+        {composerStep !== 'upload' && composerStep !== 'destinations' && (
           <GuidedComposerPlaceholder step={composerStep} />
         )}
       </main>
@@ -238,12 +272,12 @@ export const GuidedComposerShell: FC<{
           </button>
 
           <div className="flex min-w-0 flex-col items-end gap-[5px] mobile:items-stretch">
-            {composerStep === 'upload' && !!uploadValidationMessage && (
+            {!!continueValidationMessage && (
               <div
                 role="status"
                 className="text-end text-[12px] text-textColor/55 mobile:text-start"
               >
-                {uploadValidationMessage}
+                {continueValidationMessage}
               </div>
             )}
             {nextStep ? (
@@ -272,7 +306,7 @@ export const GuidedComposerShell: FC<{
 };
 
 const GuidedComposerPlaceholder: FC<{
-  step: Exclude<GuidedComposerStep, 'upload'>;
+  step: Exclude<GuidedComposerStep, 'upload' | 'destinations'>;
 }> = ({ step }) => {
   const details = GUIDED_COMPOSER_STEP_DETAILS[step];
 
