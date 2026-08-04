@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
 
+# Temporary branch-only applicator. Removed before the PR branch advances.
 jobs:
   apply-fix:
     if: github.actor != 'github-actions[bot]'
