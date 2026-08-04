@@ -11,7 +11,7 @@ const GUIDED_VIDEO_MIME_TYPES = new Set([
 
 export type GuidedVideoMedia = {
   id: string;
-  path?: string;
+  path: string;
   originalName?: string | null;
   type?: string | null;
 };
@@ -24,7 +24,7 @@ export const isGuidedMp4MovMedia = (media?: GuidedVideoMedia) => {
     return false;
   }
 
-  const nameOrPath = media.originalName || media.path || '';
+  const nameOrPath = media.originalName || media.path;
   const mediaType = (media.type || '').toLowerCase();
   const typeIsCompatible =
     !mediaType ||
