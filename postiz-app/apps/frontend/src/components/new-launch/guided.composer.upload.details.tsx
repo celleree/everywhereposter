@@ -4,6 +4,7 @@ import React, { FC, useCallback, useLayoutEffect, useState } from 'react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
+import { inferUploadFileType } from '@gitroom/frontend/components/media/upload.file.type';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { isVideoMedia } from '@gitroom/frontend/components/new-launch/media.copy.helpers';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
@@ -49,31 +50,17 @@ const CAPTION_OPTIONS: Array<{
   },
 ];
 
-export const isGuidedVideoFile = (file: Pick<File, 'name' | 'type'>) => {
-  const type = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
-
-  return (
-    GUIDED_VIDEO_MIME_TYPES.has(type) ||
-    name.endsWith('.mp4') ||
-    name.endsWith('.mov')
-  );
-};
+export const isGuidedVideoFile = (file: Pick<File, 'name' | 'type'>) =>
+  GUIDED_VIDEO_MIME_TYPES.has(inferUploadFileType(file));
 
 export const normalizeGuidedVideoFile = (file: File) => {
   const currentType = file.type.toLowerCase();
-  if (GUIDED_VIDEO_MIME_TYPES.has(currentType)) {
-    return file;
-  }
+  const inferredType = inferUploadFileType(file);
 
-  const name = file.name.toLowerCase();
-  const inferredType = name.endsWith('.mp4')
-    ? 'video/mp4'
-    : name.endsWith('.mov')
-    ? 'video/quicktime'
-    : '';
-
-  if (!inferredType) {
+  if (
+    !GUIDED_VIDEO_MIME_TYPES.has(inferredType) ||
+    inferredType === currentType
+  ) {
     return file;
   }
 
