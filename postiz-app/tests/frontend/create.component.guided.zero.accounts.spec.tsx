@@ -1,5 +1,9 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+dayjs.extend(utc);
 
 const mockMutateIntegrations = jest.fn();
 let mockIntegrations: any[] = [];
