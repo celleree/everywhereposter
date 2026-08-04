@@ -1,13 +1,22 @@
 'use client';
 
-import React, { FC, useState } from 'react';
+import React, { FC, useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
+import { MediaBox } from '@gitroom/frontend/components/media/media.component';
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { isVideoMedia } from '@gitroom/frontend/components/new-launch/media.copy.helpers';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import {
   CaptionMode,
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
+
+export const GUIDED_VIDEO_ACCEPT =
+  'video/mp4,video/quicktime,video/mov,.mp4,.mov';
+
+const GUIDED_UPLOAD_INPUT_SELECTOR =
+  '.guided-upload-existing-composer #social-content section:first-child input[type="file"]';
 
 const ADDITIONAL_CONTEXT_HELP =
   'Add details that may not be clear from the video, such as the target audience, key facts, names, offers, links, desired call to action, or anything the AI should avoid mentioning.';
@@ -37,13 +46,33 @@ const CAPTION_OPTIONS: Array<{
   },
 ];
 
+export const isGuidedVideoFile = (file: Pick<File, 'name' | 'type'>) => {
+  const type = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+
+  return (
+    type === 'video/mp4' ||
+    type === 'video/quicktime' ||
+    type === 'video/mov' ||
+    name.endsWith('.mp4') ||
+    name.endsWith('.mov')
+  );
+};
+
 export const GuidedComposerUploadDetails: FC<{
   disabled?: boolean;
 }> = ({ disabled = false }) => {
   const [showContextHelp, setShowContextHelp] = useState(false);
-  const { global, setGlobalValueMedia } = useLaunchStore(
+  const [uploadError, setUploadError] = useState('');
+  const modals = useModals();
+  const {
+    global,
+    appendGlobalValueMedia,
+    setGlobalValueMedia,
+  } = useLaunchStore(
     useShallow((state) => ({
       global: state.global,
+      appendGlobalValueMedia: state.appendGlobalValueMedia,
       setGlobalValueMedia: state.setGlobalValueMedia,
     }))
   );
@@ -66,29 +95,165 @@ export const GuidedComposerUploadDetails: FC<{
   );
 
   const captionRequired = captionMode !== 'generate';
-  const attachedMediaCount = global[0]?.media?.length || 0;
+  const attachedMedia = global[0]?.media || [];
+
+  useEffect(() => {
+    const input = document.querySelector<HTMLInputElement>(
+      GUIDED_UPLOAD_INPUT_SELECTOR
+    );
+
+    if (!input) {
+      return;
+    }
+
+    input.accept = GUIDED_VIDEO_ACCEPT;
+
+    const rejectNonVideoFiles = (event: Event) => {
+      const target = event.currentTarget as HTMLInputElement;
+      const files = Array.from(target.files || []);
+
+      if (!files.length || files.every(isGuidedVideoFile)) {
+        setUploadError('');
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      target.value = '';
+      setUploadError('Only MP4 and MOV video files can be uploaded here.');
+    };
+
+    input.addEventListener('change', rejectNonVideoFiles, true);
+
+    return () => {
+      input.removeEventListener('change', rejectNonVideoFiles, true);
+    };
+  }, []);
+
+  const openDevicePicker = useCallback(() => {
+    if (disabled) {
+      return;
+    }
+
+    setUploadError('');
+    const input = document.querySelector<HTMLInputElement>(
+      GUIDED_UPLOAD_INPUT_SELECTOR
+    );
+
+    if (!input) {
+      setUploadError('The video picker is unavailable. Refresh and try again.');
+      return;
+    }
+
+    input.accept = GUIDED_VIDEO_ACCEPT;
+    input.click();
+  }, [disabled]);
+
+  const addSelectedVideos = useCallback(
+    (media: { id: string; path: string; type?: string | null }[]) => {
+      const videos = media.filter((item) => isVideoMedia(item));
+
+      if (!videos.length) {
+        setUploadError('Only video files can be added in this workflow.');
+        return;
+      }
+
+      setUploadError('');
+      appendGlobalValueMedia(0, videos);
+    },
+    [appendGlobalValueMedia]
+  );
+
+  const openVideoLibrary = useCallback(() => {
+    if (disabled) {
+      return;
+    }
+
+    setUploadError('');
+    modals.openModal({
+      title: 'Video Library',
+      askClose: false,
+      closeOnEscape: true,
+      fullScreen: true,
+      size: 'calc(100% - 80px)',
+      height: 'calc(100% - 80px)',
+      children: (close) => (
+        <MediaBox
+          type="video"
+          setMedia={addSelectedVideos}
+          closeModal={close}
+        />
+      ),
+    });
+  }, [addSelectedVideos, disabled, modals]);
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] px-[40px] pb-[40px] mobile:px-[12px] mobile:pb-[18px]">
+    <div className="mx-auto w-full max-w-[1600px] px-[40px] py-[40px] mobile:px-[12px] mobile:py-[18px]">
       <div className="rounded-[20px] border border-newBorder bg-newBgColorInner p-[24px] mobile:rounded-[16px] mobile:p-[16px]">
-        {attachedMediaCount > 0 && (
-          <div className="mb-[18px] flex min-w-0 items-center justify-between gap-[12px] rounded-[12px] border border-newBorder bg-newBgColor px-[14px] py-[11px] mobile:flex-col mobile:items-stretch">
-            <div className="text-[13px] text-textColor/65">
-              {attachedMediaCount} media asset
-              {attachedMediaCount === 1 ? '' : 's'} attached
-            </div>
+        <section className="border-b border-newBorder pb-[22px]">
+          <div className="text-[16px] font-[700] text-white">Upload video</div>
+          <p className="mt-[6px] text-[13px] leading-[1.5] text-textColor/65">
+            Choose an MP4 or MOV video from your device or video library.
+          </p>
+
+          <div className="mt-[14px] flex min-w-0 flex-wrap gap-[10px] mobile:flex-col">
             <button
               type="button"
               disabled={disabled}
-              onClick={() => setGlobalValueMedia(0, [])}
-              className="rounded-[8px] border border-newBorder px-[12px] py-[8px] text-[12px] font-[700] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 [@media(hover:hover)]:hover:border-ai"
+              onClick={openDevicePicker}
+              className="rounded-[12px] bg-btnPrimary px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
             >
-              Remove media
+              Choose video
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={openVideoLibrary}
+              className="rounded-[12px] border border-newBorder bg-newBgColor px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:border-ai mobile:w-full"
+            >
+              Video Library
             </button>
           </div>
-        )}
 
-        <div className="grid min-w-0 grid-cols-1 gap-[18px] lg:grid-cols-2">
+          {!!uploadError && (
+            <p role="alert" className="mt-[10px] text-[12px] text-red-300">
+              {uploadError}
+            </p>
+          )}
+
+          <div
+            className={clsx(
+              'mt-[16px] min-w-0 overflow-hidden rounded-[14px] border border-newBorder bg-newBgColor p-[14px]',
+              !attachedMedia.length &&
+                'flex min-h-[120px] items-center justify-center'
+            )}
+          >
+            {!attachedMedia.length ? (
+              <div className="text-center text-[13px] text-textColor/60">
+                No video attached yet.
+              </div>
+            ) : (
+              <div className="flex min-w-0 flex-col gap-[12px]">
+                <div className="flex min-w-0 items-center justify-between gap-[12px] mobile:flex-col mobile:items-stretch">
+                  <div className="text-[13px] text-textColor/65">
+                    {attachedMedia.length} video
+                    {attachedMedia.length === 1 ? '' : 's'} attached
+                  </div>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setGlobalValueMedia(0, [])}
+                    className="rounded-[8px] border border-newBorder px-[12px] py-[8px] text-[12px] font-[700] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 [@media(hover:hover)]:hover:border-ai"
+                  >
+                    Remove media
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <div className="mt-[22px] grid min-w-0 grid-cols-1 gap-[18px] lg:grid-cols-2">
           <section className="min-w-0">
             <div className="flex min-w-0 items-center gap-[8px]">
               <label
