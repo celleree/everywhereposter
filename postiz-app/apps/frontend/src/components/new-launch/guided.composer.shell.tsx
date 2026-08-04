@@ -10,7 +10,7 @@ import {
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import { GuidedComposerUploadDetails } from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
-import { isVideoMedia } from '@gitroom/frontend/components/new-launch/media.copy.helpers';
+import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
@@ -82,7 +82,9 @@ export const GuidedComposerShell: FC<{
     [currentStepIndex]
   );
   const globalMedia = global[0]?.media || [];
-  const hasUploadedVideo = globalMedia.some((media) => isVideoMedia(media));
+  const hasUploadedVideo = globalMedia.some((media) =>
+    isGuidedMp4MovMedia(media)
+  );
   const needsSourceCaption = captionMode !== 'generate';
   const hasSourceCaption = sourceCaption.trim().length > 0;
   const uploadStepValid =
@@ -90,7 +92,7 @@ export const GuidedComposerShell: FC<{
   const continueDisabled =
     locked || (composerStep === 'upload' && !uploadStepValid);
   const uploadValidationMessage = !hasUploadedVideo
-    ? 'Upload a video to continue.'
+    ? 'Upload an MP4 or MOV video to continue.'
     : needsSourceCaption && !hasSourceCaption
     ? 'Enter your caption to continue.'
     : '';
