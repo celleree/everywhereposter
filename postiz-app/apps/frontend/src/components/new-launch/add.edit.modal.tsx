@@ -70,9 +70,12 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
   useEffect(() => {
     setDummy(!!props.dummy);
     setDate(props.date || newDayjs());
-    setAllIntegrations(props.allIntegrations || []);
     setIsCreateSet(!!props.addEditSets);
   }, []);
+
+  useEffect(() => {
+    setAllIntegrations(props.allIntegrations || []);
+  }, [props.allIntegrations, setAllIntegrations]);
 
   if (!integrations.length && !canRenderEmptyGuidedComposer(props)) {
     return null;
