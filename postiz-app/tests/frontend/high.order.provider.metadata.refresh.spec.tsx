@@ -63,11 +63,11 @@ jest.mock('@gitroom/frontend/components/layout/set.timezone', () => ({
   newDayjs: () => require('dayjs')('2026-08-04T12:00:00Z'),
 }));
 
+import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 import {
   PostComment,
   withProvider,
 } from '../../apps/frontend/src/components/new-launch/providers/high.order.provider';
-import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
 const initialIntegration = {
   id: 'instagram-account',
