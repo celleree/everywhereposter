@@ -4,7 +4,10 @@ import 'reflect-metadata';
 
 import { AddProviderButton } from '@gitroom/frontend/components/launches/add.provider.component';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
-import { CreatePostComposer } from '@gitroom/frontend/components/create/create.post.composer';
+import {
+  CreatePostComposer,
+  isGuidedComposerShellEnabled,
+} from '@gitroom/frontend/components/create/create.post.composer';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -33,6 +36,7 @@ export const CreateComponent = () => {
   const t = useT();
   const [selectedSetId, setSelectedSetId] = useState('');
   const [composerKey, setComposerKey] = useState(0);
+  const guidedComposerEnabled = isGuidedComposerShellEnabled();
 
   const {
     data: integrations = [],
@@ -98,7 +102,7 @@ export const CreateComponent = () => {
     );
   }
 
-  if (!activeIntegrations.length) {
+  if (!activeIntegrations.length && !guidedComposerEnabled) {
     return (
       <div className="flex flex-1 items-center justify-center bg-newBgColorInner p-[20px]">
         <div className="flex max-w-[520px] flex-col items-center rounded-[18px] border border-newBorder bg-newBgColor px-[24px] py-[28px] text-center">
