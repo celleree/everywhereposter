@@ -50,6 +50,7 @@ jest.mock('@gitroom/react/helpers/safe.image', () => ({
 }));
 
 import { GuidedComposerShell } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
+import { getGuidedPlatformIdentity } from '../../apps/frontend/src/components/new-launch/guided.composer.destinations';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
@@ -95,7 +96,64 @@ const unavailableIntegrations = [
   },
 ] as any[];
 
-const seedDraft = () => {
+const providerVariantIntegrations = [
+  {
+    id: 'linkedin-personal',
+    name: 'LinkedIn Personal',
+    identifier: 'linkedin',
+    display: 'Personal profile',
+    picture: '',
+    disabled: false,
+    inBetweenSteps: false,
+  },
+  {
+    id: 'linkedin-company',
+    name: 'LinkedIn Page',
+    identifier: 'linkedin-page',
+    display: 'Company page',
+    picture: '',
+    disabled: false,
+    inBetweenSteps: false,
+  },
+  {
+    id: 'instagram-facebook',
+    name: 'Instagram via Facebook',
+    identifier: 'instagram',
+    display: '@brand',
+    picture: '',
+    disabled: false,
+    inBetweenSteps: false,
+  },
+  {
+    id: 'instagram-direct',
+    name: 'Instagram Direct',
+    identifier: 'instagram-standalone',
+    display: '@creator',
+    picture: '',
+    disabled: false,
+    inBetweenSteps: false,
+  },
+  {
+    id: 'youtube-account',
+    name: 'YouTube Channel',
+    identifier: 'youtube',
+    display: 'Channel',
+    picture: '',
+    disabled: false,
+    inBetweenSteps: false,
+  },
+  {
+    id: 'gmb-account',
+    name: 'Local Business',
+    identifier: 'gmb',
+    display: '',
+    picture: '',
+    disabled: false,
+    inBetweenSteps: false,
+  },
+] as any[];
+
+const seedVideoDraft = () => {
   useLaunchStore.getState().addGlobalValue(0, [
     {
       id: 'post-1',
@@ -110,6 +168,10 @@ const seedDraft = () => {
       ],
     },
   ]);
+};
+
+const seedDraft = () => {
+  seedVideoDraft();
   useLaunchStore
     .getState()
     .setAllIntegrations([...availableIntegrations, ...unavailableIntegrations]);
@@ -252,7 +314,7 @@ describe('guided composer destinations step', () => {
       screen.getByRole('heading', { name: 'Instagram', level: 3 })
     ).toBeTruthy();
     expect(
-      screen.getByRole('heading', { name: 'Linkedin', level: 3 })
+      screen.getByRole('heading', { name: 'LinkedIn', level: 3 })
     ).toBeTruthy();
     expect(screen.getByText('Creator Team')).toBeTruthy();
     expect(screen.queryByText('Disabled account')).toBeNull();
@@ -265,10 +327,71 @@ describe('guided composer destinations step', () => {
     ).toBeNull();
   });
 
+  it('consolidates provider variants under canonical platform labels', () => {
+    useLaunchStore.getState().reset();
+    useGuidedComposerStore.getState().resetGuidedComposer();
+    seedVideoDraft();
+    useLaunchStore
+      .getState()
+      .setAllIntegrations(providerVariantIntegrations);
+
+    renderDestinations();
+
+    const linkedInHeading = screen.getByRole('heading', {
+      name: 'LinkedIn',
+      level: 3,
+    });
+    const instagramHeading = screen.getByRole('heading', {
+      name: 'Instagram',
+      level: 3,
+    });
+
+    expect(screen.getAllByRole('heading', { name: 'LinkedIn', level: 3 })).toHaveLength(1);
+    expect(screen.getAllByRole('heading', { name: 'Instagram', level: 3 })).toHaveLength(1);
+    expect(linkedInHeading.closest('section')?.textContent).toContain('2 accounts');
+    expect(instagramHeading.closest('section')?.textContent).toContain('2 accounts');
+    expect(
+      screen.getByRole('heading', { name: 'YouTube', level: 3 })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('heading', { name: 'Google Business', level: 3 })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Select LinkedIn Page on LinkedIn' })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: 'Select Instagram Direct on Instagram',
+      })
+    ).toBeTruthy();
+    expect(screen.queryByText('Linkedin Page')).toBeNull();
+    expect(screen.queryByText('Instagram Standalone')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Youtube' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Gmb' })).toBeNull();
+  });
+
+  it('returns canonical identities for provider aliases and branded names', () => {
+    expect(getGuidedPlatformIdentity('linkedin')).toEqual({
+      key: 'linkedin',
+      label: 'LinkedIn',
+    });
+    expect(getGuidedPlatformIdentity('linkedin-page')).toEqual({
+      key: 'linkedin',
+      label: 'LinkedIn',
+    });
+    expect(getGuidedPlatformIdentity('instagram-standalone')).toEqual({
+      key: 'instagram',
+      label: 'Instagram',
+    });
+    expect(getGuidedPlatformIdentity('youtube').label).toBe('YouTube');
+    expect(getGuidedPlatformIdentity('gmb').label).toBe('Google Business');
+    expect(getGuidedPlatformIdentity('tiktok').label).toBe('TikTok');
+  });
+
   it('uses the shared image fallbacks for account and platform identity', () => {
     renderDestinations();
 
-    const avatar = screen.getByTestId('fallback-image-instagram');
+    const avatar = screen.getByTestId('fallback-image-Founder Instagram');
     expect(avatar.getAttribute('src')).toBe(
       'https://media.example.com/missing-avatar.jpg'
     );
@@ -277,7 +400,7 @@ describe('guided composer destinations step', () => {
 
     expect(avatar.getAttribute('src')).toBe('/no-picture.jpg');
     expect(screen.getByTestId('safe-image-Instagram')).toBeTruthy();
-    expect(screen.getByTestId('safe-image-Linkedin')).toBeTruthy();
+    expect(screen.getByTestId('safe-image-LinkedIn')).toBeTruthy();
   });
 
   it('disables destination controls while the shared composer is locked', () => {
