@@ -83,6 +83,7 @@ export const GuidedComposerShell: FC<{
   );
 
   const currentStepIndex = GUIDED_COMPOSER_STEPS.indexOf(composerStep);
+  const destinationStepIndex = GUIDED_COMPOSER_STEPS.indexOf('destinations');
   const currentStep = GUIDED_COMPOSER_STEP_DETAILS[composerStep];
   const nextStep = useMemo(
     () => GUIDED_COMPOSER_STEPS[currentStepIndex + 1],
@@ -112,10 +113,12 @@ export const GuidedComposerShell: FC<{
     availableDestinationIds.has(selected.integration.id)
   ).length;
   const destinationStepValid = selectedDestinationCount > 0;
+  const destinationRequiredForCurrentStep =
+    currentStepIndex >= destinationStepIndex;
   const continueDisabled =
     locked ||
     (composerStep === 'upload' && !uploadStepValid) ||
-    (composerStep === 'destinations' && !destinationStepValid);
+    (destinationRequiredForCurrentStep && !destinationStepValid);
   const uploadValidationMessage = !hasUploadedVideo
     ? 'Upload an MP4 or MOV video to continue.'
     : needsSourceCaption && !hasSourceCaption
@@ -124,7 +127,7 @@ export const GuidedComposerShell: FC<{
   const continueValidationMessage =
     composerStep === 'upload'
       ? uploadValidationMessage
-      : composerStep === 'destinations' && !destinationStepValid
+      : destinationRequiredForCurrentStep && !destinationStepValid
       ? 'Select at least one destination to continue.'
       : '';
 
