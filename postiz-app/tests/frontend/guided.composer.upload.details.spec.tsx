@@ -24,17 +24,45 @@ jest.mock(
 import {
   GUIDED_VIDEO_ACCEPT,
   GuidedComposerUploadDetails,
+  isGuidedMp4MovMedia,
   isGuidedVideoFile,
   normalizeGuidedVideoFile,
   selectGuidedSourceVideo,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.upload.details';
-import { inferUploadFileType } from '../../apps/frontend/src/components/media/upload.file.type';
+import { resolveUploadFileType } from '../../apps/frontend/src/components/media/upload.file.type';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
-const createVideo = (id: string) => ({
+const encodeAscii = (value: string) =>
+  Array.from(value).map((character) => character.charCodeAt(0));
+
+const createIsoBmffBytes = (brand: string, compatibleBrand = brand) =>
+  new Uint8Array([
+    0,
+    0,
+    0,
+    20,
+    ...encodeAscii('ftyp'),
+    ...encodeAscii(brand),
+    0,
+    0,
+    0,
+    0,
+    ...encodeAscii(compatibleBrand),
+  ]);
+
+const createMp4File = (
+  name = 'demo.mp4',
+  type = 'video/mp4',
+  brand = 'isom'
+) => new File([createIsoBmffBytes(brand)], name, { type });
+
+const createMovFile = (name = 'demo.mov', type = 'video/quicktime') =>
+  new File([createIsoBmffBytes('qt  ')], name, { type });
+
+const createVideo = (id: string, extension = 'mp4') => ({
   id,
-  path: `https://media.example.com/${id}.mp4`,
+  path: `https://media.example.com/${id}.${extension}`,
   type: 'video',
 });
 
@@ -44,71 +72,82 @@ describe('guided composer video picker', () => {
     useLaunchStore.getState().reset();
   });
 
-  it('accepts supported MP4 and MOV videos', () => {
-    expect(
-      isGuidedVideoFile({ name: 'demo.mp4', type: 'video/mp4' } as File)
-    ).toBe(true);
-    expect(
-      isGuidedVideoFile({
-        name: 'demo.mov',
-        type: 'video/quicktime',
-      } as File)
-    ).toBe(true);
-    expect(
-      isGuidedVideoFile({ name: 'demo.MOV', type: '' } as File)
-    ).toBe(true);
+  it('accepts supported MP4 and MOV files with valid container signatures', async () => {
+    await expect(isGuidedVideoFile(createMp4File())).resolves.toBe(true);
+    await expect(isGuidedVideoFile(createMovFile())).resolves.toBe(true);
+    await expect(
+      isGuidedVideoFile(createMovFile('demo.MOV', ''))
+    ).resolves.toBe(true);
   });
 
-  it('normalizes extension-only videos before the legacy uploader validates MIME', () => {
-    const mov = new File(['video'], 'demo.MOV', { type: '' });
-    const mp4 = new File(['video'], 'demo.mp4', {
+  it('normalizes extension-only videos only after their bytes validate', async () => {
+    const mov = createMovFile('demo.MOV', '');
+    const mp4 = createMp4File('demo.mp4', 'application/octet-stream');
+
+    await expect(normalizeGuidedVideoFile(mov)).resolves.toMatchObject({
+      type: 'video/quicktime',
+    });
+    await expect(normalizeGuidedVideoFile(mp4)).resolves.toMatchObject({
+      type: 'video/mp4',
+    });
+    await expect(resolveUploadFileType(mov)).resolves.toBe('video/quicktime');
+    await expect(resolveUploadFileType(mp4)).resolves.toBe('video/mp4');
+  });
+
+  it('rejects arbitrary bytes renamed to MP4 or MOV with a generic MIME', async () => {
+    const renamedMp4 = new File(['not a video'], 'example.mp4', {
       type: 'application/octet-stream',
     });
+    const renamedMov = new File(['not a video'], 'example.mov', { type: '' });
 
-    expect(normalizeGuidedVideoFile(mov).type).toBe('video/quicktime');
-    expect(normalizeGuidedVideoFile(mp4).type).toBe('video/mp4');
-  });
-
-  it('infers generic video MIME types in every shared Uppy upload path', () => {
-    expect(inferUploadFileType({ name: 'library.MOV', type: '' })).toBe(
-      'video/quicktime'
+    await expect(isGuidedVideoFile(renamedMp4)).resolves.toBe(false);
+    await expect(isGuidedVideoFile(renamedMov)).resolves.toBe(false);
+    await expect(resolveUploadFileType(renamedMp4)).resolves.toBe(
+      'application/octet-stream'
     );
-    expect(
-      inferUploadFileType({
-        name: 'dragged.mp4',
-        type: 'application/octet-stream',
-      })
-    ).toBe('video/mp4');
-    expect(
-      inferUploadFileType({ name: 'thumbnail.mp4', type: 'image/png' })
-    ).toBe('image/png');
   });
 
-  it('rejects explicit non-video MIME types even with a video extension', () => {
+  it('rejects explicit non-video MIME types and invalid video bytes', async () => {
     const disguisedImage = new File(['image'], 'thumbnail.mp4', {
       type: 'image/png',
     });
+    const invalidVideo = new File(['text'], 'fake.mp4', {
+      type: 'video/mp4',
+    });
 
-    expect(isGuidedVideoFile(disguisedImage)).toBe(false);
-    expect(normalizeGuidedVideoFile(disguisedImage)).toBe(disguisedImage);
+    await expect(isGuidedVideoFile(disguisedImage)).resolves.toBe(false);
+    await expect(isGuidedVideoFile(invalidVideo)).resolves.toBe(false);
+    await expect(normalizeGuidedVideoFile(disguisedImage)).resolves.toBe(
+      disguisedImage
+    );
   });
 
-  it('leaves recognized video files unchanged', () => {
-    const video = new File(['video'], 'demo.mp4', { type: 'video/mp4' });
-
-    expect(normalizeGuidedVideoFile(video)).toBe(video);
+  it('rejects image and unsupported file types', async () => {
+    await expect(
+      isGuidedVideoFile(
+        new File(['image'], 'thumbnail.png', { type: 'image/png' })
+      )
+    ).resolves.toBe(false);
+    await expect(
+      isGuidedVideoFile(new File(['notes'], 'notes.txt', { type: 'text/plain' }))
+    ).resolves.toBe(false);
   });
 
-  it('rejects image and unsupported file types', () => {
-    expect(
-      isGuidedVideoFile({ name: 'thumbnail.png', type: 'image/png' } as File)
-    ).toBe(false);
-    expect(
-      isGuidedVideoFile({ name: 'notes.txt', type: 'text/plain' } as File)
-    ).toBe(false);
+  it('accepts only MP4 and MOV assets from the video library', () => {
+    const mp4 = createVideo('first', 'mp4');
+    const mov = createVideo('second', 'mov');
+    const webm = createVideo('unsupported', 'webm');
+    const m4v = createVideo('unsupported-m4v', 'm4v');
+
+    expect(isGuidedMp4MovMedia(mp4)).toBe(true);
+    expect(isGuidedMp4MovMedia(mov)).toBe(true);
+    expect(isGuidedMp4MovMedia(webm)).toBe(false);
+    expect(isGuidedMp4MovMedia(m4v)).toBe(false);
+    expect(selectGuidedSourceVideo([webm, m4v])).toBeUndefined();
+    expect(selectGuidedSourceVideo([webm, mov, mp4])).toBe(mov);
   });
 
-  it('uses only the first video from a multi-video library selection', () => {
+  it('uses only the first supported video from a multi-video library selection', () => {
     const first = createVideo('first');
     const second = createVideo('second');
 
@@ -147,24 +186,70 @@ describe('guided composer video picker', () => {
     unmount();
   });
 
-  it('does not advertise image files in the device picker', () => {
+  it('removes unsupported library video formats from the guided draft', () => {
+    const webm = createVideo('unsupported', 'webm');
+
+    useLaunchStore.getState().addGlobalValue(0, [
+      {
+        id: 'post-1',
+        content: '',
+        delay: 0,
+        media: [webm],
+      } as any,
+    ]);
+
+    const { unmount } = render(<GuidedComposerUploadDetails />);
+
+    expect(useLaunchStore.getState().global[0].media).toEqual([]);
+    unmount();
+  });
+
+  it('does not advertise image or unsupported video formats in the picker', () => {
     expect(GUIDED_VIDEO_ACCEPT).toContain('video/mp4');
     expect(GUIDED_VIDEO_ACCEPT).toContain('.mov');
     expect(GUIDED_VIDEO_ACCEPT).not.toContain('image/');
+    expect(GUIDED_VIDEO_ACCEPT).not.toContain('webm');
   });
 
-  it('allows only one device file and restores the legacy input on unmount', () => {
+  it('shows only progress and cancellation from the real legacy upload-card structure', () => {
     const host = document.createElement('div');
     host.innerHTML = `
       <div class="guided-upload-existing-composer">
         <div id="social-content">
-          <section><input type="file" multiple /></section>
+          <section>
+            <div data-testid="legacy-heading">Upload media</div>
+            <div data-testid="legacy-card">
+              <input type="file" multiple />
+              <div data-testid="legacy-controls">
+                <div>
+                  <button disabled>Choose files</button>
+                  <button disabled>Media Library</button>
+                  <button>Cancel upload</button>
+                </div>
+                <div>Drop files here or browse from your device.</div>
+              </div>
+              <div class="uppyChange" data-testid="legacy-progress">Progress</div>
+              <div data-testid="legacy-media">Shared media</div>
+            </div>
+          </section>
         </div>
       </div>
     `;
     document.body.appendChild(host);
+
     const section = host.querySelector('section') as HTMLElement;
     const input = host.querySelector('input') as HTMLInputElement;
+    const heading = host.querySelector('[data-testid="legacy-heading"]') as HTMLElement;
+    const choose = host.querySelector('button:nth-of-type(1)') as HTMLElement;
+    const library = host.querySelector('button:nth-of-type(2)') as HTMLElement;
+    const cancel = host.querySelector('button:nth-of-type(3)') as HTMLElement;
+    const dropText = host.querySelector(
+      '[data-testid="legacy-controls"] > div:last-child'
+    ) as HTMLElement;
+    const progress = host.querySelector(
+      '[data-testid="legacy-progress"]'
+    ) as HTMLElement;
+    const media = host.querySelector('[data-testid="legacy-media"]') as HTMLElement;
 
     const { rerender, unmount } = render(
       <GuidedComposerUploadDetails disabled={false} />
@@ -177,11 +262,18 @@ describe('guided composer video picker', () => {
     rerender(<GuidedComposerUploadDetails disabled />);
 
     expect(section.style.display).toBe('');
-    expect(input.accept).toBe(GUIDED_VIDEO_ACCEPT);
-    expect(input.multiple).toBe(false);
+    expect(section.classList.contains('guided-upload-progress-only')).toBe(true);
+    expect(getComputedStyle(heading).display).toBe('none');
+    expect(getComputedStyle(choose).display).toBe('none');
+    expect(getComputedStyle(library).display).toBe('none');
+    expect(getComputedStyle(dropText).display).toBe('none');
+    expect(getComputedStyle(media).display).toBe('none');
+    expect(getComputedStyle(cancel).display).not.toBe('none');
+    expect(getComputedStyle(progress).display).not.toBe('none');
 
     unmount();
     expect(input.multiple).toBe(true);
+    expect(section.classList.contains('guided-upload-progress-only')).toBe(false);
     host.remove();
   });
 });
