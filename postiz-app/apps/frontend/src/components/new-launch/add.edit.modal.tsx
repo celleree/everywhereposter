@@ -224,10 +224,13 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
   }
 
   const manageModal = <ManageModal {...props} />;
+  const hasPreloadedSet = !!props.set?.posts?.length;
   const guidedComposerEnabled = shouldUseGuidedComposerShell({
     enabled: props.enableGuidedComposerShell,
     existingIntegration: existingData.integration,
-    isCreateSet: !!props.addEditSets,
+    // Saved Sets can contain image media, so keep them in the normal composer
+    // until the guided workflow supports mixed-media drafts.
+    isCreateSet: !!props.addEditSets || hasPreloadedSet,
     dummy: !!props.dummy,
   });
 
