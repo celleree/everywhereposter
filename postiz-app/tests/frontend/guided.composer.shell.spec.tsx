@@ -1,10 +1,32 @@
 import React, { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
+
+jest.mock('@gitroom/frontend/components/media/media.component', () => ({
+  MediaBox: () => null,
+}));
+
+jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
+  useModals: () => ({
+    openModal: jest.fn(),
+    closeAll: jest.fn(),
+    closeById: jest.fn(),
+    closeCurrent: jest.fn(),
+  }),
+}));
+
+jest.mock(
+  '@gitroom/frontend/components/new-launch/providers/high.order.provider',
+  () => ({
+    PostComment: { ALL: 'ALL' },
+  })
+);
+
 import {
   GuidedComposerShell,
   shouldUseGuidedComposerShell,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
+import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
 const StatefulUploadComposer = () => {
   const [queuedPreset, setQueuedPreset] = useState(false);
@@ -19,9 +41,28 @@ const StatefulUploadComposer = () => {
   );
 };
 
+const seedUploadedVideo = () => {
+  useLaunchStore.getState().addGlobalValue(0, [
+    {
+      id: 'post-1',
+      content: '',
+      delay: 0,
+      media: [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        } as any,
+      ],
+    },
+  ]);
+};
+
 describe('guided composer shell', () => {
   beforeEach(() => {
     useGuidedComposerStore.getState().resetGuidedComposer();
+    useLaunchStore.getState().reset();
+    seedUploadedVideo();
   });
 
   it('renders the upload step around the existing composer content', () => {
@@ -36,6 +77,11 @@ describe('guided composer shell', () => {
     ).toBeTruthy();
     expect(screen.getByText('Create post')).toBeTruthy();
     expect(screen.getByText('Existing composer content')).toBeTruthy();
+    expect(screen.getByLabelText('Additional context')).toBeTruthy();
+    expect(
+      screen.getByRole('radio', { name: /Create captions for me/ })
+        .hasAttribute('checked')
+    ).toBe(true);
     expect(
       screen.getByRole('button', { name: 'Continue to Destinations' })
     ).toBeTruthy();
@@ -148,6 +194,108 @@ describe('guided composer shell', () => {
 
     expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
     expect(screen.getByText('Upload progress and cancel controls')).toBeTruthy();
+  });
+
+  it('requires an uploaded MP4 or MOV before continuing', () => {
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    expect(
+      screen.getByText('Upload an MP4 or MOV video to continue.')
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole('button', { name: 'Continue to Destinations' })
+        .hasAttribute('disabled')
+    ).toBe(true);
+  });
+
+  it('does not treat an unsupported WebM library asset as a valid source', () => {
+    useLaunchStore.getState().setGlobalValueMedia(0, [
+      {
+        id: 'webm-video',
+        path: 'https://media.example.com/video.webm',
+        type: 'video',
+      } as any,
+    ]);
+
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    expect(
+      screen.getByText('Upload an MP4 or MOV video to continue.')
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole('button', { name: 'Continue to Destinations' })
+        .hasAttribute('disabled')
+    ).toBe(true);
+  });
+
+  it('requires and preserves a user caption for caption-based modes', () => {
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    fireEvent.change(screen.getByLabelText('Additional context'), {
+      target: { value: 'Use the founder audience and mention the beta.' },
+    });
+    fireEvent.click(
+      screen.getByRole('radio', {
+        name: /Adapt my caption for each platform/,
+      })
+    );
+
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Destinations',
+    });
+    expect(screen.getByText('Enter your caption to continue.')).toBeTruthy();
+    expect(continueButton.hasAttribute('disabled')).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Your caption'), {
+      target: { value: 'One video should not die on one platform.' },
+    });
+
+    expect(continueButton.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(continueButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(
+      (screen.getByLabelText('Additional context') as HTMLTextAreaElement).value
+    ).toBe('Use the founder audience and mention the beta.');
+    expect(
+      (screen.getByLabelText('Your caption') as HTMLTextAreaElement).value
+    ).toBe('One video should not die on one platform.');
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      captionMode: 'adapt-by-platform',
+      additionalContext: 'Use the founder audience and mention the beta.',
+      sourceCaption: 'One video should not die on one platform.',
+    });
+  });
+
+  it('removes attached media from the shared composer draft', () => {
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove media' }));
+
+    expect(useLaunchStore.getState().global[0].media).toEqual([]);
+    expect(
+      screen.getByText('Upload an MP4 or MOV video to continue.')
+    ).toBeTruthy();
   });
 
   it('renders a placeholder for later phases while hiding upload content', () => {

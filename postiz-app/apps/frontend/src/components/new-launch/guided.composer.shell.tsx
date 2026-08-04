@@ -8,6 +8,9 @@ import {
   GuidedComposerStep,
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
+import { GuidedComposerUploadDetails } from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
+import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
+import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
@@ -18,7 +21,7 @@ export const GUIDED_COMPOSER_STEP_DETAILS: Record<
 > = {
   upload: {
     title: 'Upload',
-    description: 'Add your media and the information needed to prepare the post.',
+    description: 'Add your video and any context the captions should use.',
   },
   destinations: {
     title: 'Destinations',
@@ -51,8 +54,11 @@ export const GuidedComposerShell: FC<{
   locked?: boolean;
 }> = ({ children, locked = false }) => {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const global = useLaunchStore((state) => state.global);
   const {
     composerStep,
+    captionMode,
+    sourceCaption,
     setComposerStep,
     nextComposerStep,
     previousComposerStep,
@@ -60,6 +66,8 @@ export const GuidedComposerShell: FC<{
   } = useGuidedComposerStore(
     useShallow((state) => ({
       composerStep: state.composerStep,
+      captionMode: state.captionMode,
+      sourceCaption: state.sourceCaption,
       setComposerStep: state.setComposerStep,
       nextComposerStep: state.nextComposerStep,
       previousComposerStep: state.previousComposerStep,
@@ -73,6 +81,21 @@ export const GuidedComposerShell: FC<{
     () => GUIDED_COMPOSER_STEPS[currentStepIndex + 1],
     [currentStepIndex]
   );
+  const globalMedia = global[0]?.media || [];
+  const hasUploadedVideo = globalMedia.some((media) =>
+    isGuidedMp4MovMedia(media)
+  );
+  const needsSourceCaption = captionMode !== 'generate';
+  const hasSourceCaption = sourceCaption.trim().length > 0;
+  const uploadStepValid =
+    hasUploadedVideo && (!needsSourceCaption || hasSourceCaption);
+  const continueDisabled =
+    locked || (composerStep === 'upload' && !uploadStepValid);
+  const uploadValidationMessage = !hasUploadedVideo
+    ? 'Upload an MP4 or MOV video to continue.'
+    : needsSourceCaption && !hasSourceCaption
+    ? 'Enter your caption to continue.'
+    : '';
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -172,9 +195,31 @@ export const GuidedComposerShell: FC<{
         <div
           data-testid="guided-composer-upload-content"
           hidden={composerStep !== 'upload'}
-          className="h-full min-h-full"
+          className="min-h-full"
         >
-          {children}
+          <div className="guided-upload-existing-composer">
+            {children}
+            <style>
+              {`
+                .guided-upload-existing-composer #social-content > section:not(:first-child) {
+                  display: none !important;
+                }
+                .guided-upload-existing-composer div[class*="w-[580px]"] {
+                  display: none !important;
+                }
+                .guided-upload-existing-composer div[class*="min-h-[84px]"] {
+                  display: none !important;
+                }
+                .guided-upload-existing-composer div[class*="min-h-[65px]"] {
+                  display: none !important;
+                }
+                .guided-upload-existing-composer > :not(:first-child) {
+                  display: none !important;
+                }
+              `}
+            </style>
+          </div>
+          <GuidedComposerUploadDetails disabled={locked} />
         </div>
         {composerStep !== 'upload' && (
           <GuidedComposerPlaceholder step={composerStep} />
@@ -192,24 +237,34 @@ export const GuidedComposerShell: FC<{
             Back
           </button>
 
-          {nextStep ? (
-            <button
-              type="button"
-              disabled={locked}
-              onClick={nextComposerStep}
-              className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50 mobile:w-full"
-            >
-              Continue to {GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled
-              className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white opacity-50 mobile:w-full"
-            >
-              Publish
-            </button>
-          )}
+          <div className="flex min-w-0 flex-col items-end gap-[5px] mobile:items-stretch">
+            {composerStep === 'upload' && !!uploadValidationMessage && (
+              <div
+                role="status"
+                className="text-end text-[12px] text-textColor/55 mobile:text-start"
+              >
+                {uploadValidationMessage}
+              </div>
+            )}
+            {nextStep ? (
+              <button
+                type="button"
+                disabled={continueDisabled}
+                onClick={nextComposerStep}
+                className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50 mobile:w-full"
+              >
+                Continue to {GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white opacity-50 mobile:w-full"
+              >
+                Publish
+              </button>
+            )}
+          </div>
         </div>
       </footer>
     </div>
@@ -234,7 +289,8 @@ const GuidedComposerPlaceholder: FC<{
           {details.description}
         </p>
         <p className="mx-auto mt-[12px] max-w-[500px] text-[12px] leading-[1.5] text-textColor/45">
-          The existing controls for this stage will be connected in the next implementation phase.
+          The existing controls for this stage will be connected in the next
+          implementation phase.
         </p>
       </div>
     </div>
