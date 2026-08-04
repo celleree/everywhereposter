@@ -27,6 +27,7 @@ import {
   isGuidedVideoFile,
   normalizeGuidedVideoFile,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.upload.details';
+import { inferUploadFileType } from '../../apps/frontend/src/components/media/upload.file.type';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
@@ -59,6 +60,21 @@ describe('guided composer video picker', () => {
 
     expect(normalizeGuidedVideoFile(mov).type).toBe('video/quicktime');
     expect(normalizeGuidedVideoFile(mp4).type).toBe('video/mp4');
+  });
+
+  it('infers generic video MIME types in every shared Uppy upload path', () => {
+    expect(inferUploadFileType({ name: 'library.MOV', type: '' })).toBe(
+      'video/quicktime'
+    );
+    expect(
+      inferUploadFileType({
+        name: 'dragged.mp4',
+        type: 'application/octet-stream',
+      })
+    ).toBe('video/mp4');
+    expect(
+      inferUploadFileType({ name: 'thumbnail.mp4', type: 'image/png' })
+    ).toBe('image/png');
   });
 
   it('leaves recognized video files unchanged', () => {
