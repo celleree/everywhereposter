@@ -1,5 +1,10 @@
 import React from 'react';
 import { render } from '@testing-library/react';
+
+jest.mock('@gitroom/frontend/components/media/media.component', () => ({
+  MediaBox: () => null,
+}));
+
 import {
   GUIDED_VIDEO_ACCEPT,
   GuidedComposerUploadDetails,
