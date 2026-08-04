@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
+
+jest.mock('@gitroom/frontend/components/media/media.component', () => ({
+  MediaBox: () => null,
+}));
+
 import {
   GuidedComposerShell,
   shouldUseGuidedComposerShell,
