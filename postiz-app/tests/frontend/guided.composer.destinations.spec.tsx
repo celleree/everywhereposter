@@ -21,6 +21,34 @@ jest.mock(
   })
 );
 
+jest.mock('@gitroom/react/helpers/image.with.fallback', () => {
+  const ReactModule = require('react');
+
+  return {
+    __esModule: true,
+    default: ({ fallbackSrc, src, alt, ...props }: any) => {
+      const [currentSrc, setCurrentSrc] = ReactModule.useState(src);
+
+      return (
+        <img
+          {...props}
+          alt={alt}
+          src={currentSrc}
+          data-testid={`fallback-image-${alt}`}
+          onError={() => setCurrentSrc(fallbackSrc)}
+        />
+      );
+    },
+  };
+});
+
+jest.mock('@gitroom/react/helpers/safe.image', () => ({
+  __esModule: true,
+  default: ({ alt, ...props }: any) => (
+    <img {...props} alt={alt} data-testid={`safe-image-${alt}`} />
+  ),
+}));
+
 import { GuidedComposerShell } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
@@ -31,9 +59,13 @@ const availableIntegrations = [
     name: 'Founder Instagram',
     identifier: 'instagram',
     display: '@founder',
-    picture: '',
+    picture: 'https://media.example.com/missing-avatar.jpg',
     disabled: false,
     inBetweenSteps: false,
+    customer: {
+      id: 'customer-1',
+      name: 'Creator Team',
+    },
   },
   {
     id: 'linkedin-account',
@@ -133,6 +165,29 @@ describe('guided composer destinations step', () => {
     expect(useGuidedComposerStore.getState().composerStep).toBe('review');
   });
 
+  it('supports individual deselection and restores the review gate', () => {
+    renderDestinations();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Select Founder Instagram on Instagram',
+      })
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Deselect Founder Instagram on Instagram',
+      })
+    );
+
+    expect(useLaunchStore.getState().selectedIntegrations).toEqual([]);
+    expect(screen.getByText('0 of 2 accounts selected')).toBeTruthy();
+    expect(
+      screen
+        .getByRole('button', { name: 'Continue to Review' })
+        .hasAttribute('disabled')
+    ).toBe(true);
+  });
+
   it('selects only usable accounts in bulk and preserves them across steps', () => {
     renderDestinations();
 
@@ -154,6 +209,96 @@ describe('guided composer destinations step', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Deselect all' }));
     expect(useLaunchStore.getState().selectedIntegrations).toEqual([]);
+    expect(
+      screen
+        .getByRole('button', { name: 'Continue to Review' })
+        .hasAttribute('disabled')
+    ).toBe(true);
+  });
+
+  it('preserves existing per-account settings during Select all', () => {
+    const instagramSettings = {
+      post_type: 'reel',
+      collaborators: ['creator'],
+    };
+
+    useLaunchStore.getState().setSelectedIntegrations([
+      {
+        selectedIntegrations: availableIntegrations[0],
+        settings: instagramSettings,
+      },
+    ]);
+
+    renderDestinations();
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+
+    const selected = useLaunchStore.getState().selectedIntegrations;
+    expect(selected).toHaveLength(2);
+    expect(
+      selected.find(
+        (item) => item.integration.id === 'instagram-account'
+      )?.settings
+    ).toEqual(instagramSettings);
+    expect(
+      selected.find((item) => item.integration.id === 'linkedin-account')
+        ?.settings
+    ).toEqual({});
+  });
+
+  it('groups usable accounts and excludes disabled and intermediary accounts', () => {
+    renderDestinations();
+
+    expect(
+      screen.getByRole('heading', { name: 'Instagram', level: 3 })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('heading', { name: 'Linkedin', level: 3 })
+    ).toBeTruthy();
+    expect(screen.getByText('Creator Team')).toBeTruthy();
+    expect(screen.queryByText('Disabled account')).toBeNull();
+    expect(screen.queryByText('Intermediary account')).toBeNull();
+    expect(
+      screen.queryByRole('heading', { name: 'Facebook', level: 3 })
+    ).toBeNull();
+    expect(
+      screen.queryByRole('heading', { name: 'Threads', level: 3 })
+    ).toBeNull();
+  });
+
+  it('uses the shared image fallbacks for account and platform identity', () => {
+    renderDestinations();
+
+    const avatar = screen.getByTestId('fallback-image-instagram');
+    expect(avatar.getAttribute('src')).toBe(
+      'https://media.example.com/missing-avatar.jpg'
+    );
+
+    fireEvent.error(avatar);
+
+    expect(avatar.getAttribute('src')).toBe('/no-picture.jpg');
+    expect(screen.getByTestId('safe-image-Instagram')).toBeTruthy();
+    expect(screen.getByTestId('safe-image-Linkedin')).toBeTruthy();
+  });
+
+  it('disables destination controls while the shared composer is locked', () => {
+    useGuidedComposerStore.getState().setComposerStep('destinations');
+
+    render(
+      <GuidedComposerShell locked>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Select all' }).hasAttribute('disabled')
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole('button', {
+          name: 'Select Founder Instagram on Instagram',
+        })
+        .hasAttribute('disabled')
+    ).toBe(true);
     expect(
       screen
         .getByRole('button', { name: 'Continue to Review' })
