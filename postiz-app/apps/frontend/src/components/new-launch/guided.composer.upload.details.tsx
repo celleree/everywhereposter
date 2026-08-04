@@ -1,6 +1,12 @@
 'use client';
 
-import React, { FC, useCallback, useLayoutEffect, useState } from 'react';
+import React, {
+  FC,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
@@ -70,16 +76,35 @@ export const normalizeGuidedVideoFile = (file: File) => {
   });
 };
 
+export const selectGuidedSourceVideo = <
+  T extends { id: string; path?: string; type?: string | null }
+>(
+  media: T[],
+  previousSourceId?: string
+) => {
+  const videos = media.filter((item) => isVideoMedia(item));
+
+  if (!videos.length) {
+    return undefined;
+  }
+
+  if (!previousSourceId) {
+    return videos[0];
+  }
+
+  return videos.find((item) => item.id !== previousSourceId) || videos[0];
+};
+
 export const GuidedComposerUploadDetails: FC<{
   disabled?: boolean;
 }> = ({ disabled = false }) => {
   const [showContextHelp, setShowContextHelp] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const sourceVideoIdRef = useRef<string | undefined>();
   const modals = useModals();
-  const { global, appendGlobalValueMedia, setGlobalValueMedia } = useLaunchStore(
+  const { global, setGlobalValueMedia } = useLaunchStore(
     useShallow((state) => ({
       global: state.global,
-      appendGlobalValueMedia: state.appendGlobalValueMedia,
       setGlobalValueMedia: state.setGlobalValueMedia,
     }))
   );
@@ -105,6 +130,27 @@ export const GuidedComposerUploadDetails: FC<{
   const captionRequired = captionMode !== 'generate';
 
   useLayoutEffect(() => {
+    const videos = attachedMedia.filter((item) => isVideoMedia(item));
+
+    if (videos.length <= 1) {
+      sourceVideoIdRef.current = videos[0]?.id;
+      return;
+    }
+
+    const sourceVideo = selectGuidedSourceVideo(
+      videos,
+      sourceVideoIdRef.current
+    );
+
+    if (!sourceVideo) {
+      return;
+    }
+
+    sourceVideoIdRef.current = sourceVideo.id;
+    setGlobalValueMedia(0, [sourceVideo]);
+  }, [attachedMedia, setGlobalValueMedia]);
+
+  useLayoutEffect(() => {
     const legacySection = document.querySelector<HTMLElement>(
       GUIDED_UPLOAD_SECTION_SELECTOR
     );
@@ -118,8 +164,10 @@ export const GuidedComposerUploadDetails: FC<{
 
     const previousDisplay = legacySection.style.display;
     const previousAccept = input.accept;
+    const previousMultiple = input.multiple;
     legacySection.style.display = disabled ? '' : 'none';
     input.accept = GUIDED_VIDEO_ACCEPT;
+    input.multiple = false;
 
     const validateAndNormalizeVideoFiles = (event: Event) => {
       const target = event.currentTarget as HTMLInputElement;
@@ -137,14 +185,14 @@ export const GuidedComposerUploadDetails: FC<{
         return;
       }
 
-      const normalizedFiles = files.map(normalizeGuidedVideoFile);
-      const needsReplacement = normalizedFiles.some(
-        (file, index) => file !== files[index]
-      );
+      const sourceFile = normalizeGuidedVideoFile(files[0]);
 
-      if (needsReplacement && typeof DataTransfer !== 'undefined') {
+      if (
+        sourceFile !== files[0] &&
+        typeof DataTransfer !== 'undefined'
+      ) {
         const transfer = new DataTransfer();
-        normalizedFiles.forEach((file) => transfer.items.add(file));
+        transfer.items.add(sourceFile);
         target.files = transfer.files;
       }
 
@@ -156,6 +204,7 @@ export const GuidedComposerUploadDetails: FC<{
     return () => {
       legacySection.style.display = previousDisplay;
       input.accept = previousAccept;
+      input.multiple = previousMultiple;
       input.removeEventListener(
         'change',
         validateAndNormalizeVideoFiles,
@@ -176,22 +225,24 @@ export const GuidedComposerUploadDetails: FC<{
     }
 
     input.accept = GUIDED_VIDEO_ACCEPT;
+    input.multiple = false;
     input.click();
   }, []);
 
   const addSelectedVideos = useCallback(
     (media: { id: string; path: string; type?: string | null }[]) => {
-      const videos = media.filter((item) => isVideoMedia(item));
+      const sourceVideo = selectGuidedSourceVideo(media);
 
-      if (!videos.length) {
+      if (!sourceVideo) {
         setUploadError('Only video files can be added in this workflow.');
         return;
       }
 
+      sourceVideoIdRef.current = sourceVideo.id;
       setUploadError('');
-      appendGlobalValueMedia(0, videos);
+      setGlobalValueMedia(0, [sourceVideo]);
     },
-    [appendGlobalValueMedia]
+    [setGlobalValueMedia]
   );
 
   const openVideoLibrary = useCallback(() => {
@@ -219,7 +270,7 @@ export const GuidedComposerUploadDetails: FC<{
         <section className="border-b border-newBorder pb-[22px]">
           <h2 className="text-[18px] font-[700] text-white">Upload video</h2>
           <p className="mt-[6px] text-[13px] text-textColor/65">
-            Choose an MP4 or MOV video from your device or video library.
+            Choose one MP4 or MOV video from your device or video library.
           </p>
 
           <div className="mt-[14px] flex flex-wrap gap-[10px] mobile:flex-col">
@@ -229,7 +280,7 @@ export const GuidedComposerUploadDetails: FC<{
               onClick={openDevicePicker}
               className="rounded-[12px] bg-btnPrimary px-[22px] py-[13px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-60 mobile:w-full"
             >
-              Choose video
+              {attachedMedia.length ? 'Replace video' : 'Choose video'}
             </button>
             <button
               type="button"
@@ -262,20 +313,22 @@ export const GuidedComposerUploadDetails: FC<{
               <div className="flex flex-col gap-[12px]">
                 <div className="flex items-center justify-between gap-[12px] mobile:flex-col mobile:items-stretch">
                   <div className="text-[13px] text-textColor/65">
-                    {attachedMedia.length} video
-                    {attachedMedia.length === 1 ? '' : 's'} attached
+                    Source video attached
                   </div>
                   <button
                     type="button"
                     disabled={disabled}
-                    onClick={() => setGlobalValueMedia(0, [])}
+                    onClick={() => {
+                      sourceVideoIdRef.current = undefined;
+                      setGlobalValueMedia(0, []);
+                    }}
                     className="rounded-[8px] border border-newBorder px-[12px] py-[8px] text-[12px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Remove media
                   </button>
                 </div>
-                <div className="grid grid-cols-1 gap-[10px] md:grid-cols-2 xl:grid-cols-3">
-                  {attachedMedia.map((media) => (
+                <div className="grid grid-cols-1 gap-[10px]">
+                  {attachedMedia.slice(0, 1).map((media) => (
                     <video
                       key={media.id}
                       src={media.path}
