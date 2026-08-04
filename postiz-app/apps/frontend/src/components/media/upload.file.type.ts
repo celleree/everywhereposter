@@ -4,33 +4,14 @@ const GENERIC_UPLOAD_MIME_TYPES = new Set([
   'binary/octet-stream',
 ]);
 
-const MP4_VIDEO_BRANDS = new Set([
-  'isom',
-  'iso2',
-  'iso3',
-  'iso4',
-  'iso5',
-  'iso6',
-  'iso7',
-  'iso8',
-  'iso9',
-  'mp41',
-  'mp42',
-  'avc1',
-  'dash',
-  'M4V ',
-  'M4VH',
-  'MSNV',
-  '3gp4',
-  '3gp5',
-  '3gp6',
-  '3ge6',
-  '3gg6',
-  '3g2a',
-  '3g2b',
+const SUPPORTED_VIDEO_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/mov',
 ]);
 
 const MOV_VIDEO_BRANDS = new Set(['qt  ']);
+const AUDIO_ONLY_BRANDS = new Set(['M4A ', 'M4B ', 'M4P ']);
 
 type UploadFileLike = {
   name?: string | null;
@@ -50,8 +31,9 @@ const getUploadBlob = (file: UploadFileLike | Blob) => {
   return file.data instanceof Blob ? file.data : undefined;
 };
 
-const getExpectedVideoType = (name?: string | null) => {
-  const normalizedName = (name || '').toLowerCase().split(/[?#]/)[0];
+const getExpectedVideoType = (file: UploadFileLike) => {
+  const currentType = (file.type || '').toLowerCase();
+  const normalizedName = (file.name || '').toLowerCase().split(/[?#]/)[0];
 
   if (normalizedName.endsWith('.mp4')) {
     return 'video/mp4';
@@ -59,6 +41,10 @@ const getExpectedVideoType = (name?: string | null) => {
 
   if (normalizedName.endsWith('.mov')) {
     return 'video/quicktime';
+  }
+
+  if (SUPPORTED_VIDEO_MIME_TYPES.has(currentType)) {
+    return currentType === 'video/mov' ? 'video/quicktime' : currentType;
   }
 
   return '';
@@ -71,10 +57,10 @@ export const hasSupportedMp4MovSignature = async (
   blob: Blob,
   expectedType: string
 ) => {
-  const bytes = new Uint8Array(await blob.slice(0, 128).arrayBuffer());
+  const bytes = new Uint8Array(await blob.slice(0, 4096).arrayBuffer());
   let ftypOffset = -1;
 
-  for (let index = 4; index <= bytes.length - 4; index += 1) {
+  for (let index = 4; index <= bytes.length - 8; index += 1) {
     if (readAscii(bytes, index, 4) === 'ftyp') {
       ftypOffset = index;
       break;
@@ -91,10 +77,14 @@ export const hasSupportedMp4MovSignature = async (
     brands.push(readAscii(bytes, index, 4));
   }
 
-  const allowedBrands =
-    expectedType === 'video/quicktime' ? MOV_VIDEO_BRANDS : MP4_VIDEO_BRANDS;
+  if (expectedType === 'video/quicktime') {
+    return brands.some((brand) => MOV_VIDEO_BRANDS.has(brand));
+  }
 
-  return brands.some((brand) => allowedBrands.has(brand));
+  return (
+    !brands.some((brand) => MOV_VIDEO_BRANDS.has(brand)) &&
+    !brands.some((brand) => AUDIO_ONLY_BRANDS.has(brand))
+  );
 };
 
 export const inferUploadFileType = (file: UploadFileLike) =>
@@ -104,12 +94,7 @@ export const resolveUploadFileType = async (
   file: UploadFileLike | (Blob & { name?: string | null; type?: string | null })
 ) => {
   const currentType = inferUploadFileType(file);
-
-  if (!GENERIC_UPLOAD_MIME_TYPES.has(currentType)) {
-    return currentType;
-  }
-
-  const expectedType = getExpectedVideoType(file.name);
+  const expectedType = getExpectedVideoType(file);
 
   if (!expectedType) {
     return currentType;
@@ -117,9 +102,11 @@ export const resolveUploadFileType = async (
 
   const blob = getUploadBlob(file);
 
-  if (!blob || !(await hasSupportedMp4MovSignature(blob, expectedType))) {
-    return currentType;
+  if (!blob) {
+    return GENERIC_UPLOAD_MIME_TYPES.has(currentType) ? currentType : expectedType;
   }
 
-  return expectedType;
+  return (await hasSupportedMp4MovSignature(blob, expectedType))
+    ? expectedType
+    : 'application/octet-stream';
 };
