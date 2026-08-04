@@ -38,6 +38,9 @@ const encodeAscii = (value: string) =>
     Array.from(value).map((character) => character.charCodeAt(0))
   );
 
+const encodeUint16 = (value: number) =>
+  new Uint8Array([(value >>> 8) & 0xff, value & 0xff]);
+
 const encodeUint32 = (value: number) =>
   new Uint8Array([
     (value >>> 24) & 0xff,
@@ -69,10 +72,66 @@ const createBox = (type: string, ...payloadChunks: Uint8Array[]) => {
   );
 };
 
+const createVisualSampleEntry = (type = 'avc1') => {
+  const entry = new Uint8Array(86);
+  entry.set(encodeUint32(entry.length), 0);
+  entry.set(encodeAscii(type), 4);
+  entry.set(encodeUint16(1), 14);
+  entry.set(encodeUint16(1920), 32);
+  entry.set(encodeUint16(1080), 34);
+  entry.set(encodeUint32(0x00480000), 36);
+  entry.set(encodeUint32(0x00480000), 40);
+  entry.set(encodeUint16(1), 48);
+  entry.set(encodeUint16(24), 82);
+  entry.set(encodeUint16(0xffff), 84);
+  return entry;
+};
+
+const createSampleTable = (chunkOffset: number) => {
+  const sampleSize = 4;
+  const stsd = createBox(
+    'stsd',
+    new Uint8Array(4),
+    encodeUint32(1),
+    createVisualSampleEntry()
+  );
+  const stts = createBox(
+    'stts',
+    new Uint8Array(4),
+    encodeUint32(1),
+    encodeUint32(1),
+    encodeUint32(1)
+  );
+  const stsc = createBox(
+    'stsc',
+    new Uint8Array(4),
+    encodeUint32(1),
+    encodeUint32(1),
+    encodeUint32(1),
+    encodeUint32(1)
+  );
+  const stsz = createBox(
+    'stsz',
+    new Uint8Array(4),
+    encodeUint32(0),
+    encodeUint32(1),
+    encodeUint32(sampleSize)
+  );
+  const stco = createBox(
+    'stco',
+    new Uint8Array(4),
+    encodeUint32(1),
+    encodeUint32(chunkOffset)
+  );
+
+  return createBox('stbl', stsd, stts, stsc, stsz, stco);
+};
+
 const createIsoBmffBytes = (
   brand: string,
   compatibleBrand = brand,
-  handlerType = 'vide'
+  handlerType = 'vide',
+  includeVideoSamples = true
 ) => {
   const ftyp = createBox(
     'ftyp',
@@ -80,17 +139,21 @@ const createIsoBmffBytes = (
     new Uint8Array(4),
     encodeAscii(compatibleBrand)
   );
+  const sampleBytes = new Uint8Array([0x00, 0x00, 0x00, 0x01]);
+  const mdat = includeVideoSamples ? createBox('mdat', sampleBytes) : undefined;
   const hdlr = createBox(
     'hdlr',
     new Uint8Array(8),
     encodeAscii(handlerType)
   );
-  const moov = createBox(
-    'moov',
-    createBox('trak', createBox('mdia', hdlr))
-  );
+  const sampleTable = includeVideoSamples
+    ? createSampleTable(ftyp.length + 8)
+    : undefined;
+  const minf = sampleTable ? createBox('minf', sampleTable) : undefined;
+  const mdia = createBox('mdia', hdlr, ...(minf ? [minf] : []));
+  const moov = createBox('moov', createBox('trak', mdia));
 
-  return concatBytes(ftyp, moov);
+  return concatBytes(ftyp, ...(mdat ? [mdat] : []), moov);
 };
 
 const createMp4File = (
@@ -114,7 +177,7 @@ describe('guided composer video picker', () => {
     useLaunchStore.getState().reset();
   });
 
-  it('accepts supported MP4 and MOV files with valid video tracks', async () => {
+  it('accepts supported MP4 and MOV files with real video samples', async () => {
     await expect(isGuidedVideoFile(createMp4File())).resolves.toBe(true);
     await expect(isGuidedVideoFile(createMovFile())).resolves.toBe(true);
     await expect(
@@ -122,7 +185,7 @@ describe('guided composer video picker', () => {
     ).resolves.toBe(true);
   });
 
-  it('normalizes extension-only videos only after their bytes validate', async () => {
+  it('normalizes extension-only videos only after their sample data validates', async () => {
     const mov = createMovFile('demo.MOV', '');
     const mp4 = createMp4File('demo.mp4', 'application/octet-stream');
 
@@ -134,6 +197,19 @@ describe('guided composer video picker', () => {
     });
     await expect(resolveUploadFileType(mov)).resolves.toBe('video/quicktime');
     await expect(resolveUploadFileType(mp4)).resolves.toBe('video/mp4');
+  });
+
+  it('rejects a header-only vide track without sample tables or media data', async () => {
+    const headerOnly = new File(
+      [createIsoBmffBytes('isom', 'mp42', 'vide', false)],
+      'header-only.mp4',
+      { type: 'application/octet-stream' }
+    );
+
+    await expect(isGuidedVideoFile(headerOnly)).resolves.toBe(false);
+    await expect(resolveUploadFileType(headerOnly)).resolves.toBe(
+      'application/octet-stream'
+    );
   });
 
   it('rejects arbitrary bytes renamed to MP4 or MOV with a generic MIME', async () => {
