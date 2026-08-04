@@ -34,28 +34,70 @@ import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-l
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
 const encodeAscii = (value: string) =>
-  Array.from(value).map((character) => character.charCodeAt(0));
+  new Uint8Array(
+    Array.from(value).map((character) => character.charCodeAt(0))
+  );
 
-const createIsoBmffBytes = (brand: string, compatibleBrand = brand) =>
+const encodeUint32 = (value: number) =>
   new Uint8Array([
-    0,
-    0,
-    0,
-    20,
-    ...encodeAscii('ftyp'),
-    ...encodeAscii(brand),
-    0,
-    0,
-    0,
-    0,
-    ...encodeAscii(compatibleBrand),
+    (value >>> 24) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 8) & 0xff,
+    value & 0xff,
   ]);
+
+const concatBytes = (...chunks: Uint8Array[]) => {
+  const totalLength = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+
+  chunks.forEach((chunk) => {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  });
+
+  return output;
+};
+
+const createBox = (type: string, ...payloadChunks: Uint8Array[]) => {
+  const payload = concatBytes(...payloadChunks);
+
+  return concatBytes(
+    encodeUint32(payload.length + 8),
+    encodeAscii(type),
+    payload
+  );
+};
+
+const createIsoBmffBytes = (
+  brand: string,
+  compatibleBrand = brand,
+  handlerType = 'vide'
+) => {
+  const ftyp = createBox(
+    'ftyp',
+    encodeAscii(brand),
+    new Uint8Array(4),
+    encodeAscii(compatibleBrand)
+  );
+  const hdlr = createBox(
+    'hdlr',
+    new Uint8Array(8),
+    encodeAscii(handlerType)
+  );
+  const moov = createBox(
+    'moov',
+    createBox('trak', createBox('mdia', hdlr))
+  );
+
+  return concatBytes(ftyp, moov);
+};
 
 const createMp4File = (
   name = 'demo.mp4',
   type = 'video/mp4',
   brand = 'isom'
-) => new File([createIsoBmffBytes(brand)], name, { type });
+) => new File([createIsoBmffBytes(brand, 'mp42')], name, { type });
 
 const createMovFile = (name = 'demo.mov', type = 'video/quicktime') =>
   new File([createIsoBmffBytes('qt  ')], name, { type });
@@ -72,7 +114,7 @@ describe('guided composer video picker', () => {
     useLaunchStore.getState().reset();
   });
 
-  it('accepts supported MP4 and MOV files with valid container signatures', async () => {
+  it('accepts supported MP4 and MOV files with valid video tracks', async () => {
     await expect(isGuidedVideoFile(createMp4File())).resolves.toBe(true);
     await expect(isGuidedVideoFile(createMovFile())).resolves.toBe(true);
     await expect(
@@ -103,6 +145,31 @@ describe('guided composer video picker', () => {
     await expect(isGuidedVideoFile(renamedMp4)).resolves.toBe(false);
     await expect(isGuidedVideoFile(renamedMov)).resolves.toBe(false);
     await expect(resolveUploadFileType(renamedMp4)).resolves.toBe(
+      'application/octet-stream'
+    );
+  });
+
+  it('rejects structurally valid BMFF files without a video track', async () => {
+    const audioOnly = new File(
+      [createIsoBmffBytes('isom', 'mp42', 'soun')],
+      'audio-only.mp4',
+      { type: 'application/octet-stream' }
+    );
+    const avif = new File(
+      [createIsoBmffBytes('avif', 'mif1', 'pict')],
+      'renamed-avif.mp4',
+      { type: 'application/octet-stream' }
+    );
+    const heic = new File(
+      [createIsoBmffBytes('heic', 'mif1', 'pict')],
+      'renamed-heic.mp4',
+      { type: '' }
+    );
+
+    await expect(isGuidedVideoFile(audioOnly)).resolves.toBe(false);
+    await expect(isGuidedVideoFile(avif)).resolves.toBe(false);
+    await expect(isGuidedVideoFile(heic)).resolves.toBe(false);
+    await expect(resolveUploadFileType(audioOnly)).resolves.toBe(
       'application/octet-stream'
     );
   });
@@ -239,7 +306,9 @@ describe('guided composer video picker', () => {
 
     const section = host.querySelector('section') as HTMLElement;
     const input = host.querySelector('input') as HTMLInputElement;
-    const heading = host.querySelector('[data-testid="legacy-heading"]') as HTMLElement;
+    const heading = host.querySelector(
+      '[data-testid="legacy-heading"]'
+    ) as HTMLElement;
     const choose = host.querySelector('button:nth-of-type(1)') as HTMLElement;
     const library = host.querySelector('button:nth-of-type(2)') as HTMLElement;
     const cancel = host.querySelector('button:nth-of-type(3)') as HTMLElement;
@@ -249,7 +318,9 @@ describe('guided composer video picker', () => {
     const progress = host.querySelector(
       '[data-testid="legacy-progress"]'
     ) as HTMLElement;
-    const media = host.querySelector('[data-testid="legacy-media"]') as HTMLElement;
+    const media = host.querySelector(
+      '[data-testid="legacy-media"]'
+    ) as HTMLElement;
 
     const { rerender, unmount } = render(
       <GuidedComposerUploadDetails disabled={false} />
