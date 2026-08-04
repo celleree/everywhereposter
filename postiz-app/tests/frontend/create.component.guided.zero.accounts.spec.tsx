@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 
-const mutateIntegrations = jest.fn();
+const mockMutateIntegrations = jest.fn();
 
 jest.mock(
   '@gitroom/frontend/components/launches/helpers/use.integration.list',
@@ -9,7 +9,7 @@ jest.mock(
     useIntegrationList: () => ({
       data: [],
       isLoading: false,
-      mutate: mutateIntegrations,
+      mutate: mockMutateIntegrations,
     }),
   })
 );
@@ -25,36 +25,52 @@ jest.mock(
   })
 );
 
-jest.mock('@gitroom/frontend/components/layout/loading', () => ({
-  LoadingComponent: () => <div>Loading</div>,
-}));
+jest.mock('@gitroom/frontend/components/layout/loading', () => {
+  const ReactModule = require('react');
+
+  return {
+    LoadingComponent: () => ReactModule.createElement('div', null, 'Loading'),
+  };
+});
 
 jest.mock(
   '@gitroom/frontend/components/launches/add.provider.component',
-  () => ({
-    AddProviderButton: () => <button type="button">Connect account</button>,
-  })
+  () => {
+    const ReactModule = require('react');
+
+    return {
+      AddProviderButton: () =>
+        ReactModule.createElement(
+          'button',
+          { type: 'button' },
+          'Connect account'
+        ),
+    };
+  }
 );
 
 jest.mock(
   '@gitroom/frontend/components/create/create.post.composer',
-  () => ({
-    isGuidedComposerShellEnabled: () =>
-      process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL === 'true',
-    CreatePostComposer: ({
-      allIntegrations,
-      standaloneCreate,
-    }: {
-      allIntegrations?: unknown[];
-      standaloneCreate?: boolean;
-    }) => (
-      <div
-        data-testid="create-post-composer"
-        data-integration-count={String(allIntegrations?.length || 0)}
-        data-standalone={standaloneCreate === true ? 'true' : 'false'}
-      />
-    ),
-  })
+  () => {
+    const ReactModule = require('react');
+
+    return {
+      isGuidedComposerShellEnabled: () =>
+        process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL === 'true',
+      CreatePostComposer: ({
+        allIntegrations,
+        standaloneCreate,
+      }: {
+        allIntegrations?: unknown[];
+        standaloneCreate?: boolean;
+      }) =>
+        ReactModule.createElement('div', {
+          'data-testid': 'create-post-composer',
+          'data-integration-count': String(allIntegrations?.length || 0),
+          'data-standalone': standaloneCreate === true ? 'true' : 'false',
+        }),
+    };
+  }
 );
 
 jest.mock('swr', () => ({
