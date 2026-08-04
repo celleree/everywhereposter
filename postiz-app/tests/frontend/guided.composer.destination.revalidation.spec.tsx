@@ -21,10 +21,15 @@ jest.mock(
   })
 );
 
-jest.mock('@gitroom/react/helpers/image.with.fallback', () => ({
-  __esModule: true,
-  default: ({ fallbackSrc: _fallbackSrc, ...props }: any) => <img {...props} />,
-}));
+jest.mock('@gitroom/react/helpers/image.with.fallback', () => {
+  const ReactModule = require('react');
+
+  return {
+    __esModule: true,
+    default: ({ fallbackSrc: _fallbackSrc, ...props }: any) =>
+      ReactModule.createElement('img', props),
+  };
+});
 
 import { GuidedComposerShell } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
