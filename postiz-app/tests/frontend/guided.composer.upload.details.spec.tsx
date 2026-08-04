@@ -1,5 +1,5 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 
 jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
@@ -26,10 +26,17 @@ import {
   GuidedComposerUploadDetails,
   isGuidedVideoFile,
   normalizeGuidedVideoFile,
+  selectGuidedSourceVideo,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.upload.details';
 import { inferUploadFileType } from '../../apps/frontend/src/components/media/upload.file.type';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
+
+const createVideo = (id: string) => ({
+  id,
+  path: `https://media.example.com/${id}.mp4`,
+  type: 'video',
+});
 
 describe('guided composer video picker', () => {
   beforeEach(() => {
@@ -101,18 +108,57 @@ describe('guided composer video picker', () => {
     ).toBe(false);
   });
 
+  it('uses only the first video from a multi-video library selection', () => {
+    const first = createVideo('first');
+    const second = createVideo('second');
+
+    expect(selectGuidedSourceVideo([first, second])).toBe(first);
+  });
+
+  it('prefers the newly uploaded video when replacing an existing source', () => {
+    const current = createVideo('current');
+    const replacement = createVideo('replacement');
+
+    expect(
+      selectGuidedSourceVideo([current, replacement], current.id)
+    ).toBe(replacement);
+  });
+
+  it('collapses repeated uploader results to the newest source video', () => {
+    const current = createVideo('current');
+    const replacement = createVideo('replacement');
+
+    useLaunchStore.getState().addGlobalValue(0, [
+      {
+        id: 'post-1',
+        content: '',
+        delay: 0,
+        media: [current],
+      } as any,
+    ]);
+
+    const { unmount } = render(<GuidedComposerUploadDetails />);
+
+    act(() => {
+      useLaunchStore.getState().appendGlobalValueMedia(0, [replacement]);
+    });
+
+    expect(useLaunchStore.getState().global[0].media).toEqual([replacement]);
+    unmount();
+  });
+
   it('does not advertise image files in the device picker', () => {
     expect(GUIDED_VIDEO_ACCEPT).toContain('video/mp4');
     expect(GUIDED_VIDEO_ACCEPT).toContain('.mov');
     expect(GUIDED_VIDEO_ACCEPT).not.toContain('image/');
   });
 
-  it('reveals the legacy progress and cancel controls only while uploading', () => {
+  it('allows only one device file and restores the legacy input on unmount', () => {
     const host = document.createElement('div');
     host.innerHTML = `
       <div class="guided-upload-existing-composer">
         <div id="social-content">
-          <section><input type="file" /></section>
+          <section><input type="file" multiple /></section>
         </div>
       </div>
     `;
@@ -126,13 +172,16 @@ describe('guided composer video picker', () => {
 
     expect(section.style.display).toBe('none');
     expect(input.accept).toBe(GUIDED_VIDEO_ACCEPT);
+    expect(input.multiple).toBe(false);
 
     rerender(<GuidedComposerUploadDetails disabled />);
 
     expect(section.style.display).toBe('');
     expect(input.accept).toBe(GUIDED_VIDEO_ACCEPT);
+    expect(input.multiple).toBe(false);
 
     unmount();
+    expect(input.multiple).toBe(true);
     host.remove();
   });
 });
