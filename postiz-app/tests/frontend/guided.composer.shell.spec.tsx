@@ -5,6 +5,15 @@ jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
 }));
 
+jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
+  useModals: () => ({
+    openModal: jest.fn(),
+    closeAll: jest.fn(),
+    closeById: jest.fn(),
+    closeCurrent: jest.fn(),
+  }),
+}));
+
 import {
   GuidedComposerShell,
   shouldUseGuidedComposerShell,
