@@ -18,6 +18,11 @@ export const GUIDED_VIDEO_ACCEPT =
 const GUIDED_UPLOAD_SECTION_SELECTOR =
   '.guided-upload-existing-composer #social-content section:first-child';
 const GUIDED_UPLOAD_INPUT_SELECTOR = `${GUIDED_UPLOAD_SECTION_SELECTOR} input[type="file"]`;
+const GUIDED_VIDEO_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/mov',
+]);
 
 const ADDITIONAL_CONTEXT_HELP =
   'Add details that may not be clear from the video, such as the target audience, key facts, names, offers, links, desired call to action, or anything the AI should avoid mentioning.';
@@ -49,12 +54,33 @@ export const isGuidedVideoFile = (file: Pick<File, 'name' | 'type'>) => {
   const name = file.name.toLowerCase();
 
   return (
-    type === 'video/mp4' ||
-    type === 'video/quicktime' ||
-    type === 'video/mov' ||
+    GUIDED_VIDEO_MIME_TYPES.has(type) ||
     name.endsWith('.mp4') ||
     name.endsWith('.mov')
   );
+};
+
+export const normalizeGuidedVideoFile = (file: File) => {
+  const currentType = file.type.toLowerCase();
+  if (GUIDED_VIDEO_MIME_TYPES.has(currentType)) {
+    return file;
+  }
+
+  const name = file.name.toLowerCase();
+  const inferredType = name.endsWith('.mp4')
+    ? 'video/mp4'
+    : name.endsWith('.mov')
+    ? 'video/quicktime'
+    : '';
+
+  if (!inferredType) {
+    return file;
+  }
+
+  return new File([file], file.name, {
+    type: inferredType,
+    lastModified: file.lastModified,
+  });
 };
 
 export const GuidedComposerUploadDetails: FC<{
@@ -105,32 +131,51 @@ export const GuidedComposerUploadDetails: FC<{
 
     const previousDisplay = legacySection.style.display;
     const previousAccept = input.accept;
-    legacySection.style.display = 'none';
+    legacySection.style.display = disabled ? '' : 'none';
     input.accept = GUIDED_VIDEO_ACCEPT;
 
-    const rejectNonVideoFiles = (event: Event) => {
+    const validateAndNormalizeVideoFiles = (event: Event) => {
       const target = event.currentTarget as HTMLInputElement;
       const files = Array.from(target.files || []);
 
-      if (!files.length || files.every(isGuidedVideoFile)) {
-        setUploadError('');
+      if (!files.length) {
         return;
       }
 
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      target.value = '';
-      setUploadError('Only MP4 and MOV video files can be uploaded here.');
+      if (!files.every(isGuidedVideoFile)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        target.value = '';
+        setUploadError('Only MP4 and MOV video files can be uploaded here.');
+        return;
+      }
+
+      const normalizedFiles = files.map(normalizeGuidedVideoFile);
+      const needsReplacement = normalizedFiles.some(
+        (file, index) => file !== files[index]
+      );
+
+      if (needsReplacement && typeof DataTransfer !== 'undefined') {
+        const transfer = new DataTransfer();
+        normalizedFiles.forEach((file) => transfer.items.add(file));
+        target.files = transfer.files;
+      }
+
+      setUploadError('');
     };
 
-    input.addEventListener('change', rejectNonVideoFiles, true);
+    input.addEventListener('change', validateAndNormalizeVideoFiles, true);
 
     return () => {
       legacySection.style.display = previousDisplay;
       input.accept = previousAccept;
-      input.removeEventListener('change', rejectNonVideoFiles, true);
+      input.removeEventListener(
+        'change',
+        validateAndNormalizeVideoFiles,
+        true
+      );
     };
-  }, []);
+  }, [disabled]);
 
   const openDevicePicker = useCallback(() => {
     setUploadError('');
