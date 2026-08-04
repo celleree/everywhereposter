@@ -12,6 +12,7 @@ import Compressor from '@uppy/compressor';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
+import { inferUploadFileType } from '@gitroom/frontend/components/media/upload.file.type';
 import { uniqBy } from 'lodash';
 
 export class CompressionWrapper<M = any, B = any> extends Compressor<any, any> {
@@ -112,13 +113,13 @@ export function useUppyUploader(props: {
 
         for (const file of files) {
           if (fileIDs.includes(file.id)) {
-            const fileType = file.type;
+            const fileType = inferUploadFileType(file);
 
             // Check if file type is allowed
             const isAllowed = expandedTypes.some((allowedType) => {
               if (allowedType.endsWith('/*')) {
                 const baseType = allowedType.replace('/*', '/');
-                return fileType?.startsWith(baseType);
+                return fileType.startsWith(baseType);
               }
               return fileType === allowedType;
             });
@@ -149,8 +150,9 @@ export function useUppyUploader(props: {
 
         for (const file of files) {
           if (fileIDs.includes(file.id)) {
-            const isImage = file.type?.startsWith('image/');
-            const isVideo = file.type?.startsWith('video/');
+            const fileType = inferUploadFileType(file);
+            const isImage = fileType.startsWith('image/');
+            const isVideo = fileType.startsWith('video/');
 
             const maxImageSize = 30 * 1024 * 1024; // 30MB
             const maxVideoSize = 1000 * 1024 * 1024; // 1GB
