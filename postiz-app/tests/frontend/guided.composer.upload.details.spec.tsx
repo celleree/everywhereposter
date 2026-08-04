@@ -77,6 +77,15 @@ describe('guided composer video picker', () => {
     ).toBe('image/png');
   });
 
+  it('rejects explicit non-video MIME types even with a video extension', () => {
+    const disguisedImage = new File(['image'], 'thumbnail.mp4', {
+      type: 'image/png',
+    });
+
+    expect(isGuidedVideoFile(disguisedImage)).toBe(false);
+    expect(normalizeGuidedVideoFile(disguisedImage)).toBe(disguisedImage);
+  });
+
   it('leaves recognized video files unchanged', () => {
     const video = new File(['video'], 'demo.mp4', { type: 'video/mp4' });
 
