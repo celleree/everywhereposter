@@ -292,7 +292,7 @@ export const GuidedComposerUploadDetails: FC<{
             display: none !important;
           }
 
-          ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) > div:first-of-type button[disabled] {
+          ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) > div:first-of-type > div:first-child > button:nth-child(-n + 2) {
             display: none !important;
           }
         `}
