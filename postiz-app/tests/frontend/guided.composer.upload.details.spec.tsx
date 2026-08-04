@@ -29,7 +29,10 @@ import {
   normalizeGuidedVideoFile,
   selectGuidedSourceVideo,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.upload.details';
-import { resolveUploadFileType } from '../../apps/frontend/src/components/media/upload.file.type';
+import {
+  canBrowserDecodeVideo,
+  resolveUploadFileType,
+} from '../../apps/frontend/src/components/media/upload.file.type';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
@@ -72,8 +75,37 @@ const createBox = (type: string, ...payloadChunks: Uint8Array[]) => {
   );
 };
 
-const createVisualSampleEntry = (type = 'avc1') => {
-  const entry = new Uint8Array(86);
+const VIDEO_SAMPLE_BYTES = new Uint8Array([0, 0, 0, 1, 0x65]);
+
+const createVisualSampleEntry = (
+  type = 'avc1',
+  includeCodecConfig = true
+) => {
+  const baseEntry = new Uint8Array(86);
+  const codecConfig = includeCodecConfig
+    ? createBox(
+        'avcC',
+        new Uint8Array([
+          1,
+          0x42,
+          0,
+          0x1e,
+          0xff,
+          0xe1,
+          0,
+          2,
+          0x67,
+          0x42,
+          1,
+          0,
+          2,
+          0x68,
+          0xce,
+        ])
+      )
+    : new Uint8Array();
+  const entry = concatBytes(baseEntry, codecConfig);
+
   entry.set(encodeUint32(entry.length), 0);
   entry.set(encodeAscii(type), 4);
   entry.set(encodeUint16(1), 14);
@@ -84,16 +116,19 @@ const createVisualSampleEntry = (type = 'avc1') => {
   entry.set(encodeUint16(1), 48);
   entry.set(encodeUint16(24), 82);
   entry.set(encodeUint16(0xffff), 84);
+
   return entry;
 };
 
-const createSampleTable = (chunkOffset: number) => {
-  const sampleSize = 4;
+const createSampleTable = (
+  chunkOffset: number,
+  includeCodecConfig = true
+) => {
   const stsd = createBox(
     'stsd',
     new Uint8Array(4),
     encodeUint32(1),
-    createVisualSampleEntry()
+    createVisualSampleEntry('avc1', includeCodecConfig)
   );
   const stts = createBox(
     'stts',
@@ -115,7 +150,7 @@ const createSampleTable = (chunkOffset: number) => {
     new Uint8Array(4),
     encodeUint32(0),
     encodeUint32(1),
-    encodeUint32(sampleSize)
+    encodeUint32(VIDEO_SAMPLE_BYTES.length)
   );
   const stco = createBox(
     'stco',
@@ -131,7 +166,8 @@ const createIsoBmffBytes = (
   brand: string,
   compatibleBrand = brand,
   handlerType = 'vide',
-  includeVideoSamples = true
+  includeVideoSamples = true,
+  includeCodecConfig = true
 ) => {
   const ftyp = createBox(
     'ftyp',
@@ -139,15 +175,16 @@ const createIsoBmffBytes = (
     new Uint8Array(4),
     encodeAscii(compatibleBrand)
   );
-  const sampleBytes = new Uint8Array([0x00, 0x00, 0x00, 0x01]);
-  const mdat = includeVideoSamples ? createBox('mdat', sampleBytes) : undefined;
+  const mdat = includeVideoSamples
+    ? createBox('mdat', VIDEO_SAMPLE_BYTES)
+    : undefined;
   const hdlr = createBox(
     'hdlr',
     new Uint8Array(8),
     encodeAscii(handlerType)
   );
   const sampleTable = includeVideoSamples
-    ? createSampleTable(ftyp.length + 8)
+    ? createSampleTable(ftyp.length + 8, includeCodecConfig)
     : undefined;
   const minf = sampleTable ? createBox('minf', sampleTable) : undefined;
   const mdia = createBox('mdia', hdlr, ...(minf ? [minf] : []));
@@ -210,6 +247,69 @@ describe('guided composer video picker', () => {
     await expect(resolveUploadFileType(headerOnly)).resolves.toBe(
       'application/octet-stream'
     );
+  });
+
+  it('rejects sample metadata without the required codec configuration', async () => {
+    const missingCodecConfig = new File(
+      [createIsoBmffBytes('isom', 'mp42', 'vide', true, false)],
+      'missing-codec-config.mp4',
+      { type: 'application/octet-stream' }
+    );
+
+    await expect(isGuidedVideoFile(missingCodecConfig)).resolves.toBe(false);
+    await expect(resolveUploadFileType(missingCodecConfig)).resolves.toBe(
+      'application/octet-stream'
+    );
+  });
+
+  it('rejects a structurally valid file when the browser decoder cannot load a frame', async () => {
+    const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(
+      URL,
+      'createObjectURL'
+    );
+    const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(
+      URL,
+      'revokeObjectURL'
+    );
+    const video = document.createElement('video');
+    const createElementSpy = jest
+      .spyOn(document, 'createElement')
+      .mockReturnValueOnce(video);
+
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: jest.fn(() => 'blob:decoder-test'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: jest.fn(),
+    });
+    Object.defineProperty(video, 'load', {
+      configurable: true,
+      value: () => video.onerror?.(new Event('error')),
+    });
+
+    try {
+      await expect(
+        canBrowserDecodeVideo(new Blob(['invalid']), 'video/mp4')
+      ).resolves.toBe(false);
+    } finally {
+      createElementSpy.mockRestore();
+
+      if (originalCreateObjectUrl) {
+        Object.defineProperty(URL, 'createObjectURL', originalCreateObjectUrl);
+      } else {
+        delete (URL as typeof URL & { createObjectURL?: unknown })
+          .createObjectURL;
+      }
+
+      if (originalRevokeObjectUrl) {
+        Object.defineProperty(URL, 'revokeObjectURL', originalRevokeObjectUrl);
+      } else {
+        delete (URL as typeof URL & { revokeObjectURL?: unknown })
+          .revokeObjectURL;
+      }
+    }
   });
 
   it('rejects arbitrary bytes renamed to MP4 or MOV with a generic MIME', async () => {
