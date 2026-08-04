@@ -1,9 +1,8 @@
 'use client';
 
-import React, { FC, useMemo } from 'react';
+import React, { FC, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
-import SafeImage from '@gitroom/react/helpers/safe.image';
 import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
@@ -73,6 +72,42 @@ export const getGuidedAvailableIntegrations = (
   integrations.filter(
     (integration) => !integration.disabled && !integration.inBetweenSteps
   );
+
+const GuidedPlatformIcon: FC<{
+  identifier?: string;
+  platformName: string;
+}> = ({ identifier, platformName }) => {
+  const [failed, setFailed] = useState(false);
+  const iconSource =
+    identifier === 'youtube'
+      ? '/icons/platforms/youtube.svg'
+      : `/icons/platforms/${identifier || 'other'}.png`;
+
+  if (failed) {
+    return (
+      <span
+        role="img"
+        aria-label={`${platformName} icon unavailable`}
+        data-testid={`platform-icon-fallback-${platformName}`}
+        className="absolute -bottom-[2px] -end-[4px] z-10 flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border border-newBorder bg-newSettings text-[9px] font-[800] uppercase text-textColor/75"
+      >
+        {platformName.slice(0, 1) || '?'}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={iconSource}
+      alt={platformName}
+      width={18}
+      height={18}
+      data-testid={`platform-icon-${platformName}`}
+      onError={() => setFailed(true)}
+      className="absolute -bottom-[2px] -end-[4px] z-10 h-[18px] w-[18px] rounded-[5px]"
+    />
+  );
+};
 
 export const GuidedComposerDestinations: FC<{
   disabled?: boolean;
@@ -254,23 +289,10 @@ export const GuidedComposerDestinations: FC<{
                               selected ? 'border-black' : 'border-transparent'
                             )}
                           />
-                          {integration.identifier === 'youtube' ? (
-                            <img
-                              src="/icons/platforms/youtube.svg"
-                              alt={platformName}
-                              width={18}
-                              height={18}
-                              className="absolute -bottom-[2px] -end-[4px] z-10 h-[18px] w-[18px] rounded-[5px]"
-                            />
-                          ) : (
-                            <SafeImage
-                              src={`/icons/platforms/${integration.identifier}.png`}
-                              alt={platformName}
-                              width={18}
-                              height={18}
-                              className="absolute -bottom-[2px] -end-[4px] z-10 h-[18px] w-[18px] rounded-[5px]"
-                            />
-                          )}
+                          <GuidedPlatformIcon
+                            identifier={integration.identifier}
+                            platformName={platformName}
+                          />
                         </div>
 
                         <div className="min-w-0 flex-1 xs:w-full">
