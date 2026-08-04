@@ -75,7 +75,22 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
 
   useEffect(() => {
     const nextIntegrations = props.allIntegrations || [];
+    const integrationsById = new Map(
+      nextIntegrations.map((integration) => [integration.id, integration])
+    );
+
     setAllIntegrations(nextIntegrations);
+    useLaunchStore.setState((state) => ({
+      selectedIntegrations: state.selectedIntegrations.map((selected) => {
+        const refreshedIntegration = integrationsById.get(
+          selected.integration.id
+        );
+
+        return refreshedIntegration
+          ? { ...selected, integration: refreshedIntegration }
+          : selected;
+      }),
+    }));
 
     if (!canRenderEmptyGuidedComposer(props)) {
       return;
