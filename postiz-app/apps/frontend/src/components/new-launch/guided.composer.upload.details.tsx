@@ -100,7 +100,7 @@ export const GuidedComposerUploadDetails: FC<{
 }> = ({ disabled = false }) => {
   const [showContextHelp, setShowContextHelp] = useState(false);
   const [uploadError, setUploadError] = useState('');
-  const sourceVideoIdRef = useRef<string | undefined>();
+  const sourceVideoIdRef = useRef<string | undefined>(undefined);
   const modals = useModals();
   const { global, setGlobalValueMedia } = useLaunchStore(
     useShallow((state) => ({
