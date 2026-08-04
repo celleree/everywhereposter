@@ -42,13 +42,6 @@ jest.mock('@gitroom/react/helpers/image.with.fallback', () => {
   };
 });
 
-jest.mock('@gitroom/react/helpers/safe.image', () => ({
-  __esModule: true,
-  default: ({ alt, ...props }: any) => (
-    <img {...props} alt={alt} data-testid={`safe-image-${alt}`} />
-  ),
-}));
-
 import { GuidedComposerShell } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { getGuidedPlatformIdentity } from '../../apps/frontend/src/components/new-launch/guided.composer.destinations';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
@@ -346,10 +339,18 @@ describe('guided composer destinations step', () => {
       level: 3,
     });
 
-    expect(screen.getAllByRole('heading', { name: 'LinkedIn', level: 3 })).toHaveLength(1);
-    expect(screen.getAllByRole('heading', { name: 'Instagram', level: 3 })).toHaveLength(1);
-    expect(linkedInHeading.closest('section')?.textContent).toContain('2 accounts');
-    expect(instagramHeading.closest('section')?.textContent).toContain('2 accounts');
+    expect(
+      screen.getAllByRole('heading', { name: 'LinkedIn', level: 3 })
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByRole('heading', { name: 'Instagram', level: 3 })
+    ).toHaveLength(1);
+    expect(linkedInHeading.closest('section')?.textContent).toContain(
+      '2 accounts'
+    );
+    expect(instagramHeading.closest('section')?.textContent).toContain(
+      '2 accounts'
+    );
     expect(
       screen.getByRole('heading', { name: 'YouTube', level: 3 })
     ).toBeTruthy();
@@ -388,7 +389,7 @@ describe('guided composer destinations step', () => {
     expect(getGuidedPlatformIdentity('tiktok').label).toBe('TikTok');
   });
 
-  it('uses the shared image fallbacks for account and platform identity', () => {
+  it('uses account-image fallback and renders platform identity images', () => {
     renderDestinations();
 
     const avatar = screen.getByTestId('fallback-image-Founder Instagram');
@@ -399,8 +400,8 @@ describe('guided composer destinations step', () => {
     fireEvent.error(avatar);
 
     expect(avatar.getAttribute('src')).toBe('/no-picture.jpg');
-    expect(screen.getByTestId('safe-image-Instagram')).toBeTruthy();
-    expect(screen.getByTestId('safe-image-LinkedIn')).toBeTruthy();
+    expect(screen.getByTestId('platform-icon-Instagram')).toBeTruthy();
+    expect(screen.getByTestId('platform-icon-LinkedIn')).toBeTruthy();
   });
 
   it('disables destination controls while the shared composer is locked', () => {
