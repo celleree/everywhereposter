@@ -34,22 +34,38 @@ jest.mock(
 );
 
 jest.mock('@gitroom/frontend/components/layout/set.timezone', () => ({
-  newDayjs: () => dayjs('2026-08-04T12:00:00Z'),
+  newDayjs: () => require('dayjs')('2026-08-04T12:00:00Z'),
 }));
 
-jest.mock('@gitroom/frontend/components/new-launch/manage.modal', () => ({
-  ManageModal: () => <div data-testid="manage-modal">Manage modal</div>,
-}));
+jest.mock('@gitroom/frontend/components/new-launch/manage.modal', () => {
+  const ReactModule = require('react');
+
+  return {
+    ManageModal: () =>
+      ReactModule.createElement(
+        'div',
+        { 'data-testid': 'manage-modal' },
+        'Manage modal'
+      ),
+  };
+});
 
 jest.mock(
   '@gitroom/frontend/components/new-launch/guided.composer.shell',
-  () => ({
-    GuidedComposerShell: ({ children }: { children: React.ReactNode }) => (
-      <div data-testid="guided-composer-shell">{children}</div>
-    ),
-    shouldUseGuidedComposerShell: ({ enabled }: { enabled?: boolean }) =>
-      enabled === true,
-  })
+  () => {
+    const ReactModule = require('react');
+
+    return {
+      GuidedComposerShell: ({ children }: { children: React.ReactNode }) =>
+        ReactModule.createElement(
+          'div',
+          { 'data-testid': 'guided-composer-shell' },
+          children
+        ),
+      shouldUseGuidedComposerShell: ({ enabled }: { enabled?: boolean }) =>
+        enabled === true,
+    };
+  }
 );
 
 import {
