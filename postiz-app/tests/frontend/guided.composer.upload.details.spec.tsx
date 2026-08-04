@@ -1,6 +1,7 @@
 import {
   GUIDED_VIDEO_ACCEPT,
   isGuidedVideoFile,
+  normalizeGuidedVideoFile,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.upload.details';
 
 describe('guided composer video picker', () => {
@@ -17,6 +18,22 @@ describe('guided composer video picker', () => {
     expect(
       isGuidedVideoFile({ name: 'demo.MOV', type: '' } as File)
     ).toBe(true);
+  });
+
+  it('normalizes extension-only videos before the legacy uploader validates MIME', () => {
+    const mov = new File(['video'], 'demo.MOV', { type: '' });
+    const mp4 = new File(['video'], 'demo.mp4', {
+      type: 'application/octet-stream',
+    });
+
+    expect(normalizeGuidedVideoFile(mov).type).toBe('video/quicktime');
+    expect(normalizeGuidedVideoFile(mp4).type).toBe('video/mp4');
+  });
+
+  it('leaves recognized video files unchanged', () => {
+    const video = new File(['video'], 'demo.mp4', { type: 'video/mp4' });
+
+    expect(normalizeGuidedVideoFile(video)).toBe(video);
   });
 
   it('rejects image and unsupported file types', () => {
