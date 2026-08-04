@@ -12,7 +12,7 @@ import Compressor from '@uppy/compressor';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
-import { resolveUploadFileType } from '@gitroom/frontend/components/media/upload.file.type';
+import { resolveStructurallyValidatedUploadFileType } from '@gitroom/frontend/components/media/structural.upload.file.type';
 import { uniqBy } from 'lodash';
 
 export class CompressionWrapper<M = any, B = any> extends Compressor<any, any> {
@@ -112,7 +112,7 @@ export function useUppyUploader(props: {
 
       for (const file of files) {
         if (fileIDs.includes(file.id)) {
-          const fileType = await resolveUploadFileType(file);
+          const fileType = await resolveStructurallyValidatedUploadFileType(file);
 
           // Check if file type is allowed
           const isAllowed = expandedTypes.some((allowedType) => {
@@ -145,7 +145,7 @@ export function useUppyUploader(props: {
 
       for (const file of files) {
         if (fileIDs.includes(file.id)) {
-          const fileType = await resolveUploadFileType(file);
+          const fileType = await resolveStructurallyValidatedUploadFileType(file);
           const isImage = fileType.startsWith('image/');
           const isVideo = fileType.startsWith('video/');
 
