@@ -3,6 +3,8 @@
 import React, { FC, useMemo } from 'react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
+import SafeImage from '@gitroom/react/helpers/safe.image';
+import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 
@@ -176,9 +178,10 @@ export const GuidedComposerDestinations: FC<{
                         )}
                       >
                         <div className="relative h-[52px] w-[52px] min-w-[52px]">
-                          <img
+                          <ImageWithFallback
+                            fallbackSrc="/no-picture.jpg"
                             src={integration.picture || '/no-picture.jpg'}
-                            alt=""
+                            alt={integration.identifier}
                             width={52}
                             height={52}
                             className={clsx(
@@ -186,17 +189,23 @@ export const GuidedComposerDestinations: FC<{
                               selected ? 'border-black' : 'border-transparent'
                             )}
                           />
-                          <img
-                            src={
-                              integration.identifier === 'youtube'
-                                ? '/icons/platforms/youtube.svg'
-                                : `/icons/platforms/${integration.identifier}.png`
-                            }
-                            alt={platformName}
-                            width={18}
-                            height={18}
-                            className="absolute -bottom-[2px] -end-[4px] z-10 h-[18px] w-[18px] rounded-[5px]"
-                          />
+                          {integration.identifier === 'youtube' ? (
+                            <img
+                              src="/icons/platforms/youtube.svg"
+                              alt={platformName}
+                              width={18}
+                              height={18}
+                              className="absolute -bottom-[2px] -end-[4px] z-10 h-[18px] w-[18px] rounded-[5px]"
+                            />
+                          ) : (
+                            <SafeImage
+                              src={`/icons/platforms/${integration.identifier}.png`}
+                              alt={platformName}
+                              width={18}
+                              height={18}
+                              className="absolute -bottom-[2px] -end-[4px] z-10 h-[18px] w-[18px] rounded-[5px]"
+                            />
+                          )}
                         </div>
 
                         <div className="min-w-0 flex-1 xs:w-full">
