@@ -374,6 +374,74 @@ describe('CopyGenerationService', () => {
     });
   });
 
+  it('falls back to the exact original for every platform when source brief creation fails', async () => {
+    const sourceBriefService = createSourceBriefService();
+    sourceBriefService.build.mockRejectedValueOnce(
+      new Error('Source analysis unavailable')
+    );
+    const modelService = createModelService();
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+    const sourceCaption = '  Keep this exact.\nIncluding spacing.  ';
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin', 'instagram'],
+      goal: 'convert',
+      captionMode: 'adapt-by-platform',
+      sourceCaption,
+    });
+
+    expect(sourceBriefService.assertMediaAccess).toHaveBeenCalledWith(
+      'org-1',
+      'media-1'
+    );
+    expect(modelService.generatePlatformDraft).not.toHaveBeenCalled();
+    expect(events.some((event) => event.name === 'source-brief-complete')).toBe(
+      false
+    );
+    expect(events.some((event) => event.name === 'platform-failed')).toBe(false);
+    expect(
+      events.filter((event) => event.name === 'platform-started')
+    ).toHaveLength(2);
+    expect(
+      events.filter((event) => event.name === 'platform-complete')
+    ).toHaveLength(2);
+
+    const completed = events[events.length - 1];
+    expect(completed.name).toBe('completed');
+    expect(completed.data).toMatchObject({
+      status: 'complete',
+      sourceConfidence: null,
+      imagePlans: [],
+      results: [
+        {
+          platform: 'linkedin',
+          draft: sourceCaption,
+          origin: 'original',
+          confidence: null,
+          antiGenericScore: null,
+          warnings: [
+            expect.objectContaining({ code: 'ADAPTATION_PRESERVATION_FAILED' }),
+          ],
+        },
+        {
+          platform: 'instagram',
+          draft: sourceCaption,
+          origin: 'original',
+          confidence: null,
+          antiGenericScore: null,
+          warnings: [
+            expect.objectContaining({ code: 'ADAPTATION_PRESERVATION_FAILED' }),
+          ],
+        },
+      ],
+    });
+  });
+
   it('falls back when adaptation changes a case-sensitive URL path', async () => {
     const sourceBriefService = createSourceBriefService();
     const modelService = createModelService({

@@ -160,7 +160,80 @@ export class CopyGenerationService {
       return;
     }
 
-    const sourceBrief = await this._sourceBriefService.build(orgId, body);
+    let sourceBrief: SourceBriefResult;
+    try {
+      sourceBrief = await this._sourceBriefService.build(orgId, body);
+    } catch (error) {
+      if (captionMode !== 'adapt-by-platform') {
+        throw error;
+      }
+
+      await this._sourceBriefService.assertMediaAccess(orgId, body.mediaId);
+      const sourceCaption = body.sourceCaption as string;
+      const results: GenerateMediaCopyResult[] = [];
+
+      for (const platform of platforms) {
+        yield {
+          name: 'platform-started',
+          data: { platform },
+        };
+
+        const controls = body.platformControls?.[platform] as
+          | PlatformRuleOverrides
+          | undefined;
+        const platformRule = resolvePlatformRule(platform, controls);
+        const warnings: CopyGenerationWarning[] = [
+          {
+            code: 'ADAPTATION_PRESERVATION_FAILED',
+            message:
+              'Source analysis failed, so the original caption was returned unchanged.',
+          },
+        ];
+
+        if (sourceCaption.length > platformRule.hardCap) {
+          warnings.push({
+            code: 'ORIGINAL_CAPTION_OVER_LIMIT',
+            message:
+              'The original caption exceeds the platform hard cap and was returned unchanged.',
+          });
+        }
+
+        const result: GenerateMediaCopyResult = {
+          platform,
+          draft: sourceCaption,
+          origin: 'original',
+          charCount: sourceCaption.length,
+          confidence: null,
+          antiGenericScore: null,
+          rewritten: false,
+          warnings,
+        };
+
+        results.push(result);
+        yield {
+          name: 'platform-complete',
+          data: {
+            platform,
+            score: result.antiGenericScore,
+            warnings: result.warnings,
+          },
+        };
+      }
+
+      yield {
+        name: 'completed',
+        data: {
+          requestId,
+          status: 'complete',
+          sourceConfidence: null,
+          warnings: results.flatMap((result) => result.warnings),
+          results,
+          imagePlans: [],
+        } satisfies GenerateMediaCopyResponse,
+      };
+      return;
+    }
+
     yield {
       name: 'source-brief-complete',
       data: {
