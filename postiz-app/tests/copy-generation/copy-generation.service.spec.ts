@@ -90,6 +90,7 @@ describe('CopyGenerationService', () => {
     expect(completed.data.status).toBe('complete');
     expect(completed.data.results[0]).toMatchObject({
       platform: 'linkedin',
+      origin: 'generated',
       rewritten: false,
     });
     expect(modelService.generatePlatformDraft).toHaveBeenCalledTimes(1);
@@ -106,7 +107,9 @@ describe('CopyGenerationService', () => {
 
     expect(prompt).toContain('Text-post mode');
     expect(prompt).toContain('standalone text-native post');
-    expect(prompt).toContain('Prioritize one strong founder/operator-style post');
+    expect(prompt).toContain(
+      'Prioritize one strong founder/operator-style post'
+    );
     expect(prompt).toContain('Do not produce several weak angles');
   });
 
@@ -142,7 +145,9 @@ describe('CopyGenerationService', () => {
 
     expect(prompt).toContain('Caption mode');
     expect(prompt).toContain('media-grounded caption');
-    expect(prompt).toContain('Write a caption that is grounded in the visual media');
+    expect(prompt).toContain(
+      'Write a caption that is grounded in the visual media'
+    );
   });
 
   it('clamps x drafts to the shared hard cap', async () => {
@@ -179,7 +184,9 @@ describe('CopyGenerationService', () => {
 
   it('merges stored knowledge-base facts into the prompt brief', async () => {
     const sourceBriefService = createSourceBriefService({
-      storedKnowledgeBaseFacts: ['The founder records teardown notes after each launch'],
+      storedKnowledgeBaseFacts: [
+        'The founder records teardown notes after each launch',
+      ],
     });
     const modelService = createModelService();
     const service = new CopyGenerationService(
@@ -200,6 +207,122 @@ describe('CopyGenerationService', () => {
       'The team ships updates every Tuesday',
       'The founder records teardown notes after each launch',
     ]);
+  });
+
+  it('adds additional context to the generation brief and prompt', async () => {
+    const sourceBriefService = createSourceBriefService();
+    const modelService = createModelService();
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+
+    await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin'],
+      goal: 'position',
+      additionalContext: 'Mention that registration closes Friday.',
+    });
+
+    const [brief, prompt] = modelService.generatePlatformDraft.mock.calls[0];
+    expect(brief.strategy.additionalContext).toBe(
+      'Mention that registration closes Friday.'
+    );
+    expect(prompt).toContain('Explicit user instructions and context:');
+    expect(prompt).toContain('Mention that registration closes Friday.');
+  });
+
+  it('adapts the authoritative source caption once per unique platform', async () => {
+    const sourceBriefService = createSourceBriefService();
+    const modelService = createModelService({
+      generatePlatformDraft: jest.fn().mockResolvedValue({
+        draft:
+          'This is your sign to unlock a game-changer for your workflow. Let that sink in!',
+        angle: '',
+        hook: '',
+        cta: '',
+      }),
+    });
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+    const sourceCaption =
+      'Registration closes Friday. Save your seat at example.com.';
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin', 'linkedin', 'instagram'],
+      goal: 'convert',
+      captionMode: 'adapt-by-platform',
+      sourceCaption,
+    });
+
+    const completed = events[events.length - 1].data;
+    expect(modelService.generatePlatformDraft).toHaveBeenCalledTimes(2);
+    expect(modelService.rewriteDraft).not.toHaveBeenCalled();
+    expect(completed.results).toHaveLength(2);
+    expect(completed.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: 'linkedin', origin: 'adapted' }),
+        expect.objectContaining({ platform: 'instagram', origin: 'adapted' }),
+      ])
+    );
+    for (const [brief, prompt] of modelService.generatePlatformDraft.mock
+      .calls) {
+      expect(brief.strategy.sourceCaption).toBe(sourceCaption);
+      expect(prompt).toContain('authoritative starting point');
+      expect(prompt).toContain(sourceCaption);
+      expect(prompt).toContain('Preserve its facts, meaning, offer, and CTA');
+    }
+  });
+
+  it('returns the exact original caption everywhere without model calls', async () => {
+    const sourceBriefService = createSourceBriefService();
+    const modelService = createModelService();
+    const imagePlanService = { generate: jest.fn() };
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any,
+      imagePlanService as any
+    );
+    const sourceCaption = `  ${'A'.repeat(281)}\nKeep this spacing.  `;
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['x', 'x', 'facebook'],
+      goal: 'position',
+      captionMode: 'use-everywhere',
+      sourceCaption,
+    });
+
+    const completed = events[events.length - 1].data;
+    expect(sourceBriefService.build).not.toHaveBeenCalled();
+    expect(modelService.generatePlatformDraft).not.toHaveBeenCalled();
+    expect(modelService.rewriteDraft).not.toHaveBeenCalled();
+    expect(imagePlanService.generate).not.toHaveBeenCalled();
+    expect(completed.results).toHaveLength(2);
+    expect(
+      completed.results.every((result: any) => result.draft === sourceCaption)
+    ).toBe(true);
+    expect(
+      completed.results.every((result: any) => result.origin === 'original')
+    ).toBe(true);
+    expect(
+      completed.results.find((result: any) => result.platform === 'x')
+    ).toMatchObject({
+      charCount: sourceCaption.length,
+      warnings: [
+        expect.objectContaining({ code: 'ORIGINAL_CAPTION_OVER_LIMIT' }),
+      ],
+    });
+    expect(
+      completed.results.find((result: any) => result.platform === 'facebook')
+        .warnings
+    ).toEqual([]);
   });
 
   it('rewrites copy that scores as too generic', async () => {
@@ -248,13 +371,16 @@ describe('CopyGenerationService', () => {
         mediaType: 'video',
         visualSummary: 'Video asset: clip.mp4',
         facts: [],
-        unknowns: ['Specific spoken details are unavailable without a transcript.'],
+        unknowns: [
+          'Specific spoken details are unavailable without a transcript.',
+        ],
       },
       sourceConfidence: 0.2,
       warnings: [
         {
           code: 'TRANSCRIPT_REQUIRED',
-          message: 'Add a transcript to generate grounded copy from this video.',
+          message:
+            'Add a transcript to generate grounded copy from this video.',
         },
       ],
       storedKnowledgeBaseFacts: [],

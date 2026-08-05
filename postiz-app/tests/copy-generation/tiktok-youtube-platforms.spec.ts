@@ -9,6 +9,10 @@ import {
   resolvePlatformRule,
 } from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
 import { GenerateMediaCopyDto } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.dto';
+import {
+  ADDITIONAL_CONTEXT_MAX_LENGTH,
+  SOURCE_CAPTION_MAX_LENGTH,
+} from '@gitroom/nestjs-libraries/copy-generation/caption-modes';
 
 const validBody = (platforms: string[]) => ({
   mediaId: 'media-1',
@@ -30,9 +34,13 @@ describe('TikTok and YouTube copy-generation coverage', () => {
     ]);
 
     expect(mapIntegrationIdentifierToCopyPlatform('tiktok')).toBe('tiktok');
-    expect(mapIntegrationIdentifierToCopyPlatform('tiktok-business')).toBe('tiktok');
+    expect(mapIntegrationIdentifierToCopyPlatform('tiktok-business')).toBe(
+      'tiktok'
+    );
     expect(mapIntegrationIdentifierToCopyPlatform('youtube')).toBe('youtube');
-    expect(mapIntegrationIdentifierToCopyPlatform('youtube-shorts')).toBe('youtube');
+    expect(mapIntegrationIdentifierToCopyPlatform('youtube-shorts')).toBe(
+      'youtube'
+    );
   });
 
   it('defines native rules and adapters for both platforms', () => {
@@ -82,7 +90,9 @@ describe('TikTok and YouTube copy-generation coverage', () => {
     });
 
     expect(tiktokPrompt).toContain('Short-form video caption mode');
-    expect(tiktokPrompt).toContain('Do not invent trends, sounds, or challenges');
+    expect(tiktokPrompt).toContain(
+      'Do not invent trends, sounds, or challenges'
+    );
     expect(youtubePrompt).toContain('Video description mode');
     expect(youtubePrompt).toContain(
       'Do not invent links, timestamps, chapters, sponsors, or claims'
@@ -125,6 +135,69 @@ describe('TikTok and YouTube copy-generation coverage', () => {
     expect(oversizedError?.constraints?.arrayMaxSize).toBeDefined();
   });
 
+  it('defaults caption mode and validates caption-mode combinations and limits', async () => {
+    const legacy = plainToInstance(
+      GenerateMediaCopyDto,
+      validBody(['linkedin'])
+    );
+    expect(legacy.captionMode).toBe('generate');
+    expect(await validate(legacy)).toHaveLength(0);
+
+    for (const captionMode of ['use-everywhere', 'adapt-by-platform']) {
+      const missingCaption = plainToInstance(GenerateMediaCopyDto, {
+        ...validBody(['linkedin']),
+        captionMode,
+      });
+      expect(
+        (await validate(missingCaption)).some(
+          (error) => error.property === 'sourceCaption'
+        )
+      ).toBe(true);
+    }
+
+    const invalidMode = plainToInstance(GenerateMediaCopyDto, {
+      ...validBody(['linkedin']),
+      captionMode: 'rewrite-everything',
+    });
+    expect(
+      (await validate(invalidMode)).some(
+        (error) => error.property === 'captionMode'
+      )
+    ).toBe(true);
+
+    const nullMode = plainToInstance(GenerateMediaCopyDto, {
+      ...validBody(['linkedin']),
+      captionMode: null,
+    });
+    expect(
+      (await validate(nullMode)).some(
+        (error) => error.property === 'captionMode'
+      )
+    ).toBe(true);
+
+    const blankCaption = plainToInstance(GenerateMediaCopyDto, {
+      ...validBody(['linkedin']),
+      captionMode: 'use-everywhere',
+      sourceCaption: '   ',
+    });
+    expect(
+      (await validate(blankCaption)).some(
+        (error) => error.property === 'sourceCaption'
+      )
+    ).toBe(true);
+
+    const oversized = plainToInstance(GenerateMediaCopyDto, {
+      ...validBody(['linkedin']),
+      captionMode: 'adapt-by-platform',
+      sourceCaption: 'x'.repeat(SOURCE_CAPTION_MAX_LENGTH + 1),
+      additionalContext: 'x'.repeat(ADDITIONAL_CONTEXT_MAX_LENGTH + 1),
+    });
+    const oversizedErrors = await validate(oversized);
+    expect(oversizedErrors.map((error) => error.property)).toEqual(
+      expect.arrayContaining(['sourceCaption', 'additionalContext'])
+    );
+  });
+
   it('returns editable TikTok and YouTube results in the normal response shape', async () => {
     const sourceBriefService = {
       build: jest.fn().mockResolvedValue({
@@ -150,15 +223,17 @@ describe('TikTok and YouTube copy-generation coverage', () => {
     };
 
     const modelService = {
-      generatePlatformDraft: jest.fn().mockImplementation(async (brief: any) => ({
-        draft:
-          brief.platform.name === 'tiktok'
-            ? 'We hand-label each small-batch order to catch shipping errors before the box leaves.'
-            : 'This video shows the hand-labeling check our team uses to catch shipping errors before small-batch orders leave.',
-        angle: 'quality control',
-        hook: 'The final check before shipping',
-        cta: '',
-      })),
+      generatePlatformDraft: jest
+        .fn()
+        .mockImplementation(async (brief: any) => ({
+          draft:
+            brief.platform.name === 'tiktok'
+              ? 'We hand-label each small-batch order to catch shipping errors before the box leaves.'
+              : 'This video shows the hand-labeling check our team uses to catch shipping errors before small-batch orders leave.',
+          angle: 'quality control',
+          hook: 'The final check before shipping',
+          cta: '',
+        })),
       rewriteDraft: jest.fn(),
     };
 
@@ -179,10 +254,9 @@ describe('TikTok and YouTube copy-generation coverage', () => {
     const completed = events[events.length - 1];
     expect(completed.name).toBe('completed');
     expect(completed.data.status).toBe('complete');
-    expect(completed.data.results.map((result: any) => result.platform)).toEqual([
-      'tiktok',
-      'youtube',
-    ]);
+    expect(
+      completed.data.results.map((result: any) => result.platform)
+    ).toEqual(['tiktok', 'youtube']);
     expect(completed.data.results).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

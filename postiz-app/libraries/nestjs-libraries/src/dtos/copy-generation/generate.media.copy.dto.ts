@@ -8,23 +8,33 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
-  CopyPlatform,
   COPY_PLATFORMS,
-  CopyTargetLength,
   COPY_TARGET_LENGTHS,
-  HashtagBehavior,
   HASHTAG_BEHAVIORS,
-  LineBreakBehavior,
   LINE_BREAK_BEHAVIORS,
-  PlatformCtaStyle,
   PLATFORM_CTA_STYLES,
 } from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
+import type {
+  CopyPlatform,
+  CopyTargetLength,
+  HashtagBehavior,
+  LineBreakBehavior,
+  PlatformCtaStyle,
+} from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
+import {
+  ADDITIONAL_CONTEXT_MAX_LENGTH,
+  CAPTION_MODES,
+  SOURCE_CAPTION_MAX_LENGTH,
+} from '@gitroom/nestjs-libraries/copy-generation/caption-modes';
+import type { CaptionMode } from '@gitroom/nestjs-libraries/copy-generation/caption-modes';
 
 export class CtaPreferenceDto {
   @IsString()
@@ -105,6 +115,24 @@ export class GenerateMediaCopyDto {
   @ArrayUnique()
   @IsIn(COPY_PLATFORMS, { each: true })
   platforms: CopyPlatform[];
+
+  @IsString()
+  @IsIn(CAPTION_MODES)
+  captionMode: CaptionMode = 'generate';
+
+  @ValidateIf(
+    (body: GenerateMediaCopyDto, value: unknown) =>
+      body.captionMode !== 'generate' || (value !== undefined && value !== '')
+  )
+  @IsString()
+  @Matches(/\S/, { message: 'sourceCaption must contain non-whitespace text' })
+  @MaxLength(SOURCE_CAPTION_MAX_LENGTH)
+  sourceCaption?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(ADDITIONAL_CONTEXT_MAX_LENGTH)
+  additionalContext?: string;
 
   @IsOptional()
   @IsString()

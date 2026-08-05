@@ -1,6 +1,11 @@
 'use client';
 
 import { create } from 'zustand';
+import { CAPTION_MODES } from '@gitroom/nestjs-libraries/copy-generation/caption-modes';
+import type { CaptionMode } from '@gitroom/nestjs-libraries/copy-generation/caption-modes';
+
+export { CAPTION_MODES };
+export type { CaptionMode };
 
 export const GUIDED_COMPOSER_STEPS = [
   'upload',
@@ -10,14 +15,6 @@ export const GUIDED_COMPOSER_STEPS = [
 ] as const;
 
 export type GuidedComposerStep = (typeof GUIDED_COMPOSER_STEPS)[number];
-
-export const CAPTION_MODES = [
-  'generate',
-  'use-everywhere',
-  'adapt-by-platform',
-] as const;
-
-export type CaptionMode = (typeof CAPTION_MODES)[number];
 
 interface GuidedComposerValues {
   composerStep: GuidedComposerStep;
