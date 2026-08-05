@@ -41,6 +41,35 @@ const buildPostFormatInstruction = (brief: CopyGenerationBrief) => {
   return 'Text-post mode: turn the video/transcript into a standalone text-native post. Do not simply copy a caption, script line, or transcript excerpt.';
 };
 
+const renderCaptionInstructions = (brief: CopyGenerationBrief) => {
+  const sourceCaption = brief.strategy.sourceCaption;
+  const additionalContext = brief.strategy.additionalContext;
+  const sections: string[] = [];
+
+  if (brief.strategy.captionMode === 'adapt-by-platform' && sourceCaption) {
+    sections.push(`Caption adaptation instructions:
+- Treat the source caption below as the authoritative starting point.
+- Preserve its facts, meaning, offer, and CTA. Do not invent, remove, or contradict them.
+- Adapt only the hook, length, formatting, hashtags, tone, and platform conventions.
+- Return one ${brief.platform.name}-native version.
+
+Authoritative source caption:
+---
+${sourceCaption}
+---`);
+  }
+
+  if (additionalContext) {
+    sections.push(`Explicit user instructions and context:
+---
+${additionalContext}
+---
+Follow these instructions unless they conflict with the authoritative source caption or known source facts.`);
+  }
+
+  return sections.length ? `\n${sections.join('\n\n')}\n` : '';
+};
+
 export const buildBasePlatformPrompt = (
   brief: CopyGenerationBrief,
   extraInstruction: string
@@ -79,6 +108,7 @@ ${brief.personalization.voiceProfile ? `Voice profile:
 ${renderOptionalList('Preferred openings:', brief.personalization.voiceProfile.preferredOpenings)}
 ${renderOptionalList('Vocabulary tendencies:', brief.personalization.voiceProfile.vocabularyTendencies)}
 ${renderOptionalList('Taboo phrases:', brief.personalization.voiceProfile.tabooPhrases)}` : ''}
+${renderCaptionInstructions(brief)}
 
 Anti-generic rules:
 - Do not use filler openings, hype phrases, or content-bot cadence.

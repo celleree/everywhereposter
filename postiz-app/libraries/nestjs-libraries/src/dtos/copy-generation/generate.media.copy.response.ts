@@ -5,6 +5,7 @@ import {
   LineBreakBehavior,
   PlatformCtaStyle,
 } from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
+import type { CaptionMode } from '@gitroom/nestjs-libraries/copy-generation/caption-modes';
 
 export interface CopyGenerationWarning {
   code: string;
@@ -68,6 +69,9 @@ export interface CopyGenerationBrief {
   strategy: {
     audience?: string;
     goal: string;
+    captionMode?: CaptionMode;
+    sourceCaption?: string;
+    additionalContext?: string;
     ctaPreference?: {
       strength: 'none' | 'soft' | 'medium' | 'direct';
       action?: string;
@@ -94,12 +98,13 @@ export interface CopyGenerationBrief {
 export interface GenerateMediaCopyResult {
   platform: CopyPlatform;
   draft: string;
+  origin: 'generated' | 'original' | 'adapted';
   angle?: string;
   hook?: string;
   cta?: string;
   charCount: number;
-  confidence: number;
-  antiGenericScore: number;
+  confidence: number | null;
+  antiGenericScore: number | null;
   rewritten: boolean;
   warnings: CopyGenerationWarning[];
 }
@@ -107,7 +112,7 @@ export interface GenerateMediaCopyResult {
 export interface GenerateMediaCopyResponse {
   requestId: string;
   status: 'complete' | 'partial' | 'failed';
-  sourceConfidence: number;
+  sourceConfidence: number | null;
   warnings: CopyGenerationWarning[];
   results: GenerateMediaCopyResult[];
   imagePlans: ImagePlanItem[];

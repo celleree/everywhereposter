@@ -25,6 +25,12 @@ import {
   RenderedImagePlanResult,
   RenderImagePlansResponse,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/render.image.plans.response';
+import {
+  getApiErrorMessage,
+  requestMediaCopyGeneration,
+  resolveCopyGenerationDestinations,
+} from '@gitroom/frontend/components/new-launch/copy-generation.client';
+import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 
 const stageLabelMap: Record<string, { key: string; fallback: string }> = {
   'copy-generation-started': {
@@ -100,104 +106,10 @@ const preservesAccountPrimaryVideo = (
   return settings?.post_type !== 'post' && settings?.post_type !== 'story';
 };
 
-const getApiErrorMessage = (payload: unknown): string | undefined => {
-  if (typeof payload === 'string') {
-    return payload.trim() || undefined;
-  }
-
-  if (!payload || typeof payload !== 'object') {
-    return undefined;
-  }
-
-  const { message, error } = payload as {
-    message?: unknown;
-    error?: unknown;
-  };
-
-  if (typeof message === 'string' && message.trim()) {
-    return message;
-  }
-
-  if (Array.isArray(message)) {
-    const messages = message.filter(
-      (item): item is string => typeof item === 'string' && Boolean(item.trim())
-    );
-    if (messages.length) {
-      return messages.join(' ');
-    }
-  }
-
-  if (typeof error === 'string' && error.trim()) {
-    return error;
-  }
-
-  if (error && typeof error === 'object') {
-    const nestedMessage = (error as { message?: unknown }).message;
-    if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
-      return nestedMessage;
-    }
-  }
-
-  return undefined;
-};
-
 type ReviewTab = 'overview' | 'posts' | 'images' | 'accounts';
 
 const loadDefaultPlatforms = (integrations: Integrations[]) =>
-  Array.from(
-    new Set(
-      integrations
-        .map((integration) =>
-          mapIntegrationIdentifierToCopyPlatform(integration.identifier)
-        )
-        .filter((platform): platform is CopyPlatform => Boolean(platform))
-    )
-  );
-
-const parseGenerationStream = async (
-  request: Response,
-  onStage: (name: string, data?: any) => void
-) => {
-  if (!request.body) {
-    throw new Error('No response body returned');
-  }
-
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  let finalResponse: GenerateMediaCopyResponse | null = null;
-
-  const parseLine = (line: string) => {
-    if (!line.trim()) return;
-    try {
-      const parsed = JSON.parse(line);
-      onStage(parsed.name, parsed.data);
-      if (parsed.name === 'completed') {
-        finalResponse = parsed.data as GenerateMediaCopyResponse;
-      }
-    } catch {
-      // Ignore malformed partial stream messages.
-    }
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    lines.forEach(parseLine);
-  }
-
-  buffer += decoder.decode();
-  parseLine(buffer);
-
-  if (!finalResponse) {
-    throw new Error('Post generation did not return a final payload');
-  }
-
-  return finalResponse;
-};
+  resolveCopyGenerationDestinations(integrations).platforms;
 
 export const MediaPostReviewModal: FC<{
   mediaId: string;
@@ -226,6 +138,11 @@ export const MediaPostReviewModal: FC<{
       setInternalValue: state.setInternalValue,
       addInternalValue: state.addInternalValue,
     }))
+  );
+  const captionMode = useGuidedComposerStore((state) => state.captionMode);
+  const sourceCaption = useGuidedComposerStore((state) => state.sourceCaption);
+  const additionalContext = useGuidedComposerStore(
+    (state) => state.additionalContext
   );
 
   const selectedPlatforms = useMemo(
@@ -394,11 +311,16 @@ export const MediaPostReviewModal: FC<{
         .split('\n')
         .map((fact) => fact.trim())
         .filter(Boolean);
-      const request = await fetch('/posts/copy/generate', {
-        method: 'POST',
-        body: JSON.stringify({
+      const finalResponse = await requestMediaCopyGeneration(
+        fetch,
+        {
           mediaId,
           platforms,
+          captionMode,
+          ...(captionMode !== 'generate' ? { sourceCaption } : {}),
+          ...(additionalContext.trim()
+            ? { additionalContext: additionalContext.trim() }
+            : {}),
           audience: audience || undefined,
           goal,
           ctaPreference: {
@@ -417,33 +339,32 @@ export const MediaPostReviewModal: FC<{
           ...(facts.length
             ? { knowledgeBaseFacts: facts.map((text) => ({ text })) }
             : {}),
-        }),
-      });
-
-      const finalResponse = await parseGenerationStream(request, (name, data) => {
-        if (name === 'platform-started' && data?.platform) {
+        },
+        (name, data) => {
+          if (name === 'platform-started' && data?.platform) {
+            setStatusText(
+              `${t('generating', 'Generating')} ${
+                platformLabels[data.platform as CopyPlatform]
+              }...`
+            );
+            return;
+          }
+          if (name === 'platform-rewrite-started' && data?.platform) {
+            setStatusText(
+              `${t('refining', 'Refining')} ${
+                platformLabels[data.platform as CopyPlatform]
+              }...`
+            );
+            return;
+          }
+          const stage = stageLabelMap[name];
           setStatusText(
-            `${t('generating', 'Generating')} ${
-              platformLabels[data.platform as CopyPlatform]
-            }...`
+            stage
+              ? t(stage.key, stage.fallback)
+              : t('processing_post_set', 'Processing post set...')
           );
-          return;
         }
-        if (name === 'platform-rewrite-started' && data?.platform) {
-          setStatusText(
-            `${t('refining', 'Refining')} ${
-              platformLabels[data.platform as CopyPlatform]
-            }...`
-          );
-          return;
-        }
-        const stage = stageLabelMap[name];
-        setStatusText(
-          stage
-            ? t(stage.key, stage.fallback)
-            : t('processing_post_set', 'Processing post set...')
-        );
-      });
+      );
 
       setResponse(finalResponse);
       setEditedDrafts(
@@ -466,7 +387,9 @@ export const MediaPostReviewModal: FC<{
       setLoading(false);
     }
   }, [
+    additionalContext,
     audience,
+    captionMode,
     ctaAction,
     ctaStrength,
     fetch,
@@ -475,6 +398,7 @@ export const MediaPostReviewModal: FC<{
     mediaId,
     platforms,
     renderPlans,
+    sourceCaption,
     t,
     toaster,
     transcript,

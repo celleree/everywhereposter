@@ -97,6 +97,7 @@ jest.mock('@gitroom/react/form/checkbox', () => {
 });
 
 import { MediaPostReviewModal } from '../../apps/frontend/src/components/new-launch/media.post.review.modal';
+import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 
 Object.assign(global, {
   TextEncoder,
@@ -275,6 +276,48 @@ describe('MediaPostReviewModal workflow', () => {
   beforeEach(() => {
     fetchMock = jest.fn();
     toasterShowMock = jest.fn();
+    useGuidedComposerStore.getState().resetGuidedComposer();
+  });
+
+  it('sends guided caption-mode state in the copy-generation request', async () => {
+    const linkedin = createIntegration(
+      'linkedin-a',
+      'linkedin',
+      'LinkedIn A'
+    );
+    setupStore({
+      selectedIntegrations: [selectIntegration(linkedin)],
+    });
+    useGuidedComposerStore.setState({
+      captionMode: 'adapt-by-platform',
+      sourceCaption: 'Authoritative source caption',
+      additionalContext: '  Keep the tone practical.  ',
+    });
+    configureFetch(
+      {
+        requestId: 'request-guided-caption-mode',
+        status: 'complete',
+        sourceConfidence: 0.95,
+        warnings: [],
+        results: [makeGenerationResult('linkedin', 'LinkedIn draft')],
+        imagePlans: [],
+      },
+      []
+    );
+
+    await openGeneratedReview();
+
+    const [, request] = fetchMock.mock.calls.find(
+      ([url]) => url === '/posts/copy/generate'
+    );
+    expect(JSON.parse(request.body)).toMatchObject({
+      mediaId: 'media-1',
+      platforms: ['linkedin'],
+      goal: 'position',
+      captionMode: 'adapt-by-platform',
+      sourceCaption: 'Authoritative source caption',
+      additionalContext: 'Keep the tone practical.',
+    });
   });
 
   it('routes edited platform text and generated media only to selected matching accounts', async () => {
