@@ -30,6 +30,7 @@ import {
   requestMediaCopyGeneration,
   resolveCopyGenerationDestinations,
 } from '@gitroom/frontend/components/new-launch/copy-generation.client';
+import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 
 const stageLabelMap: Record<string, { key: string; fallback: string }> = {
   'copy-generation-started': {
@@ -137,6 +138,11 @@ export const MediaPostReviewModal: FC<{
       setInternalValue: state.setInternalValue,
       addInternalValue: state.addInternalValue,
     }))
+  );
+  const captionMode = useGuidedComposerStore((state) => state.captionMode);
+  const sourceCaption = useGuidedComposerStore((state) => state.sourceCaption);
+  const additionalContext = useGuidedComposerStore(
+    (state) => state.additionalContext
   );
 
   const selectedPlatforms = useMemo(
@@ -310,6 +316,11 @@ export const MediaPostReviewModal: FC<{
         {
           mediaId,
           platforms,
+          captionMode,
+          ...(captionMode !== 'generate' ? { sourceCaption } : {}),
+          ...(additionalContext.trim()
+            ? { additionalContext: additionalContext.trim() }
+            : {}),
           audience: audience || undefined,
           goal,
           ctaPreference: {
@@ -376,7 +387,9 @@ export const MediaPostReviewModal: FC<{
       setLoading(false);
     }
   }, [
+    additionalContext,
     audience,
+    captionMode,
     ctaAction,
     ctaStrength,
     fetch,
@@ -385,6 +398,7 @@ export const MediaPostReviewModal: FC<{
     mediaId,
     platforms,
     renderPlans,
+    sourceCaption,
     t,
     toaster,
     transcript,
