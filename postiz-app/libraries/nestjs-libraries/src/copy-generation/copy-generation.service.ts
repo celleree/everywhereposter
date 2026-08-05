@@ -77,6 +77,67 @@ const findMissingCaptionAnchors = (sourceCaption: string, draft: string) => {
   );
 };
 
+// Phase 6 checks deterministic anchors only. Semantic reversals, negation
+// changes, unsupported claims, and general fact-checking remain out of scope.
+const RELIABLE_INTRODUCED_CAPTION_ANCHOR_PATTERNS = [
+  {
+    type: 'url',
+    pattern:
+      /(?<![#\w])(?:https?:\/\/|www\.)[^\s]+|(?<![#\w])[a-z0-9.-]+\.[a-z]{2,}(?:[/?#][^\s]*)?/gi,
+  },
+  { type: 'handle', pattern: /@[a-z0-9_.-]+/gi },
+  {
+    type: 'time',
+    pattern:
+      /(?<![#\w])(?:1[0-2]|0?[1-9])(?::[0-5]\d)?\s*(?:am|pm)(?!\w)/gi,
+  },
+  {
+    type: 'currency',
+    pattern:
+      /(?<![#\w])(?:[$€£¥]\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s?(?:usd|eur|gbp))(?!\w)/gi,
+  },
+  {
+    type: 'percentage',
+    pattern: /(?<![#\w])\d[\d,.]*%(?!\w)/g,
+  },
+  {
+    type: 'date',
+    pattern:
+      /(?<![#\w])(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})(?![\w.-])/g,
+  },
+  {
+    type: 'weekday',
+    pattern:
+      /(?<![#\w])(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?!\w)/gi,
+  },
+  {
+    type: 'relative-date',
+    pattern:
+      /(?<![#\w])(?:today|tomorrow|tonight|next\s+week)(?!\w)/gi,
+  },
+] as const;
+
+const extractReliableIntroducedCaptionAnchors = (caption: string) =>
+  uniq(
+    RELIABLE_INTRODUCED_CAPTION_ANCHOR_PATTERNS.flatMap(({ type, pattern }) =>
+      Array.from(caption.matchAll(pattern), (match) =>
+        `${type}:${normalizeCaptionAnchor(match[0])}`
+      )
+    ).filter(Boolean)
+  );
+
+const findIntroducedCaptionAnchors = (
+  sourceCaption: string,
+  draft: string
+) => {
+  const sourceAnchors = new Set(
+    extractReliableIntroducedCaptionAnchors(sourceCaption)
+  );
+  return extractReliableIntroducedCaptionAnchors(draft).filter(
+    (anchor) => !sourceAnchors.has(anchor)
+  );
+};
+
 @Injectable()
 export class CopyGenerationService {
   constructor(
@@ -296,14 +357,21 @@ export class CopyGenerationService {
           captionMode === 'adapt-by-platform'
             ? findMissingCaptionAnchors(body.sourceCaption as string, draft)
             : [];
+        const introducedAnchors =
+          captionMode === 'adapt-by-platform'
+            ? findIntroducedCaptionAnchors(
+                body.sourceCaption as string,
+                draft
+              )
+            : [];
 
-        if (missingAnchors.length) {
+        if (missingAnchors.length || introducedAnchors.length) {
           draft = body.sourceCaption as string;
           resultOrigin = 'original';
           resultWarnings.push({
             code: 'ADAPTATION_PRESERVATION_FAILED',
             message:
-              'The platform adaptation omitted authoritative caption details, so the original caption was returned unchanged.',
+              'The platform adaptation changed, omitted, or introduced authoritative caption details, so the original caption was returned unchanged.',
           });
         }
 
