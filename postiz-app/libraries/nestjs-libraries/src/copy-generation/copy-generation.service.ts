@@ -28,15 +28,38 @@ import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-gener
 import { ImagePlanService } from '@gitroom/nestjs-libraries/copy-generation/image-plan.service';
 
 const CAPTION_ANCHOR_PATTERNS = [
-  /\b(?:https?:\/\/|www\.)[^\s]+|\b[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s]*)?/gi,
+  /\b(?:https?:\/\/|www\.)[^\s]+|\b[a-z0-9.-]+\.[a-z]{2,}(?:[/?#][^\s]*)?/gi,
   /@[a-z0-9_.-]+/gi,
+  /\b(?:1[0-2]|0?[1-9])(?::[0-5]\d)?\s*(?:am|pm)\b/gi,
   /[$€£¥]?\d[\d,./:-]*(?:%|\s?(?:usd|eur|gbp))?/gi,
   /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
+  /\b(?:today|tomorrow|tonight|next\s+week)\b/gi,
   /\b(?:sign up|learn more|save your seat|book now|register|subscribe|download|apply|join|visit|click|buy|shop|follow|comment|share|contact|dm|message)\b/gi,
 ];
 
-const normalizeCaptionAnchor = (anchor: string) =>
-  anchor.toLowerCase().replace(/[),.!?;:'"]+$/, '');
+const normalizeCaptionAnchor = (anchor: string) => {
+  const stripped = anchor.replace(/[),.!?;:'"]+$/, '');
+  const urlParts = stripped.match(
+    /^((?:https?:\/\/)?)([^/?#]+)([/?#].*)?$/i
+  );
+
+  if (
+    urlParts &&
+    /^(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}(?:[/?#]|$))/i.test(
+      stripped
+    )
+  ) {
+    return `${urlParts[1].toLowerCase()}${urlParts[2].toLowerCase()}${
+      urlParts[3] || ''
+    }`;
+  }
+
+  if (/\b(?:am|pm)$/i.test(stripped)) {
+    return stripped.toLowerCase().replace(/\s+/g, '');
+  }
+
+  return stripped.toLowerCase().replace(/\s+/g, ' ');
+};
 
 const extractCaptionAnchors = (caption: string) =>
   uniq(
@@ -183,6 +206,13 @@ export class CopyGenerationService {
           adapter.buildSystemPrompt(brief),
           this._antiGenericService.buildPromptConstraints()
         );
+
+        if (
+          captionMode === 'adapt-by-platform' &&
+          (typeof generated?.draft !== 'string' || !generated.draft.trim())
+        ) {
+          throw new Error('The model did not return a usable platform draft');
+        }
 
         let draft = generated.draft.trim();
         let resultOrigin: GenerateMediaCopyResult['origin'] =
@@ -369,6 +399,51 @@ export class CopyGenerationService {
           },
         };
       } catch (error: any) {
+        if (captionMode === 'adapt-by-platform') {
+          const sourceCaption = body.sourceCaption as string;
+          const controls = body.platformControls?.[platform] as
+            | PlatformRuleOverrides
+            | undefined;
+          const platformRule = resolvePlatformRule(platform, controls);
+          const warnings: CopyGenerationWarning[] = [
+            {
+              code: 'ADAPTATION_PRESERVATION_FAILED',
+              message:
+                'The platform adaptation failed, so the original caption was returned unchanged.',
+            },
+          ];
+
+          if (sourceCaption.length > platformRule.hardCap) {
+            warnings.push({
+              code: 'ORIGINAL_CAPTION_OVER_LIMIT',
+              message:
+                'The original caption exceeds the platform hard cap and was returned unchanged.',
+            });
+          }
+
+          const result: GenerateMediaCopyResult = {
+            platform,
+            draft: sourceCaption,
+            origin: 'original',
+            charCount: sourceCaption.length,
+            confidence: null,
+            antiGenericScore: null,
+            rewritten: false,
+            warnings,
+          };
+
+          results.push(result);
+          yield {
+            name: 'platform-complete',
+            data: {
+              platform,
+              score: result.antiGenericScore,
+              warnings: result.warnings,
+            },
+          };
+          continue;
+        }
+
         topLevelWarnings.push({
           code: 'PLATFORM_GENERATION_FAILED',
           message: `Generation failed for ${platform}: ${error?.message || 'Unknown error'}`,

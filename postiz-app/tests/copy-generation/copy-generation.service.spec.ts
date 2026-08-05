@@ -333,6 +333,155 @@ describe('CopyGenerationService', () => {
     expect(result.cta).toBeUndefined();
   });
 
+  it('falls back to the exact original when adaptation generation fails', async () => {
+    const sourceBriefService = createSourceBriefService();
+    const modelService = createModelService({
+      generatePlatformDraft: jest
+        .fn()
+        .mockRejectedValue(new Error('Model unavailable')),
+    });
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+    const sourceCaption = '  Keep this exact.\nIncluding spacing.  ';
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin'],
+      goal: 'convert',
+      captionMode: 'adapt-by-platform',
+      sourceCaption,
+    });
+
+    expect(events.some((event) => event.name === 'platform-failed')).toBe(false);
+    expect(events[events.length - 1].data).toMatchObject({
+      status: 'complete',
+      results: [
+        {
+          platform: 'linkedin',
+          draft: sourceCaption,
+          origin: 'original',
+          charCount: sourceCaption.length,
+          confidence: null,
+          antiGenericScore: null,
+          warnings: [
+            expect.objectContaining({ code: 'ADAPTATION_PRESERVATION_FAILED' }),
+          ],
+        },
+      ],
+    });
+  });
+
+  it('falls back when adaptation changes a case-sensitive URL path', async () => {
+    const sourceBriefService = createSourceBriefService();
+    const modelService = createModelService({
+      generatePlatformDraft: jest.fn().mockResolvedValue({
+        draft: 'Visit https://example.com/offer',
+      }),
+    });
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+    const sourceCaption = 'Visit https://example.com/Offer';
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin'],
+      goal: 'convert',
+      captionMode: 'adapt-by-platform',
+      sourceCaption,
+    });
+
+    expect(events[events.length - 1].data.results[0]).toMatchObject({
+      draft: sourceCaption,
+      origin: 'original',
+      confidence: null,
+      antiGenericScore: null,
+      warnings: [
+        expect.objectContaining({ code: 'ADAPTATION_PRESERVATION_FAILED' }),
+      ],
+    });
+  });
+
+  it.each([
+    [
+      'query',
+      'Visit example.com?Code=ABC',
+      'Visit example.com?code=ABC',
+    ],
+    ['fragment', 'Visit example.com#Offer', 'Visit example.com#offer'],
+  ])(
+    'falls back when adaptation changes a case-sensitive bare-domain %s',
+    async (_component, sourceCaption, adaptedCaption) => {
+      const sourceBriefService = createSourceBriefService();
+      const modelService = createModelService({
+        generatePlatformDraft: jest.fn().mockResolvedValue({
+          draft: adaptedCaption,
+        }),
+      });
+      const service = new CopyGenerationService(
+        sourceBriefService as any,
+        new AntiGenericService(),
+        modelService as any
+      );
+
+      const events = await consumeGenerator(service, {
+        mediaId: 'media-1',
+        platforms: ['linkedin'],
+        goal: 'convert',
+        captionMode: 'adapt-by-platform',
+        sourceCaption,
+      });
+
+      expect(events[events.length - 1].data.results[0]).toMatchObject({
+        draft: sourceCaption,
+        origin: 'original',
+        confidence: null,
+        antiGenericScore: null,
+        warnings: [
+          expect.objectContaining({ code: 'ADAPTATION_PRESERVATION_FAILED' }),
+        ],
+      });
+    }
+  );
+
+  it('falls back when adaptation changes relative date and AM/PM anchors', async () => {
+    const sourceBriefService = createSourceBriefService();
+    const modelService = createModelService({
+      generatePlatformDraft: jest.fn().mockResolvedValue({
+        draft: 'Registration closes next week at 7 AM',
+      }),
+    });
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+    const sourceCaption = 'Registration closes tomorrow at 7 PM';
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin'],
+      goal: 'convert',
+      captionMode: 'adapt-by-platform',
+      sourceCaption,
+    });
+
+    expect(events[events.length - 1].data.results[0]).toMatchObject({
+      draft: sourceCaption,
+      origin: 'original',
+      confidence: null,
+      antiGenericScore: null,
+      warnings: [
+        expect.objectContaining({ code: 'ADAPTATION_PRESERVATION_FAILED' }),
+      ],
+    });
+  });
+
   it('does not clamp an over-limit adaptation that preserves authoritative anchors', async () => {
     const sourceBriefService = createSourceBriefService();
     const adaptedCaption = `${'A'.repeat(300)} Save your seat at example.com Friday.`;
