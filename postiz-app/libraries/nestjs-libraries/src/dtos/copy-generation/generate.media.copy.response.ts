@@ -103,8 +103,8 @@ export interface GenerateMediaCopyResult {
   hook?: string;
   cta?: string;
   charCount: number;
-  confidence: number;
-  antiGenericScore: number;
+  confidence: number | null;
+  antiGenericScore: number | null;
   rewritten: boolean;
   warnings: CopyGenerationWarning[];
 }
@@ -112,7 +112,7 @@ export interface GenerateMediaCopyResult {
 export interface GenerateMediaCopyResponse {
   requestId: string;
   status: 'complete' | 'partial' | 'failed';
-  sourceConfidence: number;
+  sourceConfidence: number | null;
   warnings: CopyGenerationWarning[];
   results: GenerateMediaCopyResult[];
   imagePlans: ImagePlanItem[];

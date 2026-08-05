@@ -1,8 +1,12 @@
 import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
 import { AntiGenericService } from '@gitroom/nestjs-libraries/copy-generation/anti-generic.service';
 
-const createSourceBriefService = (overrides: Record<string, any> = {}) => ({
-  build: jest.fn().mockResolvedValue({
+const createSourceBriefService = (overrides: Record<string, any> = {}) => {
+  const { assertMediaAccess, ...briefOverrides } = overrides;
+  return {
+    assertMediaAccess:
+      assertMediaAccess || jest.fn().mockResolvedValue({ id: 'media-1' }),
+    build: jest.fn().mockResolvedValue({
     media: {
       id: 'media-1',
       path: 'https://example.com/image.png',
@@ -21,9 +25,10 @@ const createSourceBriefService = (overrides: Record<string, any> = {}) => ({
     storedKnowledgeBaseFacts: [],
     overlapReferenceTexts: [],
     blocked: false,
-    ...overrides,
-  }),
-});
+      ...briefOverrides,
+    }),
+  };
+};
 
 const createModelService = (overrides: Record<string, any> = {}) => ({
   generatePlatformDraft: jest.fn().mockResolvedValue({
@@ -238,7 +243,7 @@ describe('CopyGenerationService', () => {
     const modelService = createModelService({
       generatePlatformDraft: jest.fn().mockResolvedValue({
         draft:
-          'This is your sign to unlock a game-changer for your workflow. Let that sink in!',
+          'Friday is the deadline. Save your seat at example.com before registration closes.',
         angle: '',
         hook: '',
         cta: '',
@@ -277,6 +282,89 @@ describe('CopyGenerationService', () => {
       expect(prompt).toContain(sourceCaption);
       expect(prompt).toContain('Preserve its facts, meaning, offer, and CTA');
     }
+    expect(
+      completed.results.every(
+        (result: any) =>
+          result.draft.includes('Friday') &&
+          result.draft.includes('Save your seat') &&
+          result.draft.includes('example.com')
+      )
+    ).toBe(true);
+  });
+
+  it('falls back to the exact original when adaptation drops authoritative anchors', async () => {
+    const sourceBriefService = createSourceBriefService();
+    const modelService = createModelService({
+      generatePlatformDraft: jest.fn().mockResolvedValue({
+        draft:
+          'Registration closes Friday. Save your seat at example.com for $100.',
+        angle: 'price changed',
+        hook: 'Registration closes Friday',
+        cta: 'Save your seat',
+      }),
+    });
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+    const sourceCaption =
+      'Registration closes Friday. Save your seat at example.com for $10.';
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin'],
+      goal: 'convert',
+      captionMode: 'adapt-by-platform',
+      sourceCaption,
+    });
+
+    const result = events[events.length - 1].data.results[0];
+    expect(result).toMatchObject({
+      draft: sourceCaption,
+      origin: 'original',
+      confidence: null,
+      antiGenericScore: null,
+      warnings: [
+        expect.objectContaining({ code: 'ADAPTATION_PRESERVATION_FAILED' }),
+      ],
+    });
+    expect(result.angle).toBeUndefined();
+    expect(result.cta).toBeUndefined();
+  });
+
+  it('does not clamp an over-limit adaptation that preserves authoritative anchors', async () => {
+    const sourceBriefService = createSourceBriefService();
+    const adaptedCaption = `${'A'.repeat(300)} Save your seat at example.com Friday.`;
+    const modelService = createModelService({
+      generatePlatformDraft: jest.fn().mockResolvedValue({
+        draft: adaptedCaption,
+        angle: '',
+        hook: '',
+        cta: 'Save your seat',
+      }),
+    });
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['x'],
+      goal: 'convert',
+      captionMode: 'adapt-by-platform',
+      sourceCaption: 'Save your seat at example.com Friday.',
+    });
+
+    expect(events[events.length - 1].data.results[0]).toMatchObject({
+      draft: adaptedCaption,
+      origin: 'adapted',
+      warnings: [
+        expect.objectContaining({ code: 'ADAPTED_CAPTION_OVER_LIMIT' }),
+      ],
+    });
   });
 
   it('returns the exact original caption everywhere without model calls', async () => {
@@ -300,6 +388,10 @@ describe('CopyGenerationService', () => {
     });
 
     const completed = events[events.length - 1].data;
+    expect(sourceBriefService.assertMediaAccess).toHaveBeenCalledWith(
+      'org-1',
+      'media-1'
+    );
     expect(sourceBriefService.build).not.toHaveBeenCalled();
     expect(modelService.generatePlatformDraft).not.toHaveBeenCalled();
     expect(modelService.rewriteDraft).not.toHaveBeenCalled();
@@ -310,6 +402,13 @@ describe('CopyGenerationService', () => {
     ).toBe(true);
     expect(
       completed.results.every((result: any) => result.origin === 'original')
+    ).toBe(true);
+    expect(completed.sourceConfidence).toBeNull();
+    expect(
+      completed.results.every(
+        (result: any) =>
+          result.confidence === null && result.antiGenericScore === null
+      )
     ).toBe(true);
     expect(
       completed.results.find((result: any) => result.platform === 'x')
@@ -323,6 +422,31 @@ describe('CopyGenerationService', () => {
       completed.results.find((result: any) => result.platform === 'facebook')
         .warnings
     ).toEqual([]);
+  });
+
+  it('validates media access in use-everywhere mode without model calls', async () => {
+    const sourceBriefService = createSourceBriefService({
+      assertMediaAccess: jest.fn().mockRejectedValue(new Error('Media not found')),
+    });
+    const modelService = createModelService();
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+
+    await expect(
+      consumeGenerator(service, {
+        mediaId: 'missing-media',
+        platforms: ['linkedin'],
+        goal: 'position',
+        captionMode: 'use-everywhere',
+        sourceCaption: 'Keep this exact.',
+      })
+    ).rejects.toThrow('Media not found');
+    expect(sourceBriefService.build).not.toHaveBeenCalled();
+    expect(modelService.generatePlatformDraft).not.toHaveBeenCalled();
+    expect(modelService.rewriteDraft).not.toHaveBeenCalled();
   });
 
   it('rewrites copy that scores as too generic', async () => {
