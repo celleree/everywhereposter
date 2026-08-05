@@ -232,99 +232,106 @@ export const GuidedComposerDestinations: FC<{
           </div>
         ) : (
           <div className="mt-[24px] flex flex-col gap-[26px]">
-            {groupedIntegrations.map(({ identity, integrations: platformIntegrations }) => (
-              <section key={identity.key}>
-                <div className="mb-[10px] flex items-center justify-between gap-[12px]">
-                  <h3 className="text-[14px] font-[700] text-white">
-                    {identity.label}
-                  </h3>
-                  <span className="text-[11px] text-textColor/50">
-                    {platformIntegrations.length}{' '}
-                    {platformIntegrations.length === 1 ? 'account' : 'accounts'}
-                  </span>
-                </div>
+            {groupedIntegrations.map(
+              ({ identity, integrations: platformIntegrations }) => (
+                <section key={identity.key}>
+                  <div className="mb-[10px] flex items-center justify-between gap-[12px]">
+                    <h3 className="text-[14px] font-[700] text-white">
+                      {identity.label}
+                    </h3>
+                    <span className="text-[11px] text-textColor/50">
+                      {platformIntegrations.length}{' '}
+                      {platformIntegrations.length === 1
+                        ? 'account'
+                        : 'accounts'}
+                    </span>
+                  </div>
 
-                <div className="grid grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3">
-                  {platformIntegrations.map((integration) => {
-                    const selected = selectedIds.has(integration.id);
-                    const existingSettings = selectedIntegrations.find(
-                      (item) => item.integration.id === integration.id
-                    )?.settings;
-                    const platformName = getGuidedPlatformIdentity(
-                      integration.identifier
-                    ).label;
+                  <div className="grid grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3">
+                    {platformIntegrations.map((integration) => {
+                      const selected = selectedIds.has(integration.id);
+                      const existingSettings = selectedIntegrations.find(
+                        (item) => item.integration.id === integration.id
+                      )?.settings;
+                      const platformName = getGuidedPlatformIdentity(
+                        integration.identifier
+                      ).label;
 
-                    return (
-                      <button
-                        key={integration.id}
-                        type="button"
-                        aria-pressed={selected}
-                        aria-label={`${selected ? 'Deselect' : 'Select'} ${
-                          integration.name
-                        } on ${platformName}`}
-                        disabled={disabled}
-                        onClick={() =>
-                          addOrRemoveSelectedIntegration(
-                            integration,
-                            existingSettings || {}
-                          )
-                        }
-                        className={clsx(
-                          'group flex min-h-[88px] w-full items-center gap-[14px] rounded-[16px] border bg-newBgColor px-[14px] py-[14px] text-start transition-all disabled:cursor-not-allowed disabled:opacity-55 xs:flex-col xs:items-start xs:gap-[10px]',
-                          !disabled && 'hover:border-ai hover:bg-boxHover',
-                          selected
-                            ? 'border-ai bg-newBgLineColor'
-                            : 'border-newBorder'
-                        )}
-                      >
-                        <div className="relative h-[52px] w-[52px] min-w-[52px]">
-                          <ImageWithFallback
-                            fallbackSrc="/no-picture.jpg"
-                            src={integration.picture || '/no-picture.jpg'}
-                            alt={integration.name}
-                            width={52}
-                            height={52}
-                            className={clsx(
-                              'h-[52px] w-[52px] rounded-full border object-cover',
-                              selected ? 'border-black' : 'border-transparent'
-                            )}
-                          />
-                          <GuidedPlatformIcon
-                            identifier={integration.identifier}
-                            platformName={platformName}
-                          />
-                        </div>
-
-                        <div className="min-w-0 flex-1 xs:w-full">
-                          <div className="truncate text-[15px] font-[700] text-white">
-                            {integration.name}
-                          </div>
-                          <div className="mt-[2px] text-[13px] text-textColor/70">
-                            {integration.display || platformName}
-                          </div>
-                          {!!integration.customer?.name && (
-                            <div className="mt-[6px] inline-flex max-w-full rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[600] uppercase tracking-[0.04em] text-textColor/70">
-                              {integration.customer.name}
-                            </div>
-                          )}
-                        </div>
-
-                        <div
+                      return (
+                        <button
+                          key={integration.id}
+                          type="button"
+                          aria-pressed={selected}
+                          aria-label={`${selected ? 'Deselect' : 'Select'} ${
+                            integration.name
+                          } on ${platformName}`}
+                          disabled={disabled}
+                          onClick={() =>
+                            addOrRemoveSelectedIntegration(
+                              integration,
+                              existingSettings || {}
+                            )
+                          }
                           className={clsx(
-                            'flex h-[28px] min-w-[86px] items-center justify-center rounded-full border px-[12px] text-[12px] font-[700] uppercase tracking-[0.04em] xs:w-full',
+                            'group flex min-h-[88px] w-full items-center gap-[14px] rounded-[16px] border bg-newBgColor px-[14px] py-[14px] text-start transition-all disabled:cursor-not-allowed disabled:opacity-55 xs:flex-col xs:items-start xs:gap-[10px]',
+                            !disabled && 'hover:border-ai hover:bg-boxHover',
                             selected
-                              ? 'border-ai bg-newBgLineColor text-textColor'
-                              : 'border-newBorder text-textColor/65'
+                              ? 'border-ai bg-newBgLineColor'
+                              : 'border-newBorder'
                           )}
                         >
-                          {selected ? 'Selected' : 'Select'}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                          <div className="relative h-[52px] w-[52px] min-w-[52px]">
+                            <ImageWithFallback
+                              fallbackSrc="/no-picture.jpg"
+                              src={integration.picture || '/no-picture.jpg'}
+                              alt={integration.name}
+                              width={52}
+                              height={52}
+                              className={clsx(
+                                'h-[52px] w-[52px] rounded-full border object-cover',
+                                selected
+                                  ? 'border-black'
+                                  : 'border-transparent'
+                              )}
+                            />
+                            <GuidedPlatformIcon
+                              key={integration.identifier || 'other'}
+                              identifier={integration.identifier}
+                              platformName={platformName}
+                            />
+                          </div>
+
+                          <div className="min-w-0 flex-1 xs:w-full">
+                            <div className="truncate text-[15px] font-[700] text-white">
+                              {integration.name}
+                            </div>
+                            <div className="mt-[2px] text-[13px] text-textColor/70">
+                              {integration.display || platformName}
+                            </div>
+                            {!!integration.customer?.name && (
+                              <div className="mt-[6px] inline-flex max-w-full rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[600] uppercase tracking-[0.04em] text-textColor/70">
+                                {integration.customer.name}
+                              </div>
+                            )}
+                          </div>
+
+                          <div
+                            className={clsx(
+                              'flex h-[28px] min-w-[86px] items-center justify-center rounded-full border px-[12px] text-[12px] font-[700] uppercase tracking-[0.04em] xs:w-full',
+                              selected
+                                ? 'border-ai bg-newBgLineColor text-textColor'
+                                : 'border-newBorder text-textColor/65'
+                            )}
+                          >
+                            {selected ? 'Selected' : 'Select'}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              )
+            )}
           </div>
         )}
       </section>
