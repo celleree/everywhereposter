@@ -97,15 +97,21 @@ export class SourceBriefService {
     private readonly _knowledgeBaseService: KnowledgeBaseService
   ) {}
 
-  async build(orgId: string, body: GenerateMediaCopyDto): Promise<SourceBriefResult> {
+  async assertMediaAccess(orgId: string, mediaId: string) {
     const media = await this._mediaRepository.getMediaByOrganizationIdAndId(
       orgId,
-      body.mediaId
+      mediaId
     );
 
     if (!media) {
       throw new NotFoundException('Media not found');
     }
+
+    return media;
+  }
+
+  async build(orgId: string, body: GenerateMediaCopyDto): Promise<SourceBriefResult> {
+    const media = await this.assertMediaAccess(orgId, body.mediaId);
 
     const mimeType = this.getMimeType(media.path, media.originalName, media.name);
     const mediaType = mimeType.startsWith('video/') ? 'video' : 'image';

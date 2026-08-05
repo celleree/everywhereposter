@@ -89,6 +89,7 @@ const createService = (
       modelService as any,
       knowledgeBaseService as any
     ),
+    mediaRepository,
     modelService,
   };
 };
@@ -122,6 +123,27 @@ describe('SourceBriefService video grounding', () => {
       isTemporary: true,
       cleanup,
     });
+  });
+
+  it('checks media ownership without invoking a model', async () => {
+    const { service, mediaRepository, modelService } = createService();
+
+    await expect(service.assertMediaAccess('org-1', 'media-1')).resolves.toEqual(
+      expect.objectContaining({ id: 'media-1' })
+    );
+    expect(mediaRepository.getMediaByOrganizationIdAndId).toHaveBeenCalledWith(
+      'org-1',
+      'media-1'
+    );
+    expect(modelService.analyzeImage).not.toHaveBeenCalled();
+    expect(modelService.transcribeVideo).not.toHaveBeenCalled();
+    expect(modelService.analyzeVideoFrames).not.toHaveBeenCalled();
+    expect(modelService.summarizeTranscript).not.toHaveBeenCalled();
+
+    mediaRepository.getMediaByOrganizationIdAndId.mockResolvedValueOnce(null);
+    await expect(
+      service.assertMediaAccess('other-org', 'media-1')
+    ).rejects.toThrow('Media not found');
   });
 
   it('uses a manually supplied transcript without running transcription', async () => {

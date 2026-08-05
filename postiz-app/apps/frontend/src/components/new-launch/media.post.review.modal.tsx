@@ -26,6 +26,7 @@ import {
   RenderImagePlansResponse,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/render.image.plans.response';
 import {
+  getApiErrorMessage,
   requestMediaCopyGeneration,
   resolveCopyGenerationDestinations,
 } from '@gitroom/frontend/components/new-launch/copy-generation.client';
@@ -102,47 +103,6 @@ const preservesAccountPrimaryVideo = (
   }
 
   return settings?.post_type !== 'post' && settings?.post_type !== 'story';
-};
-
-const getApiErrorMessage = (payload: unknown): string | undefined => {
-  if (typeof payload === 'string') {
-    return payload.trim() || undefined;
-  }
-
-  if (!payload || typeof payload !== 'object') {
-    return undefined;
-  }
-
-  const { message, error } = payload as {
-    message?: unknown;
-    error?: unknown;
-  };
-
-  if (typeof message === 'string' && message.trim()) {
-    return message;
-  }
-
-  if (Array.isArray(message)) {
-    const messages = message.filter(
-      (item): item is string => typeof item === 'string' && Boolean(item.trim())
-    );
-    if (messages.length) {
-      return messages.join(' ');
-    }
-  }
-
-  if (typeof error === 'string' && error.trim()) {
-    return error;
-  }
-
-  if (error && typeof error === 'object') {
-    const nestedMessage = (error as { message?: unknown }).message;
-    if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
-      return nestedMessage;
-    }
-  }
-
-  return undefined;
 };
 
 type ReviewTab = 'overview' | 'posts' | 'images' | 'accounts';

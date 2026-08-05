@@ -27,6 +27,33 @@ import {
 import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.model.service';
 import { ImagePlanService } from '@gitroom/nestjs-libraries/copy-generation/image-plan.service';
 
+const CAPTION_ANCHOR_PATTERNS = [
+  /\b(?:https?:\/\/|www\.)[^\s]+|\b[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s]*)?/gi,
+  /@[a-z0-9_.-]+/gi,
+  /[$€£¥]?\d[\d,./:-]*(?:%|\s?(?:usd|eur|gbp))?/gi,
+  /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
+  /\b(?:sign up|learn more|save your seat|book now|register|subscribe|download|apply|join|visit|click|buy|shop|follow|comment|share|contact|dm|message)\b/gi,
+];
+
+const normalizeCaptionAnchor = (anchor: string) =>
+  anchor.toLowerCase().replace(/[),.!?;:'"]+$/, '');
+
+const extractCaptionAnchors = (caption: string) =>
+  uniq(
+    CAPTION_ANCHOR_PATTERNS.flatMap((pattern) =>
+      Array.from(caption.matchAll(pattern), (match) =>
+        normalizeCaptionAnchor(match[0])
+      )
+    ).filter(Boolean)
+  );
+
+const findMissingCaptionAnchors = (sourceCaption: string, draft: string) => {
+  const draftAnchors = new Set(extractCaptionAnchors(draft));
+  return extractCaptionAnchors(sourceCaption).filter(
+    (anchor) => !draftAnchors.has(anchor)
+  );
+};
+
 @Injectable()
 export class CopyGenerationService {
   constructor(
@@ -51,6 +78,7 @@ export class CopyGenerationService {
     };
 
     if (captionMode === 'use-everywhere') {
+      await this._sourceBriefService.assertMediaAccess(orgId, body.mediaId);
       const sourceCaption = body.sourceCaption as string;
       const results: GenerateMediaCopyResult[] = [];
 
@@ -78,8 +106,8 @@ export class CopyGenerationService {
           draft: sourceCaption,
           origin: 'original',
           charCount: sourceCaption.length,
-          confidence: 1,
-          antiGenericScore: 0,
+          confidence: null,
+          antiGenericScore: null,
           rewritten: false,
           warnings,
         };
@@ -100,7 +128,7 @@ export class CopyGenerationService {
         data: {
           requestId,
           status: 'complete',
-          sourceConfidence: 1,
+          sourceConfidence: null,
           warnings: results.flatMap((result) => result.warnings),
           results,
           imagePlans: [],
@@ -157,12 +185,33 @@ export class CopyGenerationService {
         );
 
         let draft = generated.draft.trim();
+        let resultOrigin: GenerateMediaCopyResult['origin'] =
+          captionMode === 'adapt-by-platform' ? 'adapted' : 'generated';
         let rewritten = false;
-        let score = this._antiGenericService.scoreDraft(draft, brief);
         const resultWarnings: CopyGenerationWarning[] = [];
+        const missingAnchors =
+          captionMode === 'adapt-by-platform'
+            ? findMissingCaptionAnchors(body.sourceCaption as string, draft)
+            : [];
+
+        if (missingAnchors.length) {
+          draft = body.sourceCaption as string;
+          resultOrigin = 'original';
+          resultWarnings.push({
+            code: 'ADAPTATION_PRESERVATION_FAILED',
+            message:
+              'The platform adaptation omitted authoritative caption details, so the original caption was returned unchanged.',
+          });
+        }
+
+        let score =
+          resultOrigin === 'original'
+            ? null
+            : this._antiGenericService.scoreDraft(draft, brief);
 
         if (
           captionMode === 'generate' &&
+          score &&
           this._antiGenericService.shouldRewrite(score)
         ) {
           yield {
@@ -194,8 +243,9 @@ export class CopyGenerationService {
               'This draft was rewritten once to remove generic AI-sounding phrasing.',
           });
         } else if (
-          this._antiGenericService.shouldWarn(score) ||
+          (score && this._antiGenericService.shouldWarn(score)) ||
           (captionMode === 'adapt-by-platform' &&
+            score &&
             this._antiGenericService.shouldRewrite(score))
         ) {
           resultWarnings.push({
@@ -205,18 +255,21 @@ export class CopyGenerationService {
           });
         }
 
-        if (score.score >= 60) {
+        if (score && score.score >= 60) {
           resultWarnings.push({
             code: 'GENERIC_TONE_HIGH',
             message:
-              'This draft still scored high on generic-tone checks after the rewrite pass.',
+              'This draft scored high on generic-tone checks and should be reviewed before publishing.',
           });
         }
 
-        const overlapCheck = this._antiGenericService.detectTranscriptOverlap(
-          draft,
-          sourceBrief.overlapReferenceTexts
-        );
+        const overlapCheck =
+          resultOrigin === 'original'
+            ? { overlaps: false }
+            : this._antiGenericService.detectTranscriptOverlap(
+                draft,
+                sourceBrief.overlapReferenceTexts
+              );
 
         if (captionMode === 'generate' && overlapCheck.overlaps) {
           const overlapRewrite =
@@ -256,8 +309,23 @@ export class CopyGenerationService {
           score = this._antiGenericService.scoreDraft(draft, brief);
         }
 
-        const hardCapAdjusted = this.enforceHardCap(draft, brief.platform.hardCap);
-        if (hardCapAdjusted !== draft) {
+        const hardCapAdjusted = this.enforceHardCap(
+          draft,
+          brief.platform.hardCap
+        );
+        if (resultOrigin === 'adapted' && hardCapAdjusted !== draft) {
+          resultWarnings.push({
+            code: 'ADAPTED_CAPTION_OVER_LIMIT',
+            message:
+              'The adapted caption exceeds the platform hard cap and was returned without truncation to preserve its authoritative details.',
+          });
+        } else if (resultOrigin === 'original' && hardCapAdjusted !== draft) {
+          resultWarnings.push({
+            code: 'ORIGINAL_CAPTION_OVER_LIMIT',
+            message:
+              'The original caption exceeds the platform hard cap and was returned unchanged.',
+          });
+        } else if (hardCapAdjusted !== draft) {
           draft = hardCapAdjusted;
           resultWarnings.push({
             code: 'CHAR_LIMIT_CLAMPED',
@@ -269,17 +337,24 @@ export class CopyGenerationService {
         const result: GenerateMediaCopyResult = {
           platform,
           draft,
-          origin: captionMode === 'adapt-by-platform' ? 'adapted' : 'generated',
-          angle: generated.angle || undefined,
-          hook: generated.hook || undefined,
-          cta: generated.cta || undefined,
+          origin: resultOrigin,
+          ...(resultOrigin !== 'original'
+            ? {
+                angle: generated.angle || undefined,
+                hook: generated.hook || undefined,
+                cta: generated.cta || undefined,
+              }
+            : {}),
           charCount: draft.length,
-          confidence: this.calculateResultConfidence(
-            sourceBrief,
-            resultWarnings,
-            rewritten
-          ),
-          antiGenericScore: score.score,
+          confidence:
+            resultOrigin === 'original'
+              ? null
+              : this.calculateResultConfidence(
+                  sourceBrief,
+                  resultWarnings,
+                  rewritten
+                ),
+          antiGenericScore: score?.score ?? null,
           rewritten,
           warnings: resultWarnings,
         };
@@ -423,6 +498,14 @@ export class CopyGenerationService {
     }
 
     if (warnings.some((warning) => warning.code === 'CHAR_LIMIT_CLAMPED')) {
+      confidence -= 0.08;
+    }
+
+    if (
+      warnings.some(
+        (warning) => warning.code === 'ADAPTED_CAPTION_OVER_LIMIT'
+      )
+    ) {
       confidence -= 0.08;
     }
 

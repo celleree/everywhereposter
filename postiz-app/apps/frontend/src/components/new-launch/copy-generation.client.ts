@@ -53,6 +53,47 @@ type CopyGenerationFetch = (
   init?: RequestInit
 ) => Promise<Response>;
 
+export const getApiErrorMessage = (payload: unknown): string | undefined => {
+  if (typeof payload === 'string') {
+    return payload.trim() || undefined;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+
+  const { message, error } = payload as {
+    message?: unknown;
+    error?: unknown;
+  };
+
+  if (typeof message === 'string' && message.trim()) {
+    return message;
+  }
+
+  if (Array.isArray(message)) {
+    const messages = message.filter(
+      (item): item is string => typeof item === 'string' && Boolean(item.trim())
+    );
+    if (messages.length) {
+      return messages.join(' ');
+    }
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  if (error && typeof error === 'object') {
+    const nestedMessage = (error as { message?: unknown }).message;
+    if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
+      return nestedMessage;
+    }
+  }
+
+  return undefined;
+};
+
 export const resolveCopyGenerationDestinations = <
   T extends { identifier: string }
 >(
@@ -94,14 +135,21 @@ export const parseCopyGenerationStream = async (
 
   const parseLine = (line: string) => {
     if (!line.trim()) return;
+    let parsed: { name?: unknown; data?: unknown };
     try {
-      const parsed = JSON.parse(line);
-      onStage(parsed.name, parsed.data);
-      if (parsed.name === 'completed') {
-        finalResponse = parsed.data as GenerateMediaCopyResponse;
-      }
+      parsed = JSON.parse(line);
     } catch {
       // Ignore malformed partial stream messages.
+      return;
+    }
+
+    if (typeof parsed.name !== 'string') {
+      return;
+    }
+
+    onStage(parsed.name, parsed.data);
+    if (parsed.name === 'completed') {
+      finalResponse = parsed.data as GenerateMediaCopyResponse;
     }
   };
 
@@ -134,5 +182,44 @@ export const requestMediaCopyGeneration = async (
     body: JSON.stringify(body),
   });
 
+  if (request.ok === false) {
+    const responseText = await request.text().catch(() => '');
+    let payload: unknown = responseText;
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      // Keep the response text as the fallback error payload.
+    }
+
+    throw new Error(
+      getApiErrorMessage(payload) ||
+        `Post generation failed with status ${request.status}.`
+    );
+  }
+
   return parseCopyGenerationStream(request, onStage);
+};
+
+export const requestMediaCopyGenerationForDestinations = async <
+  T extends { identifier: string }
+>(
+  fetch: CopyGenerationFetch,
+  destinations: T[],
+  body: Omit<MediaCopyGenerationRequest, 'platforms'>,
+  onStage?: CopyGenerationStageHandler
+) => {
+  const { platforms, unsupportedDestinations } =
+    resolveCopyGenerationDestinations(destinations);
+
+  if (!platforms.length) {
+    return { response: null, platforms, unsupportedDestinations };
+  }
+
+  const response = await requestMediaCopyGeneration(
+    fetch,
+    { ...body, platforms },
+    onStage
+  );
+
+  return { response, platforms, unsupportedDestinations };
 };
