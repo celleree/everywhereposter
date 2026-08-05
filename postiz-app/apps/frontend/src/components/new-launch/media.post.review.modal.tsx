@@ -25,6 +25,10 @@ import {
   RenderedImagePlanResult,
   RenderImagePlansResponse,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/render.image.plans.response';
+import {
+  requestMediaCopyGeneration,
+  resolveCopyGenerationDestinations,
+} from '@gitroom/frontend/components/new-launch/copy-generation.client';
 
 const stageLabelMap: Record<string, { key: string; fallback: string }> = {
   'copy-generation-started': {
@@ -144,60 +148,7 @@ const getApiErrorMessage = (payload: unknown): string | undefined => {
 type ReviewTab = 'overview' | 'posts' | 'images' | 'accounts';
 
 const loadDefaultPlatforms = (integrations: Integrations[]) =>
-  Array.from(
-    new Set(
-      integrations
-        .map((integration) =>
-          mapIntegrationIdentifierToCopyPlatform(integration.identifier)
-        )
-        .filter((platform): platform is CopyPlatform => Boolean(platform))
-    )
-  );
-
-const parseGenerationStream = async (
-  request: Response,
-  onStage: (name: string, data?: any) => void
-) => {
-  if (!request.body) {
-    throw new Error('No response body returned');
-  }
-
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  let finalResponse: GenerateMediaCopyResponse | null = null;
-
-  const parseLine = (line: string) => {
-    if (!line.trim()) return;
-    try {
-      const parsed = JSON.parse(line);
-      onStage(parsed.name, parsed.data);
-      if (parsed.name === 'completed') {
-        finalResponse = parsed.data as GenerateMediaCopyResponse;
-      }
-    } catch {
-      // Ignore malformed partial stream messages.
-    }
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    lines.forEach(parseLine);
-  }
-
-  buffer += decoder.decode();
-  parseLine(buffer);
-
-  if (!finalResponse) {
-    throw new Error('Post generation did not return a final payload');
-  }
-
-  return finalResponse;
-};
+  resolveCopyGenerationDestinations(integrations).platforms;
 
 export const MediaPostReviewModal: FC<{
   mediaId: string;
@@ -394,9 +345,9 @@ export const MediaPostReviewModal: FC<{
         .split('\n')
         .map((fact) => fact.trim())
         .filter(Boolean);
-      const request = await fetch('/posts/copy/generate', {
-        method: 'POST',
-        body: JSON.stringify({
+      const finalResponse = await requestMediaCopyGeneration(
+        fetch,
+        {
           mediaId,
           platforms,
           audience: audience || undefined,
@@ -417,33 +368,32 @@ export const MediaPostReviewModal: FC<{
           ...(facts.length
             ? { knowledgeBaseFacts: facts.map((text) => ({ text })) }
             : {}),
-        }),
-      });
-
-      const finalResponse = await parseGenerationStream(request, (name, data) => {
-        if (name === 'platform-started' && data?.platform) {
+        },
+        (name, data) => {
+          if (name === 'platform-started' && data?.platform) {
+            setStatusText(
+              `${t('generating', 'Generating')} ${
+                platformLabels[data.platform as CopyPlatform]
+              }...`
+            );
+            return;
+          }
+          if (name === 'platform-rewrite-started' && data?.platform) {
+            setStatusText(
+              `${t('refining', 'Refining')} ${
+                platformLabels[data.platform as CopyPlatform]
+              }...`
+            );
+            return;
+          }
+          const stage = stageLabelMap[name];
           setStatusText(
-            `${t('generating', 'Generating')} ${
-              platformLabels[data.platform as CopyPlatform]
-            }...`
+            stage
+              ? t(stage.key, stage.fallback)
+              : t('processing_post_set', 'Processing post set...')
           );
-          return;
         }
-        if (name === 'platform-rewrite-started' && data?.platform) {
-          setStatusText(
-            `${t('refining', 'Refining')} ${
-              platformLabels[data.platform as CopyPlatform]
-            }...`
-          );
-          return;
-        }
-        const stage = stageLabelMap[name];
-        setStatusText(
-          stage
-            ? t(stage.key, stage.fallback)
-            : t('processing_post_set', 'Processing post set...')
-        );
-      });
+      );
 
       setResponse(finalResponse);
       setEditedDrafts(

@@ -15,6 +15,7 @@ import {
   PlatformRuleOverrides,
   resolvePlatformRule,
 } from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
+import type { CaptionMode } from '@gitroom/nestjs-libraries/copy-generation/caption-modes';
 import { platformAdapters } from '@gitroom/nestjs-libraries/copy-generation/platform-adapters';
 import {
   SourceBriefResult,
@@ -40,12 +41,73 @@ export class CopyGenerationService {
     body: GenerateMediaCopyDto
   ): AsyncGenerator<CopyGenerationStreamEvent> {
     const requestId = makeId(12);
+    const captionMode: CaptionMode = body.captionMode || 'generate';
+    const platforms = uniq(body.platforms);
     yield {
       name: 'copy-generation-started',
       data: {
         requestId,
       },
     };
+
+    if (captionMode === 'use-everywhere') {
+      const sourceCaption = body.sourceCaption as string;
+      const results: GenerateMediaCopyResult[] = [];
+
+      for (const platform of platforms) {
+        yield {
+          name: 'platform-started',
+          data: { platform },
+        };
+
+        const controls = body.platformControls?.[platform] as
+          | PlatformRuleOverrides
+          | undefined;
+        const platformRule = resolvePlatformRule(platform, controls);
+        const warnings: CopyGenerationWarning[] = [];
+
+        if (sourceCaption.length > platformRule.hardCap) {
+          warnings.push({
+            code: 'ORIGINAL_CAPTION_OVER_LIMIT',
+            message: `The original caption is ${sourceCaption.length} characters, which exceeds the ${platform} limit of ${platformRule.hardCap}. It was returned unchanged.`,
+          });
+        }
+
+        const result: GenerateMediaCopyResult = {
+          platform,
+          draft: sourceCaption,
+          origin: 'original',
+          charCount: sourceCaption.length,
+          confidence: 1,
+          antiGenericScore: 0,
+          rewritten: false,
+          warnings,
+        };
+
+        results.push(result);
+        yield {
+          name: 'platform-complete',
+          data: {
+            platform,
+            score: result.antiGenericScore,
+            warnings: result.warnings,
+          },
+        };
+      }
+
+      yield {
+        name: 'completed',
+        data: {
+          requestId,
+          status: 'complete',
+          sourceConfidence: 1,
+          warnings: results.flatMap((result) => result.warnings),
+          results,
+          imagePlans: [],
+        } satisfies GenerateMediaCopyResponse,
+      };
+      return;
+    }
 
     const sourceBrief = await this._sourceBriefService.build(orgId, body);
     yield {
@@ -57,7 +119,7 @@ export class CopyGenerationService {
       },
     };
 
-    if (sourceBrief.blocked) {
+    if (sourceBrief.blocked && captionMode === 'generate') {
       const blockedResponse: GenerateMediaCopyResponse = {
         requestId,
         status: 'failed',
@@ -77,7 +139,7 @@ export class CopyGenerationService {
     const topLevelWarnings = [...sourceBrief.warnings];
     const results: GenerateMediaCopyResult[] = [];
 
-    for (const platform of body.platforms) {
+    for (const platform of platforms) {
       yield {
         name: 'platform-started',
         data: {
@@ -99,7 +161,10 @@ export class CopyGenerationService {
         let score = this._antiGenericService.scoreDraft(draft, brief);
         const resultWarnings: CopyGenerationWarning[] = [];
 
-        if (this._antiGenericService.shouldRewrite(score)) {
+        if (
+          captionMode === 'generate' &&
+          this._antiGenericService.shouldRewrite(score)
+        ) {
           yield {
             name: 'platform-rewrite-started',
             data: {
@@ -128,7 +193,11 @@ export class CopyGenerationService {
             message:
               'This draft was rewritten once to remove generic AI-sounding phrasing.',
           });
-        } else if (this._antiGenericService.shouldWarn(score)) {
+        } else if (
+          this._antiGenericService.shouldWarn(score) ||
+          (captionMode === 'adapt-by-platform' &&
+            this._antiGenericService.shouldRewrite(score))
+        ) {
           resultWarnings.push({
             code: 'GENERIC_TONE_WARNING',
             message:
@@ -149,7 +218,7 @@ export class CopyGenerationService {
           sourceBrief.overlapReferenceTexts
         );
 
-        if (overlapCheck.overlaps) {
+        if (captionMode === 'generate' && overlapCheck.overlaps) {
           const overlapRewrite =
             await this._copyGenerationModelService.rewriteDraft({
               brief,
@@ -200,6 +269,7 @@ export class CopyGenerationService {
         const result: GenerateMediaCopyResult = {
           platform,
           draft,
+          origin: captionMode === 'adapt-by-platform' ? 'adapted' : 'generated',
           angle: generated.angle || undefined,
           hook: generated.hook || undefined,
           cta: generated.cta || undefined,
@@ -243,14 +313,14 @@ export class CopyGenerationService {
       yield {
         name: 'image-plan-started',
         data: {
-          platforms: body.platforms,
+          platforms,
         },
       };
 
       try {
         imagePlans = await this._imagePlanService.generate(
           sourceBrief,
-          body.platforms
+          platforms
         );
         yield {
           name: 'image-plan-complete',
@@ -276,7 +346,7 @@ export class CopyGenerationService {
       status:
         results.length === 0
           ? 'failed'
-          : results.length === body.platforms.length
+          : results.length === platforms.length
           ? 'complete'
           : 'partial',
       sourceConfidence: sourceBrief.sourceConfidence,
@@ -305,6 +375,17 @@ export class CopyGenerationService {
       strategy: {
         audience: body.audience,
         goal: body.goal,
+        captionMode: body.captionMode || 'generate',
+        ...(body.sourceCaption
+          ? {
+              sourceCaption: body.sourceCaption,
+            }
+          : {}),
+        ...(body.additionalContext?.trim()
+          ? {
+              additionalContext: body.additionalContext,
+            }
+          : {}),
         ...(body.ctaPreference
           ? {
               ctaPreference: body.ctaPreference,
