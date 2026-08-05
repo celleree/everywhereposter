@@ -39,6 +39,22 @@ export interface AddEditModalProps {
   }>;
 }
 
+export const canRenderEmptyGuidedComposer = (
+  props: Pick<
+    AddEditModalProps,
+    | 'enableGuidedComposerShell'
+    | 'standaloneCreate'
+    | 'addEditSets'
+    | 'dummy'
+    | 'set'
+  >
+) =>
+  props.enableGuidedComposerShell === true &&
+  props.standaloneCreate === true &&
+  !props.addEditSets &&
+  !props.dummy &&
+  !props.set?.posts?.length;
+
 export const AddEditModal: FC<AddEditModalProps> = (props) => {
   const { setAllIntegrations, setDate, setIsCreateSet, setDummy } =
     useLaunchStore(
@@ -54,11 +70,63 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
   useEffect(() => {
     setDummy(!!props.dummy);
     setDate(props.date || newDayjs());
-    setAllIntegrations(props.allIntegrations || []);
     setIsCreateSet(!!props.addEditSets);
   }, []);
 
-  if (!integrations.length) {
+  useEffect(() => {
+    const nextIntegrations = props.allIntegrations || [];
+    const integrationsById = new Map(
+      nextIntegrations.map((integration) => [integration.id, integration])
+    );
+
+    setAllIntegrations(nextIntegrations);
+    useLaunchStore.setState((state) => ({
+      selectedIntegrations: state.selectedIntegrations.map((selected) => {
+        const refreshedIntegration = integrationsById.get(
+          selected.integration.id
+        );
+
+        return refreshedIntegration
+          ? { ...selected, integration: refreshedIntegration }
+          : selected;
+      }),
+    }));
+
+    if (!canRenderEmptyGuidedComposer(props)) {
+      return;
+    }
+
+    const availableIntegrationIds = new Set(
+      nextIntegrations
+        .filter(
+          (integration) =>
+            !integration.disabled && !integration.inBetweenSteps
+        )
+        .map((integration) => integration.id)
+    );
+
+    const staleSelections = useLaunchStore
+      .getState()
+      .selectedIntegrations.filter(
+        (selected) => !availableIntegrationIds.has(selected.integration.id)
+      );
+
+    staleSelections.forEach((selected) => {
+      const store = useLaunchStore.getState();
+      const selectionStillExists = store.selectedIntegrations.some(
+        (current) => current.integration.id === selected.integration.id
+      );
+
+      if (selectionStillExists) {
+        store.addOrRemoveSelectedIntegration(
+          selected.integration,
+          selected.settings
+        );
+      }
+    });
+  }, [props.allIntegrations, setAllIntegrations]);
+
+  if (!integrations.length && !canRenderEmptyGuidedComposer(props)) {
     return null;
   }
 

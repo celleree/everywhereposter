@@ -4,13 +4,16 @@ import 'reflect-metadata';
 
 import { AddProviderButton } from '@gitroom/frontend/components/launches/add.provider.component';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
-import { CreatePostComposer } from '@gitroom/frontend/components/create/create.post.composer';
+import {
+  CreatePostComposer,
+  isGuidedComposerShellEnabled,
+} from '@gitroom/frontend/components/create/create.post.composer';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 
 type CreateSet = {
@@ -33,6 +36,7 @@ export const CreateComponent = () => {
   const t = useT();
   const [selectedSetId, setSelectedSetId] = useState('');
   const [composerKey, setComposerKey] = useState(0);
+  const guidedComposerEnabled = isGuidedComposerShellEnabled();
 
   const {
     data: integrations = [],
@@ -84,6 +88,14 @@ export const CreateComponent = () => {
       ),
     [integrations]
   );
+  const hasActiveIntegrations = activeIntegrations.length > 0;
+  const composerSet = hasActiveIntegrations ? parsedSet : undefined;
+
+  useEffect(() => {
+    if (!hasActiveIntegrations && selectedSetId) {
+      setSelectedSetId('');
+    }
+  }, [hasActiveIntegrations, selectedSetId]);
 
   const onComposerComplete = useCallback(() => {
     setSelectedSetId('');
@@ -98,7 +110,7 @@ export const CreateComponent = () => {
     );
   }
 
-  if (!activeIntegrations.length) {
+  if (!hasActiveIntegrations && !guidedComposerEnabled) {
     return (
       <div className="flex flex-1 items-center justify-center bg-newBgColorInner p-[20px]">
         <div className="flex max-w-[520px] flex-col items-center rounded-[18px] border border-newBorder bg-newBgColor px-[24px] py-[28px] text-center">
@@ -126,18 +138,20 @@ export const CreateComponent = () => {
           <div className="text-[16px] font-[700] text-white mobile:text-[15px]">
             {t('create_post', 'Create Post')}
           </div>
-          <div className="mt-[3px] text-[13px] text-textColor/65 mobile:hidden">
-            {t(
-              'create_post_inline_set_hint',
-              'Start blank or preload a saved Set without leaving the composer.'
-            )}
-          </div>
+          {hasActiveIntegrations && (
+            <div className="mt-[3px] text-[13px] text-textColor/65 mobile:hidden">
+              {t(
+                'create_post_inline_set_hint',
+                'Start blank or preload a saved Set without leaving the composer.'
+              )}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-[12px] mobile:w-full mobile:flex-col mobile:items-stretch">
           <div className="w-[260px] mobile:w-full">
             <AddProviderButton update={() => mutateIntegrations()} />
           </div>
-          {!!sets.length && (
+          {hasActiveIntegrations && !!sets.length && (
             <label className="flex items-center gap-[10px] text-[13px] text-textColor/70 mobile:w-full mobile:flex-col mobile:items-start">
               <span>{t('saved_set', 'Saved Set')}</span>
               <select
@@ -162,11 +176,11 @@ export const CreateComponent = () => {
       </div>
       <div className="flex min-h-0 flex-1 mobile:block mobile:flex-none">
         <CreatePostComposer
-          key={`${selectedSetId || 'blank'}-${nextSlot}-${composerKey}`}
+          key={`${hasActiveIntegrations && selectedSetId ? selectedSetId : 'blank'}-${nextSlot}-${composerKey}`}
           allIntegrations={integrations.map((integration: any) => ({
             ...integration,
           }))}
-          {...(parsedSet ? { set: parsedSet } : {})}
+          {...(composerSet ? { set: composerSet } : {})}
           reopenModal={() => {}}
           mutate={() => {}}
           customClose={onComposerComplete}
