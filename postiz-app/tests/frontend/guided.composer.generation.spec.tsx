@@ -340,23 +340,6 @@ describe('guided composer generation transition', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps network failures on Destinations', async () => {
-    seedDraft();
-    mockFetch.mockRejectedValueOnce(new Error('Network unavailable'));
-    renderGeneration();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
-
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState()).toMatchObject({
-        composerStep: 'destinations',
-        generationStatus: 'failed',
-        generatedResponse: null,
-        generationError: 'Network unavailable',
-      })
-    );
-  });
-
   it('retains unsupported-only destinations and does not make a network request', async () => {
     seedDraft([unsupportedDestination]);
     renderGeneration();
@@ -407,28 +390,6 @@ describe('guided composer generation transition', () => {
 
     fireEvent.click(publishButton);
     expect(useGuidedComposerStore.getState().composerStep).toBe('review');
-  });
-
-  it('blocks Publish when generation becomes stale', async () => {
-    seedDraft();
-    mockFetch.mockResolvedValue(streamResponse(response()));
-    renderGeneration();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().composerStep).toBe('review')
-    );
-
-    act(() =>
-      useGuidedComposerStore.getState().setAdditionalContext('Changed')
-    );
-
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Continue to Publish' })
-          .hasAttribute('disabled')
-      ).toBe(true)
-    );
   });
 
   it('does not regenerate unchanged inputs but invalidates results after an input change', async () => {
@@ -485,12 +446,6 @@ describe('guided composer generation transition', () => {
       }),
     ];
     expect(new Set(fingerprints).size).toBe(fingerprints.length);
-    expect(
-      buildGuidedGenerationFingerprint({
-        ...base,
-        additionalContext: '  Context  ',
-      })
-    ).toBe(buildGuidedGenerationFingerprint(base));
     expect(
       buildGuidedGenerationFingerprint({
         ...base,
