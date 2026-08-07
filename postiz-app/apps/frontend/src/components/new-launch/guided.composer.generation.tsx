@@ -35,7 +35,7 @@ export const buildGuidedGenerationFingerprint = ({
       .sort((left, right) => left.id.localeCompare(right.id)),
     captionMode,
     sourceCaption,
-    additionalContext,
+    additionalContext: additionalContext.trim(),
   });
 
 export const getGuidedGenerationProgress = (name: string, data?: any) => {

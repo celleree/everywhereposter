@@ -121,6 +121,7 @@ export const GuidedComposerShell: FC<{
 
   const currentStepIndex = GUIDED_COMPOSER_STEPS.indexOf(composerStep);
   const destinationStepIndex = GUIDED_COMPOSER_STEPS.indexOf('destinations');
+  const reviewStepIndex = GUIDED_COMPOSER_STEPS.indexOf('review');
   const currentStep = GUIDED_COMPOSER_STEP_DETAILS[composerStep];
   const nextStep = useMemo(
     () => GUIDED_COMPOSER_STEPS[currentStepIndex + 1],
@@ -176,13 +177,18 @@ export const GuidedComposerShell: FC<{
     ]
   );
   const generationLoading = generationStatus === 'loading';
+  const generationReady =
+    generationInputFingerprint === generationFingerprint &&
+    (generationStatus === 'complete' || generationStatus === 'partial');
   const navigationLocked = locked || generationLoading;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
+  const generationRequiredForCurrentStep = currentStepIndex >= reviewStepIndex;
   const continueDisabled =
     navigationLocked ||
     (composerStep === 'upload' && !uploadStepValid) ||
-    (destinationRequiredForCurrentStep && !destinationStepValid);
+    (destinationRequiredForCurrentStep && !destinationStepValid) ||
+    (generationRequiredForCurrentStep && !generationReady);
   const uploadValidationMessage = !hasUploadedVideo
     ? 'Upload an MP4 or MOV video to continue.'
     : needsSourceCaption && !hasSourceCaption
