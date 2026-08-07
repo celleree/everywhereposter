@@ -1,5 +1,40 @@
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+
+jest.mock(
+  '@gitroom/frontend/components/new-launch/copy-generation.client',
+  () => ({
+    requestMediaCopyGenerationForDestinations: jest.fn(async () => ({
+      response: {
+        requestId: 'guided-revalidation-test',
+        status: 'complete',
+        sourceConfidence: 1,
+        warnings: [],
+        results: [
+          {
+            platform: 'instagram',
+            draft: 'Instagram draft',
+            origin: 'generated',
+            charCount: 15,
+            confidence: 1,
+            antiGenericScore: 1,
+            rewritten: false,
+            warnings: [],
+          },
+        ],
+        imagePlans: [],
+      },
+      platforms: ['instagram'],
+      unsupportedDestinations: [],
+    })),
+  })
+);
 
 jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
@@ -70,7 +105,7 @@ describe('guided composer destination revalidation', () => {
     seedDraft();
   });
 
-  it('blocks Review from advancing when the selected account is no longer available', () => {
+  it('blocks Review from advancing when the selected account is no longer available', async () => {
     render(
       <GuidedComposerShell>
         <div>Existing composer content</div>
@@ -87,7 +122,9 @@ describe('guided composer destination revalidation', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
 
-    expect(useGuidedComposerStore.getState().composerStep).toBe('review');
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().composerStep).toBe('review')
+    );
     expect(
       screen
         .getByRole('button', { name: 'Continue to Publish' })
@@ -129,9 +166,7 @@ describe('guided composer destination revalidation', () => {
     fireEvent.error(platformIcon);
 
     expect(screen.queryByTestId('platform-icon-Instagram')).toBeNull();
-    expect(
-      screen.getByTestId('platform-icon-fallback-Instagram')
-    ).toBeTruthy();
+    expect(screen.getByTestId('platform-icon-fallback-Instagram')).toBeTruthy();
     expect(
       screen.getByRole('img', { name: 'Instagram icon unavailable' })
     ).toBeTruthy();

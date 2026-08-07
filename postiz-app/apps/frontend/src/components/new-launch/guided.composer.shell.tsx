@@ -1,8 +1,16 @@
 'use client';
 
-import React, { FC, ReactNode, useEffect, useMemo, useRef } from 'react';
+import React, {
+  FC,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
+import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import {
   GUIDED_COMPOSER_STEPS,
   GuidedComposerStep,
@@ -10,6 +18,12 @@ import {
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import { GuidedComposerUploadDetails } from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
 import { GuidedComposerDestinations } from '@gitroom/frontend/components/new-launch/guided.composer.destinations';
+import {
+  buildGuidedGenerationFingerprint,
+  getGuidedGenerationProgress,
+  GuidedComposerGeneration,
+} from '@gitroom/frontend/components/new-launch/guided.composer.generation';
+import { requestMediaCopyGenerationForDestinations } from '@gitroom/frontend/components/new-launch/copy-generation.client';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
@@ -55,6 +69,9 @@ export const GuidedComposerShell: FC<{
   locked?: boolean;
 }> = ({ children, locked = false }) => {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const generationRequestActiveRef = useRef(false);
+  const composerMountedRef = useRef(true);
+  const fetch = useFetch();
   const { global, integrations, selectedIntegrations } = useLaunchStore(
     useShallow((state) => ({
       global: state.global,
@@ -66,18 +83,38 @@ export const GuidedComposerShell: FC<{
     composerStep,
     captionMode,
     sourceCaption,
+    additionalContext,
+    generationStatus,
+    generationProgress,
+    generationError,
+    generationInputFingerprint,
     setComposerStep,
     nextComposerStep,
     previousComposerStep,
+    startGeneration,
+    setGenerationProgress,
+    completeGeneration,
+    failGeneration,
+    invalidateGeneration,
     resetGuidedComposer,
   } = useGuidedComposerStore(
     useShallow((state) => ({
       composerStep: state.composerStep,
       captionMode: state.captionMode,
       sourceCaption: state.sourceCaption,
+      additionalContext: state.additionalContext,
+      generationStatus: state.generationStatus,
+      generationProgress: state.generationProgress,
+      generationError: state.generationError,
+      generationInputFingerprint: state.generationInputFingerprint,
       setComposerStep: state.setComposerStep,
       nextComposerStep: state.nextComposerStep,
       previousComposerStep: state.previousComposerStep,
+      startGeneration: state.startGeneration,
+      setGenerationProgress: state.setGenerationProgress,
+      completeGeneration: state.completeGeneration,
+      failGeneration: state.failGeneration,
+      invalidateGeneration: state.invalidateGeneration,
       resetGuidedComposer: state.resetGuidedComposer,
     }))
   );
@@ -113,10 +150,37 @@ export const GuidedComposerShell: FC<{
     availableDestinationIds.has(selected.integration.id)
   ).length;
   const destinationStepValid = selectedDestinationCount > 0;
+  const selectedDestinations = useMemo(
+    () =>
+      selectedIntegrations
+        .map((selected) => selected.integration)
+        .filter((integration) => availableDestinationIds.has(integration.id)),
+    [availableDestinationIds, selectedIntegrations]
+  );
+  const uploadedVideo = globalMedia.find((media) => isGuidedMp4MovMedia(media));
+  const generationFingerprint = useMemo(
+    () =>
+      buildGuidedGenerationFingerprint({
+        mediaId: uploadedVideo?.id,
+        destinations: selectedDestinations,
+        captionMode,
+        sourceCaption,
+        additionalContext,
+      }),
+    [
+      additionalContext,
+      captionMode,
+      selectedDestinations,
+      sourceCaption,
+      uploadedVideo?.id,
+    ]
+  );
+  const generationLoading = generationStatus === 'loading';
+  const navigationLocked = locked || generationLoading;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
   const continueDisabled =
-    locked ||
+    navigationLocked ||
     (composerStep === 'upload' && !uploadStepValid) ||
     (destinationRequiredForCurrentStep && !destinationStepValid);
   const uploadValidationMessage = !hasUploadedVideo
@@ -132,11 +196,179 @@ export const GuidedComposerShell: FC<{
       : '';
 
   useEffect(() => {
+    if (
+      generationInputFingerprint &&
+      generationInputFingerprint !== generationFingerprint &&
+      generationStatus !== 'loading'
+    ) {
+      invalidateGeneration();
+    }
+  }, [
+    generationFingerprint,
+    generationInputFingerprint,
+    generationStatus,
+    invalidateGeneration,
+  ]);
+
+  const generateForReview = useCallback(async () => {
+    if (generationRequestActiveRef.current || generationStatus === 'loading') {
+      return;
+    }
+
+    if (!uploadedVideo || !selectedDestinations.length) {
+      failGeneration(
+        !uploadedVideo
+          ? 'Upload an MP4 or MOV video before generating captions.'
+          : 'Select at least one destination before generating captions.',
+        { fingerprint: generationFingerprint }
+      );
+      return;
+    }
+
+    if (
+      generationInputFingerprint === generationFingerprint &&
+      (generationStatus === 'complete' || generationStatus === 'partial')
+    ) {
+      setComposerStep('review');
+      return;
+    }
+
+    generationRequestActiveRef.current = true;
+    startGeneration(generationFingerprint);
+
+    try {
+      const result = await requestMediaCopyGenerationForDestinations(
+        fetch,
+        selectedDestinations,
+        {
+          mediaId: uploadedVideo.id,
+          captionMode,
+          ...(captionMode !== 'generate' ? { sourceCaption } : {}),
+          ...(additionalContext.trim()
+            ? { additionalContext: additionalContext.trim() }
+            : {}),
+          goal: 'position',
+        },
+        (name, data) => {
+          if (composerMountedRef.current) {
+            setGenerationProgress(getGuidedGenerationProgress(name, data));
+          }
+        }
+      );
+
+      if (!composerMountedRef.current) {
+        return;
+      }
+
+      const currentLaunchState = useLaunchStore.getState();
+      const currentGuidedState = useGuidedComposerStore.getState();
+      const currentAvailableIds = new Set(
+        currentLaunchState.integrations
+          .filter(
+            (integration) =>
+              !integration.disabled && !integration.inBetweenSteps
+          )
+          .map((integration) => integration.id)
+      );
+      const currentMedia = currentLaunchState.global[0]?.media || [];
+      const currentVideo = currentMedia.find((media) =>
+        isGuidedMp4MovMedia(media)
+      );
+      const currentFingerprint = buildGuidedGenerationFingerprint({
+        mediaId: currentVideo?.id,
+        destinations: currentLaunchState.selectedIntegrations
+          .map((selected) => selected.integration)
+          .filter((integration) => currentAvailableIds.has(integration.id)),
+        captionMode: currentGuidedState.captionMode,
+        sourceCaption: currentGuidedState.sourceCaption,
+        additionalContext: currentGuidedState.additionalContext,
+      });
+
+      if (currentFingerprint !== generationFingerprint) {
+        invalidateGeneration();
+        return;
+      }
+
+      if (!result.response) {
+        failGeneration(
+          'None of the selected destinations support caption generation yet.',
+          {
+            unsupportedDestinations: result.unsupportedDestinations,
+            fingerprint: generationFingerprint,
+          }
+        );
+        return;
+      }
+
+      if (
+        result.response.status === 'failed' ||
+        !result.response.results.length
+      ) {
+        failGeneration(
+          result.response.warnings[0]?.message ||
+            'We could not generate captions. Please try again.',
+          {
+            response: result.response,
+            unsupportedDestinations: result.unsupportedDestinations,
+            fingerprint: generationFingerprint,
+          }
+        );
+        return;
+      }
+
+      completeGeneration(
+        result.response,
+        result.unsupportedDestinations,
+        generationFingerprint
+      );
+      setComposerStep('review');
+    } catch (error: any) {
+      if (composerMountedRef.current) {
+        failGeneration(
+          error?.message || 'We could not generate captions. Please try again.',
+          { fingerprint: generationFingerprint }
+        );
+      }
+    } finally {
+      generationRequestActiveRef.current = false;
+    }
+  }, [
+    additionalContext,
+    captionMode,
+    completeGeneration,
+    failGeneration,
+    fetch,
+    generationFingerprint,
+    generationInputFingerprint,
+    generationStatus,
+    invalidateGeneration,
+    selectedDestinations,
+    setComposerStep,
+    setGenerationProgress,
+    sourceCaption,
+    startGeneration,
+    uploadedVideo,
+  ]);
+
+  const continueComposer = useCallback(() => {
+    if (composerStep === 'destinations') {
+      void generateForReview();
+      return;
+    }
+
+    nextComposerStep();
+  }, [composerStep, generateForReview, nextComposerStep]);
+
+  useEffect(() => {
     headingRef.current?.focus();
   }, [composerStep]);
 
   useEffect(() => {
-    return () => resetGuidedComposer();
+    composerMountedRef.current = true;
+    return () => {
+      composerMountedRef.current = false;
+      resetGuidedComposer();
+    };
   }, [resetGuidedComposer]);
 
   return (
@@ -175,7 +407,9 @@ export const GuidedComposerShell: FC<{
                     <button
                       type="button"
                       aria-current={isActive ? 'step' : undefined}
-                      disabled={isFuture || (locked && !isActive)}
+                      disabled={
+                        isFuture || generationLoading || (locked && !isActive)
+                      }
                       onClick={() => setComposerStep(step)}
                       className={clsx(
                         'flex min-w-[145px] items-center gap-[10px] rounded-[12px] border px-[12px] py-[10px] text-left transition-colors disabled:cursor-not-allowed mobile:min-w-[132px]',
@@ -211,9 +445,7 @@ export const GuidedComposerShell: FC<{
                         aria-hidden="true"
                         className={clsx(
                           'h-px w-[24px]',
-                          index < currentStepIndex
-                            ? 'bg-ai/70'
-                            : 'bg-newBorder'
+                          index < currentStepIndex ? 'bg-ai/70' : 'bg-newBorder'
                         )}
                       />
                     )}
@@ -253,10 +485,13 @@ export const GuidedComposerShell: FC<{
               `}
             </style>
           </div>
-          <GuidedComposerUploadDetails disabled={locked} />
+          <GuidedComposerUploadDetails disabled={navigationLocked} />
         </div>
-        {composerStep === 'destinations' && (
-          <GuidedComposerDestinations disabled={locked} />
+        {composerStep === 'destinations' && generationLoading && (
+          <GuidedComposerGeneration progress={generationProgress} />
+        )}
+        {composerStep === 'destinations' && !generationLoading && (
+          <GuidedComposerDestinations disabled={navigationLocked} />
         )}
         {composerStep !== 'upload' && composerStep !== 'destinations' && (
           <GuidedComposerPlaceholder step={composerStep} />
@@ -267,7 +502,7 @@ export const GuidedComposerShell: FC<{
         <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-[12px] mobile:flex-col-reverse mobile:items-stretch">
           <button
             type="button"
-            disabled={currentStepIndex === 0 || locked}
+            disabled={currentStepIndex === 0 || navigationLocked}
             onClick={previousComposerStep}
             className="flex h-[44px] min-w-[120px] items-center justify-center rounded-[8px] bg-btnSimple px-[18px] text-[14px] font-[700] disabled:cursor-not-allowed disabled:opacity-40 mobile:w-full"
           >
@@ -283,14 +518,27 @@ export const GuidedComposerShell: FC<{
                 {continueValidationMessage}
               </div>
             )}
+            {!!generationError && composerStep === 'destinations' && (
+              <div
+                role="alert"
+                className="max-w-[460px] text-end text-[12px] text-red-400 mobile:text-start"
+              >
+                {generationError}
+              </div>
+            )}
             {nextStep ? (
               <button
                 type="button"
                 disabled={continueDisabled}
-                onClick={nextComposerStep}
+                onClick={continueComposer}
                 className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50 mobile:w-full"
               >
-                Continue to {GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}
+                {generationLoading
+                  ? 'Generating captions...'
+                  : composerStep === 'destinations' &&
+                    generationStatus === 'failed'
+                  ? 'Retry generation'
+                  : `Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}
               </button>
             ) : (
               <button

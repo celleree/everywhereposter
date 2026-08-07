@@ -1,5 +1,34 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+jest.mock(
+  '@gitroom/frontend/components/new-launch/copy-generation.client',
+  () => ({
+    requestMediaCopyGenerationForDestinations: jest.fn(async () => ({
+      response: {
+        requestId: 'guided-destinations-test',
+        status: 'complete',
+        sourceConfidence: 1,
+        warnings: [],
+        results: [
+          {
+            platform: 'instagram',
+            draft: 'Instagram draft',
+            origin: 'generated',
+            charCount: 15,
+            confidence: 1,
+            antiGenericScore: 1,
+            rewritten: false,
+            warnings: [],
+          },
+        ],
+        imagePlans: [],
+      },
+      platforms: ['instagram'],
+      unsupportedDestinations: [],
+    })),
+  })
+);
 
 jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
@@ -189,7 +218,7 @@ describe('guided composer destinations step', () => {
     seedDraft();
   });
 
-  it('requires at least one available destination before review', () => {
+  it('requires at least one available destination before review', async () => {
     renderDestinations();
 
     const continueButton = screen.getByRole('button', {
@@ -211,13 +240,15 @@ describe('guided composer destinations step', () => {
     expect(screen.getByText('1 of 2 accounts selected')).toBeTruthy();
     expect(continueButton.hasAttribute('disabled')).toBe(false);
     expect(
-      useLaunchStore.getState().selectedIntegrations.map((selected) =>
-        selected.integration.id
-      )
+      useLaunchStore
+        .getState()
+        .selectedIntegrations.map((selected) => selected.integration.id)
     ).toEqual(['instagram-account']);
 
     fireEvent.click(continueButton);
-    expect(useGuidedComposerStore.getState().composerStep).toBe('review');
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().composerStep).toBe('review')
+    );
   });
 
   it('supports individual deselection and restores the review gate', () => {
@@ -250,9 +281,9 @@ describe('guided composer destinations step', () => {
 
     expect(screen.getByText('2 of 2 accounts selected')).toBeTruthy();
     expect(
-      useLaunchStore.getState().selectedIntegrations.map((selected) =>
-        selected.integration.id
-      )
+      useLaunchStore
+        .getState()
+        .selectedIntegrations.map((selected) => selected.integration.id)
     ).toEqual(['instagram-account', 'linkedin-account']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
@@ -290,9 +321,8 @@ describe('guided composer destinations step', () => {
     const selected = useLaunchStore.getState().selectedIntegrations;
     expect(selected).toHaveLength(2);
     expect(
-      selected.find(
-        (item) => item.integration.id === 'instagram-account'
-      )?.settings
+      selected.find((item) => item.integration.id === 'instagram-account')
+        ?.settings
     ).toEqual(instagramSettings);
     expect(
       selected.find((item) => item.integration.id === 'linkedin-account')
@@ -324,9 +354,7 @@ describe('guided composer destinations step', () => {
     useLaunchStore.getState().reset();
     useGuidedComposerStore.getState().resetGuidedComposer();
     seedVideoDraft();
-    useLaunchStore
-      .getState()
-      .setAllIntegrations(providerVariantIntegrations);
+    useLaunchStore.getState().setAllIntegrations(providerVariantIntegrations);
 
     renderDestinations();
 
@@ -414,7 +442,9 @@ describe('guided composer destinations step', () => {
     );
 
     expect(
-      screen.getByRole('button', { name: 'Select all' }).hasAttribute('disabled')
+      screen
+        .getByRole('button', { name: 'Select all' })
+        .hasAttribute('disabled')
     ).toBe(true);
     expect(
       screen
