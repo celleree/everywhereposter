@@ -196,7 +196,29 @@ describe('guided composer shell', () => {
     expect(screen.getByText('Upload progress and cancel controls')).toBeTruthy();
   });
 
-  it('requires an uploaded MP4 or MOV before continuing', () => {
+  it('allows a valid legacy text draft to continue without media', () => {
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+    useLaunchStore
+      .getState()
+      .setGlobalValueText(0, 'A normal text-only post.');
+
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Destinations',
+    });
+    expect(continueButton.hasAttribute('disabled')).toBe(false);
+    expect(screen.queryByLabelText('Additional context')).toBeNull();
+
+    fireEvent.click(continueButton);
+    expect(useGuidedComposerStore.getState().composerStep).toBe('destinations');
+  });
+
+  it('keeps an empty legacy draft blocked', () => {
     useLaunchStore.getState().setGlobalValueMedia(0, []);
 
     render(
@@ -206,13 +228,39 @@ describe('guided composer shell', () => {
     );
 
     expect(
-      screen.getByText('Upload an MP4 or MOV video to continue.')
+      screen.getByText('Enter post text or add media to continue.')
     ).toBeTruthy();
     expect(
       screen
         .getByRole('button', { name: 'Continue to Destinations' })
         .hasAttribute('disabled')
     ).toBe(true);
+  });
+
+  it('allows an image-only legacy draft and preserves its media', () => {
+    const image = {
+      id: 'image-1',
+      path: 'https://media.example.com/image.png',
+      type: 'image',
+    } as any;
+    useLaunchStore.getState().setGlobalValueMedia(0, [image]);
+
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Destinations',
+    });
+    expect(continueButton.hasAttribute('disabled')).toBe(false);
+    expect(screen.queryByLabelText('Additional context')).toBeNull();
+
+    fireEvent.click(continueButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(useLaunchStore.getState().global[0].media).toEqual([image]);
   });
 
   it('does not treat an unsupported WebM library asset as a valid source', () => {
@@ -247,17 +295,36 @@ describe('guided composer shell', () => {
       </GuidedComposerShell>
     );
 
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Destinations',
+    });
+    expect(continueButton.hasAttribute('disabled')).toBe(false);
+
     fireEvent.change(screen.getByLabelText('Additional context'), {
       target: { value: 'Use the founder audience and mention the beta.' },
     });
+    fireEvent.click(
+      screen.getByRole('radio', {
+        name: /Use my caption on every platform/,
+      })
+    );
+
+    expect(screen.getByText('Enter your caption to continue.')).toBeTruthy();
+    expect(continueButton.hasAttribute('disabled')).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Your caption'), {
+      target: { value: 'One caption for every platform.' },
+    });
+    expect(continueButton.hasAttribute('disabled')).toBe(false);
+
     fireEvent.click(
       screen.getByRole('radio', {
         name: /Adapt my caption for each platform/,
       })
     );
 
-    const continueButton = screen.getByRole('button', {
-      name: 'Continue to Destinations',
+    fireEvent.change(screen.getByLabelText('Your caption'), {
+      target: { value: '' },
     });
     expect(screen.getByText('Enter your caption to continue.')).toBeTruthy();
     expect(continueButton.hasAttribute('disabled')).toBe(true);
@@ -283,19 +350,46 @@ describe('guided composer shell', () => {
     });
   });
 
-  it('removes attached media from the shared composer draft', () => {
+  it('does not mutate mixed image and supported video media', () => {
+    const mixedMedia = [
+      {
+        id: 'image-1',
+        path: 'https://media.example.com/image.png',
+        type: 'image',
+      },
+      {
+        id: 'video-1',
+        path: 'https://media.example.com/video.mp4',
+        type: 'video',
+      },
+    ] as any;
+    useLaunchStore.getState().setGlobalValueMedia(0, mixedMedia);
+
     render(
       <GuidedComposerShell>
         <div>Existing composer content</div>
       </GuidedComposerShell>
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove media' }));
+    expect(useLaunchStore.getState().global[0].media).toEqual(mixedMedia);
+    expect(screen.getByLabelText('Additional context')).toBeTruthy();
 
-    expect(useLaunchStore.getState().global[0].media).toEqual([]);
-    expect(
-      screen.getByText('Upload an MP4 or MOV video to continue.')
-    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole('radio', {
+        name: /Adapt my caption for each platform/,
+      })
+    );
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Destinations',
+    });
+    expect(continueButton.hasAttribute('disabled')).toBe(true);
+    expect(useLaunchStore.getState().global[0].media).toEqual(mixedMedia);
+
+    fireEvent.change(screen.getByLabelText('Your caption'), {
+      target: { value: 'One video caption for every destination.' },
+    });
+    expect(continueButton.hasAttribute('disabled')).toBe(false);
+    expect(useLaunchStore.getState().global[0].media).toEqual(mixedMedia);
   });
 
   it('renders a placeholder for later phases while hiding upload content', () => {

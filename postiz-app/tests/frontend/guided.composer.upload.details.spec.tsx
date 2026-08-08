@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 
 jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
@@ -22,6 +22,7 @@ jest.mock(
 );
 
 import {
+  GUIDED_MEDIA_ACCEPT,
   GUIDED_VIDEO_ACCEPT,
   GuidedComposerUploadDetails,
   isGuidedMp4MovMedia,
@@ -406,16 +407,21 @@ describe('guided composer video picker', () => {
     ).toBe(replacement);
   });
 
-  it('collapses repeated uploader results to the newest source video', () => {
+  it('does not collapse mixed media or repeated uploader results', () => {
     const current = createVideo('current');
     const replacement = createVideo('replacement');
+    const image = {
+      id: 'image',
+      path: 'https://media.example.com/image.png',
+      type: 'image',
+    };
 
     useLaunchStore.getState().addGlobalValue(0, [
       {
         id: 'post-1',
         content: '',
         delay: 0,
-        media: [current],
+        media: [image, current],
       } as any,
     ]);
 
@@ -425,33 +431,190 @@ describe('guided composer video picker', () => {
       useLaunchStore.getState().appendGlobalValueMedia(0, [replacement]);
     });
 
-    expect(useLaunchStore.getState().global[0].media).toEqual([replacement]);
+    expect(useLaunchStore.getState().global[0].media).toEqual([
+      image,
+      current,
+      replacement,
+    ]);
     unmount();
   });
 
-  it('removes unsupported library video formats from the guided draft', () => {
+  it('does not remove image or unsupported video media from the guided draft', () => {
     const webm = createVideo('unsupported', 'webm');
+    const image = {
+      id: 'image',
+      path: 'https://media.example.com/image.png',
+      type: 'image',
+    };
 
     useLaunchStore.getState().addGlobalValue(0, [
       {
         id: 'post-1',
         content: '',
         delay: 0,
-        media: [webm],
+        media: [image, webm],
       } as any,
     ]);
 
     const { unmount } = render(<GuidedComposerUploadDetails />);
 
-    expect(useLaunchStore.getState().global[0].media).toEqual([]);
+    expect(useLaunchStore.getState().global[0].media).toEqual([image, webm]);
     unmount();
   });
 
-  it('does not advertise image or unsupported video formats in the picker', () => {
-    expect(GUIDED_VIDEO_ACCEPT).toContain('video/mp4');
-    expect(GUIDED_VIDEO_ACCEPT).toContain('.mov');
+  it('does not mutate an image-only draft when guided details mount', () => {
+    const image = {
+      id: 'image-only',
+      path: 'https://media.example.com/image-only.png',
+      type: 'image',
+    };
+    useLaunchStore.getState().addGlobalValue(0, [
+      {
+        id: 'post-1',
+        content: '',
+        delay: 0,
+        media: [image],
+      } as any,
+    ]);
+    const originalMedia = useLaunchStore.getState().global[0].media;
+
+    const { unmount } = render(<GuidedComposerUploadDetails />);
+
+    expect(useLaunchStore.getState().global[0].media).toEqual(originalMedia);
+    unmount();
+  });
+
+  it('passes image files through the guided input unchanged', () => {
+    const host = document.createElement('div');
+    host.innerHTML = `
+      <div class="guided-upload-existing-composer">
+        <div id="social-content">
+          <section data-guided-composer-section="media">
+            <div></div>
+            <div><input type="file" multiple /></div>
+          </section>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(host);
+    const input = host.querySelector('input') as HTMLInputElement;
+    const image = new File(['image'], 'photo.png', { type: 'image/png' });
+    const forwarded = jest.fn();
+    input.addEventListener('change', () => forwarded(input.files?.[0]));
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [image],
+    });
+
+    const { unmount } = render(<GuidedComposerUploadDetails />);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(forwarded).toHaveBeenCalledWith(image);
+    expect(input.files?.[0]).toBe(image);
+    unmount();
+    host.remove();
+  });
+
+  it('rejects unsupported video files in the guided input', async () => {
+    const host = document.createElement('div');
+    host.innerHTML = `
+      <div class="guided-upload-existing-composer">
+        <div id="social-content">
+          <section data-guided-composer-section="media">
+            <div></div>
+            <div><input type="file" multiple /></div>
+          </section>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(host);
+    const input = host.querySelector('input') as HTMLInputElement;
+    const unsupportedVideo = new File(['video'], 'clip.webm', {
+      type: 'video/webm',
+    });
+    const forwarded = jest.fn();
+    input.addEventListener('change', forwarded);
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [unsupportedVideo],
+    });
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      writable: true,
+      value: 'clip.webm',
+    });
+
+    const { unmount } = render(<GuidedComposerUploadDetails />);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Only valid MP4 and MOV video files can be uploaded here.'
+      )
+    );
+    expect(input.value).toBe('');
+    expect(forwarded).not.toHaveBeenCalled();
+    unmount();
+    host.remove();
+  });
+
+  it('shows video controls only for supported video drafts', () => {
+    useLaunchStore.getState().addGlobalValue(0, [
+      {
+        id: 'post-1',
+        content: '',
+        delay: 0,
+        media: [createVideo('source')],
+      } as any,
+    ]);
+
+    const { rerender, unmount } = render(
+      <GuidedComposerUploadDetails />
+    );
+
+    expect(screen.getByLabelText('Additional context')).toBeTruthy();
+    expect(
+      screen.getByRole('radio', { name: /Create captions for me/ })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('radio', { name: /Use my caption on every platform/ })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('radio', { name: /Adapt my caption for each platform/ })
+    ).toBeTruthy();
+    expect(screen.queryByLabelText('Your caption')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('radio', { name: /Use my caption on every platform/ })
+    );
+    expect(screen.getByLabelText('Your caption')).toBeTruthy();
+
+    useLaunchStore.getState().setGlobalValueMedia(0, [
+      {
+        id: 'image-only',
+        path: 'https://media.example.com/image-only.png',
+        type: 'image',
+      } as any,
+    ]);
+    rerender(<GuidedComposerUploadDetails />);
+    expect(screen.queryByLabelText('Additional context')).toBeNull();
+    expect(screen.queryByRole('radio', { name: /Create captions for me/ })).toBeNull();
+    expect(screen.queryByLabelText('Your caption')).toBeNull();
+
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+    rerender(<GuidedComposerUploadDetails />);
+    expect(screen.queryByLabelText('Additional context')).toBeNull();
+    expect(screen.queryByRole('radio', { name: /Adapt my caption for each platform/ })).toBeNull();
+    expect(screen.queryByLabelText('Your caption')).toBeNull();
+    unmount();
+  });
+
+  it('advertises images and supported video formats in the shared picker', () => {
+    expect(GUIDED_MEDIA_ACCEPT).toContain('image/*');
+    expect(GUIDED_MEDIA_ACCEPT).toContain('video/mp4');
+    expect(GUIDED_MEDIA_ACCEPT).toContain('.mov');
+    expect(GUIDED_MEDIA_ACCEPT).not.toContain('webm');
     expect(GUIDED_VIDEO_ACCEPT).not.toContain('image/');
-    expect(GUIDED_VIDEO_ACCEPT).not.toContain('webm');
   });
 
   it('shows only progress and cancellation from the real legacy upload-card structure', () => {
@@ -459,7 +622,7 @@ describe('guided composer video picker', () => {
     host.innerHTML = `
       <div class="guided-upload-existing-composer">
         <div id="social-content">
-          <section>
+          <section data-guided-composer-section="media">
             <div data-testid="legacy-heading">Upload media</div>
             <div data-testid="legacy-card">
               <input type="file" multiple />
@@ -502,9 +665,9 @@ describe('guided composer video picker', () => {
       <GuidedComposerUploadDetails disabled={false} />
     );
 
-    expect(section.style.display).toBe('none');
-    expect(input.accept).toBe(GUIDED_VIDEO_ACCEPT);
-    expect(input.multiple).toBe(false);
+    expect(section.style.display).toBe('');
+    expect(input.accept).toBe(GUIDED_MEDIA_ACCEPT);
+    expect(input.multiple).toBe(true);
 
     rerender(<GuidedComposerUploadDetails disabled />);
 

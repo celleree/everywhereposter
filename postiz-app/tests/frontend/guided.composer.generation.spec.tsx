@@ -187,6 +187,23 @@ const seedDraft = (destinations = [linkedinPersonal]) => {
   useGuidedComposerStore.getState().setComposerStep('destinations');
 };
 
+const seedTextDraft = () => {
+  seedDraft();
+  useLaunchStore.getState().setGlobalValueMedia(0, []);
+  useLaunchStore.getState().setGlobalValueText(0, 'A text-only post.');
+};
+
+const seedImageDraft = () => {
+  seedDraft();
+  useLaunchStore.getState().setGlobalValueMedia(0, [
+    {
+      id: 'image-1',
+      path: 'https://media.example.com/image.png',
+      type: 'image',
+    } as any,
+  ]);
+};
+
 const renderGeneration = () =>
   render(
     <GuidedComposerShell>
@@ -199,6 +216,57 @@ describe('guided composer generation transition', () => {
     mockFetch.mockReset();
     useGuidedComposerStore.getState().resetGuidedComposer();
     useLaunchStore.getState().reset();
+  });
+
+  it('moves a text draft directly to Review without generation', () => {
+    seedTextDraft();
+    useGuidedComposerStore.setState({
+      generationStatus: 'complete',
+      generatedResponse: response() as any,
+      generationInputFingerprint: 'stale-video-fingerprint',
+    });
+    renderGeneration();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      composerStep: 'review',
+      generationStatus: 'idle',
+      generatedResponse: null,
+      generationInputFingerprint: null,
+    });
+    expect(
+      screen
+        .getByRole('button', { name: 'Continue to Publish' })
+        .hasAttribute('disabled')
+    ).toBe(false);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('moves an image draft directly to Review without generation', () => {
+    seedImageDraft();
+    const originalMedia = useLaunchStore.getState().global[0].media;
+    useGuidedComposerStore.setState({
+      generationStatus: 'complete',
+      generatedResponse: response() as any,
+      generationInputFingerprint: 'stale-video-fingerprint',
+    });
+    renderGeneration();
+
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Review',
+    });
+    expect(continueButton.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(continueButton);
+
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      composerStep: 'review',
+      generationStatus: 'idle',
+      generatedResponse: null,
+      generationInputFingerprint: null,
+    });
+    expect(useLaunchStore.getState().global[0].media).toEqual(originalMedia);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('sends the Phase 6 request and generates once for multiple accounts on one platform', async () => {

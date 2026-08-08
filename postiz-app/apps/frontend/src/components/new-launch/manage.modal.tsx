@@ -1155,6 +1155,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       step="1"
                       title="Upload media"
                       description="Add images or video, then choose where to post."
+                      guidedComposerSection="media"
                     >
                       <ComposerUploadCard
                         disabled={locked}
@@ -1236,6 +1237,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       step="4"
                       title="Review and edit"
                       description="Edit the shared post or a platform version."
+                      guidedComposerSection="editor"
                     >
                       {!existingData.integration &&
                         selectedIntegrations.length > 0 && (
@@ -1593,10 +1595,14 @@ const ComposerSection: FC<{
   step?: string;
   title: string;
   description: string;
+  guidedComposerSection?: 'media' | 'editor';
   children: ReactNode;
-}> = ({ step, title, description, children }) => {
+}> = ({ step, title, description, guidedComposerSection, children }) => {
   return (
-    <section className="w-full min-w-0 max-w-full overflow-x-hidden border-b border-newBorder pb-[24px] last:border-b-0 last:pb-0 mobile:pb-[18px]">
+    <section
+      data-guided-composer-section={guidedComposerSection}
+      className="w-full min-w-0 max-w-full overflow-x-hidden border-b border-newBorder pb-[24px] last:border-b-0 last:pb-0 mobile:pb-[18px]"
+    >
       <div className="mb-[14px] flex min-w-0 items-start gap-[12px] mobile:mb-[10px]">
         {!!step && (
           <div className="flex h-[28px] w-[28px] min-w-[28px] items-center justify-center rounded-full bg-newBgLineColor text-[12px] font-[700] text-white mobile:h-[26px] mobile:w-[26px] mobile:min-w-[26px]">

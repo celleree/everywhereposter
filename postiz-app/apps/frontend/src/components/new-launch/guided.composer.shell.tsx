@@ -26,6 +26,40 @@ import {
 import { requestMediaCopyGenerationForDestinations } from '@gitroom/frontend/components/new-launch/copy-generation.client';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
+import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+
+type GuidedComposerSourceType = 'text' | 'image' | 'video';
+
+const GUIDED_VIDEO_PATH_PATTERN =
+  /\.(mp4|mov|webm|m4v|avi|mkv|mpeg|mpg|ogv|3gp)(?:$|[?#])/i;
+
+const isGuidedVideoMedia = (media: {
+  path?: string;
+  originalName?: string | null;
+  type?: string | null;
+}) => {
+  const mediaType = (media.type || '').toLowerCase();
+
+  return (
+    mediaType === 'video' ||
+    mediaType.startsWith('video/') ||
+    GUIDED_VIDEO_PATH_PATTERN.test(media.originalName || media.path || '')
+  );
+};
+
+const getGuidedComposerSourceType = (
+  media: Array<{
+    path?: string;
+    originalName?: string | null;
+    type?: string | null;
+  }>
+): GuidedComposerSourceType => {
+  if (media.some(isGuidedVideoMedia)) {
+    return 'video';
+  }
+
+  return media.length ? 'image' : 'text';
+};
 
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
@@ -128,13 +162,19 @@ export const GuidedComposerShell: FC<{
     [currentStepIndex]
   );
   const globalMedia = global[0]?.media || [];
+  const sourceType = getGuidedComposerSourceType(globalMedia);
   const hasUploadedVideo = globalMedia.some((media) =>
     isGuidedMp4MovMedia(media)
   );
+  const legacyDraftValid =
+    stripHtmlValidation('normal', global[0]?.content || '', true).length > 0 ||
+    globalMedia.length > 0;
   const needsSourceCaption = captionMode !== 'generate';
   const hasSourceCaption = sourceCaption.trim().length > 0;
   const uploadStepValid =
-    hasUploadedVideo && (!needsSourceCaption || hasSourceCaption);
+    sourceType === 'video'
+      ? hasUploadedVideo && (!needsSourceCaption || hasSourceCaption)
+      : legacyDraftValid;
   const availableDestinationIds = useMemo(
     () =>
       new Set(
@@ -183,17 +223,21 @@ export const GuidedComposerShell: FC<{
   const navigationLocked = locked || generationLoading;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
-  const generationRequiredForCurrentStep = currentStepIndex >= reviewStepIndex;
+  const generationRequiredForCurrentStep =
+    sourceType === 'video' && currentStepIndex >= reviewStepIndex;
   const continueDisabled =
     navigationLocked ||
     (composerStep === 'upload' && !uploadStepValid) ||
     (destinationRequiredForCurrentStep && !destinationStepValid) ||
     (generationRequiredForCurrentStep && !generationReady);
-  const uploadValidationMessage = !hasUploadedVideo
-    ? 'Upload an MP4 or MOV video to continue.'
-    : needsSourceCaption && !hasSourceCaption
-    ? 'Enter your caption to continue.'
-    : '';
+  const uploadValidationMessage =
+    sourceType === 'video' && !hasUploadedVideo
+      ? 'Upload an MP4 or MOV video to continue.'
+      : sourceType === 'video' && needsSourceCaption && !hasSourceCaption
+      ? 'Enter your caption to continue.'
+      : !legacyDraftValid
+      ? 'Enter post text or add media to continue.'
+      : '';
   const continueValidationMessage =
     composerStep === 'upload'
       ? uploadValidationMessage
@@ -358,12 +402,32 @@ export const GuidedComposerShell: FC<{
 
   const continueComposer = useCallback(() => {
     if (composerStep === 'destinations') {
+      if (sourceType !== 'video') {
+        if (
+          generationStatus !== 'idle' ||
+          generationInputFingerprint !== null
+        ) {
+          invalidateGeneration();
+        }
+        setComposerStep('review');
+        return;
+      }
+
       void generateForReview();
       return;
     }
 
     nextComposerStep();
-  }, [composerStep, generateForReview, nextComposerStep]);
+  }, [
+    composerStep,
+    generateForReview,
+    generationInputFingerprint,
+    generationStatus,
+    invalidateGeneration,
+    nextComposerStep,
+    setComposerStep,
+    sourceType,
+  ]);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -473,7 +537,7 @@ export const GuidedComposerShell: FC<{
             {children}
             <style>
               {`
-                .guided-upload-existing-composer #social-content > section:not(:first-child) {
+                .guided-upload-existing-composer #social-content > section:not([data-guided-composer-section="media"]):not([data-guided-composer-section="editor"]) {
                   display: none !important;
                 }
                 .guided-upload-existing-composer div[class*="w-[580px]"] {
@@ -524,14 +588,16 @@ export const GuidedComposerShell: FC<{
                 {continueValidationMessage}
               </div>
             )}
-            {!!generationError && composerStep === 'destinations' && (
-              <div
-                role="alert"
-                className="max-w-[460px] text-end text-[12px] text-red-400 mobile:text-start"
-              >
-                {generationError}
-              </div>
-            )}
+            {!!generationError &&
+              composerStep === 'destinations' &&
+              sourceType === 'video' && (
+                <div
+                  role="alert"
+                  className="max-w-[460px] text-end text-[12px] text-red-400 mobile:text-start"
+                >
+                  {generationError}
+                </div>
+              )}
             {nextStep ? (
               <button
                 type="button"
@@ -541,7 +607,8 @@ export const GuidedComposerShell: FC<{
               >
                 {generationLoading
                   ? 'Generating captions...'
-                  : composerStep === 'destinations' &&
+                  : sourceType === 'video' &&
+                    composerStep === 'destinations' &&
                     generationStatus === 'failed'
                   ? 'Retry generation'
                   : `Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}
