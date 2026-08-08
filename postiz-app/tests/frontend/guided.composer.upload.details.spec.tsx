@@ -548,7 +548,7 @@ describe('guided composer video picker', () => {
     input.dispatchEvent(new Event('change', { bubbles: true }));
 
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent(
+      expect(screen.getByRole('alert').textContent).toContain(
         'Only valid MP4 and MOV video files can be uploaded here.'
       )
     );
