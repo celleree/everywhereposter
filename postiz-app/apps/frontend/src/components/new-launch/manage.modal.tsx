@@ -127,7 +127,9 @@ function countCharacters(text: string, type: string): number {
   return weightedLength(text);
 }
 
-export const ManageModal: FC<AddEditModalProps> = (props) => {
+export const ManageModal: FC<
+  AddEditModalProps & { guidedComposerActive?: boolean }
+> = (props) => {
   const t = useT();
   const fetch = useFetch();
   const ref = useRef<any>(null);
@@ -1161,6 +1163,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                         disabled={locked}
                         media={globalMedia}
                         onUpload={handleUpload}
+                        guidedTranscription={props.guidedComposerActive === true}
                       />
                     </ComposerSection>
 
@@ -1627,7 +1630,8 @@ const ComposerUploadCard: FC<{
   disabled: boolean;
   media: any[];
   onUpload: (media: any[]) => void;
-}> = ({ disabled, media, onUpload }) => {
+  guidedTranscription?: boolean;
+}> = ({ disabled, media, onUpload, guidedTranscription = false }) => {
   const t = useT();
   const toaster = useToaster();
   const modals = useModals();
@@ -1636,6 +1640,7 @@ const ComposerUploadCard: FC<{
 
   const uppy = useUppyUploader({
     allowedFileTypes: 'image/*,video/mp4,video/quicktime,video/mov',
+    guidedTranscription,
     onUploadSuccess: (result: any) => {
       onUpload(result);
       uppy.clear();
@@ -1693,11 +1698,15 @@ const ComposerUploadCard: FC<{
         size: 'calc(100% - 80px)',
         height: 'calc(100% - 80px)',
         children: (close) => (
-          <MediaBox setMedia={onUpload} closeModal={close} />
+          <MediaBox
+            setMedia={onUpload}
+            closeModal={close}
+            guidedTranscription={guidedTranscription}
+          />
         ),
       });
     },
-    [modals, onUpload, t]
+    [guidedTranscription, modals, onUpload, t]
   );
 
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({

@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, Injectable, Optional } from '@nestjs/common';
 import { MediaRepository } from '@gitroom/nestjs-libraries/database/prisma/media/media.repository';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
@@ -12,6 +12,7 @@ import {
   Sections,
   SubscriptionException,
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
 @Injectable()
 export class MediaService {
@@ -21,10 +22,15 @@ export class MediaService {
     private _mediaRepository: MediaRepository,
     private _openAi: OpenaiService,
     private _subscriptionService: SubscriptionService,
-    private _videoManager: VideoManager
+    private _videoManager: VideoManager,
+    @Optional()
+    private _mediaTranscriptionService?: MediaTranscriptionService
   ) {}
 
   async deleteMedia(org: string, id: string) {
+    if (this._mediaTranscriptionService) {
+      return this._mediaTranscriptionService.deleteMedia(org, id);
+    }
     return this._mediaRepository.deleteMedia(org, id);
   }
 
@@ -76,20 +82,34 @@ export class MediaService {
     return reservation.value;
   }
 
-  saveFile(
+  async saveFile(
     org: string,
     fileName: string,
     filePath: string,
     originalName?: string,
-    mimeType?: string
+    mimeType?: string,
+    guidedTranscription = false
   ) {
-    return this._mediaRepository.saveFile(
+    const media = await this._mediaRepository.saveFile(
       org,
       fileName,
       filePath,
       originalName,
       mimeType
     );
+
+    if (
+      guidedTranscription &&
+      media.type === 'video' &&
+      this._mediaTranscriptionService
+    ) {
+      await this._mediaTranscriptionService.ensureTranscriptionStarted(
+        org,
+        media.id
+      );
+    }
+
+    return media;
   }
 
   getMedia(org: string, page: number) {

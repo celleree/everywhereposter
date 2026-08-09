@@ -32,6 +32,8 @@ import {
 import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
 import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.service';
 import { startCopyGenerationHeartbeat } from '@gitroom/backend/api/routes/copy-generation-heartbeat';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import type { GenerateMediaCopyResponse } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
 
 @ApiTags('Posts')
 @Controller('/posts')
@@ -217,14 +219,46 @@ export class PostsController {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('X-Accel-Buffering', 'no');
     const heartbeat = startCopyGenerationHeartbeat(res);
+    let requestId = '';
+    let terminalSent = false;
+    const writeTerminalFailure = () => {
+      if (heartbeat.isClosed() || terminalSent) {
+        return;
+      }
+
+      const response: GenerateMediaCopyResponse = {
+        requestId: requestId || makeId(12),
+        status: 'failed',
+        sourceConfidence: null,
+        warnings: [
+          {
+            code: 'COPY_GENERATION_FAILED',
+            message: 'Post generation could not be completed. Please try again.',
+          },
+        ],
+        results: [],
+        imagePlans: [],
+      };
+      terminalSent = true;
+      res.write(JSON.stringify({ name: 'completed', data: response }) + '\n');
+    };
 
     try {
       for await (const event of this._copyGenerationService.generate(org.id, body)) {
         if (heartbeat.isClosed()) {
           break;
         }
+        if (event.name === 'copy-generation-started') {
+          requestId = event.data?.requestId || requestId;
+        }
+        if (event.name === 'completed') {
+          terminalSent = true;
+        }
         res.write(JSON.stringify(event) + '\n');
       }
+      writeTerminalFailure();
+    } catch {
+      writeTerminalFailure();
     } finally {
       heartbeat.stop();
       if (!res.writableEnded && !res.destroyed) {

@@ -1,4 +1,5 @@
 import { SourceBriefService } from '@gitroom/nestjs-libraries/copy-generation/source-brief.service';
+import { TranscriptionLifecycleError } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
 jest.mock('@gitroom/helpers/utils/read.or.fetch', () => ({
   readOrFetch: jest.fn(),
@@ -40,7 +41,8 @@ const voiceProfile = {
 const createService = (
   modelOverrides: Record<string, unknown> = {},
   mediaOverrides: Record<string, unknown> = {},
-  knowledgeBaseVoiceProfile?: typeof voiceProfile
+  knowledgeBaseVoiceProfile?: typeof voiceProfile,
+  transcriptionOverrides: Record<string, unknown> = {}
 ) => {
   const mediaRepository = {
     getMediaByOrganizationIdAndId: jest.fn().mockResolvedValue({
@@ -82,15 +84,26 @@ const createService = (
       explicitVoiceProfileMissed: false,
     }),
   };
+  const mediaTranscriptionService = {
+    ensureTranscriptionStarted: jest.fn().mockResolvedValue({
+      status: 'PENDING',
+    }),
+    resolveForGeneration: jest
+      .fn()
+      .mockResolvedValue('A persisted transcript with concrete details.'),
+    ...transcriptionOverrides,
+  };
 
   return {
     service: new SourceBriefService(
       mediaRepository as any,
       modelService as any,
-      knowledgeBaseService as any
+      knowledgeBaseService as any,
+      mediaTranscriptionService as any
     ),
     mediaRepository,
     modelService,
+    mediaTranscriptionService,
   };
 };
 
@@ -147,11 +160,15 @@ describe('SourceBriefService video grounding', () => {
   });
 
   it('uses a manually supplied transcript without running transcription', async () => {
-    const { service, modelService } = createService();
+    const { service, modelService, mediaTranscriptionService } = createService();
 
     const result = await service.build('org-1', request as any);
 
     expect(modelService.transcribeVideo).not.toHaveBeenCalled();
+    expect(mediaTranscriptionService.resolveForGeneration).not.toHaveBeenCalled();
+    expect(
+      mediaTranscriptionService.ensureTranscriptionStarted
+    ).toHaveBeenCalledWith('org-1', 'media-1');
     expect(modelService.analyzeVideoFrames).toHaveBeenCalledWith(
       expect.objectContaining({
         inputPath: '/tmp/postiz-video/video.mp4',
@@ -162,8 +179,8 @@ describe('SourceBriefService video grounding', () => {
     expect(result.blocked).toBe(false);
   });
 
-  it('reuses one prepared file for generated transcription and frame analysis', async () => {
-    const { service, modelService } = createService();
+  it('reuses the persisted READY transcript without inline transcription', async () => {
+    const { service, modelService, mediaTranscriptionService } = createService();
 
     const result = await service.build('org-1', {
       ...request,
@@ -171,67 +188,55 @@ describe('SourceBriefService video grounding', () => {
     } as any);
 
     expect(prepareVideoMediaFile).toHaveBeenCalledTimes(1);
-    expect(modelService.transcribeVideo).toHaveBeenCalledWith(
-      expect.objectContaining({ inputPath: '/tmp/postiz-video/video.mp4' })
+    expect(modelService.transcribeVideo).not.toHaveBeenCalled();
+    expect(mediaTranscriptionService.resolveForGeneration).toHaveBeenCalledWith(
+      'org-1',
+      'media-1'
     );
     expect(modelService.analyzeVideoFrames).toHaveBeenCalledWith(
       expect.objectContaining({
         inputPath: '/tmp/postiz-video/video.mp4',
-        transcriptText: 'A generated transcript with concrete details.',
+        transcriptText: 'A persisted transcript with concrete details.',
       })
     );
     expect(result.transcript).toEqual({
-      text: 'A generated transcript with concrete details.',
+      text: 'A persisted transcript with concrete details.',
       source: 'generated',
       confidence: 0.68,
     });
   });
 
-  it('allows a silent video with usable visual grounding', async () => {
-    const { service } = createService({
-      transcribeVideo: jest.fn().mockResolvedValue({ text: '' }),
+  it('returns pending without starting duplicate inline transcription', async () => {
+    const pending = new TranscriptionLifecycleError(
+      'TRANSCRIPTION_PENDING',
+      'The video is still being transcribed.'
+    );
+    const { service, modelService } = createService({}, {}, undefined, {
+      resolveForGeneration: jest.fn().mockRejectedValue(pending),
     });
 
-    const result = await service.build('org-1', {
-      ...request,
-      transcript: undefined,
-    } as any);
-
-    expect(result.transcript).toBeUndefined();
-    expect(result.blocked).toBe(false);
-    expect(result.source.scenes).toEqual(defaultVideoInsights.scenes);
-    expect(result.warnings).toEqual(
-      expect.arrayContaining([expect.objectContaining({ code: 'NO_TRANSCRIPT' })])
-    );
+    await expect(
+      service.build('org-1', { ...request, transcript: undefined } as any)
+    ).rejects.toBe(pending);
+    expect(modelService.transcribeVideo).not.toHaveBeenCalled();
+    expect(modelService.analyzeVideoFrames).not.toHaveBeenCalled();
   });
 
-  it('preserves zero confidence for silent scene-only video grounding', async () => {
-    const { service } = createService({
-      transcribeVideo: jest.fn().mockResolvedValue({ text: '' }),
-      analyzeVideoFrames: jest.fn().mockResolvedValue({
-        visualSummary: 'A product appears in a representative frame.',
-        facts: [],
-        unknowns: [],
-        coreMessage: 'The product is shown on screen.',
-        sourceConfidence: 0,
-        scenes: [
-          {
-            timestampSeconds: 3,
-            description: 'A product appears on screen.',
-            visibleText: '',
-            usefulForPosting: true,
-          },
-        ],
-      }),
-    });
+  it('does not trust client-claimed generated provenance over canonical text', async () => {
+    const { service, mediaTranscriptionService } = createService();
 
     const result = await service.build('org-1', {
       ...request,
-      transcript: undefined,
+      transcript: {
+        text: 'Client supplied generated text.',
+        source: 'generated',
+      },
     } as any);
 
-    expect(result.blocked).toBe(false);
-    expect(result.sourceConfidence).toBe(0.1);
+    expect(mediaTranscriptionService.resolveForGeneration).toHaveBeenCalled();
+    expect(result.transcript?.text).toBe(
+      'A persisted transcript with concrete details.'
+    );
   });
 
   it('continues with transcript grounding when visual analysis fails', async () => {
@@ -248,78 +253,6 @@ describe('SourceBriefService video grounding', () => {
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: 'VIDEO_VISUAL_ANALYSIS_FAILED' }),
-      ])
-    );
-  });
-
-  it('continues from visual grounding when transcription fails', async () => {
-    const { service } = createService({
-      transcribeVideo: jest.fn().mockRejectedValue(new Error('no audio stream')),
-    });
-
-    const result = await service.build('org-1', {
-      ...request,
-      transcript: undefined,
-    } as any);
-
-    expect(result.blocked).toBe(false);
-    expect(result.transcript).toBeUndefined();
-    expect(result.source.facts).toEqual(
-      expect.arrayContaining(defaultVideoInsights.facts)
-    );
-  });
-
-  it('blocks when transcription and visual analysis both fail', async () => {
-    const { service } = createService({
-      transcribeVideo: jest.fn().mockRejectedValue(new Error('no audio stream')),
-      analyzeVideoFrames: jest.fn().mockRejectedValue(new Error('no video stream')),
-    });
-
-    const result = await service.build('org-1', {
-      ...request,
-      transcript: undefined,
-    } as any);
-
-    expect(result.blocked).toBe(true);
-    expect(result.warnings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'TRANSCRIPT_REQUIRED' }),
-        expect.objectContaining({ code: 'VIDEO_VISUAL_ANALYSIS_FAILED' }),
-        expect.objectContaining({ code: 'NO_TRANSCRIPT' }),
-      ])
-    );
-  });
-
-  it('does not treat whitespace facts or non-useful scenes as grounding', async () => {
-    const { service } = createService({
-      transcribeVideo: jest.fn().mockResolvedValue({ text: '' }),
-      analyzeVideoFrames: jest.fn().mockResolvedValue({
-        visualSummary: '   ',
-        facts: [' ', '\n'],
-        unknowns: [],
-        coreMessage: ' ',
-        sourceConfidence: 0.9,
-        scenes: [
-          {
-            timestampSeconds: 2,
-            description: 'A blurry frame.',
-            visibleText: '',
-            usefulForPosting: false,
-          },
-        ],
-      }),
-    });
-
-    const result = await service.build('org-1', {
-      ...request,
-      transcript: undefined,
-    } as any);
-
-    expect(result.blocked).toBe(true);
-    expect(result.source.facts).toEqual([]);
-    expect(result.warnings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'VIDEO_VISUAL_ANALYSIS_EMPTY' }),
       ])
     );
   });

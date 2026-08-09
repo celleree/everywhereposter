@@ -60,6 +60,7 @@ export function useUppyUploader(props: {
   onStart?: () => void;
   onEnd?: () => void;
   allowedFileTypes: string;
+  guidedTranscription?: boolean;
 }) {
   const setLocked = useLaunchStore((state) => state.setLocked);
   const toast = useToaster();
@@ -207,6 +208,7 @@ export function useUppyUploader(props: {
       uppy2.setFileMeta(file.id, {
         useCloudflare: storageProvider === 'cloudflare' ? 'true' : 'false', // Example of adding a custom field
         addedOrder: fileOrderIndex++, // Track original order for sorting after upload
+        guidedTranscription: props.guidedTranscription ? 'true' : 'false',
         // Add more fields as needed
       });
     });
@@ -290,6 +292,7 @@ export function useUppyUploader(props: {
                   body: JSON.stringify({
                     name,
                     originalName,
+                    guidedTranscription: props.guidedTranscription === true,
                   }),
                 })
               ).json(),

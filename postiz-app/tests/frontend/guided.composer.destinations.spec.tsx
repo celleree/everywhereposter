@@ -190,6 +190,10 @@ const seedVideoDraft = () => {
       ],
     },
   ]);
+  useGuidedComposerStore.setState({
+    sourceMediaId: 'video-1',
+    transcriptionStatus: 'READY',
+  });
 };
 
 const seedDraft = () => {

@@ -6,3 +6,4 @@ export * from './missing.post.workflow';
 export * from './send.email.workflow';
 export * from './refresh.token.workflow';
 export * from './streak.workflow';
+export * from './media-transcription.workflow';

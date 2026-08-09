@@ -7,6 +7,7 @@ import React, {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
@@ -30,7 +31,10 @@ import {
 } from '@gitroom/frontend/components/new-launch/guided.composer.review';
 import { requestMediaCopyGenerationForDestinations } from '@gitroom/frontend/components/new-launch/copy-generation.client';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
-import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
+import {
+  isGuidedMp4MovMedia,
+  selectGuidedSourceVideo,
+} from '@gitroom/frontend/components/new-launch/guided.video.validation';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 
 type GuidedComposerSourceType = 'text' | 'image' | 'video';
@@ -110,17 +114,37 @@ export const GuidedComposerShell: FC<{
   const headingRef = useRef<HTMLHeadingElement>(null);
   const generationRequestActiveRef = useRef(false);
   const composerMountedRef = useRef(true);
+  const previousVideoIdsRef = useRef<Set<string>>(new Set());
+  const sourceMediaSnapshotRef = useRef<{
+    id: string;
+    path: string;
+    thumbnail?: string;
+  } | null>(null);
+  const sourceDeletionInFlightRef = useRef<Set<string>>(new Set());
+  const [sourceTransitionPending, setSourceTransitionPending] = useState(false);
+  const [sourceTransitionError, setSourceTransitionError] = useState<
+    string | null
+  >(null);
   const fetch = useFetch();
-  const { global, integrations, selectedIntegrations, chars } = useLaunchStore(
+  const {
+    global,
+    integrations,
+    selectedIntegrations,
+    chars,
+    setGlobalValueMedia,
+  } = useLaunchStore(
     useShallow((state) => ({
       global: state.global,
       integrations: state.integrations,
       selectedIntegrations: state.selectedIntegrations,
       chars: state.chars,
+      setGlobalValueMedia: state.setGlobalValueMedia,
     }))
   );
   const {
     composerStep,
+    sourceMediaId,
+    transcriptionStatus,
     captionMode,
     sourceCaption,
     additionalContext,
@@ -130,6 +154,8 @@ export const GuidedComposerShell: FC<{
     generationInputFingerprint,
     reviewDrafts,
     setComposerStep,
+    selectSourceMedia,
+    setTranscriptionState,
     nextComposerStep,
     previousComposerStep,
     startGeneration,
@@ -142,6 +168,8 @@ export const GuidedComposerShell: FC<{
   } = useGuidedComposerStore(
     useShallow((state) => ({
       composerStep: state.composerStep,
+      sourceMediaId: state.sourceMediaId,
+      transcriptionStatus: state.transcriptionStatus,
       captionMode: state.captionMode,
       sourceCaption: state.sourceCaption,
       additionalContext: state.additionalContext,
@@ -151,6 +179,8 @@ export const GuidedComposerShell: FC<{
       generationInputFingerprint: state.generationInputFingerprint,
       reviewDrafts: state.reviewDrafts,
       setComposerStep: state.setComposerStep,
+      selectSourceMedia: state.selectSourceMedia,
+      setTranscriptionState: state.setTranscriptionState,
       nextComposerStep: state.nextComposerStep,
       previousComposerStep: state.previousComposerStep,
       startGeneration: state.startGeneration,
@@ -173,8 +203,8 @@ export const GuidedComposerShell: FC<{
   );
   const globalMedia = global[0]?.media || [];
   const sourceType = getGuidedComposerSourceType(globalMedia);
-  const hasUploadedVideo = globalMedia.some((media) =>
-    isGuidedMp4MovMedia(media)
+  const hasUploadedVideo = globalMedia.some(
+    (media) => media.id === sourceMediaId && isGuidedMp4MovMedia(media)
   );
   const legacyDraftValid =
     stripHtmlValidation('normal', global[0]?.content || '', true).length > 0 ||
@@ -217,7 +247,9 @@ export const GuidedComposerShell: FC<{
     () => selectedIntegrations.map((selected) => selected.integration),
     [selectedIntegrations]
   );
-  const uploadedVideo = globalMedia.find((media) => isGuidedMp4MovMedia(media));
+  const uploadedVideo = globalMedia.find(
+    (media) => media.id === sourceMediaId && isGuidedMp4MovMedia(media)
+  );
   const generationFingerprint = useMemo(
     () =>
       buildGuidedGenerationFingerprint({
@@ -263,7 +295,8 @@ export const GuidedComposerShell: FC<{
     enabledReviewDrafts.length > 0 &&
     !reviewHasBlockingError &&
     !reviewRegenerationLoading;
-  const navigationLocked = locked || generationLoading;
+  const navigationLocked =
+    locked || generationLoading || sourceTransitionPending;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
   const generationRequiredForCurrentStep =
@@ -299,6 +332,188 @@ export const GuidedComposerShell: FC<{
       : composerStep === 'review' && reviewHasBlockingError
       ? 'Resolve blocking caption errors or disable those destinations.'
       : '';
+
+  useEffect(() => {
+    const videos = globalMedia.filter((media) => isGuidedMp4MovMedia(media));
+    const previousVideoIds = previousVideoIdsRef.current;
+    const newlyAttachedVideo = videos.find(
+      (media) => !previousVideoIds.has(media.id)
+    );
+    const currentSource = videos.find((media) => media.id === sourceMediaId);
+    const nextSource =
+      newlyAttachedVideo && sourceMediaId && newlyAttachedVideo.id !== sourceMediaId
+        ? newlyAttachedVideo
+        : currentSource || selectGuidedSourceVideo(videos, sourceMediaId || undefined);
+    const nextSourceId = nextSource?.id || null;
+
+    previousVideoIdsRef.current = new Set(videos.map((media) => media.id));
+
+    if (currentSource) {
+      sourceMediaSnapshotRef.current = currentSource;
+    }
+
+    if (nextSourceId === sourceMediaId) {
+      return;
+    }
+
+    const previousSourceId = sourceMediaId;
+    if (!previousSourceId) {
+      setSourceTransitionError(null);
+      selectSourceMedia(nextSourceId);
+      return;
+    }
+
+    if (sourceDeletionInFlightRef.current.has(previousSourceId)) {
+      return;
+    }
+
+    sourceDeletionInFlightRef.current.add(previousSourceId);
+    setSourceTransitionPending(true);
+    setSourceTransitionError(null);
+
+    const previousSource = sourceMediaSnapshotRef.current;
+    if (
+      previousSource?.id === previousSourceId &&
+      !globalMedia.some((media) => media.id === previousSourceId)
+    ) {
+      setGlobalValueMedia(0, [...globalMedia, previousSource]);
+    }
+
+    void (async () => {
+      try {
+        const response = await fetch(`/media/${previousSourceId}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) {
+          throw new Error('The previous video could not be deleted.');
+        }
+
+        if (!composerMountedRef.current) {
+          return;
+        }
+
+        const latestGuidedState = useGuidedComposerStore.getState();
+        if (latestGuidedState.sourceMediaId !== previousSourceId) {
+          return;
+        }
+
+        const latestLaunchState = useLaunchStore.getState();
+        const latestMedia = latestLaunchState.global[0]?.media || [];
+        const latestVideos = latestMedia.filter(
+          (media) =>
+            media.id !== previousSourceId && isGuidedMp4MovMedia(media)
+        );
+        const confirmedNextSource =
+          latestVideos.find((media) => media.id === nextSourceId) ||
+          selectGuidedSourceVideo(latestVideos, nextSourceId || undefined);
+
+        selectSourceMedia(confirmedNextSource?.id || null);
+
+        if (latestMedia.some((media) => media.id === previousSourceId)) {
+          setGlobalValueMedia(
+            0,
+            latestMedia.filter((media) => media.id !== previousSourceId)
+          );
+        }
+      } catch {
+        if (!composerMountedRef.current) {
+          return;
+        }
+
+        const latestLaunchState = useLaunchStore.getState();
+        const latestMedia = latestLaunchState.global[0]?.media || [];
+        const previousSource = sourceMediaSnapshotRef.current;
+        if (
+          previousSource?.id === previousSourceId &&
+          !latestMedia.some((media) => media.id === previousSourceId)
+        ) {
+          setGlobalValueMedia(0, [...latestMedia, previousSource]);
+        }
+        setSourceTransitionError(
+          'The previous video could not be removed. Please try again.'
+        );
+      } finally {
+        sourceDeletionInFlightRef.current.delete(previousSourceId);
+        if (composerMountedRef.current) {
+          setSourceTransitionPending(false);
+        }
+      }
+    })();
+  }, [
+    fetch,
+    globalMedia,
+    selectSourceMedia,
+    setGlobalValueMedia,
+    sourceMediaId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !sourceMediaId ||
+      transcriptionStatus === 'READY' ||
+      transcriptionStatus === 'FAILED'
+    ) {
+      return;
+    }
+
+    let active = true;
+    let statusTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const syncStatus = async (method: 'GET' | 'POST') => {
+      try {
+        const response = await fetch(
+          method === 'POST'
+            ? `/media/${sourceMediaId}/transcription/ensure`
+            : `/media/${sourceMediaId}/transcription`,
+          { method }
+        );
+        if (!response.ok) {
+          throw new Error('Transcription could not be started.');
+        }
+
+        const status = await response.json();
+        if (!active || status.mediaId !== sourceMediaId) {
+          return;
+        }
+
+        setTranscriptionState(
+          sourceMediaId,
+          status.status,
+          status.error?.message || null
+        );
+
+        if (status.status === 'PENDING' || status.status === 'PROCESSING') {
+          statusTimer = setTimeout(() => void syncStatus('GET'), 2_000);
+        }
+      } catch (error) {
+        if (active) {
+          setTranscriptionState(
+            sourceMediaId,
+            'FAILED',
+            error instanceof Error
+              ? error.message
+              : 'Transcription could not be started.'
+          );
+        }
+      }
+    };
+
+    void syncStatus(
+      transcriptionStatus === 'PROCESSING' ? 'GET' : 'POST'
+    );
+
+    return () => {
+      active = false;
+      if (statusTimer) {
+        clearTimeout(statusTimer);
+      }
+    };
+  }, [
+    fetch,
+    setTranscriptionState,
+    sourceMediaId,
+    transcriptionStatus,
+  ]);
 
   useEffect(() => {
     pruneReviewDrafts(
@@ -365,7 +580,11 @@ export const GuidedComposerShell: FC<{
           goal: 'position',
         },
         (name, data) => {
-          if (composerMountedRef.current) {
+          if (
+            composerMountedRef.current &&
+            useGuidedComposerStore.getState().generationInputFingerprint ===
+              generationFingerprint
+          ) {
             setGenerationProgress(getGuidedGenerationProgress(name, data));
           }
         }
@@ -378,8 +597,10 @@ export const GuidedComposerShell: FC<{
       const currentLaunchState = useLaunchStore.getState();
       const currentGuidedState = useGuidedComposerStore.getState();
       const currentMedia = currentLaunchState.global[0]?.media || [];
-      const currentVideo = currentMedia.find((media) =>
-        isGuidedMp4MovMedia(media)
+      const currentVideo = currentMedia.find(
+        (media) =>
+          media.id === currentGuidedState.sourceMediaId &&
+          isGuidedMp4MovMedia(media)
       );
       const currentFingerprint = buildGuidedGenerationFingerprint({
         mediaId: currentVideo?.id,
@@ -430,7 +651,11 @@ export const GuidedComposerShell: FC<{
       );
       setComposerStep('review');
     } catch (error: any) {
-      if (composerMountedRef.current) {
+      if (
+        composerMountedRef.current &&
+        useGuidedComposerStore.getState().generationInputFingerprint ===
+          generationFingerprint
+      ) {
         failGeneration(
           error?.message || 'We could not generate captions. Please try again.',
           { fingerprint: generationFingerprint }
@@ -536,7 +761,7 @@ export const GuidedComposerShell: FC<{
                       type="button"
                       aria-current={isActive ? 'step' : undefined}
                       disabled={
-                        isFuture || generationLoading || (locked && !isActive)
+                        isFuture || navigationLocked || (locked && !isActive)
                       }
                       onClick={() => setComposerStep(step)}
                       className={clsx(
@@ -613,7 +838,10 @@ export const GuidedComposerShell: FC<{
               `}
             </style>
           </div>
-          <GuidedComposerUploadDetails disabled={navigationLocked} />
+          <GuidedComposerUploadDetails
+            disabled={navigationLocked}
+            sourceMutationError={sourceTransitionError}
+          />
         </div>
         {composerStep === 'destinations' && generationLoading && (
           <GuidedComposerGeneration progress={generationProgress} />

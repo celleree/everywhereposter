@@ -174,6 +174,10 @@ const seedGeneratedReview = ({
   );
   useGuidedComposerStore.getState().setCaptionMode(captionMode);
   useGuidedComposerStore.getState().setSourceCaption(sourceCaption);
+  useGuidedComposerStore.setState({
+    sourceMediaId: 'video-1',
+    transcriptionStatus: 'READY',
+  });
   const fingerprint = buildGuidedGenerationFingerprint({
     mediaId: 'video-1',
     destinations,

@@ -81,6 +81,10 @@ fi
 
 docker tag "$TARGET_IMAGE" "$RUNTIME_IMAGE"
 
+docker compose run --rm --no-deps --entrypoint /bin/sh \
+  "$SERVICE_NAME" -lc \
+  'cd /app && pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma'
+
 docker compose up -d --no-build --no-deps --force-recreate "$SERVICE_NAME"
 sleep "$STARTUP_WAIT_SECONDS"
 

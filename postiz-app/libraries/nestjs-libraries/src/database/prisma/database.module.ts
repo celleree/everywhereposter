@@ -52,6 +52,8 @@ import { KnowledgeBaseRepository } from '@gitroom/nestjs-libraries/database/pris
 import { KnowledgeBaseService } from '@gitroom/nestjs-libraries/database/prisma/knowledge-base/knowledge-base.service';
 import { HistoricalImportRepository } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.repository';
 import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.service';
+import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
+import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
 @Global()
 @Module({
@@ -82,6 +84,8 @@ import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/pris
     SignatureService,
     MediaService,
     MediaRepository,
+    MediaTranscriptionService,
+    MediaTranscriptionRepository,
     ReferenceImageRepository,
     ReferenceImageService,
     AgenciesService,

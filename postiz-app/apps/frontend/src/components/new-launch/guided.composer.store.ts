@@ -36,6 +36,12 @@ export type GuidedReviewBaselineSource = Exclude<
   'edited'
 >;
 export type GuidedReviewRegenerationStatus = 'idle' | 'loading' | 'failed';
+export type GuidedTranscriptionStatus =
+  | 'IDLE'
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'READY'
+  | 'FAILED';
 
 export interface GuidedReviewDraftSeed {
   destinationId: string;
@@ -58,6 +64,9 @@ export interface GuidedReviewDraft extends GuidedReviewDraftSeed {
 
 interface GuidedComposerValues {
   composerStep: GuidedComposerStep;
+  sourceMediaId: string | null;
+  transcriptionStatus: GuidedTranscriptionStatus;
+  transcriptionError: string | null;
   additionalContext: string;
   captionMode: CaptionMode;
   sourceCaption: string;
@@ -72,6 +81,12 @@ interface GuidedComposerValues {
 
 interface GuidedComposerStore extends GuidedComposerValues {
   setComposerStep: (composerStep: GuidedComposerStep) => void;
+  selectSourceMedia: (sourceMediaId: string | null) => void;
+  setTranscriptionState: (
+    sourceMediaId: string,
+    status: GuidedTranscriptionStatus,
+    error?: string | null
+  ) => void;
   nextComposerStep: () => void;
   previousComposerStep: () => void;
   setAdditionalContext: (additionalContext: string) => void;
@@ -129,6 +144,9 @@ const initialGenerationState = {
 
 const initialGuidedComposerState: GuidedComposerValues = {
   composerStep: 'upload',
+  sourceMediaId: null,
+  transcriptionStatus: 'IDLE',
+  transcriptionError: null,
   additionalContext: '',
   captionMode: 'generate',
   sourceCaption: '',
@@ -154,6 +172,20 @@ const moveComposerStep = (
 export const useGuidedComposerStore = create<GuidedComposerStore>()((set) => ({
   ...initialGuidedComposerState,
   setComposerStep: (composerStep) => set({ composerStep }),
+  selectSourceMedia: (sourceMediaId) =>
+    set({
+      sourceMediaId,
+      transcriptionStatus: sourceMediaId ? 'PENDING' : 'IDLE',
+      transcriptionError: null,
+      reviewDrafts: {},
+      ...initialGenerationState,
+    }),
+  setTranscriptionState: (sourceMediaId, transcriptionStatus, error = null) =>
+    set((state) =>
+      state.sourceMediaId === sourceMediaId
+        ? { transcriptionStatus, transcriptionError: error }
+        : state
+    ),
   nextComposerStep: () =>
     set((state) => ({
       composerStep: moveComposerStep(state.composerStep, 1),

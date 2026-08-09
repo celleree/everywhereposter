@@ -1,5 +1,7 @@
 import { CopyGenerationService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.service';
 import { AntiGenericService } from '@gitroom/nestjs-libraries/copy-generation/anti-generic.service';
+import { TranscriptionLifecycleError } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
+import { NotFoundException } from '@nestjs/common';
 
 const createSourceBriefService = (overrides: Record<string, any> = {}) => {
   const { assertMediaAccess, ...briefOverrides } = overrides;
@@ -845,6 +847,76 @@ describe('CopyGenerationService', () => {
     const completed = events[events.length - 1].data;
     expect(completed.status).toBe('failed');
     expect(completed.results).toHaveLength(0);
+    expect(modelService.generatePlatformDraft).not.toHaveBeenCalled();
+  });
+
+  it('returns a typed terminal response while transcription is pending', async () => {
+    const sourceBriefService = createSourceBriefService();
+    sourceBriefService.build.mockRejectedValueOnce(
+      new TranscriptionLifecycleError(
+        'TRANSCRIPTION_PENDING',
+        'The video is still being transcribed.'
+      )
+    );
+    const modelService = createModelService();
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin'],
+      goal: 'position',
+      knowledgeBaseFacts: [],
+    });
+
+    expect(events[events.length - 1]).toMatchObject({
+      name: 'completed',
+      data: {
+        status: 'failed',
+        results: [],
+        warnings: [
+          {
+            code: 'TRANSCRIPTION_PENDING',
+            message: 'The video is still being transcribed.',
+          },
+        ],
+      },
+    });
+    expect(modelService.generatePlatformDraft).not.toHaveBeenCalled();
+  });
+
+  it('returns a typed terminal response when the source is deleted during generation', async () => {
+    const sourceBriefService = createSourceBriefService();
+    sourceBriefService.build.mockRejectedValueOnce(
+      new NotFoundException('Media not found')
+    );
+    const modelService = createModelService();
+    const service = new CopyGenerationService(
+      sourceBriefService as any,
+      new AntiGenericService(),
+      modelService as any
+    );
+
+    const events = await consumeGenerator(service, {
+      mediaId: 'media-1',
+      platforms: ['linkedin'],
+      goal: 'position',
+      knowledgeBaseFacts: [],
+    });
+
+    expect(events[events.length - 1]).toMatchObject({
+      name: 'completed',
+      data: {
+        status: 'failed',
+        results: [],
+        warnings: [
+          expect.objectContaining({ code: 'SOURCE_MEDIA_UNAVAILABLE' }),
+        ],
+      },
+    });
     expect(modelService.generatePlatformDraft).not.toHaveBeenCalled();
   });
 

@@ -11,6 +11,7 @@ import {
   CopyGenerationWarning,
   VoiceProfileSnapshot,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
+import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
 export interface VisualScene {
   timestampSeconds: number;
@@ -94,7 +95,8 @@ export class SourceBriefService {
   constructor(
     private readonly _mediaRepository: MediaRepository,
     private readonly _copyGenerationModelService: CopyGenerationModelService,
-    private readonly _knowledgeBaseService: KnowledgeBaseService
+    private readonly _knowledgeBaseService: KnowledgeBaseService,
+    private readonly _mediaTranscriptionService: MediaTranscriptionService
   ) {}
 
   async assertMediaAccess(orgId: string, mediaId: string) {
@@ -133,10 +135,11 @@ export class SourceBriefService {
     };
 
     try {
-      let transcript = body.transcript?.text?.trim()
+      let transcript: SourceBriefResult['transcript'] =
+        body.transcript?.source === 'manual' && body.transcript.text?.trim()
         ? {
             text: body.transcript.text.trim(),
-            source: body.transcript.source,
+            source: 'manual',
             confidence: body.transcript.confidence,
           }
         : undefined;
@@ -174,33 +177,21 @@ export class SourceBriefService {
         sourceConfidenceParts.push(imageInsights.sourceConfidence || 0.65);
       }
 
-      if (mediaType === 'video' && !transcript?.text) {
-        try {
-          const transcription =
-            await this._copyGenerationModelService.transcribeVideo({
-              inputPath: await getVideoInputPath(),
-              mimeType,
-              originalName: media.originalName || media.name,
-            });
-          if (transcription.text?.trim()) {
-            transcript = {
-              text: transcription.text.trim(),
-              source: 'generated',
-              confidence: 0.68,
-            };
-          } else {
-            warnings.push({
-              code: 'TRANSCRIPT_REQUIRED',
-              message:
-                'Auto transcription did not return usable text. Add a transcript for stronger grounded copy from this video.',
-            });
-          }
-        } catch {
-          warnings.push({
-            code: 'TRANSCRIPT_REQUIRED',
-            message:
-              'Auto transcription failed for this video. Add a transcript for stronger grounded copy.',
-          });
+      if (mediaType === 'video') {
+        if (transcript?.source === 'manual') {
+          await this._mediaTranscriptionService.ensureTranscriptionStarted(
+            orgId,
+            media.id
+          );
+        } else {
+          transcript = {
+            text: await this._mediaTranscriptionService.resolveForGeneration(
+              orgId,
+              media.id
+            ),
+            source: 'generated',
+            confidence: 0.68,
+          };
         }
       }
 

@@ -567,6 +567,10 @@ describe('guided composer video picker', () => {
         media: [createVideo('source')],
       } as any,
     ]);
+    useGuidedComposerStore.setState({
+      sourceMediaId: 'source',
+      transcriptionStatus: 'READY',
+    });
 
     const { rerender, unmount } = render(
       <GuidedComposerUploadDetails />

@@ -15,6 +15,7 @@ import {
   normalizeGuidedVideoFile,
   selectGuidedSourceVideo,
 } from '@gitroom/frontend/components/new-launch/guided.video.validation';
+import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 
 export {
   GUIDED_VIDEO_ACCEPT,
@@ -62,33 +63,75 @@ const isVideoFileCandidate = (file: File) =>
 
 export const GuidedComposerUploadDetails: FC<{
   disabled?: boolean;
-}> = ({ disabled = false }) => {
+  sourceMutationError?: string | null;
+}> = ({ disabled = false, sourceMutationError = null }) => {
   const [showContextHelp, setShowContextHelp] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const fetch = useFetch();
   const global = useLaunchStore((state) => state.global);
   const {
     additionalContext,
     captionMode,
     sourceCaption,
+    sourceMediaId,
+    transcriptionStatus,
+    transcriptionError,
     setAdditionalContext,
     setCaptionMode,
     setSourceCaption,
+    setTranscriptionState,
   } = useGuidedComposerStore(
     useShallow((state) => ({
       additionalContext: state.additionalContext,
       captionMode: state.captionMode,
       sourceCaption: state.sourceCaption,
+      sourceMediaId: state.sourceMediaId,
+      transcriptionStatus: state.transcriptionStatus,
+      transcriptionError: state.transcriptionError,
       setAdditionalContext: state.setAdditionalContext,
       setCaptionMode: state.setCaptionMode,
       setSourceCaption: state.setSourceCaption,
+      setTranscriptionState: state.setTranscriptionState,
     }))
   );
 
   const attachedMedia = global[0]?.media || [];
-  const sourceVideo = attachedMedia.find((media) =>
-    isGuidedMp4MovMedia(media)
+  const sourceVideo = attachedMedia.find(
+    (media) =>
+      media.id === sourceMediaId && isGuidedMp4MovMedia(media)
   );
   const captionRequired = captionMode !== 'generate';
+
+  const retryTranscription = async () => {
+    if (!sourceMediaId) return;
+    setTranscriptionState(sourceMediaId, 'PENDING');
+    try {
+      const response = await fetch(
+        `/media/${sourceMediaId}/transcription/retry`,
+        { method: 'POST' }
+      );
+      if (!response.ok) {
+        throw new Error('Transcription retry could not be started.');
+      }
+      const status = await response.json();
+      if (status.mediaId !== sourceMediaId) {
+        return;
+      }
+      setTranscriptionState(
+        sourceMediaId,
+        status.status,
+        status.error?.message || null
+      );
+    } catch (error) {
+      setTranscriptionState(
+        sourceMediaId,
+        'FAILED',
+        error instanceof Error
+          ? error.message
+          : 'Transcription retry could not be started.'
+      );
+    }
+  };
 
   useLayoutEffect(() => {
     const legacySection = document.querySelector<HTMLElement>(
@@ -229,9 +272,51 @@ export const GuidedComposerUploadDetails: FC<{
         </div>
       )}
 
+      {!!sourceMutationError && (
+        <div className="mx-auto w-full max-w-[1600px] px-[40px] pt-[20px] mobile:px-[12px]">
+          <p role="alert" className="text-[12px] text-red-300">
+            {sourceMutationError}
+          </p>
+        </div>
+      )}
+
       {!!sourceVideo && (
         <div className="mx-auto w-full max-w-[1600px] px-[40px] pb-[40px] mobile:px-[12px] mobile:pb-[18px]">
           <div className="rounded-[20px] border border-newBorder bg-newBgColorInner p-[24px] mobile:rounded-[16px] mobile:p-[16px]">
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-[16px] flex flex-wrap items-center gap-[8px] text-[12px] text-textColor/65"
+            >
+              {(transcriptionStatus === 'PENDING' ||
+                transcriptionStatus === 'PROCESSING') && (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="h-[12px] w-[12px] animate-spin rounded-full border-2 border-newBorder border-t-ai"
+                  />
+                  <span>Transcribing… You can continue choosing destinations.</span>
+                </>
+              )}
+              {transcriptionStatus === 'READY' && (
+                <span>Transcript ready</span>
+              )}
+              {transcriptionStatus === 'FAILED' && (
+                <>
+                  <span className="text-red-300">
+                    {transcriptionError || 'Transcription failed.'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => void retryTranscription()}
+                    className="rounded-[8px] border border-newBorder px-[10px] py-[6px] font-[700] text-white disabled:opacity-50"
+                  >
+                    Retry transcription
+                  </button>
+                </>
+              )}
+            </div>
             <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-2">
               <section>
                 <div className="flex items-center gap-[8px]">
