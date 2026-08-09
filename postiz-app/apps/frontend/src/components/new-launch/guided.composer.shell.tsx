@@ -23,6 +23,11 @@ import {
   getGuidedGenerationProgress,
   GuidedComposerGeneration,
 } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
+import {
+  getGuidedReviewDestinationLimit,
+  getGuidedReviewDraftValidation,
+  GuidedComposerReview,
+} from '@gitroom/frontend/components/new-launch/guided.composer.review';
 import { requestMediaCopyGenerationForDestinations } from '@gitroom/frontend/components/new-launch/copy-generation.client';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
@@ -106,11 +111,12 @@ export const GuidedComposerShell: FC<{
   const generationRequestActiveRef = useRef(false);
   const composerMountedRef = useRef(true);
   const fetch = useFetch();
-  const { global, integrations, selectedIntegrations } = useLaunchStore(
+  const { global, integrations, selectedIntegrations, chars } = useLaunchStore(
     useShallow((state) => ({
       global: state.global,
       integrations: state.integrations,
       selectedIntegrations: state.selectedIntegrations,
+      chars: state.chars,
     }))
   );
   const {
@@ -122,6 +128,7 @@ export const GuidedComposerShell: FC<{
     generationProgress,
     generationError,
     generationInputFingerprint,
+    reviewDrafts,
     setComposerStep,
     nextComposerStep,
     previousComposerStep,
@@ -130,6 +137,7 @@ export const GuidedComposerShell: FC<{
     completeGeneration,
     failGeneration,
     invalidateGeneration,
+    pruneReviewDrafts,
     resetGuidedComposer,
   } = useGuidedComposerStore(
     useShallow((state) => ({
@@ -141,6 +149,7 @@ export const GuidedComposerShell: FC<{
       generationProgress: state.generationProgress,
       generationError: state.generationError,
       generationInputFingerprint: state.generationInputFingerprint,
+      reviewDrafts: state.reviewDrafts,
       setComposerStep: state.setComposerStep,
       nextComposerStep: state.nextComposerStep,
       previousComposerStep: state.previousComposerStep,
@@ -149,6 +158,7 @@ export const GuidedComposerShell: FC<{
       completeGeneration: state.completeGeneration,
       failGeneration: state.failGeneration,
       invalidateGeneration: state.invalidateGeneration,
+      pruneReviewDrafts: state.pruneReviewDrafts,
       resetGuidedComposer: state.resetGuidedComposer,
     }))
   );
@@ -190,6 +200,11 @@ export const GuidedComposerShell: FC<{
   const selectedDestinationCount = selectedIntegrations.filter((selected) =>
     availableDestinationIds.has(selected.integration.id)
   ).length;
+  const allSelectedDestinationsAvailable =
+    selectedIntegrations.length > 0 &&
+    selectedIntegrations.every((selected) =>
+      availableDestinationIds.has(selected.integration.id)
+    );
   const destinationStepValid = selectedDestinationCount > 0;
   const selectedDestinations = useMemo(
     () =>
@@ -198,12 +213,16 @@ export const GuidedComposerShell: FC<{
         .filter((integration) => availableDestinationIds.has(integration.id)),
     [availableDestinationIds, selectedIntegrations]
   );
+  const selectedGenerationDestinations = useMemo(
+    () => selectedIntegrations.map((selected) => selected.integration),
+    [selectedIntegrations]
+  );
   const uploadedVideo = globalMedia.find((media) => isGuidedMp4MovMedia(media));
   const generationFingerprint = useMemo(
     () =>
       buildGuidedGenerationFingerprint({
         mediaId: uploadedVideo?.id,
-        destinations: selectedDestinations,
+        destinations: selectedGenerationDestinations,
         captionMode,
         sourceCaption,
         additionalContext,
@@ -211,7 +230,7 @@ export const GuidedComposerShell: FC<{
     [
       additionalContext,
       captionMode,
-      selectedDestinations,
+      selectedGenerationDestinations,
       sourceCaption,
       uploadedVideo?.id,
     ]
@@ -220,6 +239,30 @@ export const GuidedComposerShell: FC<{
   const generationReady =
     generationInputFingerprint === generationFingerprint &&
     (generationStatus === 'complete' || generationStatus === 'partial');
+  const selectedReviewDrafts = selectedDestinations
+    .map((destination) => reviewDrafts[destination.id])
+    .filter(Boolean);
+  const enabledReviewDrafts = selectedReviewDrafts.filter(
+    (draft) => draft.enabled
+  );
+  const reviewRegenerationLoading = enabledReviewDrafts.some(
+    (draft) => draft.regenerationStatus === 'loading'
+  );
+  const reviewHasBlockingError = enabledReviewDrafts.some((draft) => {
+    const limit = getGuidedReviewDestinationLimit({
+      providerLimit: chars[draft.destinationId],
+      platform: draft.platform,
+    });
+    return Boolean(
+      getGuidedReviewDraftValidation(draft, limit, globalMedia.length > 0)
+        .errors.length
+    );
+  });
+  const reviewStepValid =
+    selectedReviewDrafts.length === selectedDestinations.length &&
+    enabledReviewDrafts.length > 0 &&
+    !reviewHasBlockingError &&
+    !reviewRegenerationLoading;
   const navigationLocked = locked || generationLoading;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
@@ -229,7 +272,11 @@ export const GuidedComposerShell: FC<{
     navigationLocked ||
     (composerStep === 'upload' && !uploadStepValid) ||
     (destinationRequiredForCurrentStep && !destinationStepValid) ||
-    (generationRequiredForCurrentStep && !generationReady);
+    (composerStep === 'destinations' &&
+      sourceType === 'video' &&
+      !allSelectedDestinationsAvailable) ||
+    (generationRequiredForCurrentStep && !generationReady) ||
+    (composerStep === 'review' && !reviewStepValid);
   const uploadValidationMessage =
     sourceType === 'video' && !hasUploadedVideo
       ? 'Upload an MP4 or MOV video to continue.'
@@ -243,7 +290,21 @@ export const GuidedComposerShell: FC<{
       ? uploadValidationMessage
       : destinationRequiredForCurrentStep && !destinationStepValid
       ? 'Select at least one destination to continue.'
+      : composerStep === 'destinations' &&
+        sourceType === 'video' &&
+        !allSelectedDestinationsAvailable
+      ? 'Wait for all selected destinations to load before generating captions.'
+      : composerStep === 'review' && !enabledReviewDrafts.length
+      ? 'Include at least one destination to continue.'
+      : composerStep === 'review' && reviewHasBlockingError
+      ? 'Resolve blocking caption errors or disable those destinations.'
       : '';
+
+  useEffect(() => {
+    pruneReviewDrafts(
+      selectedIntegrations.map((selected) => selected.integration.id)
+    );
+  }, [pruneReviewDrafts, selectedIntegrations]);
 
   useEffect(() => {
     if (
@@ -262,6 +323,10 @@ export const GuidedComposerShell: FC<{
 
   const generateForReview = useCallback(async () => {
     if (generationRequestActiveRef.current || generationStatus === 'loading') {
+      return;
+    }
+
+    if (!allSelectedDestinationsAvailable) {
       return;
     }
 
@@ -312,23 +377,15 @@ export const GuidedComposerShell: FC<{
 
       const currentLaunchState = useLaunchStore.getState();
       const currentGuidedState = useGuidedComposerStore.getState();
-      const currentAvailableIds = new Set(
-        currentLaunchState.integrations
-          .filter(
-            (integration) =>
-              !integration.disabled && !integration.inBetweenSteps
-          )
-          .map((integration) => integration.id)
-      );
       const currentMedia = currentLaunchState.global[0]?.media || [];
       const currentVideo = currentMedia.find((media) =>
         isGuidedMp4MovMedia(media)
       );
       const currentFingerprint = buildGuidedGenerationFingerprint({
         mediaId: currentVideo?.id,
-        destinations: currentLaunchState.selectedIntegrations
-          .map((selected) => selected.integration)
-          .filter((integration) => currentAvailableIds.has(integration.id)),
+        destinations: currentLaunchState.selectedIntegrations.map(
+          (selected) => selected.integration
+        ),
         captionMode: currentGuidedState.captionMode,
         sourceCaption: currentGuidedState.sourceCaption,
         additionalContext: currentGuidedState.additionalContext,
@@ -384,6 +441,7 @@ export const GuidedComposerShell: FC<{
     }
   }, [
     additionalContext,
+    allSelectedDestinationsAvailable,
     captionMode,
     completeGeneration,
     failGeneration,
@@ -563,8 +621,9 @@ export const GuidedComposerShell: FC<{
         {composerStep === 'destinations' && !generationLoading && (
           <GuidedComposerDestinations disabled={navigationLocked} />
         )}
-        {composerStep !== 'upload' && composerStep !== 'destinations' && (
-          <GuidedComposerPlaceholder step={composerStep} />
+        {composerStep === 'review' && <GuidedComposerReview />}
+        {composerStep === 'publish' && (
+          <GuidedComposerPlaceholder step="publish" />
         )}
       </main>
 
@@ -630,7 +689,7 @@ export const GuidedComposerShell: FC<{
 };
 
 const GuidedComposerPlaceholder: FC<{
-  step: Exclude<GuidedComposerStep, 'upload' | 'destinations'>;
+  step: 'publish';
 }> = ({ step }) => {
   const details = GUIDED_COMPOSER_STEP_DETAILS[step];
 

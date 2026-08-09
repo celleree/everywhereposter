@@ -79,7 +79,8 @@ describe('guided composer shell', () => {
     expect(screen.getByText('Existing composer content')).toBeTruthy();
     expect(screen.getByLabelText('Additional context')).toBeTruthy();
     expect(
-      screen.getByRole('radio', { name: /Create captions for me/ })
+      screen
+        .getByRole('radio', { name: /Create captions for me/ })
         .hasAttribute('checked')
     ).toBe(true);
     expect(
@@ -193,14 +194,14 @@ describe('guided composer shell', () => {
     fireEvent.click(destinationsStep);
 
     expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
-    expect(screen.getByText('Upload progress and cancel controls')).toBeTruthy();
+    expect(
+      screen.getByText('Upload progress and cancel controls')
+    ).toBeTruthy();
   });
 
   it('allows a valid legacy text draft to continue without media', () => {
     useLaunchStore.getState().setGlobalValueMedia(0, []);
-    useLaunchStore
-      .getState()
-      .setGlobalValueText(0, 'A normal text-only post.');
+    useLaunchStore.getState().setGlobalValueText(0, 'A normal text-only post.');
 
     render(
       <GuidedComposerShell>
@@ -392,7 +393,25 @@ describe('guided composer shell', () => {
     expect(useLaunchStore.getState().global[0].media).toEqual(mixedMedia);
   });
 
-  it('renders a placeholder for later phases while hiding upload content', () => {
+  it('renders the Review step while hiding upload content', async () => {
+    const integration = {
+      id: 'linkedin-account',
+      name: 'Founder LinkedIn',
+      identifier: 'linkedin',
+      display: 'LinkedIn',
+      disabled: false,
+      inBetweenSteps: false,
+    } as any;
+    useLaunchStore.getState().setAllIntegrations([integration]);
+    useLaunchStore
+      .getState()
+      .setSelectedIntegrations([
+        { selectedIntegrations: integration, settings: {} },
+      ]);
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+    useLaunchStore
+      .getState()
+      .setGlobalValueText(0, '<p>Original review caption</p>');
     useGuidedComposerStore.getState().setComposerStep('review');
 
     render(
@@ -402,13 +421,10 @@ describe('guided composer shell', () => {
     );
 
     expect(
-      screen.getAllByText('Review and refine each platform-specific version.')
-    ).toHaveLength(2);
-    expect(
-      screen.getByText(
-        'The existing controls for this stage will be connected in the next implementation phase.'
-      )
+      await screen.findByLabelText('Founder LinkedIn caption')
     ).toBeTruthy();
+    expect(screen.getByText('Destinations selected')).toBeTruthy();
+    expect(screen.queryByText(/existing controls for this stage/)).toBeNull();
     expect(
       screen.getByRole('button', { name: 'Continue to Publish' })
     ).toBeTruthy();
@@ -478,8 +494,8 @@ describe('guided composer shell', () => {
     expect(
       shouldUseGuidedComposerShell({ enabled: true, isCreateSet: true })
     ).toBe(false);
-    expect(
-      shouldUseGuidedComposerShell({ enabled: true, dummy: true })
-    ).toBe(false);
+    expect(shouldUseGuidedComposerShell({ enabled: true, dummy: true })).toBe(
+      false
+    );
   });
 });
