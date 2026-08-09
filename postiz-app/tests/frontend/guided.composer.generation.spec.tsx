@@ -185,12 +185,21 @@ const seedDraft = (destinations = [linkedinPersonal]) => {
     }))
   );
   useGuidedComposerStore.getState().setComposerStep('destinations');
+  useGuidedComposerStore.setState({
+    sourceMediaId: 'video-1',
+    transcriptionStatus: 'READY',
+    transcriptionError: null,
+  });
 };
 
 const seedTextDraft = () => {
   seedDraft();
   useLaunchStore.getState().setGlobalValueMedia(0, []);
   useLaunchStore.getState().setGlobalValueText(0, 'A text-only post.');
+  useGuidedComposerStore.setState({
+    sourceMediaId: null,
+    transcriptionStatus: 'IDLE',
+  });
 };
 
 const seedImageDraft = () => {
@@ -202,6 +211,10 @@ const seedImageDraft = () => {
       type: 'image',
     } as any,
   ]);
+  useGuidedComposerStore.setState({
+    sourceMediaId: null,
+    transcriptionStatus: 'IDLE',
+  });
 };
 
 const renderGeneration = () =>
@@ -379,6 +392,39 @@ describe('guided composer generation transition', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
+  it('shows TRANSCRIPTION_PENDING instead of a missing-final-payload error', async () => {
+    seedDraft();
+    const pendingResponse = {
+      ...response('failed'),
+      warnings: [
+        {
+          code: 'TRANSCRIPTION_PENDING',
+          message:
+            'The video is still being transcribed. You can retry generation shortly.',
+        },
+      ],
+    };
+    mockFetch.mockResolvedValue(streamResponse(pendingResponse as any));
+    renderGeneration();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+
+    expect(
+      await screen.findByText(
+        'The video is still being transcribed. You can retry generation shortly.'
+      )
+    ).toBeTruthy();
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      composerStep: 'destinations',
+      generationStatus: 'failed',
+      generationError:
+        'The video is still being transcribed. You can retry generation shortly.',
+    });
+    expect(
+      screen.queryByText('Post generation did not return a final payload')
+    ).toBeNull();
+  });
+
   it('keeps network failures on Destinations and allows retry', async () => {
     seedDraft();
     mockFetch
@@ -406,6 +452,64 @@ describe('guided composer generation transition', () => {
       expect(useGuidedComposerStore.getState().composerStep).toBe('review')
     );
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a stale generation failure after the source video is replaced', async () => {
+    seedDraft();
+    let rejectGeneration: ((error: Error) => void) | undefined;
+    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/posts/copy/generate') {
+        return new Promise((_resolve, reject) => {
+          rejectGeneration = reject;
+        });
+      }
+      if (url === '/media/video-1' && options?.method === 'DELETE') {
+        return Promise.resolve({ ok: true });
+      }
+      if (url === '/media/video-2/transcription/ensure') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: 'transcription-2',
+            mediaId: 'video-2',
+            generation: 1,
+            status: 'READY',
+            text: 'Replacement transcript.',
+            error: null,
+          }),
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    renderGeneration();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(rejectGeneration).toBeDefined());
+
+    act(() => {
+      useLaunchStore.getState().setGlobalValueMedia(0, [
+        ...(useLaunchStore.getState().global[0]?.media || []),
+        {
+          id: 'video-2',
+          path: 'https://media.example.com/replacement.mov',
+          type: 'video',
+        } as any,
+      ]);
+    });
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2')
+    );
+
+    act(() => rejectGeneration?.(new Error('Late failure from video 1')));
+
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState()).toMatchObject({
+        sourceMediaId: 'video-2',
+        generationStatus: 'idle',
+        generationError: null,
+        generationInputFingerprint: null,
+      })
+    );
   });
 
   it('retains unsupported-only destinations and does not make a network request', async () => {

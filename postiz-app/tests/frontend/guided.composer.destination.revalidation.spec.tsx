@@ -96,6 +96,10 @@ const seedDraft = () => {
     },
   ]);
   useLaunchStore.getState().setAllIntegrations([instagramIntegration]);
+  useGuidedComposerStore.setState({
+    sourceMediaId: 'video-1',
+    transcriptionStatus: 'READY',
+  });
 };
 
 describe('guided composer destination revalidation', () => {

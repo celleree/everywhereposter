@@ -291,7 +291,6 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
     return null;
   }
 
-  const manageModal = <ManageModal {...props} />;
   const hasPreloadedSet = !!props.set?.posts?.length;
   const guidedComposerEnabled = shouldUseGuidedComposerShell({
     enabled: props.enableGuidedComposerShell,
@@ -301,6 +300,9 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
     isCreateSet: !!props.addEditSets || hasPreloadedSet,
     dummy: !!props.dummy,
   });
+  const manageModal = (
+    <ManageModal {...props} guidedComposerActive={guidedComposerEnabled} />
+  );
 
   return (
     <>

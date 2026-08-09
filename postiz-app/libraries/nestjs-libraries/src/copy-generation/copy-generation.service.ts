@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { uniq, uniqBy } from 'lodash';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { GenerateMediaCopyDto } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.dto';
@@ -10,6 +10,7 @@ import {
   GenerateMediaCopyResult,
   ImagePlanItem,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
+import { TranscriptionLifecycleError } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 import {
   CopyPlatform,
   PlatformRuleOverrides,
@@ -162,7 +163,31 @@ export class CopyGenerationService {
     };
 
     if (captionMode === 'use-everywhere') {
-      await this._sourceBriefService.assertMediaAccess(orgId, body.mediaId);
+      try {
+        await this._sourceBriefService.assertMediaAccess(orgId, body.mediaId);
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) {
+          throw error;
+        }
+        yield {
+          name: 'completed',
+          data: {
+            requestId,
+            status: 'failed',
+            sourceConfidence: null,
+            warnings: [
+              {
+                code: 'SOURCE_MEDIA_UNAVAILABLE',
+                message:
+                  'The source media is no longer available. Select or upload it again before generating captions.',
+              },
+            ],
+            results: [],
+            imagePlans: [],
+          } satisfies GenerateMediaCopyResponse,
+        };
+        return;
+      }
       const sourceCaption = body.sourceCaption as string;
       const results: GenerateMediaCopyResult[] = [];
 
@@ -225,6 +250,47 @@ export class CopyGenerationService {
     try {
       sourceBrief = await this._sourceBriefService.build(orgId, body);
     } catch (error) {
+      if (error instanceof TranscriptionLifecycleError) {
+        yield {
+          name: 'completed',
+          data: {
+            requestId,
+            status: 'failed',
+            sourceConfidence: null,
+            warnings: [
+              {
+                code: error.code,
+                message: error.message,
+              },
+            ],
+            results: [],
+            imagePlans: [],
+          } satisfies GenerateMediaCopyResponse,
+        };
+        return;
+      }
+
+      if (error instanceof NotFoundException) {
+        yield {
+          name: 'completed',
+          data: {
+            requestId,
+            status: 'failed',
+            sourceConfidence: null,
+            warnings: [
+              {
+                code: 'SOURCE_MEDIA_UNAVAILABLE',
+                message:
+                  'The source media is no longer available. Select or upload it again before generating captions.',
+              },
+            ],
+            results: [],
+            imagePlans: [],
+          } satisfies GenerateMediaCopyResponse,
+        };
+        return;
+      }
+
       if (captionMode !== 'adapt-by-platform') {
         throw error;
       }

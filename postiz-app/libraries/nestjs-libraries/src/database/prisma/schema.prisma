@@ -232,10 +232,29 @@ model Media {
   agencies           SocialMediaAgency[]
   userPicture        User[]
   oauthApps          OAuthApp[]
+  transcription      MediaTranscription?
 
   @@index([name])
   @@index([organizationId])
   @@index([type])
+}
+
+model MediaTranscription {
+  id           String                   @id @default(uuid())
+  mediaId      String                   @unique
+  generation   Int                      @default(1)
+  status       MediaTranscriptionStatus @default(PENDING)
+  text         String?
+  errorCode    String?
+  errorMessage String?
+  requestedAt  DateTime                 @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  media        Media                    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@index([status, requestedAt])
 }
 
 model KnowledgeDocument {
@@ -1116,6 +1135,13 @@ enum KnowledgeInputMethod {
 }
 
 enum KnowledgeDocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum MediaTranscriptionStatus {
   PENDING
   PROCESSING
   READY

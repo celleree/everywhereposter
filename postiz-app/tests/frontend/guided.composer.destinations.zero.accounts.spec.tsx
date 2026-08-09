@@ -44,6 +44,10 @@ describe('guided composer destinations with zero connected accounts', () => {
       },
     ]);
     useLaunchStore.getState().setAllIntegrations([]);
+    useGuidedComposerStore.setState({
+      sourceMediaId: 'video-1',
+      transcriptionStatus: 'READY',
+    });
   });
 
   it('renders the reachable empty state and keeps review blocked', () => {

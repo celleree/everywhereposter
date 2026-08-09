@@ -29,6 +29,7 @@ import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { SaveMediaInformationDto } from '@gitroom/nestjs-libraries/dtos/media/save.media.information.dto';
 import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
+import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -38,7 +39,8 @@ export class MediaController {
 
   constructor(
     private _mediaService: MediaService,
-    private _subscriptionService: SubscriptionService
+    private _subscriptionService: SubscriptionService,
+    private _mediaTranscriptionService: MediaTranscriptionService
   ) {}
 
   @Delete('/:id')
@@ -95,7 +97,8 @@ export class MediaController {
   @UsePipes(new CustomFileValidationPipe())
   async uploadServer(
     @GetOrgFromRequest() org: Organization,
-    @UploadedFile() file: Express.Multer.File
+    @UploadedFile() file: Express.Multer.File,
+    @Body('guidedTranscription') guidedTranscription?: string
   ) {
     const originalName = file?.originalname || '';
     const uploadedFile = await this.storage.uploadFile(file);
@@ -105,7 +108,8 @@ export class MediaController {
       uploadedFile.originalname,
       uploadedFile.path,
       originalName,
-      uploadedFile.mimetype
+      uploadedFile.mimetype,
+      this.isGuidedTranscription(guidedTranscription)
     );
 
     if (!savedMedia?.id || savedMedia.path !== uploadedFile.path) {
@@ -131,7 +135,8 @@ export class MediaController {
     @GetOrgFromRequest() org: Organization,
     @Req() req: Request,
     @Body('name') name: string,
-    @Body('originalName') originalName: string
+    @Body('originalName') originalName: string,
+    @Body('guidedTranscription') guidedTranscription?: boolean | string
   ) {
     if (!name) {
       return false;
@@ -140,7 +145,9 @@ export class MediaController {
       org.id,
       name,
       process.env.CLOUDFLARE_BUCKET_URL + '/' + name,
-      originalName || undefined
+      originalName || undefined,
+      undefined,
+      this.isGuidedTranscription(guidedTranscription)
     );
   }
 
@@ -192,13 +199,18 @@ export class MediaController {
     // @ts-ignore
     const name = upload.Location.split('/').pop();
     const originalName = req.body?.file?.name;
+    const guidedTranscription =
+      req.body?.file?.meta?.guidedTranscription ??
+      req.body?.file?.guidedTranscription;
 
     const saveFile = await this._mediaService.saveFile(
       org.id,
       name,
       // @ts-ignore
       upload.Location,
-      originalName || undefined
+      originalName || undefined,
+      undefined,
+      this.isGuidedTranscription(guidedTranscription)
     );
 
     res.status(200).json({ ...upload, saved: saveFile });
@@ -240,6 +252,33 @@ export class MediaController {
     return this._mediaService.generateVideoAllowed(org, type);
   }
 
+  @Post('/:id/transcription/ensure')
+  ensureTranscription(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._mediaTranscriptionService.ensureTranscriptionStarted(
+      org.id,
+      id
+    );
+  }
+
+  @Post('/:id/transcription/retry')
+  retryTranscription(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._mediaTranscriptionService.retry(org.id, id);
+  }
+
+  @Get('/:id/transcription')
+  getTranscription(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._mediaTranscriptionService.getStatus(org.id, id);
+  }
+
   @Get('/:id')
   getMediaById(
     @GetOrgFromRequest() org: Organization,
@@ -263,6 +302,10 @@ export class MediaController {
     }
 
     return diskPath;
+  }
+
+  private isGuidedTranscription(value: unknown) {
+    return value === true || value === 'true';
   }
 
   private getLocalUploadDiskPath(publicPath: string) {

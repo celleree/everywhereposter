@@ -204,8 +204,9 @@ export const MediaBox: FC<{
   setMedia: (params: { id: string; path: string }[]) => void;
   standalone?: boolean;
   type?: 'image' | 'video';
+  guidedTranscription?: boolean;
   closeModal: () => void;
-}> = ({ type, standalone, setMedia }) => {
+}> = ({ type, standalone, setMedia, guidedTranscription = false }) => {
   const [page, setPage] = useState(0);
   const [source, setSource] = useState<'library' | 'posted'>('library');
   const fetch = useFetch();
@@ -237,6 +238,7 @@ export const MediaBox: FC<{
         : type == 'video'
         ? 'video/mp4,video/quicktime,video/mov'
         : 'image/*,video/mp4,video/quicktime,video/mov',
+    guidedTranscription,
     onUploadSuccess: async (arr) => {
       await mutate();
       if (standalone) {
