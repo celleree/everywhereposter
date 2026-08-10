@@ -200,6 +200,15 @@ const CHUNK_SIZE = 1024 * 1024;
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 const isVideoMedia = (media?: { path?: string; type?: string | null }) =>
   media?.type === 'video' || /\.(mp4|mov)(?:$|[?#])/i.test(media?.path || '');
+
+const isGuidedTranscriptionMedia = (media?: {
+  originalName?: string | null;
+  path?: string;
+  type?: string | null;
+}) =>
+  ['video/mp4', 'video/quicktime', 'video/mov'].includes(
+    (media?.type || '').toLowerCase()
+  ) || /\.(mp4|mov)(?:$|[?#])/i.test(media?.originalName || media?.path || '');
 export const MediaBox: FC<{
   setMedia: (params: { id: string; path: string }[]) => void;
   standalone?: boolean;
@@ -271,10 +280,23 @@ export const MediaBox: FC<{
     if (standalone) {
       return;
     }
+
+    if (guidedTranscription) {
+      await Promise.all(
+        selected
+          .filter(isGuidedTranscriptionMedia)
+          .map((media: any) =>
+            fetch(`/media/${media.id}/transcription/ensure`, {
+              method: 'POST',
+            }).catch(() => undefined)
+          )
+      );
+    }
+
     // @ts-ignore
     setMedia(selected);
     modals.closeCurrent();
-  }, [selected]);
+  }, [fetch, guidedTranscription, modals, selected, setMedia]);
 
   const addToUpload = useCallback(
     async (e: ChangeEvent<HTMLInputElement>) => {
