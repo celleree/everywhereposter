@@ -280,44 +280,77 @@ describe('guided composer publish', () => {
     expect(screen.getAllByText('Scheduled')).toHaveLength(2);
   });
 
-  it('preserves the draft and requires an explicit retry after an ambiguous failure', async () => {
-    const submitter = jest
-      .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        kind: 'transport',
-        message: 'The connection closed before a response arrived.',
-        ambiguous: true,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        posts: [
-          { postId: 'retry-personal', integration: linkedinPersonal.id },
-          { postId: 'retry-page', integration: linkedinPage.id },
-        ],
-      });
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ posts: [{ state: 'PUBLISHED' }] }),
+  it('preserves the draft and locks resubmission after an ambiguous failure', async () => {
+    const submitter = jest.fn().mockResolvedValue({
+      ok: false,
+      kind: 'transport',
+      message: 'The connection closed before a response arrived.',
+      ambiguous: true,
     });
+
+    renderPublish(submitter);
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'The connection closed before a response arrived.'
+    );
+    expect(submitter).toHaveBeenCalledTimes(1);
+    expect(
+      useGuidedComposerStore.getState().reviewDrafts[linkedinPage.id].caption
+    ).toBe('Final company caption.');
+    expect(screen.queryByRole('button', { name: 'Prepare retry' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Publish now' }).hasAttribute('disabled')
+    ).toBe(true);
+    expect(submitter).toHaveBeenCalledTimes(1);
+  });
+
+  it('locks an ERROR without release identifiers and does not resubmit', async () => {
+    const submitter = jest.fn().mockResolvedValue({
+      ok: true,
+      posts: [
+        { postId: 'post-personal', integration: linkedinPersonal.id },
+        { postId: 'post-page', integration: linkedinPage.id },
+      ],
+    });
+    mockFetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () => ({
+        posts: [
+          {
+            id: url.slice('/posts/'.length),
+            state: url.endsWith('post-page') ? 'ERROR' : 'PUBLISHED',
+            ...(url.endsWith('post-page')
+              ? {
+                  error: 'Provider rejected this destination.',
+                  releaseId: null,
+                  releaseURL: null,
+                }
+              : {}),
+          },
+        ],
+      }),
+    }));
 
     renderPublish(submitter);
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
 
     expect(
       await screen.findByText(
-        'The connection closed before a response arrived.'
+        'At least one destination failed, but retry is locked because publishing may already have started or the account requires reconnection.'
       )
     ).toBeTruthy();
-    expect(submitter).toHaveBeenCalledTimes(1);
-    expect(
-      useGuidedComposerStore.getState().reviewDrafts[linkedinPage.id].caption
-    ).toBe('Final company caption.');
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Check the calendar and connected accounts before retrying to avoid a duplicate post.'
+    );
+    expect(screen.getByText('Published')).toBeTruthy();
+    expect(screen.getByText('Failed')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Prepare retry' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Prepare retry' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
-
-    await waitFor(() => expect(submitter).toHaveBeenCalledTimes(2));
+    const publishButton = screen.getByRole('button', { name: 'Publish now' });
+    expect(publishButton.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(publishButton);
+    await waitFor(() => expect(submitter).toHaveBeenCalledTimes(1));
   });
 
   it('polls a returned post until PUBLISHED and stops at the configured timeout', async () => {
@@ -351,7 +384,10 @@ describe('guided composer publish', () => {
 
     expect(published.status).toBe('published');
     expect(publishedFetcher).toHaveBeenCalledTimes(2);
-    expect(publishedFetcher).toHaveBeenCalledWith('/posts/returned-post');
+    expect(publishedFetcher).toHaveBeenCalledWith(
+      '/posts/returned-post',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
 
     clock = 0;
     const queuedFetcher = jest.fn().mockResolvedValue({
@@ -372,7 +408,118 @@ describe('guided composer publish', () => {
 
     expect(timedOut.status).toBe('processing');
     expect(timedOut.message).toContain('Status checks stopped');
-    expect(queuedFetcher).toHaveBeenCalledTimes(3);
+    expect(queuedFetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('terminates a never-resolving status request inside the polling window', async () => {
+    let requestSignal: AbortSignal | undefined;
+    const startedAt = Date.now();
+    const result = await pollGuidedPublishPost({
+      fetcher: async (_url, options) => {
+        requestSignal = options?.signal;
+        return await new Promise(() => undefined);
+      },
+      reference: {
+        postId: 'hanging-post',
+        integration: linkedinPersonal.id,
+      },
+      timing: 'now',
+      timeoutMs: 25,
+      intervalMs: 5,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(result.status).toBe('processing');
+    expect(result.message).toContain('timed out');
+  });
+
+  it('waits for the full post chain and maps any child error as failure', async () => {
+    let clock = 0;
+    const chainFetcher = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          posts: [
+            { id: 'thread-root', state: 'PUBLISHED' },
+            { id: 'thread-child', state: 'QUEUE' },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          posts: [
+            { id: 'thread-root', state: 'PUBLISHED' },
+            { id: 'thread-child', state: 'PUBLISHED' },
+          ],
+        }),
+      });
+    const published = await pollGuidedPublishPost({
+      fetcher: chainFetcher,
+      reference: {
+        postId: 'thread-root',
+        integration: linkedinPersonal.id,
+      },
+      timing: 'now',
+      timeoutMs: 10,
+      intervalMs: 5,
+      now: () => clock,
+      pause: async (milliseconds) => {
+        clock += milliseconds;
+      },
+    });
+
+    expect(published.status).toBe('published');
+    expect(chainFetcher).toHaveBeenCalledTimes(2);
+
+    const failed = await pollGuidedPublishPost({
+      fetcher: async () => ({
+        ok: true,
+        json: async () => ({
+          posts: [
+            { id: 'failed-root', state: 'PUBLISHED' },
+            {
+              id: 'failed-child',
+              state: 'ERROR',
+              error: 'Comment failed.',
+            },
+          ],
+        }),
+      }),
+      reference: {
+        postId: 'failed-root',
+        integration: linkedinPage.id,
+      },
+      timing: 'now',
+    });
+
+    expect(failed).toMatchObject({
+      status: 'failed',
+      message: 'Comment failed.',
+      retryable: false,
+    });
+  });
+
+  it('does not show Scheduled when a schedule submission fails', async () => {
+    const submitter = jest.fn().mockResolvedValue({
+      ok: false,
+      kind: 'validation',
+      message: 'Schedule validation failed.',
+      ambiguous: false,
+    });
+
+    renderPublish(submitter);
+    fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Schedule validation failed.'
+    );
+    expect(screen.queryByText('Scheduled')).toBeNull();
+    expect(screen.getAllByText('Failed')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Prepare retry' })).toBeTruthy();
   });
 
   it('maps explicit backend reconnect state without claiming publication', async () => {

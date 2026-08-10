@@ -1123,7 +1123,7 @@ export const ManageModal: FC<
                 ok: false,
                 kind: 'request',
                 message,
-                ambiguous: false,
+                ambiguous: Boolean(guidedRequest),
               };
             }
 

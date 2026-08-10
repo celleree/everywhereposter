@@ -60,17 +60,21 @@ export type GuidedPublishSubmitResult =
 
 export type GuidedPublishDestinationStatus =
   | 'idle'
+  | 'submitting'
+  | 'accepted'
   | 'scheduled'
   | 'processing'
   | 'published'
   | 'failed'
-  | 'reconnect-required';
+  | 'reconnect-required'
+  | 'unknown';
 
 interface GuidedPublishDestinationResult {
   destinationId: string;
   postId?: string;
   status: GuidedPublishDestinationStatus;
   message?: string;
+  retryable?: boolean;
 }
 
 type GuidedPublishSubmitter = (
@@ -158,10 +162,8 @@ const wait = (milliseconds: number) =>
 const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
 
-const getPolledPost = (payload: any, postId: string) => {
-  const posts = Array.isArray(payload?.posts) ? payload.posts : [];
-  return posts.find((post: any) => post?.id === postId) || posts[0];
-};
+const getPolledPosts = (payload: any) =>
+  Array.isArray(payload?.posts) ? payload.posts : [];
 
 const hasReconnectState = (payload: any, post: any) =>
   Boolean(
@@ -193,43 +195,70 @@ export const pollGuidedPublishPost = async ({
   const startedAt = now();
   let lastError = '';
 
-  while (now() - startedAt <= timeoutMs) {
+  while (now() - startedAt < timeoutMs) {
+    const remainingMs = Math.max(0, timeoutMs - (now() - startedAt));
+    const controller = new AbortController();
+    let requestTimeout: ReturnType<typeof setTimeout> | undefined;
+
     try {
-      const response = await fetcher(
-        `/posts/${encodeURIComponent(reference.postId)}`
-      );
+      const response = await Promise.race([
+        fetcher(`/posts/${encodeURIComponent(reference.postId)}`, {
+          signal: controller.signal,
+        }),
+        new Promise<never>((_, reject) => {
+          requestTimeout = setTimeout(() => {
+            controller.abort();
+            reject(
+              new Error('The latest publishing status request timed out.')
+            );
+          }, remainingMs);
+        }),
+      ]);
 
       if (!response.ok) {
         lastError = 'The latest publishing status could not be loaded.';
       } else {
         const payload = await response.json();
-        const post = getPolledPost(payload, reference.postId);
+        const posts = getPolledPosts(payload);
+        const rootPost =
+          posts.find((post: any) => post?.id === reference.postId) || posts[0];
+        const failedPost = posts.find((post: any) => post?.state === 'ERROR');
 
-        if (!post) {
+        if (!rootPost) {
           lastError =
             'The submitted post was not present in the status response.';
-        } else if (post.state === 'PUBLISHED') {
+        } else if (failedPost) {
+          const reconnectRequired = posts.some((post: any) =>
+            hasReconnectState(payload, post)
+          );
+          return {
+            destinationId: reference.integration,
+            postId: reference.postId,
+            status: reconnectRequired ? 'reconnect-required' : 'failed',
+            retryable: false,
+            message: reconnectRequired
+              ? 'Reconnect this account before trying again.'
+              : getErrorMessage(
+                  failedPost.error,
+                  typeof failedPost.error === 'string'
+                    ? failedPost.error
+                    : 'Publishing failed for this destination.'
+                ),
+          };
+        } else if (
+          posts.length > 0 &&
+          posts.every((post: any) => post?.state === 'PUBLISHED')
+        ) {
           return {
             destinationId: reference.integration,
             postId: reference.postId,
             status: 'published',
           };
-        } else if (post.state === 'ERROR') {
-          const reconnectRequired = hasReconnectState(payload, post);
-          return {
-            destinationId: reference.integration,
-            postId: reference.postId,
-            status: reconnectRequired ? 'reconnect-required' : 'failed',
-            message: reconnectRequired
-              ? 'Reconnect this account before trying again.'
-              : getErrorMessage(
-                  post.error,
-                  typeof post.error === 'string'
-                    ? post.error
-                    : 'Publishing failed for this destination.'
-                ),
-          };
-        } else if (timing === 'schedule' && post.state === 'QUEUE') {
+        } else if (
+          timing === 'schedule' &&
+          posts.length > 0 &&
+          posts.every((post: any) => post?.state === 'QUEUE')
+        ) {
           return {
             destinationId: reference.integration,
             postId: reference.postId,
@@ -242,19 +271,25 @@ export const pollGuidedPublishPost = async ({
         error,
         'The latest publishing status could not be loaded.'
       );
+    } finally {
+      if (requestTimeout) {
+        clearTimeout(requestTimeout);
+      }
     }
 
     if (now() - startedAt >= timeoutMs) {
       break;
     }
 
-    await pause(intervalMs);
+    await pause(
+      Math.min(intervalMs, Math.max(0, timeoutMs - (now() - startedAt)))
+    );
   }
 
   return {
     destinationId: reference.integration,
     postId: reference.postId,
-    status: timing === 'schedule' ? 'scheduled' : 'processing',
+    status: timing === 'schedule' ? 'accepted' : 'processing',
     message:
       lastError ||
       (timing === 'schedule'
@@ -265,16 +300,20 @@ export const pollGuidedPublishPost = async ({
 
 const statusLabel: Record<GuidedPublishDestinationStatus, string> = {
   idle: 'Ready',
+  submitting: 'Submitting',
+  accepted: 'Status pending',
   scheduled: 'Scheduled',
   processing: 'Publishing',
   published: 'Published',
   failed: 'Failed',
   'reconnect-required': 'Reconnect required',
+  unknown: 'Status unknown',
 };
 
 export const GuidedComposerPublish: FC<{
+  active?: boolean;
   onSubmittingChange?: (submitting: boolean) => void;
-}> = ({ onSubmittingChange }) => {
+}> = ({ active = true, onSubmittingChange }) => {
   const fetch = useFetch();
   const { available, submit } = useContext(GuidedPublishBridgeContext);
   const { global, integrations, selectedIntegrations, chars, date, setDate } =
@@ -298,6 +337,9 @@ export const GuidedComposerPublish: FC<{
   const [results, setResults] = useState<
     Record<string, GuidedPublishDestinationResult>
   >({});
+  const [retryDestinationIds, setRetryDestinationIds] = useState<
+    string[] | null
+  >(null);
   const submissionInFlightRef = useRef(false);
 
   const availableDestinationIds = useMemo(
@@ -345,12 +387,20 @@ export const GuidedComposerPublish: FC<{
   const hasBlockingError = destinations.some(
     (destination) => validationByDestination[destination.id]?.errors.length > 0
   );
+  const submissionDestinations = useMemo(() => {
+    if (retryDestinationIds === null) {
+      return destinations;
+    }
+
+    const retryScope = new Set(retryDestinationIds);
+    return destinations.filter((destination) => retryScope.has(destination.id));
+  }, [destinations, retryDestinationIds]);
 
   const submitPublish = useCallback(async () => {
     if (
       submissionInFlightRef.current ||
       !available ||
-      !destinations.length ||
+      !submissionDestinations.length ||
       hasBlockingError
     ) {
       return;
@@ -361,24 +411,25 @@ export const GuidedComposerPublish: FC<{
     setPhase('submitting');
     setError('');
     setAmbiguous(false);
-    setResults(
-      Object.fromEntries(
-        destinations.map((destination) => [
-          destination.id,
-          {
-            destinationId: destination.id,
-            status: timing === 'schedule' ? 'scheduled' : 'processing',
-          },
-        ])
-      )
-    );
+    setResults((currentResults) => {
+      const nextResults = { ...currentResults };
+      submissionDestinations.forEach((destination) => {
+        nextResults[destination.id] = {
+          destinationId: destination.id,
+          status: 'submitting',
+        };
+      });
+      return nextResults;
+    });
 
     try {
       const request: GuidedPublishRequest = {
         type: timing,
-        destinationIds: destinations.map((destination) => destination.id),
+        destinationIds: submissionDestinations.map(
+          (destination) => destination.id
+        ),
         captionOverrides: Object.fromEntries(
-          destinations.map((destination) => [
+          submissionDestinations.map((destination) => [
             destination.id,
             reviewDrafts[destination.id].caption,
           ])
@@ -387,6 +438,25 @@ export const GuidedComposerPublish: FC<{
       const submitted = await submit(request);
 
       if (submitted.ok === false) {
+        const safeToRetry =
+          !submitted.ambiguous && submitted.kind === 'validation';
+        setResults((currentResults) => {
+          const nextResults = { ...currentResults };
+          submissionDestinations.forEach((destination) => {
+            nextResults[destination.id] = {
+              destinationId: destination.id,
+              status: safeToRetry ? 'failed' : 'unknown',
+              message: submitted.message,
+              retryable: safeToRetry,
+            };
+          });
+          return nextResults;
+        });
+        setRetryDestinationIds(
+          safeToRetry
+            ? submissionDestinations.map((destination) => destination.id)
+            : []
+        );
         setPhase('failed');
         setError(submitted.message);
         setAmbiguous(submitted.ambiguous);
@@ -396,22 +466,42 @@ export const GuidedComposerPublish: FC<{
       const referencesByDestination = new Map(
         submitted.posts.map((post) => [post.integration, post])
       );
-      const missingDestinations = destinations.filter(
+      const missingDestinations = submissionDestinations.filter(
         (destination) => !referencesByDestination.has(destination.id)
       );
+      setResults((currentResults) => {
+        const nextResults = { ...currentResults };
+        submissionDestinations.forEach((destination) => {
+          nextResults[destination.id] = {
+            destinationId: destination.id,
+            postId: referencesByDestination.get(destination.id)?.postId,
+            status: referencesByDestination.has(destination.id)
+              ? 'accepted'
+              : 'unknown',
+            ...(!referencesByDestination.has(destination.id)
+              ? {
+                  message:
+                    'The publishing response did not include this destination.',
+                }
+              : {}),
+          };
+        });
+        return nextResults;
+      });
       const pollResults = await Promise.all(
         submitted.posts.map((reference) =>
           pollGuidedPublishPost({ fetcher: fetch, reference, timing })
         )
       );
-      const nextResults = Object.fromEntries(
-        pollResults.map((result) => [result.destinationId, result])
-      );
+      const nextResults = { ...results };
+      pollResults.forEach((result) => {
+        nextResults[result.destinationId] = result;
+      });
 
       missingDestinations.forEach((destination) => {
         nextResults[destination.id] = {
           destinationId: destination.id,
-          status: 'failed',
+          status: 'unknown',
           message: 'The publishing response did not include this destination.',
         };
       });
@@ -424,22 +514,26 @@ export const GuidedComposerPublish: FC<{
       const confirmationTimedOut = Object.values(nextResults).some(
         (result) =>
           Boolean(result.message) &&
-          (result.status === 'processing' || result.status === 'scheduled')
+          (result.status === 'accepted' ||
+            result.status === 'processing' ||
+            result.status === 'unknown')
       );
-
-      if (terminalFailure || missingDestinations.length) {
-        setPhase('failed');
-        setError(
-          'At least one destination failed. Review each result before explicitly retrying.'
-        );
-        setAmbiguous(missingDestinations.length > 0);
-      } else if (confirmationTimedOut) {
+      if (confirmationTimedOut || missingDestinations.length) {
+        setRetryDestinationIds([]);
         setPhase('failed');
         setError(
           'The request was accepted, but the latest status could not be confirmed before polling stopped.'
         );
         setAmbiguous(true);
+      } else if (terminalFailure) {
+        setRetryDestinationIds([]);
+        setPhase('failed');
+        setError(
+          'At least one destination failed, but retry is locked because publishing may already have started or the account requires reconnection.'
+        );
+        setAmbiguous(true);
       } else {
+        setRetryDestinationIds([]);
         setPhase('success');
       }
     } finally {
@@ -452,17 +546,26 @@ export const GuidedComposerPublish: FC<{
     fetch,
     hasBlockingError,
     onSubmittingChange,
+    results,
     reviewDrafts,
     submit,
+    submissionDestinations,
     timing,
   ]);
 
   const retry = useCallback(() => {
+    if (ambiguous || !retryDestinationIds?.length) {
+      return;
+    }
+
     setPhase('idle');
     setError('');
     setAmbiguous(false);
-    setResults({});
-  }, []);
+  }, [ambiguous, retryDestinationIds]);
+
+  if (!active) {
+    return null;
+  }
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-[1120px] flex-col gap-[18px] p-[28px] mobile:p-[14px]">
@@ -551,6 +654,7 @@ export const GuidedComposerPublish: FC<{
                           'text-[11px] font-[700]',
                           result?.status === 'failed' ||
                             result?.status === 'reconnect-required' ||
+                            result?.status === 'unknown' ||
                             validation?.errors.length
                             ? 'text-red-300'
                             : result?.status === 'published' ||
@@ -673,7 +777,9 @@ export const GuidedComposerPublish: FC<{
         )}
 
         <div className="mt-[16px] flex justify-end gap-[10px] mobile:flex-col">
-          {phase === 'failed' && (
+          {phase === 'failed' &&
+            !ambiguous &&
+            Boolean(retryDestinationIds?.length) && (
             <button
               type="button"
               onClick={retry}
@@ -690,7 +796,7 @@ export const GuidedComposerPublish: FC<{
               phase === 'success' ||
               phase === 'failed' ||
               !available ||
-              !destinations.length ||
+              !submissionDestinations.length ||
               hasBlockingError
             }
             className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50 mobile:w-full"

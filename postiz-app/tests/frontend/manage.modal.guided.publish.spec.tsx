@@ -480,12 +480,46 @@ describe('ManageModal guided publishing bridge', () => {
     renderGuidedManageModal();
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
 
-    expect(await screen.findByText(/Please fix your settings/)).toBeTruthy();
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Please fix your settings'
+    );
     expect(
       mockFetch.mock.calls.some(
         ([url, options]) => url === '/posts' && options?.method === 'POST'
       )
     ).toBe(false);
+    expect(
+      useGuidedComposerStore.getState().reviewDrafts[founderLinkedIn.id].caption
+    ).toBe('Edited founder caption.');
+  });
+
+  it('treats every guided non-2xx post response as ambiguous and locks retry', async () => {
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/posts/should-shortlink') {
+        return { ok: true, json: async () => ({ ask: false }) };
+      }
+      if (url === '/posts' && options?.method === 'POST') {
+        return {
+          ok: false,
+          text: async () => JSON.stringify({ message: 'Backend failed.' }),
+        };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    renderGuidedManageModal();
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+
+    expect(await screen.findAllByText('Backend failed.')).toHaveLength(3);
+    expect(
+      screen.getByText(
+        'Check the calendar and connected accounts before retrying to avoid a duplicate post.'
+      )
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Prepare retry' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Publish now' }).hasAttribute('disabled')
+    ).toBe(true);
     expect(
       useGuidedComposerStore.getState().reviewDrafts[founderLinkedIn.id].caption
     ).toBe('Edited founder caption.');

@@ -755,6 +755,86 @@ describe('guided composer shell', () => {
     expect(screen.getByRole('button', { name: 'Back' }).hasAttribute('disabled')).toBe(
       false
     );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to Publish' })
+    );
+
+    expect(
+      await screen.findByText(
+        'Publishing was confirmed for every enabled destination.'
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Publish now' }).hasAttribute('disabled')
+    ).toBe(true);
+    expect(submitter).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves an ambiguous publish lock across Back navigation', async () => {
+    const integration = {
+      id: 'linkedin-account',
+      name: 'Founder LinkedIn',
+      identifier: 'linkedin',
+      display: 'LinkedIn',
+      picture: '',
+      disabled: false,
+      inBetweenSteps: false,
+    } as any;
+    useLaunchStore.getState().setAllIntegrations([integration]);
+    useLaunchStore
+      .getState()
+      .setSelectedIntegrations([
+        { selectedIntegrations: integration, settings: {} },
+      ]);
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+    useLaunchStore.getState().setGlobalValueText(0, 'Final global caption');
+    useLaunchStore.getState().setChars(integration.id, 3000);
+    useGuidedComposerStore.getState().reconcileReviewDrafts([
+      {
+        destinationId: integration.id,
+        platform: 'linkedin',
+        sourceFingerprint: 'ambiguous-publish-review',
+        caption: 'Final reviewed caption.',
+        baselineCaption: 'Generated caption.',
+        baselineSource: 'generated',
+        originalCaption: 'Original caption.',
+        warnings: [],
+      },
+    ]);
+    useGuidedComposerStore.getState().setComposerStep('publish');
+    const submitter = jest.fn().mockResolvedValue({
+      ok: false,
+      kind: 'transport',
+      message: 'The connection closed before a response arrived.',
+      ambiguous: true,
+    });
+
+    render(
+      <GuidedComposerShell>
+        <PublishBridge submitter={submitter} />
+      </GuidedComposerShell>
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'The connection closed before a response arrived.'
+    );
+    expect(screen.queryByRole('button', { name: 'Prepare retry' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to Publish' })
+    );
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'The connection closed before a response arrived.'
+    );
+    expect(
+      screen.getByRole('button', { name: 'Publish now' }).hasAttribute('disabled')
+    ).toBe(true);
+    expect(submitter).toHaveBeenCalledTimes(1);
   });
 
   it('resets guided state when the modal closes from a later step', () => {

@@ -856,9 +856,10 @@ export const GuidedComposerShell: FC<{
             <GuidedComposerDestinations disabled={navigationLocked} />
           )}
           {composerStep === 'review' && <GuidedComposerReview />}
-          {composerStep === 'publish' && (
-            <GuidedComposerPublish onSubmittingChange={setPublishSubmitting} />
-          )}
+          <GuidedComposerPublish
+            active={composerStep === 'publish'}
+            onSubmittingChange={setPublishSubmitting}
+          />
         </GuidedComposerPublishBridgeProvider>
       </main>
 
