@@ -195,9 +195,18 @@ export const ShowAllProviders = forwardRef(
   const hasGlobalMedia = !!global?.[0]?.media?.length;
 
   useImperativeHandle(ref, () => ({
-    checkAllValid: async () => {
+    checkAllValid: async (destinationIds?: string[]) => {
+      const destinationScope = destinationIds
+        ? new Set(destinationIds)
+        : null;
       return Promise.all(
-        selectedIntegrations.map(async (p) => await p.ref?.current.isValid())
+        selectedIntegrations
+          .filter(
+            (selected) =>
+              !destinationScope ||
+              destinationScope.has(selected.integration.id)
+          )
+          .map(async (p) => await p.ref?.current.isValid())
       );
     },
     getAllValues: async () => {
