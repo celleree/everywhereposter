@@ -58,6 +58,11 @@ import {
   mapIntegrationIdentifierToCopyPlatform,
 } from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
 import { GenerateMediaCopyResponse } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
+import {
+  GuidedPublishRequest,
+  GuidedPublishSubmitResult,
+  useRegisterGuidedComposerPublish,
+} from '@gitroom/frontend/components/new-launch/guided.composer.publish';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
@@ -133,6 +138,7 @@ export const ManageModal: FC<
   const t = useT();
   const fetch = useFetch();
   const ref = useRef<any>(null);
+  const submissionInFlightRef = useRef(false);
   const existingData = useExistingData();
   const [loading, setLoading] = useState(false);
   const toaster = useToaster();
@@ -834,8 +840,11 @@ export const ManageModal: FC<
     [appendGlobalValueMedia, generateCopyForPreset, queuedAiPreset]
   );
 
-  const schedule = useCallback(
-    (type: 'draft' | 'now' | 'schedule' | 'update') => async () => {
+  const executePostSubmission = useCallback(
+    async (
+      type: 'draft' | 'now' | 'schedule' | 'update',
+      guidedRequest?: GuidedPublishRequest
+    ): Promise<GuidedPublishSubmitResult> => {
       if (
         (type === 'now' || type === 'schedule') &&
         (existingData?.posts?.[0]?.state === 'PUBLISHED' ||
@@ -881,7 +890,27 @@ export const ManageModal: FC<
       }
 
       setLoading(true);
-      const checkAllValid = await ref.current.checkAllValid();
+      const checkedProviders = await ref.current.checkAllValid(
+        guidedRequest?.destinationIds
+      );
+      const checkAllValid = guidedRequest
+        ? checkedProviders.map((post: any) => ({
+            ...post,
+            values: post.values.map((value: any, index: number) =>
+              index === 0 &&
+              Object.prototype.hasOwnProperty.call(
+                guidedRequest.captionOverrides,
+                post.integration.id
+              )
+                ? {
+                    ...value,
+                    content:
+                      guidedRequest.captionOverrides[post.integration.id],
+                  }
+                : value
+            ),
+          }))
+        : checkedProviders;
 
       const notEnoughChars = checkAllValid.filter((p: any) => {
         return p.values.some((a: any) => {
@@ -895,48 +924,61 @@ export const ManageModal: FC<
       });
 
       for (const item of notEnoughChars) {
-        toaster.show(
+        const message =
           `${capitalize(item.integration.identifier.split('-')[0])} (${
             item.integration.name
           }):` +
-            ' ' +
-            t(
-              'post_needs_content_or_image',
-              'Your post should have at least one character or one image.'
-            ),
-          'warning'
-        );
+          ' ' +
+          t(
+            'post_needs_content_or_image',
+            'Your post should have at least one character or one image.'
+          );
+        toaster.show(message, 'warning');
         setLoading(false);
         item.preview();
-        return;
+        return {
+          ok: false,
+          kind: 'validation',
+          message,
+          ambiguous: false,
+        };
       }
 
       if (type !== 'draft') {
         for (const item of checkAllValid) {
           if (item.valid === false) {
-            toaster.show(
-              `${capitalize(item.integration.identifier.split('-')[0])} (${
-                item.integration.name
-              }): ${t('please_fix_your_settings', 'Please fix your settings')}`,
-              'warning'
-            );
+            const message = `${capitalize(
+              item.integration.identifier.split('-')[0]
+            )} (${item.integration.name}): ${t(
+              'please_fix_your_settings',
+              'Please fix your settings'
+            )}`;
+            toaster.show(message, 'warning');
             item.fix();
             setLoading(false);
             setShowSettings(true);
-            return;
+            return {
+              ok: false,
+              kind: 'validation',
+              message,
+              ambiguous: false,
+            };
           }
 
           if (item.errors !== true) {
-            toaster.show(
-              `${capitalize(item.integration.identifier.split('-')[0])} (${
-                item.integration.name
-              }): ${item.errors}`,
-              'warning'
-            );
+            const message = `${capitalize(
+              item.integration.identifier.split('-')[0]
+            )} (${item.integration.name}): ${item.errors}`;
+            toaster.show(message, 'warning');
             item.preview();
             setLoading(false);
             setShowSettings(false);
-            return;
+            return {
+              ok: false,
+              kind: 'validation',
+              message,
+              ambiguous: false,
+            };
           }
         }
 
@@ -947,23 +989,26 @@ export const ManageModal: FC<
               strip,
               p?.integration?.identifier || ''
             );
-            const totalCharacters = weighted > strip.length ? weighted : strip.length;
+            const totalCharacters =
+              weighted > strip.length ? weighted : strip.length;
 
             return totalCharacters > (p.maximumCharacters || 1000000);
           });
         });
 
         for (const item of sliceNeeded) {
-          toaster.show(
-            `${item?.integration?.name} (${item?.integration?.identifier}) ${t(
-              'post_is_too_long',
-              'post is too long, please fix it'
-            )}`,
-            'warning'
-          );
+          const message = `${item?.integration?.name} (${
+            item?.integration?.identifier
+          }) ${t('post_is_too_long', 'post is too long, please fix it')}`;
+          toaster.show(message, 'warning');
           item.preview();
           setLoading(false);
-          return;
+          return {
+            ok: false,
+            kind: 'validation',
+            message,
+            ambiguous: false,
+          };
         }
       }
 
@@ -1045,6 +1090,8 @@ export const ManageModal: FC<
         setLoading(false);
       }
 
+      let submittedPosts: Array<{ postId: string; integration: string }> = [];
+
       if (!dummy) {
         try {
           if (addEditSets) {
@@ -1072,38 +1119,91 @@ export const ManageModal: FC<
 
               toaster.show(message, 'warning');
               setLoading(false);
-              return;
+              return {
+                ok: false,
+                kind: 'request',
+                message,
+                ambiguous: false,
+              };
+            }
+
+            if (guidedRequest) {
+              try {
+                const responseBody = await response.json();
+                const destinationIds = new Set(guidedRequest.destinationIds);
+
+                if (!Array.isArray(responseBody)) {
+                  throw new Error('The publishing response was not a list.');
+                }
+
+                submittedPosts = responseBody
+                  .filter(
+                    (post: any) =>
+                      typeof post?.postId === 'string' &&
+                      typeof post?.integration === 'string' &&
+                      destinationIds.has(post.integration)
+                  )
+                  .map((post: any) => ({
+                    postId: post.postId,
+                    integration: post.integration,
+                  }));
+
+                if (!submittedPosts.length) {
+                  throw new Error(
+                    'The publishing response did not include any submitted post IDs.'
+                  );
+                }
+              } catch {
+                const message =
+                  'The publishing request was accepted, but its result could not be confirmed.';
+                toaster.show(message, 'warning');
+                setLoading(false);
+                return {
+                  ok: false,
+                  kind: 'response',
+                  message,
+                  ambiguous: true,
+                };
+              }
             }
           }
         } catch (error) {
-          toaster.show(
+          const message =
             error instanceof Error
               ? error.message
-              : t('failed_to_save_post', 'Failed to save post'),
-            'warning'
-          );
+              : t('failed_to_save_post', 'Failed to save post');
+          toaster.show(message, 'warning');
           setLoading(false);
-          return;
+          return {
+            ok: false,
+            kind: 'transport',
+            message,
+            ambiguous: Boolean(guidedRequest),
+          };
         }
 
         if (!addEditSets) {
           mutate();
-          toaster.show(
-            !existingData.integration
-              ? t('added_successfully', 'Added successfully')
-              : t('updated_successfully', 'Updated successfully')
-          );
+          if (!guidedRequest) {
+            toaster.show(
+              !existingData.integration
+                ? t('added_successfully', 'Added successfully')
+                : t('updated_successfully', 'Updated successfully')
+            );
+          }
         }
-        if (customClose) {
+        if (customClose && !guidedRequest) {
           setTimeout(() => {
             customClose();
           }, 2000);
         }
 
-        if (!addEditSets) {
+        if (!addEditSets && !guidedRequest) {
           modal.closeAll();
         }
       }
+
+      return { ok: true, posts: submittedPosts };
     },
     [
       addEditSets,
@@ -1122,6 +1222,65 @@ export const ManageModal: FC<
       tags,
       toaster,
     ]
+  );
+
+  const submitPost = useCallback(
+    async (
+      type: 'draft' | 'now' | 'schedule' | 'update',
+      guidedRequest?: GuidedPublishRequest
+    ): Promise<GuidedPublishSubmitResult> => {
+      if (submissionInFlightRef.current) {
+        return {
+          ok: false,
+          kind: 'duplicate',
+          message: 'A publishing request is already in progress.',
+          ambiguous: false,
+        };
+      }
+
+      submissionInFlightRef.current = true;
+
+      try {
+        return await executePostSubmission(type, guidedRequest);
+      } catch (error) {
+        if (!guidedRequest) {
+          throw error;
+        }
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : t('failed_to_save_post', 'Failed to save post');
+        toaster.show(message, 'warning');
+        return {
+          ok: false,
+          kind: 'request',
+          message,
+          ambiguous: false,
+        };
+      } finally {
+        submissionInFlightRef.current = false;
+        setLoading(false);
+      }
+    },
+    [executePostSubmission, t, toaster]
+  );
+
+  const schedule = useCallback(
+    (type: 'draft' | 'now' | 'schedule' | 'update') => () => {
+      void submitPost(type);
+    },
+    [submitPost]
+  );
+
+  const submitGuidedPost = useCallback(
+    (request: GuidedPublishRequest) => submitPost(request.type, request),
+    [submitPost]
+  );
+
+  useRegisterGuidedComposerPublish(
+    submitGuidedPost,
+    props.guidedComposerActive === true
   );
 
   return (

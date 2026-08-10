@@ -29,6 +29,10 @@ import {
   getGuidedReviewDraftValidation,
   GuidedComposerReview,
 } from '@gitroom/frontend/components/new-launch/guided.composer.review';
+import {
+  GuidedComposerPublish,
+  GuidedComposerPublishBridgeProvider,
+} from '@gitroom/frontend/components/new-launch/guided.composer.publish';
 import { requestMediaCopyGenerationForDestinations } from '@gitroom/frontend/components/new-launch/copy-generation.client';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import {
@@ -125,6 +129,7 @@ export const GuidedComposerShell: FC<{
   const [sourceTransitionError, setSourceTransitionError] = useState<
     string | null
   >(null);
+  const [publishSubmitting, setPublishSubmitting] = useState(false);
   const fetch = useFetch();
   const {
     global,
@@ -296,7 +301,7 @@ export const GuidedComposerShell: FC<{
     !reviewHasBlockingError &&
     !reviewRegenerationLoading;
   const navigationLocked =
-    locked || generationLoading || sourceTransitionPending;
+    locked || generationLoading || sourceTransitionPending || publishSubmitting;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
   const generationRequiredForCurrentStep =
@@ -811,15 +816,16 @@ export const GuidedComposerShell: FC<{
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div
-          data-testid="guided-composer-upload-content"
-          hidden={composerStep !== 'upload'}
-          className="min-h-full"
-        >
-          <div className="guided-upload-existing-composer">
-            {children}
-            <style>
-              {`
+        <GuidedComposerPublishBridgeProvider>
+          <div
+            data-testid="guided-composer-upload-content"
+            hidden={composerStep !== 'upload'}
+            className="min-h-full"
+          >
+            <div className="guided-upload-existing-composer">
+              {children}
+              <style>
+                {`
                 .guided-upload-existing-composer #social-content > section:not([data-guided-composer-section="media"]):not([data-guided-composer-section="editor"]) {
                   display: none !important;
                 }
@@ -836,23 +842,24 @@ export const GuidedComposerShell: FC<{
                   display: none !important;
                 }
               `}
-            </style>
+              </style>
+            </div>
+            <GuidedComposerUploadDetails
+              disabled={navigationLocked}
+              sourceMutationError={sourceTransitionError}
+            />
           </div>
-          <GuidedComposerUploadDetails
-            disabled={navigationLocked}
-            sourceMutationError={sourceTransitionError}
-          />
-        </div>
-        {composerStep === 'destinations' && generationLoading && (
-          <GuidedComposerGeneration progress={generationProgress} />
-        )}
-        {composerStep === 'destinations' && !generationLoading && (
-          <GuidedComposerDestinations disabled={navigationLocked} />
-        )}
-        {composerStep === 'review' && <GuidedComposerReview />}
-        {composerStep === 'publish' && (
-          <GuidedComposerPlaceholder step="publish" />
-        )}
+          {composerStep === 'destinations' && generationLoading && (
+            <GuidedComposerGeneration progress={generationProgress} />
+          )}
+          {composerStep === 'destinations' && !generationLoading && (
+            <GuidedComposerDestinations disabled={navigationLocked} />
+          )}
+          {composerStep === 'review' && <GuidedComposerReview />}
+          {composerStep === 'publish' && (
+            <GuidedComposerPublish onSubmittingChange={setPublishSubmitting} />
+          )}
+        </GuidedComposerPublishBridgeProvider>
       </main>
 
       <footer className="border-t border-newBorder bg-newBgColorInner px-[24px] py-[14px] mobile:px-[14px]">
@@ -866,26 +873,26 @@ export const GuidedComposerShell: FC<{
             Back
           </button>
 
-          <div className="flex min-w-0 flex-col items-end gap-[5px] mobile:items-stretch">
-            {!!continueValidationMessage && (
-              <div
-                role="status"
-                className="text-end text-[12px] text-textColor/55 mobile:text-start"
-              >
-                {continueValidationMessage}
-              </div>
-            )}
-            {!!generationError &&
-              composerStep === 'destinations' &&
-              sourceType === 'video' && (
+          {nextStep && (
+            <div className="flex min-w-0 flex-col items-end gap-[5px] mobile:items-stretch">
+              {!!continueValidationMessage && (
                 <div
-                  role="alert"
-                  className="max-w-[460px] text-end text-[12px] text-red-400 mobile:text-start"
+                  role="status"
+                  className="text-end text-[12px] text-textColor/55 mobile:text-start"
                 >
-                  {generationError}
+                  {continueValidationMessage}
                 </div>
               )}
-            {nextStep ? (
+              {!!generationError &&
+                composerStep === 'destinations' &&
+                sourceType === 'video' && (
+                  <div
+                    role="alert"
+                    className="max-w-[460px] text-end text-[12px] text-red-400 mobile:text-start"
+                  >
+                    {generationError}
+                  </div>
+                )}
               <button
                 type="button"
                 disabled={continueDisabled}
@@ -900,44 +907,10 @@ export const GuidedComposerShell: FC<{
                   ? 'Retry generation'
                   : `Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}
               </button>
-            ) : (
-              <button
-                type="button"
-                disabled
-                className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white opacity-50 mobile:w-full"
-              >
-                Publish
-              </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </footer>
-    </div>
-  );
-};
-
-const GuidedComposerPlaceholder: FC<{
-  step: 'publish';
-}> = ({ step }) => {
-  const details = GUIDED_COMPOSER_STEP_DETAILS[step];
-
-  return (
-    <div className="flex min-h-full w-full items-center justify-center p-[40px] mobile:p-[18px]">
-      <div className="w-full max-w-[680px] rounded-[20px] border border-newBorder bg-newBgColorInner p-[28px] text-center mobile:rounded-[16px] mobile:p-[20px]">
-        <div className="mx-auto flex h-[42px] w-[42px] items-center justify-center rounded-full bg-newBgLineColor text-[14px] font-[700] text-white">
-          {GUIDED_COMPOSER_STEPS.indexOf(step) + 1}
-        </div>
-        <h2 className="mt-[16px] text-[22px] font-[700] text-white mobile:text-[19px]">
-          {details.title}
-        </h2>
-        <p className="mx-auto mt-[8px] max-w-[500px] text-[14px] leading-[1.6] text-textColor/65">
-          {details.description}
-        </p>
-        <p className="mx-auto mt-[12px] max-w-[500px] text-[12px] leading-[1.5] text-textColor/45">
-          The existing controls for this stage will be connected in the next
-          implementation phase.
-        </p>
-      </div>
     </div>
   );
 };
