@@ -4,21 +4,24 @@ on:
   issues:
     types: [labeled]
   pull_request_target:
-    types: [ready_for_review, closed]
+    types: [closed]
+  workflow_run:
+    workflows: [Pull request CI]
+    types: [completed]
   workflow_dispatch:
     inputs:
       mode:
         description: Agent role to run
         required: true
         type: choice
-        options: [plan, implement, review, repair, memory]
+        options: [plan, implement, review, repair, ci-review, ci-repair, memory]
       number:
         description: Issue or pull request number
         required: true
         type: string
 
 concurrency:
-  group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}
+  group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || github.event.workflow_run.id || inputs.number }}
   cancel-in-progress: false
 
 permissions: {}
@@ -26,19 +29,32 @@ permissions: {}
 jobs:
   read-role:
     if: >-
-      github.actor == github.repository_owner &&
       (
-        (github.event_name == 'issues' && github.event.label.name == 'agent-ready') ||
-        (github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review') ||
-        (github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true) ||
         (
-          github.event_name == 'workflow_dispatch' &&
-          (inputs.mode == 'plan' || inputs.mode == 'review' || inputs.mode == 'memory')
+          github.actor == github.repository_owner &&
+          (
+            (github.event_name == 'issues' && github.event.label.name == 'agent-ready') ||
+            (github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true) ||
+            (
+              github.event_name == 'workflow_dispatch' &&
+              (inputs.mode == 'plan' || inputs.mode == 'review' || inputs.mode == 'ci-review' || inputs.mode == 'memory')
+            )
+          )
+        ) ||
+        (
+          github.event_name == 'workflow_run' &&
+          (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') &&
+          github.event.workflow_run.head_repository.full_name == github.repository &&
+          (
+            github.event.workflow_run.actor.login == github.repository_owner ||
+            github.event.workflow_run.actor.login == 'github-actions[bot]'
+          )
         )
       )
     runs-on: [self-hosted, linux, codex]
     timeout-minutes: 90
     permissions:
+      actions: read
       contents: read
       issues: write
       pull-requests: write
@@ -56,30 +72,41 @@ jobs:
       - name: Resolve read-only role and target
         id: task
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          MERGED_PR_NUMBER: ${{ github.event.pull_request.number }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_NUMBER: ${{ inputs.number }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
-            echo "number=${{ inputs.number }}" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event_name }}" == "issues" ]]; then
-            echo "mode=plan" >> "$GITHUB_OUTPUT"
-            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event.action }}" == "ready_for_review" ]]; then
-            echo "mode=review" >> "$GITHUB_OUTPUT"
-            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=memory" >> "$GITHUB_OUTPUT"
-            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          rm -rf "$GH_CONFIG_DIR"
+          mkdir -p "$GH_CONFIG_DIR"
+          bash scripts/agents/resolve-codex-verification.sh
 
       - name: Verify trusted runner tools
         env:
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
         run: |
+          set -euo pipefail
           rm -rf "$GH_CONFIG_DIR"
           mkdir -p "$GH_CONFIG_DIR"
           codex login status
           codex --version
+          codex debug models --bundled |
+            jq -e '
+              any(.models[]; .slug == "gpt-5.6-sol") and
+              any(.models[]; .slug == "gpt-5.6-terra")
+            ' >/dev/null
           gh --version
           git --version
           jq --version
@@ -87,16 +114,18 @@ jobs:
           bwrap --version
 
       - name: Run bounded Codex role
+        if: steps.task.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
+          CODEX_CI_RUN_ID: ${{ github.event.workflow_run.id }}
         run: sh scripts/agents/codex-task.sh "${{ steps.task.outputs.mode }}" "${{ steps.task.outputs.number }}"
 
   write-role:
     if: >-
       github.actor == github.repository_owner &&
       github.event_name == 'workflow_dispatch' &&
-      (inputs.mode == 'implement' || inputs.mode == 'repair')
+      (inputs.mode == 'implement' || inputs.mode == 'repair' || inputs.mode == 'ci-repair')
     runs-on: [self-hosted, linux, codex]
     timeout-minutes: 90
     permissions:
@@ -120,10 +149,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
         run: |
+          set -euo pipefail
           rm -rf "$GH_CONFIG_DIR"
           mkdir -p "$GH_CONFIG_DIR"
           codex login status
           codex --version
+          codex debug models --bundled |
+            jq -e '
+              any(.models[]; .slug == "gpt-5.6-sol") and
+              any(.models[]; .slug == "gpt-5.6-terra")
+            ' >/dev/null
           gh --version
           git --version
           jq --version

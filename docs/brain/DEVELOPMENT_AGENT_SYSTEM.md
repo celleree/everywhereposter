@@ -72,6 +72,31 @@ Responsibilities:
 - Track the exact commit and required deployment verification.
 - Never merge or deploy without explicit human approval.
 
+## Verification Model Policy
+
+- CI diagnosis and CI repair use `gpt-5.6-terra` with medium reasoning. CI failures are bounded, evidence-heavy tasks where Terra is the pragmatic workhorse.
+- Independent PR review uses `gpt-5.6-sol` with high reasoning because it is the quality-first, adversarial judgment step.
+- PR repair uses `gpt-5.6-terra` with medium reasoning and may address only evidence-backed review findings.
+- Verification roles must pass the model and reasoning effort explicitly. They must not inherit the runner's Codex default or user configuration.
+
+## CI Verification Loop
+
+1. Run pull-request CI for the exact current head commit.
+2. When CI fails, a read-only CI verifier inspects only the current failed run, failed-step logs, PR diff, and repository guidance.
+3. The verifier reports the first actionable root cause, smallest safe repair, and exact validation command. It does not edit.
+4. A human decides whether to launch `ci-repair`.
+5. CI repair fixes only the verified failure, pushes one focused commit, and dispatches pull-request CI again.
+6. Stop after CI succeeds or after the shared two-repair limit; unresolved or apparently transient failures return to a human.
+
+## PR Verification Loop
+
+1. Start independent PR review only after pull-request CI succeeds for the exact current head and the PR is no longer a draft.
+2. The read-only reviewer checks the PR context, complete diff, tests, and product contracts after the trusted current-head CI gate, then posts findings and a pass/fail recommendation.
+3. A human decides whether to launch `repair` for evidence-backed findings.
+4. PR repair pushes one focused commit and returns the new head to the CI verification loop.
+5. After CI succeeds for that new head, run a fresh independent PR review.
+6. Stop after review passes or after the shared two-repair limit; a human still decides whether to merge.
+
 ## Standard Workflow
 
 1. A ChatGPT project conversation defines the desired outcome.
@@ -80,9 +105,9 @@ Responsibilities:
 4. The implementer creates a branch from current `main` and performs the work.
 5. Focused local validation runs.
 6. A draft pull request is opened.
-7. A separate reviewer checks the issue, diff, tests, and product contracts.
-8. The repair agent addresses verified findings, with no more than two default repair cycles.
-9. GitHub Actions runs the full pull-request checks.
+7. The CI verification loop runs until the current head is green or reaches the repair limit.
+8. The PR is marked ready, and the PR verification loop reviews the green current head.
+9. Any approved PR repair returns to the CI loop before another independent review.
 10. A human decides whether to merge.
 11. The coordinator prepares deployment steps and a proposed memory update.
 12. A human explicitly approves any production deployment.

@@ -20,11 +20,19 @@ Human approval remains required for:
 1. Applying the `agent-ready` label to an issue.
 2. Authorizing implementation either by launching the `implement` workflow manually or by including an already-ready issue in an owner-triggered unattended queue.
 3. Marking a draft pull request ready for review.
-4. Deciding whether review findings warrant a manually launched `repair` run.
+4. Deciding whether a CI diagnosis warrants `ci-repair` or PR findings warrant `repair`.
 5. Merging the pull request.
 6. Deploying or changing production.
 
 High-risk authentication, authorization, security-sensitive, billing, payment, database, schema, migration, infrastructure, dependency or package-upgrade, container or Docker, GitHub Actions or workflow, deployment, and production-operations work is excluded from unattended implementation.
+
+## Verification Models
+
+Verification roles are pinned in `scripts/agents/codex-task.sh`; `--ignore-user-config` must never leave them dependent on the runner's default model.
+
+- CI verification loop: `ci-review` and `ci-repair` use `gpt-5.6-terra` with medium reasoning.
+- PR verification loop: `review` uses `gpt-5.6-sol` with high reasoning; `repair` uses `gpt-5.6-terra` with medium reasoning.
+- The trusted runner checks its bundled Codex model catalog for both required GPT-5.6 models before starting a role. A missing model fails closed and requires a Codex CLI update; it must not fall back to GPT-5.3 or another model.
 
 ## Trusted Runner Requirements
 
@@ -39,6 +47,7 @@ The runner must:
 - Be used only for the private `celleree/publish-everywhere` repository.
 - Run under a dedicated operating-system user.
 - Have `git`, `gh`, `jq`, `base64`, `bubblewrap`, and the Codex CLI installed.
+- Use a Codex CLI release whose bundled catalog contains `gpt-5.6-sol` and `gpt-5.6-terra`.
 - Be authenticated to Codex using the intended ChatGPT/Codex account.
 - Have no production database credentials, application secrets, deployment keys, SSH agent, Docker socket, or Docker-volume access.
 - Have no persistent GitHub CLI login, Git credential helper, SSH Git key, or broad personal access token.
@@ -95,18 +104,33 @@ Run the `Codex development agents` workflow manually with:
 
 The issue must be `agent-ready` and non-high-risk. The job creates an `agent/issue-N` branch, runs Codex in workspace-write mode without GitHub credentials, checks the resulting scope, commits, pushes, opens a draft pull request, and explicitly dispatches the existing pull-request CI workflow.
 
+### CI review
+
+Every failed `Pull request CI` run on the current head of an owner-controlled PR triggers `ci-review` from the trusted `main` checkout. The read-only role receives the exact failed run metadata, up to the final 200 KB of available failed-step logs, and the PR diff. It uses `gpt-5.6-terra` and posts an evidence-backed diagnosis without editing.
+
+### CI repair
+
+After reviewing the diagnosis, run the workflow manually with:
+
+- mode: `ci-repair`
+- number: the pull request number
+
+CI repair revalidates that the latest CI run for the current head is a completed failure, loads those failed-step logs, and fixes only the first actionable root cause. It pushes one focused commit and explicitly dispatches pull-request CI again.
+
 ### Review
 
-Marking an owner-controlled draft pull request ready for review automatically runs an independent read-only reviewer and posts evidence-backed findings.
+Every successful `Pull request CI` run on the exact current head of a non-draft, owner-controlled PR triggers an independent `gpt-5.6-sol` review from the trusted `main` checkout. The reviewer posts evidence-backed findings and a pass/fail recommendation. A manual `review` dispatch remains available for an explicit rerun.
 
-### Repair
+### PR repair
 
-Run the workflow manually with:
+After reviewing the findings, run the workflow manually with:
 
 - mode: `repair`
-- number: the draft pull request number
+- number: the pull request number
 
-Repair is restricted to an open, owner-controlled `agent/issue-N` pull request targeting `main`. Each repair requires another explicit human launch. No more than two unattended repair commits are permitted.
+PR repair fixes only evidence-backed review findings, pushes one focused commit, and explicitly dispatches pull-request CI again. A green result then triggers a fresh independent review.
+
+Both repair modes are restricted to open, owner-controlled `agent/issue-N` pull requests targeting `main`. They share one two-commit repair limit, and every repair requires another explicit human launch.
 
 ### Memory
 
@@ -140,12 +164,14 @@ Every queue-created pull request must be a draft. The implementation role uses `
 
 - Standard development-agent roles use separate jobs and least-privilege GitHub token permissions. In the unattended queue, each issue has one isolated repository-write matrix job, and planning and implementation may run sequentially inside that job only after all readiness, template, and risk gates pass.
 - `actions/checkout` does not persist its GitHub credentials.
+- The privileged `workflow_run` handler checks out trusted `main` only. It never checks out the PR head or downloads or executes CI artifacts; PR diffs and failed logs enter Codex only as delimited untrusted text.
+- The handler requires a same-repository run, an owner-controlled open PR targeting `main`, and an exact match between the completed run SHA and the current PR head before invoking Codex.
 - Credentials are removed before Codex receives untrusted issue content. The implementation role receives Git access only during the narrowly controlled setup, commit, push, and draft-PR operations performed by the trusted wrapper.
 - The token is removed from Git configuration and the process environment before Codex starts.
 - The script fails closed if persistent `gh` authentication or usable Git remote credentials remain.
 - Codex runs with user configuration ignored so unrelated MCP servers and local automation settings are not loaded.
 - Read-only roles use the read-only sandbox.
-- Implementation and repair use the workspace-write sandbox with command network access disabled.
+- Implementation and both repair modes use the workspace-write sandbox with command network access disabled.
 - Spawned commands receive a restricted environment and a temporary empty home directory rather than the runner user's Codex credential path.
 - All non-interactive runs use `--ask-for-approval never`; requests outside the sandbox are denied rather than approved automatically.
 - The active branch and commit are verified after Codex returns.
@@ -154,7 +180,7 @@ Every queue-created pull request must be a draft. The implementation role uses `
 
 ## CI Behavior
 
-GitHub events produced with the repository `GITHUB_TOKEN` have special recursion controls. The implementation and repair roles therefore dispatch `pull-request-ci.yml` explicitly against the agent branch after pushing. Normal CI remains the deterministic quality gate; an agent review never replaces it.
+GitHub events produced with the repository `GITHUB_TOKEN` have special recursion controls. The implementation and repair roles therefore dispatch `pull-request-ci.yml` explicitly against the agent branch after pushing. A trusted `workflow_run` handler then maps the completed run back to exactly one open, owner-controlled PR and requires the run SHA to equal the current PR head. A current-head failure starts read-only CI diagnosis; a current-head success starts independent PR review only when the PR is no longer a draft. Normal CI remains the deterministic quality gate; an agent review never replaces it.
 
 ## Dry-Run Checklist
 
@@ -173,8 +199,17 @@ GitHub events produced with the repository `GITHUB_TOKEN` have special recursion
 4. Confirm pull-request CI was explicitly dispatched for the agent branch.
 5. Confirm no credentials are visible to the Codex command environment.
 6. Confirm the changed-file and protected-file guards behave as documented.
-7. Mark the PR ready and confirm the independent review comment appears.
+7. Mark the PR ready, confirm a new pull-request CI run starts, and confirm the independent review comment appears only after that run succeeds.
 8. Close the test PR without merging unless the documentation change is wanted.
+
+### Verification loop dry run
+
+1. On a disposable owner-controlled `agent/issue-N` pull request, introduce one harmless, intentional test failure.
+2. Confirm failed CI triggers a read-only `ci-review` comment that identifies `gpt-5.6-terra`.
+3. Manually launch `ci-repair`, confirm one focused repair commit is pushed, and confirm pull-request CI is dispatched again.
+4. Mark the repaired PR ready and confirm green CI triggers a read-only `review` comment that identifies `gpt-5.6-sol`.
+5. Confirm a stale CI run, draft PR, non-owner PR, non-`agent/issue-N` repair, or third repair attempt fails closed.
+6. Close the disposable PR without merging.
 
 ## Limits
 
@@ -184,8 +219,8 @@ GitHub events produced with the repository `GITHUB_TOKEN` have special recursion
 - Secret, environment, agent-system, workflow, dependency, database-schema, container, and deployment files are blocked.
 - GitHub credentials are removed before Codex receives issue, PR, comment, or diff content.
 - Codex may not alter Git history, change branches, merge, or deploy.
-- Repeated repair loops require another explicit human workflow launch.
-- Two unattended repair cycles are enforced, after which the task returns to human reassessment.
+- Every CI or PR repair requires another explicit human workflow launch.
+- CI and PR repair share a two-commit unattended limit, after which the task returns to human reassessment.
 
 ## Failure Handling
 
