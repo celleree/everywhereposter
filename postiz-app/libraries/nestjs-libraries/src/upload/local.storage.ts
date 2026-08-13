@@ -1,10 +1,11 @@
 import { IUploadProvider } from './upload.interface';
-import { mkdirSync, unlink, writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
+import { copyFile, mkdir, rm, stat } from 'fs/promises';
 // @ts-ignore
 import mime from 'mime';
-import { extname } from 'path';
+import { basename, resolve, sep } from 'path';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { fromBuffer } = require('file-type');
+const { fromBuffer, fromFile } = require('file-type');
 
 const LOCAL_STORAGE_ALLOWED_MIME = new Set<string>([
   'image/jpeg',
@@ -91,16 +92,75 @@ export class LocalStorage implements IUploadProvider {
     }
   }
 
+  async uploadFromPath(filePath: string, originalName: string) {
+    const detected = await fromFile(filePath);
+    if (!detected || !LOCAL_STORAGE_ALLOWED_MIME.has(detected.mime)) {
+      throw new Error('Unsupported file type.');
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const innerPath = `/${year}/${month}/${day}`;
+    const directory = `${this.uploadDirectory}${innerPath}`;
+    await mkdir(directory, { recursive: true });
+
+    const randomName = Array(32)
+      .fill(null)
+      .map(() => Math.round(Math.random() * 16).toString(16))
+      .join('');
+    const filename = `${randomName}.${detected.ext}`;
+    const destinationPath = `${directory}/${filename}`;
+
+    try {
+      await copyFile(filePath, destinationPath);
+      const file = await stat(destinationPath);
+      const safeOriginalName =
+        basename(originalName || `edited-video.${detected.ext}`)
+          .replace(/[^a-zA-Z0-9._-]+/g, '_')
+          .slice(0, 120) || `edited-video.${detected.ext}`;
+
+      return {
+        filename,
+        path:
+          process.env.FRONTEND_URL + '/uploads' + `${innerPath}/${filename}`,
+        mimetype: detected.mime,
+        originalname: safeOriginalName,
+        size: file.size,
+      };
+    } catch (error) {
+      await rm(destinationPath, { force: true });
+      throw error;
+    }
+  }
+
   async removeFile(filePath: string): Promise<void> {
-    // Logic to remove the file from the filesystem goes here
-    return new Promise((resolve, reject) => {
-      unlink(filePath, (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-    });
+    let pathname = filePath;
+    try {
+      pathname = new URL(filePath).pathname;
+    } catch {}
+
+    const uploadMarker = '/uploads/';
+    const markerIndex = pathname.indexOf(uploadMarker);
+    if (markerIndex < 0) {
+      throw new Error('Local upload path is invalid.');
+    }
+
+    const relativePath = decodeURIComponent(
+      pathname.slice(markerIndex + uploadMarker.length)
+    );
+    const uploadRoot = resolve(this.uploadDirectory);
+    const targetPath = resolve(uploadRoot, relativePath);
+    if (
+      !relativePath ||
+      relativePath.includes('\0') ||
+      targetPath === uploadRoot ||
+      !targetPath.startsWith(`${uploadRoot}${sep}`)
+    ) {
+      throw new Error('Local upload path is invalid.');
+    }
+
+    await rm(targetPath, { force: true });
   }
 }

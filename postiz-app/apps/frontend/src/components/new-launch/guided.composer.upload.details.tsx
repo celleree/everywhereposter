@@ -16,6 +16,7 @@ import {
   selectGuidedSourceVideo,
 } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
+import { GuidedComposerVideoEdit } from '@gitroom/frontend/components/new-launch/guided.composer.video-edit';
 
 export {
   GUIDED_VIDEO_ACCEPT,
@@ -64,7 +65,12 @@ const isVideoFileCandidate = (file: File) =>
 export const GuidedComposerUploadDetails: FC<{
   disabled?: boolean;
   sourceMutationError?: string | null;
-}> = ({ disabled = false, sourceMutationError = null }) => {
+  onVideoEditingChange?: (editing: boolean) => void;
+}> = ({
+  disabled = false,
+  sourceMutationError = null,
+  onVideoEditingChange,
+}) => {
   const [showContextHelp, setShowContextHelp] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const fetch = useFetch();
@@ -317,6 +323,12 @@ export const GuidedComposerUploadDetails: FC<{
                 </>
               )}
             </div>
+            <GuidedComposerVideoEdit
+              sourceMediaId={sourceVideo.id}
+              transcriptionStatus={transcriptionStatus}
+              disabled={disabled}
+              onEditingChange={onVideoEditingChange}
+            />
             <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-2">
               <section>
                 <div className="flex items-center gap-[8px]">

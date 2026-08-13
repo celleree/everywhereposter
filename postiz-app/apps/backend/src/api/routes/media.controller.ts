@@ -30,6 +30,12 @@ import { SaveMediaInformationDto } from '@gitroom/nestjs-libraries/dtos/media/sa
 import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
+import { CreateTalkingHeadEditDto } from '@gitroom/nestjs-libraries/dtos/media/create-talking-head-edit.dto';
+import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
+import {
+  AuthorizationActions,
+  Sections,
+} from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -260,6 +266,20 @@ export class MediaController {
     return this._mediaTranscriptionService.ensureTranscriptionStarted(
       org.id,
       id
+    );
+  }
+
+  @Post('/:id/talking-head-edit')
+  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  createTalkingHeadEdit(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Body() body: CreateTalkingHeadEditDto
+  ) {
+    return this._mediaService.createTalkingHeadEdit(
+      org.id,
+      id,
+      body.stylePrompt
     );
   }
 

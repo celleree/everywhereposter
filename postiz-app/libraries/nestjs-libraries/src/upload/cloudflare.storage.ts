@@ -1,4 +1,8 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  S3Client,
+  PutObjectCommand,
+} from '@aws-sdk/client-s3';
 import 'multer';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import mime from 'mime-types';
@@ -6,8 +10,11 @@ import mime from 'mime-types';
 import { getExtension } from 'mime';
 import { IUploadProvider } from './upload.interface';
 import axios from 'axios';
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import { basename } from 'path';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { fromBuffer } = require('file-type');
+const { fromBuffer, fromFile } = require('file-type');
 
 const ALLOWED_MIME_TYPES = new Set<string>([
   'image/jpeg',
@@ -135,14 +142,68 @@ class CloudflareStorage implements IUploadProvider {
     }
   }
 
-  // Implement the removeFile method from IUploadProvider
+  async uploadFromPath(filePath: string, originalName: string) {
+    const detected = await fromFile(filePath);
+    if (!detected || !ALLOWED_MIME_TYPES.has(detected.mime)) {
+      throw new Error('Unsupported file type.');
+    }
+
+    const file = await stat(filePath);
+    if (!file.isFile() || file.size <= 0) {
+      throw new Error('Upload file is empty.');
+    }
+
+    const id = makeId(10);
+    const filename = `${id}.${detected.ext}`;
+    await this._client.send(
+      new PutObjectCommand({
+        Bucket: this._bucketName,
+        Key: filename,
+        Body: createReadStream(filePath),
+        ContentLength: file.size,
+        ContentType: detected.mime,
+      })
+    );
+
+    const safeOriginalName =
+      basename(originalName || `edited-video.${detected.ext}`)
+        .replace(/[^a-zA-Z0-9._-]+/g, '_')
+        .slice(0, 120) || `edited-video.${detected.ext}`;
+
+    return {
+      filename,
+      path: `${this._uploadUrl.replace(/\/+$/, '')}/${filename}`,
+      mimetype: detected.mime,
+      originalname: safeOriginalName,
+      size: file.size,
+    };
+  }
+
   async removeFile(filePath: string): Promise<void> {
-    // const fileName = filePath.split('/').pop(); // Extract the filename from the path
-    // const command = new DeleteObjectCommand({
-    //   Bucket: this._bucketName,
-    //   Key: fileName,
-    // });
-    // await this._client.send(command);
+    const uploadUrl = new URL(
+      this._uploadUrl.endsWith('/') ? this._uploadUrl : `${this._uploadUrl}/`
+    );
+    const targetUrl = new URL(filePath);
+    if (
+      targetUrl.origin !== uploadUrl.origin ||
+      !targetUrl.pathname.startsWith(uploadUrl.pathname)
+    ) {
+      throw new Error('Cloudflare upload path is invalid.');
+    }
+
+    const key = decodeURIComponent(
+      targetUrl.pathname.slice(uploadUrl.pathname.length)
+    );
+    if (!key || key.includes('/') || key.includes('\0')) {
+      throw new Error('Cloudflare upload path is invalid.');
+    }
+
+    await this._client.send(
+      new DeleteObjectCommand({
+        Bucket: this._bucketName,
+        Key: key,
+      })
+    );
   }
 }
 
