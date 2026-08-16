@@ -93,7 +93,14 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
 
   const integrationService = {
     disconnectChannel: jest.fn(),
-    getIntegrationById: jest.fn(),
+    getIntegrationById: jest.fn().mockResolvedValue({
+      id: 'integration-db-id',
+      name: 'X account',
+      deletedAt: null,
+      disabled: false,
+      inBetweenSteps: false,
+      refreshNeeded: false,
+    }),
     getPlugs: jest.fn().mockResolvedValue([]),
     refreshNeeded: jest.fn(),
   };
@@ -110,14 +117,16 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
     separatePosts: jest.fn(),
   };
 
+  const workflowStart = jest.fn();
+  const getRawClient = jest.fn(() => ({
+    workflow: {
+      list: jest.fn().mockReturnValue([]),
+      start: workflowStart,
+    },
+  }));
   const temporalService = {
     client: {
-      getRawClient: jest.fn(() => ({
-        workflow: {
-          list: jest.fn(),
-          start: jest.fn(),
-        },
-      })),
+      getRawClient,
       getWorkflowHandle: jest.fn(),
     },
   };
@@ -131,6 +140,8 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
     postRepository,
     integrationService,
     refreshIntegrationService,
+    getRawClient,
+    workflowStart,
     service: new PostsService(
       postRepository as any,
       integrationManager as any,
@@ -154,7 +165,226 @@ const publishedIntegration = {
   additionalSettings: '[]',
 };
 
+const createPostBody = ({
+  type = 'now',
+  date = '2035-04-21T15:00:00.000Z',
+  integrationIds = ['integration-db-id'],
+}: {
+  type?: 'draft' | 'schedule' | 'now';
+  date?: string;
+  integrationIds?: string[];
+} = {}) =>
+  ({
+    type,
+    shortLink: false,
+    date,
+    tags: [],
+    posts: integrationIds.map((integrationId) => ({
+      integration: { id: integrationId },
+      settings: { __type: 'x' },
+      value: [
+        {
+          content: 'Publish this post',
+          image: [],
+        },
+      ],
+    })),
+  } as any);
+
 describe('PostsService published post management', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it.each([
+    [
+      'missing',
+      undefined,
+      'Integration with id integration-db-id is unavailable',
+    ],
+    [
+      'deleted',
+      { deletedAt: new Date('2029-01-01T00:00:00.000Z') },
+      'Integration with id integration-db-id is unavailable',
+    ],
+    [
+      'disabled',
+      { disabled: true },
+      'X account is disabled and cannot publish',
+    ],
+    [
+      'in-between',
+      { inBetweenSteps: true },
+      'Finish connecting X account before publishing',
+    ],
+    [
+      'reconnect-required',
+      { refreshNeeded: true },
+      'Reconnect X account before publishing',
+    ],
+  ])(
+    'rejects a %s integration before creating post rows or workflows',
+    async (_label, integrationOverrides, expectedMessage) => {
+      const { service, postRepository, integrationService, getRawClient } =
+        createService();
+      integrationService.getIntegrationById.mockResolvedValue(
+        integrationOverrides === undefined
+          ? undefined
+          : {
+              id: 'integration-db-id',
+              name: 'X account',
+              deletedAt: null,
+              disabled: false,
+              inBetweenSteps: false,
+              refreshNeeded: false,
+              ...integrationOverrides,
+            }
+      );
+
+      await expect(
+        service.createPost('org-1', createPostBody())
+      ).rejects.toThrow(expectedMessage as string);
+      expect(postRepository.createOrUpdatePost).not.toHaveBeenCalled();
+      expect(getRawClient).not.toHaveBeenCalled();
+    }
+  );
+
+  it('preflights every destination before creating any post rows', async () => {
+    const { service, postRepository, integrationService, getRawClient } =
+      createService();
+    integrationService.getIntegrationById.mockImplementation(
+      async (_orgId: string, integrationId: string) => ({
+        id: integrationId,
+        name: integrationId,
+        deletedAt: null,
+        disabled: false,
+        inBetweenSteps: false,
+        refreshNeeded: integrationId === 'reconnect-account',
+      })
+    );
+
+    await expect(
+      service.createPost(
+        'org-1',
+        createPostBody({
+          integrationIds: ['valid-account', 'reconnect-account'],
+        })
+      )
+    ).rejects.toThrow('Reconnect reconnect-account before publishing');
+    expect(postRepository.createOrUpdatePost).not.toHaveBeenCalled();
+    expect(getRawClient).not.toHaveBeenCalled();
+  });
+
+  it('preserves draft creation for an integration that is not publishable', async () => {
+    const { service, postRepository, integrationService } = createService();
+    integrationService.getIntegrationById.mockResolvedValue({
+      id: 'integration-db-id',
+      name: 'X account',
+      disabled: true,
+      inBetweenSteps: false,
+      refreshNeeded: true,
+    });
+    postRepository.createOrUpdatePost.mockResolvedValue({
+      posts: [{ id: 'draft-post', state: 'DRAFT' }],
+    });
+
+    await expect(
+      service.createPost('org-1', createPostBody({ type: 'draft' }))
+    ).resolves.toEqual([
+      { postId: 'draft-post', integration: 'integration-db-id' },
+    ]);
+    expect(integrationService.getIntegrationById).not.toHaveBeenCalled();
+  });
+
+  it('preserves immediate publishing for a usable normal-composer destination', async () => {
+    const {
+      service,
+      postRepository,
+      integrationService,
+      workflowStart,
+    } = createService();
+    postRepository.createOrUpdatePost.mockResolvedValue({
+      posts: [{ id: 'now-post', state: 'QUEUE' }],
+    });
+
+    await expect(
+      service.createPost('org-1', createPostBody())
+    ).resolves.toEqual([
+      { postId: 'now-post', integration: 'integration-db-id' },
+    ]);
+    expect(integrationService.getIntegrationById).toHaveBeenCalledWith(
+      'org-1',
+      'integration-db-id'
+    );
+    expect(postRepository.createOrUpdatePost).toHaveBeenCalledWith(
+      'now',
+      'org-1',
+      expect.any(String),
+      expect.any(Object),
+      [],
+      undefined
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(workflowStart).toHaveBeenCalledWith(
+      'postWorkflowV102',
+      expect.objectContaining({ workflowId: 'post_now-post' })
+    );
+  });
+
+  it('rejects past and equal schedule timestamps before rows or workflows', async () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    jest.setSystemTime(now);
+    const { service, postRepository, integrationService, getRawClient } =
+      createService();
+
+    for (const date of [
+      new Date(now - 1000).toISOString(),
+      new Date(now).toISOString(),
+    ]) {
+      await expect(
+        service.createPost(
+          'org-1',
+          createPostBody({ type: 'schedule', date })
+        )
+      ).rejects.toThrow('Scheduled date must be in the future');
+    }
+
+    expect(integrationService.getIntegrationById).not.toHaveBeenCalled();
+    expect(postRepository.createOrUpdatePost).not.toHaveBeenCalled();
+    expect(getRawClient).not.toHaveBeenCalled();
+  });
+
+  it('preserves the UTC timestamp for a valid future schedule', async () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    const futureDate = '2030-01-01T12:00:01.000Z';
+    jest.setSystemTime(now);
+    const { service, postRepository } = createService();
+    postRepository.createOrUpdatePost.mockResolvedValue({
+      posts: [{ id: 'scheduled-post', state: 'DRAFT' }],
+    });
+
+    await expect(
+      service.createPost(
+        'org-1',
+        createPostBody({ type: 'schedule', date: futureDate })
+      )
+    ).resolves.toEqual([
+      { postId: 'scheduled-post', integration: 'integration-db-id' },
+    ]);
+    expect(postRepository.createOrUpdatePost).toHaveBeenCalledWith(
+      'schedule',
+      'org-1',
+      futureDate,
+      expect.any(Object),
+      [],
+      undefined
+    );
+  });
+
   it('blocks Instagram media preparation when a local upload file is missing', async () => {
     const previousEnv = {
       FRONTEND_URL: process.env.FRONTEND_URL,
@@ -432,7 +662,7 @@ describe('PostsService published post management', () => {
     await service.createPost('org-1', {
       type: 'schedule',
       shortLink: false,
-      date: '2026-04-21T15:00:00.000Z',
+      date: '2035-04-21T15:00:00.000Z',
       tags: [],
       posts: [
         {
@@ -453,7 +683,7 @@ describe('PostsService published post management', () => {
     expect(postRepository.createOrUpdatePost).toHaveBeenCalledWith(
       'schedule',
       'org-1',
-      '2026-04-21T15:00:00.000Z',
+      '2035-04-21T15:00:00.000Z',
       expect.objectContaining({
         group: 'group-1',
         value: [

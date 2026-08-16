@@ -2,6 +2,7 @@ import { PostActivity } from '@gitroom/orchestrator/activities/post.activity';
 import {
   ActivityFailure,
   ApplicationFailure,
+  patched,
   startChild,
   proxyActivities,
   sleep,
@@ -95,8 +96,36 @@ export async function postWorkflowV102({
     );
   }
 
+  const persistUnusableAccountError = patched(
+    'post-workflow-v102-persist-unusable-account-error'
+  );
+  const integrationState = persistUnusableAccountError
+    ? await getIntegrationById(organizationId, post.integration.id)
+    : post.integration;
+
+  if (
+    persistUnusableAccountError &&
+    (!integrationState || integrationState.deletedAt)
+  ) {
+    await changeState(
+      post.id,
+      'ERROR',
+      'This account is unavailable and cannot publish.',
+      postsListBefore
+    );
+    return;
+  }
+
   // if refresh is needed from last time, let's inform the user
-  if (post.integration?.refreshNeeded) {
+  if (integrationState?.refreshNeeded) {
+    if (persistUnusableAccountError) {
+      await changeState(
+        post.id,
+        'ERROR',
+        'Reconnect this account before publishing.',
+        postsListBefore
+      );
+    }
     await inAppNotification(
       post.organizationId,
       `We couldn't post to ${post.integration?.providerIdentifier} for ${post?.integration?.name}`,
@@ -109,11 +138,37 @@ export async function postWorkflowV102({
   }
 
   // if it's disabled, inform the user
-  if (post.integration?.disabled) {
+  if (integrationState?.disabled) {
+    if (persistUnusableAccountError) {
+      await changeState(
+        post.id,
+        'ERROR',
+        'This account is disabled and cannot publish.',
+        postsListBefore
+      );
+    }
     await inAppNotification(
       post.organizationId,
       `We couldn't post to ${post.integration?.providerIdentifier} for ${post?.integration?.name}`,
       `We couldn't post to ${post.integration?.providerIdentifier} for ${post?.integration?.name} because it's disabled. Please enable it and try again.`,
+      true,
+      false,
+      'info'
+    );
+    return;
+  }
+
+  if (persistUnusableAccountError && integrationState?.inBetweenSteps) {
+    await changeState(
+      post.id,
+      'ERROR',
+      'Finish connecting this account before publishing.',
+      postsListBefore
+    );
+    await inAppNotification(
+      post.organizationId,
+      `We couldn't post to ${post.integration?.providerIdentifier} for ${post?.integration?.name}`,
+      `We couldn't post to ${post.integration?.providerIdentifier} for ${post?.integration?.name} because setup is incomplete. Please finish connecting it and try again.`,
       true,
       false,
       'info'

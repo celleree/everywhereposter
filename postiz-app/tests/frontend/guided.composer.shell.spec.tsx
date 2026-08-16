@@ -318,6 +318,30 @@ describe('guided composer shell', () => {
     expect(screen.getByText('Step 4 of 4')).toBeTruthy();
   });
 
+  it('keeps the existing provider settings section visible on Guided Upload', () => {
+    render(
+      <GuidedComposerShell>
+        <div id="social-content">
+          <section
+            data-testid="guided-settings-section"
+            data-guided-composer-section="settings"
+          >
+            Existing provider settings
+          </section>
+          <section data-testid="unguided-section">Unrelated section</section>
+        </div>
+      </GuidedComposerShell>
+    );
+
+    expect(
+      window.getComputedStyle(screen.getByTestId('guided-settings-section'))
+        .display
+    ).not.toBe('none');
+    expect(
+      window.getComputedStyle(screen.getByTestId('unguided-section')).display
+    ).toBe('none');
+  });
+
   it('moves forward and back while preserving the bounded step flow', () => {
     render(
       <GuidedComposerShell>

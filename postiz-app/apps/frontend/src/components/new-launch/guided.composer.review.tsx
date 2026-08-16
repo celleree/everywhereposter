@@ -18,7 +18,10 @@ import type {
   GenerateMediaCopyResponse,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
 import { requestMediaCopyGenerationForDestinations } from '@gitroom/frontend/components/new-launch/copy-generation.client';
-import { getGuidedPlatformIdentity } from '@gitroom/frontend/components/new-launch/guided.composer.destinations';
+import {
+  getGuidedAvailableIntegrations,
+  getGuidedPlatformIdentity,
+} from '@gitroom/frontend/components/new-launch/guided.composer.destinations';
 import {
   GuidedReviewCaptionSource,
   GuidedReviewDraft,
@@ -204,12 +207,9 @@ export const GuidedComposerReview: FC = () => {
   const availableDestinationIds = useMemo(
     () =>
       new Set(
-        integrations
-          .filter(
-            (integration) =>
-              !integration.disabled && !integration.inBetweenSteps
-          )
-          .map((integration) => integration.id)
+        getGuidedAvailableIntegrations(integrations).map(
+          (integration) => integration.id
+        )
       ),
     [integrations]
   );

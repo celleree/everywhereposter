@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import dayjs from 'dayjs';
 
 const mockFetch = jest.fn();
 
@@ -184,6 +185,10 @@ describe('guided composer publish', () => {
     seedPublishState();
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('submits one immutable snapshot for enabled accounts and blocks duplicate clicks', async () => {
     let resolveSubmission:
       | ((result: GuidedPublishSubmitResult) => void)
@@ -278,6 +283,57 @@ describe('guided composer publish', () => {
       await screen.findByText('The enabled destinations are scheduled.')
     ).toBeTruthy();
     expect(screen.getAllByText('Scheduled')).toHaveLength(2);
+  });
+
+  it('blocks past and equal-to-now schedule selections before submission', () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    jest.setSystemTime(now);
+    useLaunchStore.getState().setDate(dayjs(now));
+    const submitter = jest.fn();
+
+    renderPublish(submitter);
+    fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
+
+    expect(
+      screen.getByText('Choose a scheduled time that is in the future.')
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Schedule post' }).hasAttribute('disabled')
+    ).toBe(true);
+    expect(submitter).not.toHaveBeenCalled();
+
+    act(() => {
+      useLaunchStore.getState().setDate(dayjs(now - 1000));
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'Schedule post' }).hasAttribute('disabled')
+    ).toBe(true);
+    expect(submitter).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the schedule time at submit when a rendered future time has expired', () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    jest.setSystemTime(now);
+    useLaunchStore.getState().setDate(dayjs(now + 2000));
+    const submitter = jest.fn();
+
+    renderPublish(submitter);
+    fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
+    const scheduleButton = screen.getByRole('button', {
+      name: 'Schedule post',
+    });
+    expect(scheduleButton.hasAttribute('disabled')).toBe(false);
+
+    jest.setSystemTime(now + 3000);
+    fireEvent.click(scheduleButton);
+
+    expect(submitter).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('Choose a scheduled time that is in the future.')
+    ).toBeTruthy();
   });
 
   it('preserves the draft and locks resubmission after an ambiguous failure', async () => {
@@ -512,6 +568,7 @@ describe('guided composer publish', () => {
 
     renderPublish(submitter);
     fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
+    fireEvent.click(screen.getByLabelText('Choose scheduled date'));
     fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }));
 
     expect((await screen.findByRole('alert')).textContent).toContain(
@@ -522,7 +579,7 @@ describe('guided composer publish', () => {
     expect(screen.getByRole('button', { name: 'Prepare retry' })).toBeTruthy();
   });
 
-  it('maps explicit backend reconnect state without claiming publication', async () => {
+  it('maps QUEUE plus reconnect state without claiming it was scheduled', async () => {
     const result = await pollGuidedPublishPost({
       fetcher: async () => ({
         ok: true,
@@ -530,7 +587,7 @@ describe('guided composer publish', () => {
           posts: [
             {
               id: 'reconnect-post',
-              state: 'ERROR',
+              state: 'QUEUE',
               integration: { refreshNeeded: true },
             },
           ],
@@ -540,10 +597,10 @@ describe('guided composer publish', () => {
         postId: 'reconnect-post',
         integration: linkedinPersonal.id,
       },
-      timing: 'now',
+      timing: 'schedule',
     });
 
     expect(result.status).toBe('reconnect-required');
-    expect(result.status).not.toBe('published');
+    expect(result.status).not.toBe('scheduled');
   });
 });

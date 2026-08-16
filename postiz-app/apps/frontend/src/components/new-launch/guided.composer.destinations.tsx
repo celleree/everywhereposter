@@ -70,7 +70,10 @@ export const getGuidedAvailableIntegrations = (
   integrations: Integrations[]
 ) =>
   integrations.filter(
-    (integration) => !integration.disabled && !integration.inBetweenSteps
+    (integration) =>
+      !integration.disabled &&
+      !integration.inBetweenSteps &&
+      !integration.refreshNeeded
   );
 
 const GuidedPlatformIcon: FC<{

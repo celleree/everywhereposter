@@ -116,6 +116,14 @@ const unavailableIntegrations = [
     disabled: false,
     inBetweenSteps: true,
   },
+  {
+    id: 'reconnect-account',
+    name: 'Reconnect account',
+    identifier: 'youtube',
+    disabled: false,
+    inBetweenSteps: false,
+    refreshNeeded: true,
+  },
 ] as any[];
 
 const providerVariantIntegrations = [
@@ -334,7 +342,7 @@ describe('guided composer destinations step', () => {
     ).toEqual({});
   });
 
-  it('groups usable accounts and excludes disabled and intermediary accounts', () => {
+  it('groups usable accounts and excludes disabled, intermediary, and reconnect-required accounts', () => {
     renderDestinations();
 
     expect(
@@ -346,6 +354,7 @@ describe('guided composer destinations step', () => {
     expect(screen.getByText('Creator Team')).toBeTruthy();
     expect(screen.queryByText('Disabled account')).toBeNull();
     expect(screen.queryByText('Intermediary account')).toBeNull();
+    expect(screen.queryByText('Reconnect account')).toBeNull();
     expect(
       screen.queryByRole('heading', { name: 'Facebook', level: 3 })
     ).toBeNull();

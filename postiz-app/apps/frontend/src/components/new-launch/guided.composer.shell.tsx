@@ -18,7 +18,10 @@ import {
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import { GuidedComposerUploadDetails } from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
-import { GuidedComposerDestinations } from '@gitroom/frontend/components/new-launch/guided.composer.destinations';
+import {
+  getGuidedAvailableIntegrations,
+  GuidedComposerDestinations,
+} from '@gitroom/frontend/components/new-launch/guided.composer.destinations';
 import {
   buildGuidedGenerationFingerprint,
   getGuidedGenerationProgress,
@@ -223,12 +226,9 @@ export const GuidedComposerShell: FC<{
   const availableDestinationIds = useMemo(
     () =>
       new Set(
-        integrations
-          .filter(
-            (integration) =>
-              !integration.disabled && !integration.inBetweenSteps
-          )
-          .map((integration) => integration.id)
+        getGuidedAvailableIntegrations(integrations).map(
+          (integration) => integration.id
+        )
       ),
     [integrations]
   );
@@ -826,7 +826,7 @@ export const GuidedComposerShell: FC<{
               {children}
               <style>
                 {`
-                .guided-upload-existing-composer #social-content > section:not([data-guided-composer-section="media"]):not([data-guided-composer-section="editor"]) {
+                .guided-upload-existing-composer #social-content > section:not([data-guided-composer-section="media"]):not([data-guided-composer-section="editor"]):not([data-guided-composer-section="settings"]) {
                   display: none !important;
                 }
                 .guided-upload-existing-composer div[class*="w-[580px]"] {

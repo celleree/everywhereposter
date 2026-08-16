@@ -1382,6 +1382,51 @@ export class PostsService {
   }
 
   async createPost(orgId: string, body: CreatePostDto): Promise<any[]> {
+    if (
+      body.type === 'schedule' &&
+      !dayjs.utc(body.date).isAfter(dayjs.utc())
+    ) {
+      throw new BadRequestException('Scheduled date must be in the future');
+    }
+
+    if (body.type === 'now' || body.type === 'schedule') {
+      const integrationIds = [
+        ...new Set(body.posts.map((post) => post.integration.id)),
+      ];
+      const integrations = await Promise.all(
+        integrationIds.map(async (id) => ({
+          id,
+          integration: await this._integrationService.getIntegrationById(
+            orgId,
+            id
+          ),
+        }))
+      );
+
+      for (const { id, integration } of integrations) {
+        if (!integration || integration.deletedAt) {
+          throw new BadRequestException(
+            `Integration with id ${id} is unavailable`
+          );
+        }
+        if (integration.disabled) {
+          throw new BadRequestException(
+            `${integration.name} is disabled and cannot publish`
+          );
+        }
+        if (integration.inBetweenSteps) {
+          throw new BadRequestException(
+            `Finish connecting ${integration.name} before publishing`
+          );
+        }
+        if (integration.refreshNeeded) {
+          throw new BadRequestException(
+            `Reconnect ${integration.name} before publishing`
+          );
+        }
+      }
+    }
+
     const postList = [];
     for (const post of body.posts) {
       const previousPost =
