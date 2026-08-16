@@ -54,6 +54,8 @@ import { HistoricalImportRepository } from '@gitroom/nestjs-libraries/database/p
 import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/prisma/historical-imports/historical-import.service';
 import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
+import { FfmpegVideoEditorService } from '@gitroom/nestjs-libraries/media-editing/ffmpeg-video-editor.service';
+import { VideoEditStylePlannerService } from '@gitroom/nestjs-libraries/media-editing/video-edit-style-planner.service';
 
 @Global()
 @Module({
@@ -86,6 +88,8 @@ import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/pr
     MediaRepository,
     MediaTranscriptionService,
     MediaTranscriptionRepository,
+    FfmpegVideoEditorService,
+    VideoEditStylePlannerService,
     ReferenceImageRepository,
     ReferenceImageService,
     AgenciesService,

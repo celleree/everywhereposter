@@ -133,6 +133,7 @@ export const GuidedComposerShell: FC<{
     string | null
   >(null);
   const [publishSubmitting, setPublishSubmitting] = useState(false);
+  const [videoEditingActive, setVideoEditingActive] = useState(false);
   const fetch = useFetch();
   const {
     global,
@@ -301,7 +302,11 @@ export const GuidedComposerShell: FC<{
     !reviewHasBlockingError &&
     !reviewRegenerationLoading;
   const navigationLocked =
-    locked || generationLoading || sourceTransitionPending || publishSubmitting;
+    locked ||
+    generationLoading ||
+    sourceTransitionPending ||
+    publishSubmitting ||
+    videoEditingActive;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
   const generationRequiredForCurrentStep =
@@ -847,6 +852,7 @@ export const GuidedComposerShell: FC<{
             <GuidedComposerUploadDetails
               disabled={navigationLocked}
               sourceMutationError={sourceTransitionError}
+              onVideoEditingChange={setVideoEditingActive}
             />
           </div>
           {composerStep === 'destinations' && generationLoading && (
