@@ -151,6 +151,46 @@ describe('guided composer destination revalidation', () => {
     expect(useGuidedComposerStore.getState().composerStep).toBe('review');
   });
 
+  it('removes a selected account from Review when it starts requiring reconnection', async () => {
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to Destinations' })
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Select Founder Instagram on Instagram',
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().composerStep).toBe('review')
+    );
+
+    act(() => {
+      useLaunchStore.getState().setAllIntegrations([
+        {
+          ...instagramIntegration,
+          refreshNeeded: true,
+        },
+      ]);
+    });
+
+    expect(
+      screen
+        .getByRole('button', { name: 'Continue to Publish' })
+        .hasAttribute('disabled')
+    ).toBe(true);
+    expect(
+      screen.getByText('Select at least one destination to continue.')
+    ).toBeTruthy();
+  });
+
   it('replaces a failed platform image with a neutral fallback badge', () => {
     render(
       <GuidedComposerShell>

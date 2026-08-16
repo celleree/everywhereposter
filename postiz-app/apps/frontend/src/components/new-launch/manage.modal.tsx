@@ -63,6 +63,7 @@ import {
   GuidedPublishSubmitResult,
   useRegisterGuidedComposerPublish,
 } from '@gitroom/frontend/components/new-launch/guided.composer.publish';
+import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
@@ -957,6 +958,9 @@ export const ManageModal: FC<
             item.fix();
             setLoading(false);
             setShowSettings(true);
+            if (guidedRequest) {
+              useGuidedComposerStore.getState().setComposerStep('upload');
+            }
             return {
               ok: false,
               kind: 'validation',
@@ -1429,8 +1433,11 @@ export const ManageModal: FC<
                             'published_platform_settings_hint',
                             'Review saved platform settings.'
                           )
+                        : props.guidedComposerActive === true
+                        ? 'Add any required platform settings.'
                         : 'Optional platform settings.'
                     }
+                    guidedComposerSection="settings"
                   >
                     <div
                       id="wrapper-settings"
@@ -1757,7 +1764,7 @@ const ComposerSection: FC<{
   step?: string;
   title: string;
   description: string;
-  guidedComposerSection?: 'media' | 'editor';
+  guidedComposerSection?: 'media' | 'editor' | 'settings';
   children: ReactNode;
 }> = ({ step, title, description, guidedComposerSection, children }) => {
   return (

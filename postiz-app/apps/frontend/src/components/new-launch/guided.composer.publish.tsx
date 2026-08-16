@@ -12,12 +12,16 @@ import React, {
   useState,
 } from 'react';
 import clsx from 'clsx';
+import type { Dayjs } from 'dayjs';
 import { useShallow } from 'zustand/react/shallow';
 import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { VideoFrame } from '@gitroom/react/helpers/video.frame';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { DatePicker } from '@gitroom/frontend/components/launches/helpers/date.picker';
-import { getGuidedPlatformIdentity } from '@gitroom/frontend/components/new-launch/guided.composer.destinations';
+import {
+  getGuidedAvailableIntegrations,
+  getGuidedPlatformIdentity,
+} from '@gitroom/frontend/components/new-launch/guided.composer.destinations';
 import {
   getGuidedReviewDestinationLimit,
   getGuidedReviewDraftValidation,
@@ -153,6 +157,13 @@ export const useRegisterGuidedComposerPublish = (
 
 const GUIDED_PUBLISH_POLL_INTERVAL_MS = 1500;
 const GUIDED_PUBLISH_POLL_TIMEOUT_MS = 45000;
+const GUIDED_SCHEDULE_TIME_ERROR =
+  'Choose a scheduled time that is in the future.';
+
+export const isGuidedScheduleDateFuture = (
+  date: Dayjs,
+  now = Date.now()
+) => date.startOf('second').valueOf() > now;
 
 const wait = (milliseconds: number) =>
   new Promise<void>((resolve) => {
@@ -223,27 +234,33 @@ export const pollGuidedPublishPost = async ({
         const rootPost =
           posts.find((post: any) => post?.id === reference.postId) || posts[0];
         const failedPost = posts.find((post: any) => post?.state === 'ERROR');
+        const reconnectRequired = posts.some((post: any) =>
+          hasReconnectState(payload, post)
+        );
 
         if (!rootPost) {
           lastError =
             'The submitted post was not present in the status response.';
-        } else if (failedPost) {
-          const reconnectRequired = posts.some((post: any) =>
-            hasReconnectState(payload, post)
-          );
+        } else if (reconnectRequired) {
           return {
             destinationId: reference.integration,
             postId: reference.postId,
-            status: reconnectRequired ? 'reconnect-required' : 'failed',
+            status: 'reconnect-required',
             retryable: false,
-            message: reconnectRequired
-              ? 'Reconnect this account before trying again.'
-              : getErrorMessage(
-                  failedPost.error,
-                  typeof failedPost.error === 'string'
-                    ? failedPost.error
-                    : 'Publishing failed for this destination.'
-                ),
+            message: 'Reconnect this account before trying again.',
+          };
+        } else if (failedPost) {
+          return {
+            destinationId: reference.integration,
+            postId: reference.postId,
+            status: 'failed',
+            retryable: false,
+            message: getErrorMessage(
+              failedPost.error,
+              typeof failedPost.error === 'string'
+                ? failedPost.error
+                : 'Publishing failed for this destination.'
+            ),
           };
         } else if (
           posts.length > 0 &&
@@ -345,12 +362,9 @@ export const GuidedComposerPublish: FC<{
   const availableDestinationIds = useMemo(
     () =>
       new Set(
-        integrations
-          .filter(
-            (integration) =>
-              !integration.disabled && !integration.inBetweenSteps
-          )
-          .map((integration) => integration.id)
+        getGuidedAvailableIntegrations(integrations).map(
+          (integration) => integration.id
+        )
       ),
     [integrations]
   );
@@ -395,8 +409,16 @@ export const GuidedComposerPublish: FC<{
     const retryScope = new Set(retryDestinationIds);
     return destinations.filter((destination) => retryScope.has(destination.id));
   }, [destinations, retryDestinationIds]);
+  const scheduleDateIsFuture =
+    timing !== 'schedule' || isGuidedScheduleDateFuture(date);
 
   const submitPublish = useCallback(async () => {
+    if (timing === 'schedule' && !isGuidedScheduleDateFuture(date)) {
+      setError(GUIDED_SCHEDULE_TIME_ERROR);
+      setAmbiguous(false);
+      return;
+    }
+
     if (
       submissionInFlightRef.current ||
       !available ||
@@ -542,6 +564,7 @@ export const GuidedComposerPublish: FC<{
     }
   }, [
     available,
+    date,
     destinations,
     fetch,
     hasBlockingError,
@@ -703,7 +726,12 @@ export const GuidedComposerPublish: FC<{
                 name="guided-publish-timing"
                 value="now"
                 checked={timing === 'now'}
-                onChange={() => setTiming('now')}
+                onChange={() => {
+                  setTiming('now');
+                  if (error === GUIDED_SCHEDULE_TIME_ERROR) {
+                    setError('');
+                  }
+                }}
               />
               <span>
                 <span className="block text-[13px] font-[700] text-white">
@@ -746,11 +774,24 @@ export const GuidedComposerPublish: FC<{
             className="mt-[12px] max-w-[360px]"
             aria-label="Scheduled date and time"
           >
-            <DatePicker date={date} onChange={setDate} />
+            <DatePicker
+              date={date}
+              onChange={(nextDate) => {
+                setDate(nextDate);
+                if (error === GUIDED_SCHEDULE_TIME_ERROR) {
+                  setError('');
+                }
+              }}
+            />
+            {!scheduleDateIsFuture && (
+              <div className="mt-[7px] text-[12px] text-red-200" role="alert">
+                {GUIDED_SCHEDULE_TIME_ERROR}
+              </div>
+            )}
           </div>
         )}
 
-        {!!error && (
+        {!!error && error !== GUIDED_SCHEDULE_TIME_ERROR && (
           <div
             role="alert"
             className="mt-[14px] rounded-[10px] border border-red-400/40 bg-red-400/10 px-[12px] py-[10px] text-[12px] text-red-200"
@@ -797,7 +838,8 @@ export const GuidedComposerPublish: FC<{
               phase === 'failed' ||
               !available ||
               !submissionDestinations.length ||
-              hasBlockingError
+              hasBlockingError ||
+              !scheduleDateIsFuture
             }
             className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50 mobile:w-full"
           >

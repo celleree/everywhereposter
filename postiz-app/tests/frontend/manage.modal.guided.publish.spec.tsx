@@ -471,12 +471,16 @@ describe('ManageModal guided publishing bridge', () => {
     ).toBeTruthy();
   });
 
-  it('blocks submission when scoped provider validation fails and preserves Review drafts', async () => {
+  it('routes guided provider validation failures to the existing settings form and retries with corrected values', async () => {
     providerResults[0] = providerResult(
       founderLinkedIn,
       { __type: 'linkedin' },
       false
     );
+    providerResults[0].fix = jest.fn(() =>
+      useLaunchStore.getState().setCurrent(founderLinkedIn.id)
+    );
+    useGuidedComposerStore.getState().setComposerStep('publish');
     renderGuidedManageModal();
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
 
@@ -488,9 +492,54 @@ describe('ManageModal guided publishing bridge', () => {
         ([url, options]) => url === '/posts' && options?.method === 'POST'
       )
     ).toBe(false);
+    expect(providerResults[0].fix).toHaveBeenCalledTimes(1);
+    expect(useLaunchStore.getState().current).toBe(founderLinkedIn.id);
+    expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
+    expect(
+      screen
+        .getByText('Advanced settings')
+        .closest('section')
+        ?.getAttribute('data-guided-composer-section')
+    ).toBe('settings');
+    expect(
+      document
+        .querySelector('#social-settings')
+        ?.parentElement?.className.includes('hidden')
+    ).toBe(false);
     expect(
       useGuidedComposerStore.getState().reviewDrafts[founderLinkedIn.id].caption
     ).toBe('Edited founder caption.');
+
+    providerResults[0] = {
+      ...providerResults[0],
+      valid: true,
+      settings: {
+        __type: 'linkedin',
+        visibility: 'CONNECTIONS',
+      },
+    };
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Prepare retry' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+    expect(postPayload().posts[0]).toMatchObject({
+      integration: { id: founderLinkedIn.id },
+      settings: {
+        __type: 'linkedin',
+        visibility: 'CONNECTIONS',
+      },
+    });
+    expect(postPayload().posts[0].value[0].content).toBe(
+      'Edited founder caption.'
+    );
+    expect(
+      mockFetch.mock.calls.filter(
+        ([url, options]) => url === '/posts' && options?.method === 'POST'
+      )
+    ).toHaveLength(1);
   });
 
   it('treats every guided non-2xx post response as ambiguous and locks retry', async () => {
