@@ -219,6 +219,68 @@ describe('guided composer shell', () => {
     expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2');
   });
 
+  it('keeps the latest replacement when another video is selected during deletion', async () => {
+    let resolveDeletion: ((response: { ok: boolean }) => void) | undefined;
+    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/media/video-1' && options?.method === 'DELETE') {
+        return new Promise((resolve) => {
+          resolveDeletion = resolve;
+        });
+      }
+
+      const mediaId = url.match(/^\/media\/([^/]+)\/transcription/)?.[1];
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          id: `transcription-${mediaId}`,
+          mediaId,
+          generation: 1,
+          status: 'READY',
+          text: 'Persisted transcript.',
+          error: null,
+        }),
+      });
+    });
+
+    render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
+    );
+
+    act(() => {
+      useLaunchStore.getState().setGlobalValueMedia(0, [
+        ...(useLaunchStore.getState().global[0]?.media || []),
+        {
+          id: 'video-2',
+          path: 'https://media.example.com/replacement-1.mov',
+          type: 'video',
+        } as any,
+      ]);
+    });
+    await waitFor(() => expect(resolveDeletion).toBeDefined());
+
+    act(() => {
+      useLaunchStore.getState().setGlobalValueMedia(0, [
+        ...(useLaunchStore.getState().global[0]?.media || []),
+        {
+          id: 'video-3',
+          path: 'https://media.example.com/replacement-2.mp4',
+          type: 'video',
+        } as any,
+      ]);
+    });
+    await act(async () => resolveDeletion?.({ ok: true }));
+
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-3')
+    );
+    expect(useGuidedComposerStore.getState().sourceMediaId).not.toBe('video-2');
+  });
+
   it('invalidates and backend-deletes the guided source on attachment removal', async () => {
     render(
       <GuidedComposerShell>

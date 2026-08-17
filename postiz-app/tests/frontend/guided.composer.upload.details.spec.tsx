@@ -558,6 +558,80 @@ describe('guided composer video picker', () => {
     host.remove();
   });
 
+  it('does not replay stale picker validation over a newer selection', async () => {
+    const host = document.createElement('div');
+    host.innerHTML = `
+      <div class="guided-upload-existing-composer">
+        <div id="social-content">
+          <section data-guided-composer-section="media">
+            <div></div>
+            <div><input type="file" multiple /></div>
+          </section>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(host);
+    const input = host.querySelector('input') as HTMLInputElement;
+    const firstVideo = createMp4File('first.mp4');
+    const secondVideo = createMp4File('second.mp4');
+    const originalSlice = firstVideo.slice.bind(firstVideo);
+    let releaseFirstValidation: (() => void) | undefined;
+    const firstValidationGate = new Promise<void>((resolve) => {
+      releaseFirstValidation = resolve;
+    });
+    let delayNextRead = true;
+
+    Object.defineProperty(firstVideo, 'slice', {
+      configurable: true,
+      value: (...args: Parameters<Blob['slice']>) => {
+        const sliced = originalSlice(...args);
+        if (delayNextRead) {
+          delayNextRead = false;
+          const readOriginalSlice = () =>
+            new Promise<ArrayBuffer>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as ArrayBuffer);
+              reader.onerror = () => reject(reader.error);
+              reader.readAsArrayBuffer(sliced);
+            });
+          Object.defineProperty(sliced, 'arrayBuffer', {
+            configurable: true,
+            value: async () => {
+              await firstValidationGate;
+              return readOriginalSlice();
+            },
+          });
+        }
+        return sliced;
+      },
+    });
+
+    let currentFiles: File[] = [firstVideo];
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      get: () => currentFiles,
+    });
+    const forwarded = jest.fn(() => input.files?.[0]);
+    input.addEventListener('change', forwarded);
+
+    const { unmount } = render(<GuidedComposerUploadDetails />);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    currentFiles = [secondVideo];
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await waitFor(() => expect(forwarded).toHaveBeenCalledTimes(1));
+    expect(forwarded.mock.results[0].value).toBe(secondVideo);
+
+    await act(async () => {
+      releaseFirstValidation?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(forwarded).toHaveBeenCalledTimes(1);
+
+    unmount();
+    host.remove();
+  });
+
   it('shows video controls only for supported video drafts', () => {
     useLaunchStore.getState().addGlobalValue(0, [
       {

@@ -152,6 +152,7 @@ export const GuidedComposerUploadDetails: FC<{
     );
     let replayingValidatedChange = false;
     let active = true;
+    let validationSequence = 0;
 
     legacySection.classList.toggle(GUIDED_UPLOAD_PROGRESS_CLASS, disabled);
     input.accept = GUIDED_MEDIA_ACCEPT;
@@ -163,6 +164,7 @@ export const GuidedComposerUploadDetails: FC<{
         return;
       }
 
+      const validationId = ++validationSequence;
       const target = event.currentTarget as HTMLInputElement;
       const files = Array.from(target.files || []);
 
@@ -183,11 +185,12 @@ export const GuidedComposerUploadDetails: FC<{
             continue;
           }
 
-          if (!(await isGuidedVideoFile(file))) {
-            if (!active) {
-              return;
-            }
+          const isValidVideo = await isGuidedVideoFile(file);
+          if (!active || validationId !== validationSequence) {
+            return;
+          }
 
+          if (!isValidVideo) {
             target.value = '';
             setUploadError(
               'Only valid MP4 and MOV video files can be uploaded here.'
@@ -195,10 +198,14 @@ export const GuidedComposerUploadDetails: FC<{
             return;
           }
 
-          normalizedFiles.push(await normalizeGuidedVideoFile(file));
+          const normalizedFile = await normalizeGuidedVideoFile(file);
+          if (!active || validationId !== validationSequence) {
+            return;
+          }
+          normalizedFiles.push(normalizedFile);
         }
 
-        if (!active) {
+        if (!active || validationId !== validationSequence) {
           return;
         }
 

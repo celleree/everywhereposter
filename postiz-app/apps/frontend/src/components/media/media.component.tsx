@@ -51,6 +51,7 @@ import {
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
+import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 const Polonto = dynamic(
   () => import('@gitroom/frontend/components/launches/polonto')
 );
@@ -201,14 +202,28 @@ const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 const isVideoMedia = (media?: { path?: string; type?: string | null }) =>
   media?.type === 'video' || /\.(mp4|mov)(?:$|[?#])/i.test(media?.path || '');
 
-const isGuidedTranscriptionMedia = (media?: {
+const isAnyVideoMedia = (media?: {
   originalName?: string | null;
   path?: string;
   type?: string | null;
-}) =>
-  ['video/mp4', 'video/quicktime', 'video/mov'].includes(
-    (media?.type || '').toLowerCase()
-  ) || /\.(mp4|mov)(?:$|[?#])/i.test(media?.originalName || media?.path || '');
+}) => {
+  const mediaType = (media?.type || '').toLowerCase();
+
+  return (
+    mediaType === 'video' ||
+    mediaType.startsWith('video/') ||
+    /\.(mp4|mov|webm|m4v|avi|mkv|mpeg|mpg|ogv|3gp)(?:$|[?#])/i.test(
+      media?.originalName || media?.path || ''
+    )
+  );
+};
+
+const isGuidedMediaLibraryMedia = (media?: {
+  id: string;
+  originalName?: string | null;
+  path: string;
+  type?: string | null;
+}) => !isAnyVideoMedia(media) || isGuidedMp4MovMedia(media);
 export const MediaBox: FC<{
   setMedia: (params: { id: string; path: string }[]) => void;
   standalone?: boolean;
@@ -284,7 +299,7 @@ export const MediaBox: FC<{
     if (guidedTranscription) {
       await Promise.all(
         selected
-          .filter(isGuidedTranscriptionMedia)
+          .filter(isGuidedMp4MovMedia)
           .map((media: any) =>
             fetch(`/media/${media.id}/transcription/ensure`, {
               method: 'POST',
@@ -294,7 +309,11 @@ export const MediaBox: FC<{
     }
 
     // @ts-ignore
-    setMedia(selected);
+    setMedia(
+      guidedTranscription
+        ? selected.filter(isGuidedMediaLibraryMedia)
+        : selected
+    );
     modals.closeCurrent();
   }, [fetch, guidedTranscription, modals, selected, setMedia]);
 
@@ -595,6 +614,12 @@ export const MediaBox: FC<{
             )}
             {data?.results
               ?.filter((f: any) => {
+                if (
+                  guidedTranscription &&
+                  !isGuidedMediaLibraryMedia(f)
+                ) {
+                  return false;
+                }
                 if (type === 'video') {
                   return isVideoMedia(f);
                 } else if (type === 'image') {

@@ -122,6 +122,7 @@ export const GuidedComposerShell: FC<{
   const generationRequestActiveRef = useRef(false);
   const composerMountedRef = useRef(true);
   const previousVideoIdsRef = useRef<Set<string>>(new Set());
+  const latestSourceIntentRef = useRef<string | null>(null);
   const sourceMediaSnapshotRef = useRef<{
     id: string;
     path: string;
@@ -351,6 +352,10 @@ export const GuidedComposerShell: FC<{
         : currentSource || selectGuidedSourceVideo(videos, sourceMediaId || undefined);
     const nextSourceId = nextSource?.id || null;
 
+    if (newlyAttachedVideo) {
+      latestSourceIntentRef.current = newlyAttachedVideo.id;
+    }
+
     previousVideoIdsRef.current = new Set(videos.map((media) => media.id));
 
     if (currentSource) {
@@ -409,6 +414,9 @@ export const GuidedComposerShell: FC<{
             media.id !== previousSourceId && isGuidedMp4MovMedia(media)
         );
         const confirmedNextSource =
+          latestVideos.find(
+            (media) => media.id === latestSourceIntentRef.current
+          ) ||
           latestVideos.find((media) => media.id === nextSourceId) ||
           selectGuidedSourceVideo(latestVideos, nextSourceId || undefined);
 
@@ -428,11 +436,19 @@ export const GuidedComposerShell: FC<{
         const latestLaunchState = useLaunchStore.getState();
         const latestMedia = latestLaunchState.global[0]?.media || [];
         const previousSource = sourceMediaSnapshotRef.current;
+        const latestIntendedSource = latestMedia.find(
+          (media) =>
+            media.id === latestSourceIntentRef.current &&
+            isGuidedMp4MovMedia(media)
+        );
         if (
           previousSource?.id === previousSourceId &&
           !latestMedia.some((media) => media.id === previousSourceId)
         ) {
           setGlobalValueMedia(0, [...latestMedia, previousSource]);
+        }
+        if (latestIntendedSource) {
+          selectSourceMedia(latestIntendedSource.id);
         }
         setSourceTransitionError(
           'The previous video could not be removed. Please try again.'
