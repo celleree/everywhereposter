@@ -81,6 +81,16 @@ const xAccount = {
   inBetweenSteps: false,
 } as any;
 
+const mastodonAccount = {
+  id: 'mastodon-account',
+  name: 'Founder Mastodon',
+  identifier: 'mastodon',
+  display: 'Mastodon',
+  picture: '',
+  disabled: false,
+  inBetweenSteps: false,
+} as any;
+
 const generatedResult = (
   platform: 'linkedin' | 'x',
   draft: string,
@@ -233,6 +243,9 @@ describe('guided composer review', () => {
       useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id]
     ).toMatchObject({ caption: 'User edit', source: 'edited' });
 
+    useGuidedComposerStore
+      .getState()
+      .setReviewDestinationEnabled(linkedinPersonal.id, false);
     const staleRequestToken = useGuidedComposerStore
       .getState()
       .startReviewRegeneration(linkedinPersonal.id)!;
@@ -249,6 +262,7 @@ describe('guided composer review', () => {
     ).toMatchObject({
       caption: 'Materially changed baseline',
       source: 'generated',
+      enabled: false,
     });
     useGuidedComposerStore
       .getState()
@@ -280,7 +294,80 @@ describe('guided composer review', () => {
 
     expect(
       useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id]
-    ).toMatchObject({ caption: 'Generated baseline', source: 'generated' });
+    ).toMatchObject({
+      caption: 'Generated baseline',
+      source: 'generated',
+      enabled: true,
+    });
+  });
+
+  it('does not seed Generate review from a hidden stale source caption', async () => {
+    seedGeneratedReview({
+      destinations: [linkedinPersonal],
+      response: generatedResponse([]),
+      sourceCaption: 'Hidden stale caption',
+    });
+    useLaunchStore
+      .getState()
+      .setGlobalValueText(0, '<p>Visible legacy draft</p>');
+
+    renderReview();
+
+    expect(
+      await screen.findByLabelText('Founder LinkedIn caption')
+    ).toHaveProperty('value', 'Visible legacy draft');
+    expect(screen.queryByDisplayValue('Hidden stale caption')).toBeNull();
+  });
+
+  it('completes unsupported-only Use Everywhere without an AI request', async () => {
+    useLaunchStore.getState().addGlobalValue(0, [
+      {
+        id: 'post-1',
+        content: '',
+        delay: 0,
+        media: [
+          {
+            id: 'video-1',
+            path: 'https://media.example.com/video.mp4',
+            type: 'video',
+          } as any,
+        ],
+      },
+    ]);
+    useLaunchStore.getState().setAllIntegrations([mastodonAccount]);
+    useLaunchStore.getState().setSelectedIntegrations([
+      { selectedIntegrations: mastodonAccount, settings: {} },
+    ]);
+    useGuidedComposerStore.getState().setCaptionMode('use-everywhere');
+    useGuidedComposerStore
+      .getState()
+      .setSourceCaption('Use this caption everywhere.');
+    useGuidedComposerStore.setState({
+      composerStep: 'destinations',
+      sourceMediaId: 'video-1',
+      transcriptionStatus: 'READY',
+    });
+
+    renderReview();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to Review' })
+    );
+
+    expect(
+      await screen.findByLabelText('Founder Mastodon caption')
+    ).toHaveProperty('value', 'Use this caption everywhere.');
+    expect(
+      screen.getByText(
+        'Automatic caption generation is not available for this destination. Review the original caption before continuing.'
+      )
+    ).toBeTruthy();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      composerStep: 'review',
+      generationStatus: 'complete',
+      generatedResponse: null,
+      unsupportedDestinations: [mastodonAccount],
+    });
   });
 
   it('seeds same-platform accounts independently and edits only one', async () => {
@@ -719,6 +806,51 @@ describe('guided composer review', () => {
     expect(
       getGuidedReviewDestinationLimit({ providerLimit: 5, platform: 'x' })
     ).toBe(5);
+  });
+
+  it('uses final-submission weighted character validation for X', async () => {
+    const weightedCaption = '界'.repeat(141);
+    seedGeneratedReview({
+      destinations: [xAccount],
+      response: generatedResponse([
+        generatedResult('x', weightedCaption),
+      ]),
+    });
+    useLaunchStore.setState({ chars: { [xAccount.id]: 280 } });
+
+    renderReview();
+
+    await screen.findByLabelText('Founder X caption');
+    expect(
+      screen.getByTestId('review-character-count-x-account').textContent
+    ).toContain('282 / 280 characters');
+    expect(screen.getByRole('alert').textContent).toContain(
+      '2 characters over the 280-character limit'
+    );
+    expect(
+      screen.getByRole('button', { name: 'Continue to Publish' })
+    ).toBeDisabled();
+  });
+
+  it('normalizes entity-sensitive X captions like final submission', async () => {
+    seedGeneratedReview({
+      destinations: [xAccount],
+      response: generatedResponse([generatedResult('x', 'A & B')]),
+    });
+    useLaunchStore.setState({ chars: { [xAccount.id]: 5 } });
+
+    renderReview();
+
+    await screen.findByLabelText('Founder X caption');
+    expect(
+      screen.getByTestId('review-character-count-x-account').textContent
+    ).toContain('9 / 5 characters');
+    expect(screen.getByRole('alert').textContent).toContain(
+      '4 characters over the 5-character limit'
+    );
+    expect(
+      screen.getByRole('button', { name: 'Continue to Publish' })
+    ).toBeDisabled();
   });
 
   it('preserves edits across normal navigation and removes deselected destinations', async () => {

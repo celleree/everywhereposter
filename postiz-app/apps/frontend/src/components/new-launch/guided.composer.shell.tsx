@@ -120,6 +120,7 @@ export const GuidedComposerShell: FC<{
 }> = ({ children, locked = false }) => {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const generationRequestActiveRef = useRef(false);
+  const generationAbortControllerRef = useRef<AbortController | null>(null);
   const composerMountedRef = useRef(true);
   const previousVideoIdsRef = useRef<Set<string>>(new Set());
   const latestSourceIntentRef = useRef<string | null>(null);
@@ -585,6 +586,8 @@ export const GuidedComposerShell: FC<{
     }
 
     generationRequestActiveRef.current = true;
+    const abortController = new AbortController();
+    generationAbortControllerRef.current = abortController;
     startGeneration(generationFingerprint);
 
     try {
@@ -608,7 +611,8 @@ export const GuidedComposerShell: FC<{
           ) {
             setGenerationProgress(getGuidedGenerationProgress(name, data));
           }
-        }
+        },
+        abortController.signal
       );
 
       if (!composerMountedRef.current) {
@@ -639,13 +643,12 @@ export const GuidedComposerShell: FC<{
       }
 
       if (!result.response) {
-        failGeneration(
-          'None of the selected destinations support caption generation yet.',
-          {
-            unsupportedDestinations: result.unsupportedDestinations,
-            fingerprint: generationFingerprint,
-          }
+        completeGeneration(
+          null,
+          result.unsupportedDestinations,
+          generationFingerprint
         );
+        setComposerStep('review');
         return;
       }
 
@@ -683,6 +686,9 @@ export const GuidedComposerShell: FC<{
         );
       }
     } finally {
+      if (generationAbortControllerRef.current === abortController) {
+        generationAbortControllerRef.current = null;
+      }
       generationRequestActiveRef.current = false;
     }
   }, [
@@ -741,6 +747,9 @@ export const GuidedComposerShell: FC<{
     composerMountedRef.current = true;
     return () => {
       composerMountedRef.current = false;
+      generationAbortControllerRef.current?.abort();
+      generationAbortControllerRef.current = null;
+      generationRequestActiveRef.current = false;
       resetGuidedComposer();
     };
   }, [resetGuidedComposer]);

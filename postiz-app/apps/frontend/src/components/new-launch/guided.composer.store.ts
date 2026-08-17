@@ -95,7 +95,7 @@ interface GuidedComposerStore extends GuidedComposerValues {
   startGeneration: (fingerprint: string) => void;
   setGenerationProgress: (generationProgress: string) => void;
   completeGeneration: (
-    response: GenerateMediaCopyResponse,
+    response: GenerateMediaCopyResponse | null,
     unsupportedDestinations: Integrations[],
     fingerprint: string
   ) => void;
@@ -212,7 +212,7 @@ export const useGuidedComposerStore = create<GuidedComposerStore>()((set) => ({
   ) =>
     set({
       generationStatus:
-        generatedResponse.status === 'partial' ? 'partial' : 'complete',
+        generatedResponse?.status === 'partial' ? 'partial' : 'complete',
       generatedResponse,
       unsupportedDestinations,
       generationProgress: '',
@@ -243,7 +243,7 @@ export const useGuidedComposerStore = create<GuidedComposerStore>()((set) => ({
         nextDrafts[seed.destinationId] = {
           ...seed,
           source: seed.baselineSource,
-          enabled: true,
+          enabled: existing?.enabled ?? true,
           regenerationStatus: 'idle',
           regenerationRequestToken: null,
           regenerationError: null,

@@ -175,11 +175,13 @@ export const parseCopyGenerationStream = async (
 export const requestMediaCopyGeneration = async (
   fetch: CopyGenerationFetch,
   body: MediaCopyGenerationRequest,
-  onStage?: CopyGenerationStageHandler
+  onStage?: CopyGenerationStageHandler,
+  signal?: AbortSignal
 ) => {
   const request = await fetch('/posts/copy/generate', {
     method: 'POST',
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
 
   if (request.ok === false) {
@@ -206,7 +208,8 @@ export const requestMediaCopyGenerationForDestinations = async <
   fetch: CopyGenerationFetch,
   destinations: T[],
   body: Omit<MediaCopyGenerationRequest, 'platforms'>,
-  onStage?: CopyGenerationStageHandler
+  onStage?: CopyGenerationStageHandler,
+  signal?: AbortSignal
 ) => {
   const { platforms, unsupportedDestinations } =
     resolveCopyGenerationDestinations(destinations);
@@ -218,7 +221,8 @@ export const requestMediaCopyGenerationForDestinations = async <
   const response = await requestMediaCopyGeneration(
     fetch,
     { ...body, platforms },
-    onStage
+    onStage,
+    signal
   );
 
   return { response, platforms, unsupportedDestinations };

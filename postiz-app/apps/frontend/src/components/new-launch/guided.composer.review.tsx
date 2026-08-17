@@ -7,6 +7,7 @@ import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { VideoFrame } from '@gitroom/react/helpers/video.frame';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+import { weightedLength } from '@gitroom/helpers/utils/count.length';
 import type { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import {
   mapIntegrationIdentifierToCopyPlatform,
@@ -139,7 +140,18 @@ export const getGuidedReviewDraftValidation = (
   limit: number | null,
   hasMedia: boolean
 ) => {
-  const characterCount = draft.caption.length;
+  let characterCount = draft.caption.length;
+  if (draft.platform === 'x') {
+    const normalizedCaption = stripHtmlValidation(
+      'normal',
+      draft.caption,
+      true
+    );
+    characterCount = Math.max(
+      weightedLength(normalizedCaption),
+      normalizedCaption.length
+    );
+  }
   const errors: string[] = [];
 
   if (limit !== null && characterCount > limit) {
@@ -222,9 +234,15 @@ export const GuidedComposerReview: FC = () => {
   );
   const media = global[0]?.media || [];
   const video = media.find((item) => isGuidedMp4MovMedia(item));
-  const fallbackCaption = sourceCaption.trim()
-    ? sourceCaption
-    : stripHtmlValidation('normal', global[0]?.content || '', true);
+  const legacyCaption = stripHtmlValidation(
+    'normal',
+    global[0]?.content || '',
+    true
+  );
+  const fallbackCaption =
+    captionMode !== 'generate' && sourceCaption.trim()
+      ? sourceCaption
+      : legacyCaption;
   const unsupportedDestinationIds = useMemo(
     () => new Set(unsupportedDestinations.map((destination) => destination.id)),
     [unsupportedDestinations]
@@ -237,9 +255,13 @@ export const GuidedComposerReview: FC = () => {
         generationInputFingerprint,
         unsupportedDestinationIds,
         fallbackCaption,
-        originalCaption: sourceCaption || fallbackCaption,
+        originalCaption:
+          captionMode === 'generate'
+            ? fallbackCaption
+            : sourceCaption || fallbackCaption,
       }),
     [
+      captionMode,
       destinations,
       fallbackCaption,
       generatedResponse,

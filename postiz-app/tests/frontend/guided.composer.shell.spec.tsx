@@ -948,6 +948,63 @@ describe('guided composer shell', () => {
     });
   });
 
+  it('aborts an active generation request when the composer unmounts', async () => {
+    const integration = {
+      id: 'linkedin-account',
+      name: 'Founder LinkedIn',
+      identifier: 'linkedin',
+      display: 'LinkedIn',
+      disabled: false,
+      inBetweenSteps: false,
+    } as any;
+    let generationSignal: AbortSignal | undefined;
+    useLaunchStore.getState().setAllIntegrations([integration]);
+    useLaunchStore.getState().setSelectedIntegrations([
+      { selectedIntegrations: integration, settings: {} },
+    ]);
+    useGuidedComposerStore.setState({
+      composerStep: 'destinations',
+      sourceMediaId: 'video-1',
+      transcriptionStatus: 'READY',
+    });
+    mockFetch.mockImplementation(
+      (_url: string, options?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          generationSignal = options?.signal || undefined;
+          generationSignal?.addEventListener(
+            'abort',
+            () => {
+              const error = new Error('Generation aborted');
+              error.name = 'AbortError';
+              reject(error);
+            },
+            { once: true }
+          );
+        })
+    );
+
+    const view = render(
+      <GuidedComposerShell>
+        <div>Existing composer content</div>
+      </GuidedComposerShell>
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to Review' })
+    );
+
+    await waitFor(() => expect(generationSignal).toBeDefined());
+    expect(generationSignal?.aborted).toBe(false);
+    view.unmount();
+    expect(generationSignal?.aborted).toBe(true);
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState()).toMatchObject({
+        composerStep: 'upload',
+        generationStatus: 'idle',
+        generationError: null,
+      })
+    );
+  });
+
   it('keeps the unfinished shell disabled unless explicitly enabled', () => {
     expect(shouldUseGuidedComposerShell({})).toBe(false);
     expect(shouldUseGuidedComposerShell({ enabled: false })).toBe(false);

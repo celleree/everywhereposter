@@ -120,6 +120,38 @@ describe('copy-generation client', () => {
     });
   });
 
+  it('forwards an abort signal through destination generation requests', async () => {
+    const payload = {
+      requestId: 'request-with-signal',
+      status: 'complete',
+      sourceConfidence: 1,
+      warnings: [],
+      results: [],
+      imagePlans: [],
+    };
+    const fetch = jest
+      .fn()
+      .mockResolvedValue(
+        streamResponse([
+          `${JSON.stringify({ name: 'completed', data: payload })}\n`,
+        ])
+      );
+    const controller = new AbortController();
+
+    await requestMediaCopyGenerationForDestinations(
+      fetch,
+      [{ id: '1', identifier: 'linkedin' }],
+      { mediaId: 'media-1', goal: 'position' },
+      undefined,
+      controller.signal
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/posts/copy/generate',
+      expect.objectContaining({ signal: controller.signal })
+    );
+  });
+
   it('preserves validation messages from non-streaming API errors', async () => {
     const fetch = jest.fn().mockResolvedValue({
       ok: false,
