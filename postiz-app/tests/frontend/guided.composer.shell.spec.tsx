@@ -279,6 +279,14 @@ describe('guided composer shell', () => {
       expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-3')
     );
     expect(useGuidedComposerStore.getState().sourceMediaId).not.toBe('video-2');
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/media/video-2', {
+        method: 'DELETE',
+      });
+      expect(useLaunchStore.getState().global[0].media).toEqual([
+        expect.objectContaining({ id: 'video-3' }),
+      ]);
+    });
   });
 
   it('invalidates and backend-deletes the guided source on attachment removal', async () => {

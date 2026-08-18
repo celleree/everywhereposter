@@ -130,6 +130,7 @@ export const GuidedComposerShell: FC<{
     thumbnail?: string;
   } | null>(null);
   const sourceDeletionInFlightRef = useRef<Set<string>>(new Set());
+  const obsoleteSourceIntentIdsRef = useRef<Set<string>>(new Set());
   const [sourceTransitionPending, setSourceTransitionPending] = useState(false);
   const [sourceTransitionError, setSourceTransitionError] = useState<
     string | null
@@ -354,6 +355,14 @@ export const GuidedComposerShell: FC<{
     const nextSourceId = nextSource?.id || null;
 
     if (newlyAttachedVideo) {
+      const previousSourceIntent = latestSourceIntentRef.current;
+      if (
+        previousSourceIntent &&
+        previousSourceIntent !== newlyAttachedVideo.id &&
+        previousSourceIntent !== sourceMediaId
+      ) {
+        obsoleteSourceIntentIdsRef.current.add(previousSourceIntent);
+      }
       latestSourceIntentRef.current = newlyAttachedVideo.id;
     }
 
@@ -391,6 +400,7 @@ export const GuidedComposerShell: FC<{
     }
 
     void (async () => {
+      let previousSourceDeletionConfirmed = false;
       try {
         const response = await fetch(`/media/${previousSourceId}`, {
           method: 'DELETE',
@@ -398,6 +408,7 @@ export const GuidedComposerShell: FC<{
         if (!response.ok) {
           throw new Error('The previous video could not be deleted.');
         }
+        previousSourceDeletionConfirmed = true;
 
         if (!composerMountedRef.current) {
           return;
@@ -429,6 +440,47 @@ export const GuidedComposerShell: FC<{
             latestMedia.filter((media) => media.id !== previousSourceId)
           );
         }
+
+        for (const obsoleteSourceId of Array.from(
+          obsoleteSourceIntentIdsRef.current
+        )) {
+          const currentGuidedState = useGuidedComposerStore.getState();
+          const currentMedia = useLaunchStore.getState().global[0]?.media || [];
+          if (
+            obsoleteSourceId === latestSourceIntentRef.current ||
+            obsoleteSourceId === currentGuidedState.sourceMediaId ||
+            !currentMedia.some((media) => media.id === obsoleteSourceId)
+          ) {
+            obsoleteSourceIntentIdsRef.current.delete(obsoleteSourceId);
+            continue;
+          }
+
+          const obsoleteResponse = await fetch(`/media/${obsoleteSourceId}`, {
+            method: 'DELETE',
+          });
+          if (!obsoleteResponse.ok) {
+            throw new Error(
+              'An obsolete replacement video could not be deleted.'
+            );
+          }
+
+          if (!composerMountedRef.current) {
+            return;
+          }
+
+          const reconciledMedia =
+            useLaunchStore.getState().global[0]?.media || [];
+          if (
+            obsoleteSourceId !== latestSourceIntentRef.current &&
+            reconciledMedia.some((media) => media.id === obsoleteSourceId)
+          ) {
+            setGlobalValueMedia(
+              0,
+              reconciledMedia.filter((media) => media.id !== obsoleteSourceId)
+            );
+          }
+          obsoleteSourceIntentIdsRef.current.delete(obsoleteSourceId);
+        }
       } catch {
         if (!composerMountedRef.current) {
           return;
@@ -436,13 +488,13 @@ export const GuidedComposerShell: FC<{
 
         const latestLaunchState = useLaunchStore.getState();
         const latestMedia = latestLaunchState.global[0]?.media || [];
-        const previousSource = sourceMediaSnapshotRef.current;
         const latestIntendedSource = latestMedia.find(
           (media) =>
             media.id === latestSourceIntentRef.current &&
             isGuidedMp4MovMedia(media)
         );
         if (
+          !previousSourceDeletionConfirmed &&
           previousSource?.id === previousSourceId &&
           !latestMedia.some((media) => media.id === previousSourceId)
         ) {
@@ -643,12 +695,22 @@ export const GuidedComposerShell: FC<{
       }
 
       if (!result.response) {
-        completeGeneration(
-          null,
-          result.unsupportedDestinations,
-          generationFingerprint
-        );
-        setComposerStep('review');
+        if (captionMode === 'use-everywhere') {
+          completeGeneration(
+            null,
+            result.unsupportedDestinations,
+            generationFingerprint
+          );
+          setComposerStep('review');
+        } else {
+          failGeneration(
+            'None of the selected destinations support caption generation yet.',
+            {
+              unsupportedDestinations: result.unsupportedDestinations,
+              fingerprint: generationFingerprint,
+            }
+          );
+        }
         return;
       }
 

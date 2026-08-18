@@ -853,6 +853,27 @@ describe('guided composer review', () => {
     ).toBeDisabled();
   });
 
+  it('blocks normalized-empty X content without media', async () => {
+    seedGeneratedReview({
+      destinations: [xAccount],
+      response: generatedResponse([generatedResult('x', '<p></p>')]),
+    });
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+
+    renderReview();
+
+    await screen.findByLabelText('Founder X caption');
+    expect(
+      screen.getByTestId('review-character-count-x-account').textContent
+    ).toContain('0 / 280 characters');
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Add a caption or media before continuing.'
+    );
+    expect(
+      screen.getByRole('button', { name: 'Continue to Publish' })
+    ).toBeDisabled();
+  });
+
   it('preserves edits across normal navigation and removes deselected destinations', async () => {
     seedGeneratedReview();
     renderReview();

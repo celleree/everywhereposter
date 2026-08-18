@@ -61,6 +61,7 @@ import { GenerateMediaCopyResponse } from '@gitroom/nestjs-libraries/dtos/copy-g
 import {
   GuidedPublishRequest,
   GuidedPublishSubmitResult,
+  isGuidedScheduleDateFuture,
   useRegisterGuidedComposerPublish,
 } from '@gitroom/frontend/components/new-launch/guided.composer.publish';
 import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
@@ -1134,6 +1135,22 @@ export const ManageModal: FC<
           if (addEditSets) {
             await addEditSets(data);
           } else {
+            if (
+              guidedRequest?.type === 'schedule' &&
+              !isGuidedScheduleDateFuture(submissionDate)
+            ) {
+              const message =
+                'Choose a scheduled time that is in the future.';
+              toaster.show(message, 'warning');
+              setLoading(false);
+              return {
+                ok: false,
+                kind: 'preflight',
+                message,
+                ambiguous: false,
+              };
+            }
+
             const response = await fetch('/posts', {
               method: 'POST',
               body: JSON.stringify(data),

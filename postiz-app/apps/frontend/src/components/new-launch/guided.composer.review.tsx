@@ -141,12 +141,14 @@ export const getGuidedReviewDraftValidation = (
   hasMedia: boolean
 ) => {
   let characterCount = draft.caption.length;
+  let captionForEmptyValidation = draft.caption;
   if (draft.platform === 'x') {
     const normalizedCaption = stripHtmlValidation(
       'normal',
       draft.caption,
       true
     );
+    captionForEmptyValidation = normalizedCaption;
     characterCount = Math.max(
       weightedLength(normalizedCaption),
       normalizedCaption.length
@@ -161,7 +163,7 @@ export const getGuidedReviewDraftValidation = (
       } characters over the ${limit}-character limit.`
     );
   }
-  if (!draft.caption.trim() && !hasMedia) {
+  if (!captionForEmptyValidation.trim() && !hasMedia) {
     errors.push('Add a caption or media before continuing.');
   }
 

@@ -491,6 +491,63 @@ describe('ManageModal guided publishing bridge', () => {
     ).toBeTruthy();
   });
 
+  it('keeps retry available when the captured schedule expires during preflight', async () => {
+    const scheduledDate = useLaunchStore
+      .getState()
+      .date.year(2035)
+      .month(3)
+      .date(12)
+      .hour(16)
+      .minute(45)
+      .second(0);
+    let now = scheduledDate.valueOf() - 10_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    useLaunchStore.getState().setDate(scheduledDate);
+    let resolvePreflight: ((response: any) => void) | undefined;
+    const pendingPreflight = new Promise<any>((resolve) => {
+      resolvePreflight = resolve;
+    });
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url === '/posts/should-shortlink') {
+        return pendingPreflight;
+      }
+      if (url === '/posts') {
+        throw new Error('The post request must not be attempted.');
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    try {
+      renderGuidedManageModal();
+      fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }));
+
+      await waitFor(() =>
+        expect(
+          mockFetch.mock.calls.some(
+            ([url]) => url === '/posts/should-shortlink'
+          )
+        ).toBe(true)
+      );
+      now = scheduledDate.startOf('second').valueOf();
+      await act(async () => {
+        resolvePreflight?.({ ok: true, json: async () => ({ ask: false }) });
+      });
+
+      expect(postPayload()).toBeUndefined();
+      expect(
+        await screen.findAllByText(
+          'Choose a scheduled time that is in the future.'
+        )
+      ).not.toHaveLength(0);
+      expect(
+        screen.getByRole('button', { name: 'Prepare retry' })
+      ).toBeTruthy();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('routes guided provider validation failures to the existing settings form and retries with corrected values', async () => {
     providerResults[0] = providerResult(
       founderLinkedIn,
