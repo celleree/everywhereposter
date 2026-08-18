@@ -32,11 +32,21 @@ import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/gui
 
 export type GuidedPublishTiming = 'now' | 'schedule';
 
-export interface GuidedPublishRequest {
-  type: GuidedPublishTiming;
+interface GuidedPublishRequestBase {
   destinationIds: string[];
   captionOverrides: Record<string, string>;
 }
+
+export type GuidedPublishRequest = GuidedPublishRequestBase &
+  (
+    | {
+        type: 'now';
+      }
+    | {
+        type: 'schedule';
+        scheduledAt: string;
+      }
+  );
 
 export interface GuidedPublishPostReference {
   postId: string;
@@ -45,6 +55,7 @@ export interface GuidedPublishPostReference {
 
 export type GuidedPublishFailureKind =
   | 'validation'
+  | 'preflight'
   | 'request'
   | 'transport'
   | 'response'
@@ -413,7 +424,9 @@ export const GuidedComposerPublish: FC<{
     timing !== 'schedule' || isGuidedScheduleDateFuture(date);
 
   const submitPublish = useCallback(async () => {
-    if (timing === 'schedule' && !isGuidedScheduleDateFuture(date)) {
+    const attemptDate = date;
+
+    if (timing === 'schedule' && !isGuidedScheduleDateFuture(attemptDate)) {
       setError(GUIDED_SCHEDULE_TIME_ERROR);
       setAmbiguous(false);
       return;
@@ -445,8 +458,7 @@ export const GuidedComposerPublish: FC<{
     });
 
     try {
-      const request: GuidedPublishRequest = {
-        type: timing,
+      const requestDetails: GuidedPublishRequestBase = {
         destinationIds: submissionDestinations.map(
           (destination) => destination.id
         ),
@@ -457,11 +469,23 @@ export const GuidedComposerPublish: FC<{
           ])
         ),
       };
+      const request: GuidedPublishRequest =
+        timing === 'schedule'
+          ? {
+              ...requestDetails,
+              type: 'schedule',
+              scheduledAt: attemptDate.toISOString(),
+            }
+          : {
+              ...requestDetails,
+              type: 'now',
+            };
       const submitted = await submit(request);
 
       if (submitted.ok === false) {
         const safeToRetry =
-          !submitted.ambiguous && submitted.kind === 'validation';
+          !submitted.ambiguous &&
+          (submitted.kind === 'validation' || submitted.kind === 'preflight');
         setResults((currentResults) => {
           const nextResults = { ...currentResults };
           submissionDestinations.forEach((destination) => {
@@ -474,11 +498,7 @@ export const GuidedComposerPublish: FC<{
           });
           return nextResults;
         });
-        setRetryDestinationIds(
-          safeToRetry
-            ? submissionDestinations.map((destination) => destination.id)
-            : []
-        );
+        setRetryDestinationIds(safeToRetry ? null : []);
         setPhase('failed');
         setError(submitted.message);
         setAmbiguous(submitted.ambiguous);
@@ -577,7 +597,7 @@ export const GuidedComposerPublish: FC<{
   ]);
 
   const retry = useCallback(() => {
-    if (ambiguous || !retryDestinationIds?.length) {
+    if (ambiguous || retryDestinationIds !== null) {
       return;
     }
 
@@ -771,12 +791,19 @@ export const GuidedComposerPublish: FC<{
 
         {timing === 'schedule' && (
           <div
-            className="mt-[12px] max-w-[360px]"
+            className={clsx(
+              'mt-[12px] max-w-[360px]',
+              phase === 'submitting' && 'pointer-events-none opacity-60'
+            )}
             aria-label="Scheduled date and time"
+            aria-disabled={phase === 'submitting'}
           >
             <DatePicker
               date={date}
               onChange={(nextDate) => {
+                if (submissionInFlightRef.current) {
+                  return;
+                }
                 setDate(nextDate);
                 if (error === GUIDED_SCHEDULE_TIME_ERROR) {
                   setError('');
@@ -820,15 +847,15 @@ export const GuidedComposerPublish: FC<{
         <div className="mt-[16px] flex justify-end gap-[10px] mobile:flex-col">
           {phase === 'failed' &&
             !ambiguous &&
-            Boolean(retryDestinationIds?.length) && (
-            <button
-              type="button"
-              onClick={retry}
-              className="flex h-[44px] items-center justify-center rounded-[8px] bg-btnSimple px-[18px] text-[14px] font-[700] mobile:w-full"
-            >
-              Prepare retry
-            </button>
-          )}
+            retryDestinationIds === null && (
+              <button
+                type="button"
+                onClick={retry}
+                className="flex h-[44px] items-center justify-center rounded-[8px] bg-btnSimple px-[18px] text-[14px] font-[700] mobile:w-full"
+              >
+                Prepare retry
+              </button>
+            )}
           <button
             type="button"
             onClick={submitPublish}

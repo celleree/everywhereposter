@@ -272,17 +272,67 @@ describe('guided composer publish', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
     expect(screen.getByLabelText('Scheduled date and time')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Choose scheduled date'));
+    const scheduledDate = useLaunchStore.getState().date;
     fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }));
 
     await waitFor(() =>
       expect(submitter).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'schedule' })
+        expect.objectContaining({
+          type: 'schedule',
+          scheduledAt: scheduledDate.toISOString(),
+        })
       )
     );
     expect(
       await screen.findByText('The enabled destinations are scheduled.')
     ).toBeTruthy();
     expect(screen.getAllByText('Scheduled')).toHaveLength(2);
+  });
+
+  it('freezes the scheduled timestamp and prevents picker changes while submitting', async () => {
+    const scheduledDate = dayjs('2035-04-12T16:45:00.000Z');
+    useLaunchStore.getState().setDate(scheduledDate);
+    let resolveSubmission:
+      | ((result: GuidedPublishSubmitResult) => void)
+      | undefined;
+    const submitter = jest.fn(
+      () =>
+        new Promise<GuidedPublishSubmitResult>((resolve) => {
+          resolveSubmission = resolve;
+        })
+    );
+
+    renderPublish(submitter);
+    fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }));
+
+    expect(submitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'schedule',
+        scheduledAt: scheduledDate.toISOString(),
+      })
+    );
+    await waitFor(() =>
+      expect(
+        screen
+          .getByLabelText('Scheduled date and time')
+          .getAttribute('aria-disabled')
+      ).toBe('true')
+    );
+
+    fireEvent.click(screen.getByLabelText('Choose scheduled date'));
+    expect(useLaunchStore.getState().date.valueOf()).toBe(
+      scheduledDate.valueOf()
+    );
+
+    await act(async () => {
+      resolveSubmission?.({
+        ok: false,
+        kind: 'validation',
+        message: 'Validation failed.',
+        ambiguous: false,
+      });
+    });
   });
 
   it('blocks past and equal-to-now schedule selections before submission', () => {
@@ -359,6 +409,59 @@ describe('guided composer publish', () => {
       screen.getByRole('button', { name: 'Publish now' }).hasAttribute('disabled')
     ).toBe(true);
     expect(submitter).toHaveBeenCalledTimes(1);
+  });
+
+  it('derives current destinations after a safe validation retry', async () => {
+    act(() => {
+      useGuidedComposerStore
+        .getState()
+        .setReviewDestinationEnabled(linkedinPage.id, false);
+    });
+    const submitter = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'validation',
+        message: 'Provider settings need attention.',
+        ambiguous: false,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        posts: [
+          { postId: 'post-personal', integration: linkedinPersonal.id },
+          { postId: 'post-page', integration: linkedinPage.id },
+        ],
+      });
+    mockFetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () => ({
+        posts: [{ id: url.slice('/posts/'.length), state: 'PUBLISHED' }],
+      }),
+    }));
+
+    renderPublish(submitter);
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+
+    expect(
+      await screen.findByRole('button', { name: 'Prepare retry' })
+    ).toBeTruthy();
+    expect(submitter.mock.calls[0][0].destinationIds).toEqual([
+      linkedinPersonal.id,
+    ]);
+
+    act(() => {
+      useGuidedComposerStore
+        .getState()
+        .setReviewDestinationEnabled(linkedinPage.id, true);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+
+    await waitFor(() => expect(submitter).toHaveBeenCalledTimes(2));
+    expect(submitter.mock.calls[1][0].destinationIds).toEqual([
+      linkedinPersonal.id,
+      linkedinPage.id,
+    ]);
   });
 
   it('locks an ERROR without release identifiers and does not resubmit', async () => {

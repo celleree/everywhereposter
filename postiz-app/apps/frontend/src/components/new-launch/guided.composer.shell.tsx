@@ -77,6 +77,22 @@ const getGuidedComposerSourceType = (
   return media.length ? 'image' : 'text';
 };
 
+type SourceIntent = {
+  mediaId: string | null;
+  revision: number;
+};
+
+type PendingCleanup = {
+  id: string;
+  kind: 'source' | 'obsolete';
+};
+
+type ReconciliationOwner = {
+  active: boolean;
+  running: boolean;
+  pendingCleanup: PendingCleanup | null;
+};
+
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
   {
@@ -120,18 +136,27 @@ export const GuidedComposerShell: FC<{
 }> = ({ children, locked = false }) => {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const generationRequestActiveRef = useRef(false);
+  const generationAbortControllerRef = useRef<AbortController | null>(null);
   const composerMountedRef = useRef(true);
   const previousVideoIdsRef = useRef<Set<string>>(new Set());
+  const latestSourceIntentRef = useRef<SourceIntent | null>(null);
   const sourceMediaSnapshotRef = useRef<{
     id: string;
     path: string;
     thumbnail?: string;
   } | null>(null);
-  const sourceDeletionInFlightRef = useRef<Set<string>>(new Set());
+  const obsoleteSourceIntentIdsRef = useRef<Set<string>>(new Set());
+  const sourceReconciliationOwnerRef = useRef<ReconciliationOwner>({
+    active: false,
+    running: false,
+    pendingCleanup: null,
+  });
   const [sourceTransitionPending, setSourceTransitionPending] = useState(false);
   const [sourceTransitionError, setSourceTransitionError] = useState<
     string | null
   >(null);
+  const [sourceReconciliationRunning, setSourceReconciliationRunning] =
+    useState(false);
   const [publishSubmitting, setPublishSubmitting] = useState(false);
   const fetch = useFetch();
   const {
@@ -301,7 +326,11 @@ export const GuidedComposerShell: FC<{
     !reviewHasBlockingError &&
     !reviewRegenerationLoading;
   const navigationLocked =
-    locked || generationLoading || sourceTransitionPending || publishSubmitting;
+    locked ||
+    generationLoading ||
+    sourceTransitionPending ||
+    !!sourceTransitionError ||
+    publishSubmitting;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
   const generationRequiredForCurrentStep =
@@ -338,55 +367,147 @@ export const GuidedComposerShell: FC<{
       ? 'Resolve blocking caption errors or disable those destinations.'
       : '';
 
-  useEffect(() => {
-    const videos = globalMedia.filter((media) => isGuidedMp4MovMedia(media));
-    const previousVideoIds = previousVideoIdsRef.current;
-    const newlyAttachedVideo = videos.find(
-      (media) => !previousVideoIds.has(media.id)
-    );
-    const currentSource = videos.find((media) => media.id === sourceMediaId);
-    const nextSource =
-      newlyAttachedVideo && sourceMediaId && newlyAttachedVideo.id !== sourceMediaId
-        ? newlyAttachedVideo
-        : currentSource || selectGuidedSourceVideo(videos, sourceMediaId || undefined);
-    const nextSourceId = nextSource?.id || null;
-
-    previousVideoIdsRef.current = new Set(videos.map((media) => media.id));
-
-    if (currentSource) {
-      sourceMediaSnapshotRef.current = currentSource;
-    }
-
-    if (nextSourceId === sourceMediaId) {
+  const runSourceReconciliation = useCallback(async () => {
+    const owner = sourceReconciliationOwnerRef.current;
+    if (!composerMountedRef.current || !owner.active || owner.running) {
       return;
     }
 
-    const previousSourceId = sourceMediaId;
-    if (!previousSourceId) {
-      setSourceTransitionError(null);
-      selectSourceMedia(nextSourceId);
-      return;
-    }
-
-    if (sourceDeletionInFlightRef.current.has(previousSourceId)) {
-      return;
-    }
-
-    sourceDeletionInFlightRef.current.add(previousSourceId);
-    setSourceTransitionPending(true);
+    owner.running = true;
+    setSourceReconciliationRunning(true);
     setSourceTransitionError(null);
 
-    const previousSource = sourceMediaSnapshotRef.current;
-    if (
-      previousSource?.id === previousSourceId &&
-      !globalMedia.some((media) => media.id === previousSourceId)
-    ) {
-      setGlobalValueMedia(0, [...globalMedia, previousSource]);
-    }
+    try {
+      while (composerMountedRef.current && owner.active) {
+        const intent = latestSourceIntentRef.current;
+        if (!intent) {
+          owner.active = false;
+          owner.pendingCleanup = null;
+          setSourceTransitionPending(false);
+          return;
+        }
 
-    void (async () => {
-      try {
-        const response = await fetch(`/media/${previousSourceId}`, {
+        const guidedState = useGuidedComposerStore.getState();
+        const media = useLaunchStore.getState().global[0]?.media || [];
+        const attachedVideoIds = new Set(
+          media
+            .filter((item) => isGuidedMp4MovMedia(item))
+            .map((item) => item.id)
+        );
+
+        for (const obsoleteId of Array.from(
+          obsoleteSourceIntentIdsRef.current
+        )) {
+          if (
+            !attachedVideoIds.has(obsoleteId) ||
+            obsoleteId === guidedState.sourceMediaId ||
+            obsoleteId === intent.mediaId
+          ) {
+            obsoleteSourceIntentIdsRef.current.delete(obsoleteId);
+          }
+        }
+
+        if (!owner.pendingCleanup) {
+          if (
+            guidedState.sourceMediaId &&
+            guidedState.sourceMediaId !== intent.mediaId
+          ) {
+            owner.pendingCleanup = {
+              id: guidedState.sourceMediaId,
+              kind: 'source',
+            };
+          } else {
+            const obsoleteId = Array.from(
+              obsoleteSourceIntentIdsRef.current
+            ).find((id) => attachedVideoIds.has(id));
+            if (obsoleteId) {
+              owner.pendingCleanup = { id: obsoleteId, kind: 'obsolete' };
+            }
+          }
+        }
+
+        if (!owner.pendingCleanup) {
+          if (guidedState.sourceMediaId !== intent.mediaId) {
+            const intendedSource = media.find(
+              (item) =>
+                item.id === intent.mediaId && isGuidedMp4MovMedia(item)
+            );
+            selectSourceMedia(intendedSource?.id || null);
+            continue;
+          }
+
+          if (latestSourceIntentRef.current?.revision !== intent.revision) {
+            continue;
+          }
+
+          owner.active = false;
+          setSourceTransitionPending(false);
+          setSourceTransitionError(null);
+          return;
+        }
+
+        const cleanup = owner.pendingCleanup;
+        const latestIntent = latestSourceIntentRef.current;
+        const latestGuidedState = useGuidedComposerStore.getState();
+        const latestMedia = useLaunchStore.getState().global[0]?.media || [];
+        const cleanupAttached = latestMedia.some(
+          (item) => item.id === cleanup.id
+        );
+
+        if (!cleanupAttached) {
+          obsoleteSourceIntentIdsRef.current.delete(cleanup.id);
+          owner.pendingCleanup = null;
+          if (
+            cleanup.kind === 'source' &&
+            latestGuidedState.sourceMediaId === cleanup.id
+          ) {
+            const intendedSource = latestMedia.find(
+              (item) =>
+                item.id === latestIntent?.mediaId &&
+                isGuidedMp4MovMedia(item)
+            );
+            selectSourceMedia(intendedSource?.id || null);
+          }
+          continue;
+        }
+
+        if (cleanup.kind === 'source') {
+          if (latestGuidedState.sourceMediaId !== cleanup.id) {
+            if (
+              cleanup.id !== latestIntent?.mediaId &&
+              cleanup.id !== latestGuidedState.sourceMediaId
+            ) {
+              obsoleteSourceIntentIdsRef.current.add(cleanup.id);
+            }
+            owner.pendingCleanup = null;
+            continue;
+          }
+
+          if (!latestIntent || latestIntent.mediaId === cleanup.id) {
+            owner.pendingCleanup = null;
+            continue;
+          }
+
+          if (
+            latestIntent.mediaId &&
+            !latestMedia.some(
+              (item) =>
+                item.id === latestIntent.mediaId &&
+                isGuidedMp4MovMedia(item)
+            )
+          ) {
+            throw new Error('The replacement video is no longer attached.');
+          }
+        } else if (
+          cleanup.id === latestGuidedState.sourceMediaId ||
+          cleanup.id === latestIntent?.mediaId
+        ) {
+          obsoleteSourceIntentIdsRef.current.delete(cleanup.id);
+          owner.pendingCleanup = null;
+          continue;
+        }
+
+        const response = await fetch(`/media/${cleanup.id}`, {
           method: 'DELETE',
         });
         if (!response.ok) {
@@ -397,56 +518,156 @@ export const GuidedComposerShell: FC<{
           return;
         }
 
-        const latestGuidedState = useGuidedComposerStore.getState();
-        if (latestGuidedState.sourceMediaId !== previousSourceId) {
-          return;
-        }
+        const reconciledIntent = latestSourceIntentRef.current;
+        const reconciledGuidedState = useGuidedComposerStore.getState();
+        const reconciledMedia =
+          useLaunchStore.getState().global[0]?.media || [];
 
-        const latestLaunchState = useLaunchStore.getState();
-        const latestMedia = latestLaunchState.global[0]?.media || [];
-        const latestVideos = latestMedia.filter(
-          (media) =>
-            media.id !== previousSourceId && isGuidedMp4MovMedia(media)
-        );
-        const confirmedNextSource =
-          latestVideos.find((media) => media.id === nextSourceId) ||
-          selectGuidedSourceVideo(latestVideos, nextSourceId || undefined);
-
-        selectSourceMedia(confirmedNextSource?.id || null);
-
-        if (latestMedia.some((media) => media.id === previousSourceId)) {
-          setGlobalValueMedia(
-            0,
-            latestMedia.filter((media) => media.id !== previousSourceId)
+        if (cleanup.kind === 'source') {
+          const remainingMedia = reconciledMedia.filter(
+            (item) => item.id !== cleanup.id
           );
-        }
-      } catch {
-        if (!composerMountedRef.current) {
-          return;
+          previousVideoIdsRef.current = new Set(
+            remainingMedia
+              .filter((item) => isGuidedMp4MovMedia(item))
+              .map((item) => item.id)
+          );
+          setGlobalValueMedia(0, remainingMedia);
+
+          const intendedSource = remainingMedia.find(
+            (item) =>
+              item.id === reconciledIntent?.mediaId &&
+              isGuidedMp4MovMedia(item)
+          );
+          selectSourceMedia(intendedSource?.id || null);
+        } else if (
+          cleanup.id !== reconciledGuidedState.sourceMediaId &&
+          cleanup.id !== reconciledIntent?.mediaId
+        ) {
+          const remainingMedia = reconciledMedia.filter(
+            (item) => item.id !== cleanup.id
+          );
+          previousVideoIdsRef.current = new Set(
+            remainingMedia
+              .filter((item) => isGuidedMp4MovMedia(item))
+              .map((item) => item.id)
+          );
+          setGlobalValueMedia(0, remainingMedia);
         }
 
-        const latestLaunchState = useLaunchStore.getState();
-        const latestMedia = latestLaunchState.global[0]?.media || [];
-        const previousSource = sourceMediaSnapshotRef.current;
-        if (
-          previousSource?.id === previousSourceId &&
-          !latestMedia.some((media) => media.id === previousSourceId)
-        ) {
-          setGlobalValueMedia(0, [...latestMedia, previousSource]);
-        }
+        obsoleteSourceIntentIdsRef.current.delete(cleanup.id);
+        owner.pendingCleanup = null;
+      }
+    } catch {
+      if (composerMountedRef.current) {
         setSourceTransitionError(
           'The previous video could not be removed. Please try again.'
         );
-      } finally {
-        sourceDeletionInFlightRef.current.delete(previousSourceId);
-        if (composerMountedRef.current) {
-          setSourceTransitionPending(false);
-        }
       }
-    })();
+    } finally {
+      owner.running = false;
+      if (composerMountedRef.current) {
+        setSourceReconciliationRunning(false);
+      }
+    }
+  }, [fetch, selectSourceMedia, setGlobalValueMedia]);
+
+  useEffect(() => {
+    const videos = globalMedia.filter((media) => isGuidedMp4MovMedia(media));
+    const previousVideoIds = previousVideoIdsRef.current;
+    const newlyAttachedVideo = videos.find(
+      (media) => !previousVideoIds.has(media.id)
+    );
+    const currentSource = videos.find((media) => media.id === sourceMediaId);
+    const selectedSource =
+      currentSource || selectGuidedSourceVideo(videos, sourceMediaId || undefined);
+
+    if (!latestSourceIntentRef.current) {
+      latestSourceIntentRef.current = {
+        mediaId: selectedSource?.id || null,
+        revision: 0,
+      };
+      previousVideoIdsRef.current = new Set(videos.map((media) => media.id));
+      if (currentSource) {
+        sourceMediaSnapshotRef.current = currentSource;
+      }
+      if (!sourceMediaId && selectedSource) {
+        selectSourceMedia(selectedSource.id);
+      }
+      return;
+    }
+
+    if (newlyAttachedVideo) {
+      const previousIntentId = latestSourceIntentRef.current.mediaId;
+      if (
+        previousIntentId &&
+        previousIntentId !== newlyAttachedVideo.id &&
+        previousIntentId !== sourceMediaId
+      ) {
+        obsoleteSourceIntentIdsRef.current.add(previousIntentId);
+      }
+      latestSourceIntentRef.current = {
+        mediaId: newlyAttachedVideo.id,
+        revision: latestSourceIntentRef.current.revision + 1,
+      };
+    } else if (
+      sourceMediaId &&
+      !currentSource &&
+      !sourceReconciliationOwnerRef.current.active
+    ) {
+      latestSourceIntentRef.current = {
+        mediaId: selectedSource?.id || null,
+        revision: latestSourceIntentRef.current.revision + 1,
+      };
+    }
+
+    previousVideoIdsRef.current = new Set(videos.map((media) => media.id));
+
+    if (currentSource) {
+      sourceMediaSnapshotRef.current = currentSource;
+    }
+
+    const intent = latestSourceIntentRef.current;
+    const hasObsoleteCleanup = Array.from(
+      obsoleteSourceIntentIdsRef.current
+    ).some(
+      (id) =>
+        id !== sourceMediaId &&
+        id !== intent.mediaId &&
+        globalMedia.some((media) => media.id === id)
+    );
+    const needsSourceTransition = sourceMediaId !== intent.mediaId;
+
+    if (!needsSourceTransition && !hasObsoleteCleanup) {
+      return;
+    }
+
+    if (
+      sourceMediaId &&
+      !currentSource &&
+      sourceMediaSnapshotRef.current?.id === sourceMediaId
+    ) {
+      const restoredMedia = [...globalMedia, sourceMediaSnapshotRef.current];
+      previousVideoIdsRef.current = new Set(
+        restoredMedia
+          .filter((media) => isGuidedMp4MovMedia(media))
+          .map((media) => media.id)
+      );
+      setGlobalValueMedia(0, restoredMedia);
+    }
+
+    const owner = sourceReconciliationOwnerRef.current;
+    if (owner.active) {
+      return;
+    }
+
+    owner.active = true;
+    owner.pendingCleanup = null;
+    setSourceTransitionPending(true);
+    void runSourceReconciliation();
   }, [
-    fetch,
     globalMedia,
+    runSourceReconciliation,
     selectSourceMedia,
     setGlobalValueMedia,
     sourceMediaId,
@@ -569,6 +790,8 @@ export const GuidedComposerShell: FC<{
     }
 
     generationRequestActiveRef.current = true;
+    const abortController = new AbortController();
+    generationAbortControllerRef.current = abortController;
     startGeneration(generationFingerprint);
 
     try {
@@ -592,7 +815,8 @@ export const GuidedComposerShell: FC<{
           ) {
             setGenerationProgress(getGuidedGenerationProgress(name, data));
           }
-        }
+        },
+        abortController.signal
       );
 
       if (!composerMountedRef.current) {
@@ -623,13 +847,22 @@ export const GuidedComposerShell: FC<{
       }
 
       if (!result.response) {
-        failGeneration(
-          'None of the selected destinations support caption generation yet.',
-          {
-            unsupportedDestinations: result.unsupportedDestinations,
-            fingerprint: generationFingerprint,
-          }
-        );
+        if (captionMode === 'use-everywhere') {
+          completeGeneration(
+            null,
+            result.unsupportedDestinations,
+            generationFingerprint
+          );
+          setComposerStep('review');
+        } else {
+          failGeneration(
+            'None of the selected destinations support caption generation yet.',
+            {
+              unsupportedDestinations: result.unsupportedDestinations,
+              fingerprint: generationFingerprint,
+            }
+          );
+        }
         return;
       }
 
@@ -667,6 +900,9 @@ export const GuidedComposerShell: FC<{
         );
       }
     } finally {
+      if (generationAbortControllerRef.current === abortController) {
+        generationAbortControllerRef.current = null;
+      }
       generationRequestActiveRef.current = false;
     }
   }, [
@@ -717,6 +953,15 @@ export const GuidedComposerShell: FC<{
     sourceType,
   ]);
 
+  const retrySourceCleanup = useCallback(() => {
+    const owner = sourceReconciliationOwnerRef.current;
+    if (!owner.active || !owner.pendingCleanup || owner.running) {
+      return;
+    }
+
+    void runSourceReconciliation();
+  }, [runSourceReconciliation]);
+
   useEffect(() => {
     headingRef.current?.focus();
   }, [composerStep]);
@@ -725,6 +970,12 @@ export const GuidedComposerShell: FC<{
     composerMountedRef.current = true;
     return () => {
       composerMountedRef.current = false;
+      sourceReconciliationOwnerRef.current.active = false;
+      sourceReconciliationOwnerRef.current.running = false;
+      sourceReconciliationOwnerRef.current.pendingCleanup = null;
+      generationAbortControllerRef.current?.abort();
+      generationAbortControllerRef.current = null;
+      generationRequestActiveRef.current = false;
       resetGuidedComposer();
     };
   }, [resetGuidedComposer]);
@@ -848,6 +1099,19 @@ export const GuidedComposerShell: FC<{
               disabled={navigationLocked}
               sourceMutationError={sourceTransitionError}
             />
+            {!!sourceTransitionError &&
+              !!sourceReconciliationOwnerRef.current.pendingCleanup && (
+                <div className="mx-auto flex w-full max-w-[1600px] justify-end px-[40px] pt-[10px] mobile:px-[12px]">
+                  <button
+                    type="button"
+                    onClick={retrySourceCleanup}
+                    disabled={sourceReconciliationRunning}
+                    className="flex h-[36px] items-center justify-center rounded-[8px] bg-btnSimple px-[14px] text-[13px] font-[700] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Retry cleanup
+                  </button>
+                </div>
+              )}
           </div>
           {composerStep === 'destinations' && generationLoading && (
             <GuidedComposerGeneration progress={generationProgress} />

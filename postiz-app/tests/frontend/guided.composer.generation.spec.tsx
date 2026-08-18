@@ -514,6 +514,7 @@ describe('guided composer generation transition', () => {
 
   it('retains unsupported-only destinations and does not make a network request', async () => {
     seedDraft([unsupportedDestination]);
+    useGuidedComposerStore.getState().setCaptionMode('generate');
     renderGeneration();
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
@@ -527,6 +528,8 @@ describe('guided composer generation transition', () => {
     expect(useGuidedComposerStore.getState()).toMatchObject({
       composerStep: 'destinations',
       generationStatus: 'failed',
+      generationError:
+        'None of the selected destinations support caption generation yet.',
       unsupportedDestinations: [unsupportedDestination],
     });
   });

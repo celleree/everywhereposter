@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mockFetch = jest.fn();
 const mockCheckAllValid = jest.fn();
@@ -433,9 +433,13 @@ describe('ManageModal guided publishing bridge', () => {
       .minute(45)
       .second(0);
     useLaunchStore.getState().setDate(scheduledDate);
+    let resolvePreflight: ((response: any) => void) | undefined;
+    const pendingPreflight = new Promise<any>((resolve) => {
+      resolvePreflight = resolve;
+    });
     mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
       if (url === '/posts/should-shortlink') {
-        return { ok: true, json: async () => ({ ask: false }) };
+        return pendingPreflight;
       }
       if (url === '/posts' && options?.method === 'POST') {
         const payload = JSON.parse(options.body as string);
@@ -461,14 +465,87 @@ describe('ManageModal guided publishing bridge', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }));
 
+    await waitFor(() =>
+      expect(
+        mockFetch.mock.calls.some(
+          ([url]) => url === '/posts/should-shortlink'
+        )
+      ).toBe(true)
+    );
+    const changedDate = scheduledDate.add(1, 'day');
+    act(() => {
+      useLaunchStore.getState().setDate(changedDate);
+    });
+    await act(async () => {
+      resolvePreflight?.({ ok: true, json: async () => ({ ask: false }) });
+    });
+
     await waitFor(() => expect(postPayload()).toBeTruthy());
     expect(postPayload()).toMatchObject({
       type: 'schedule',
       date: scheduledDate.utc().format('YYYY-MM-DDTHH:mm:ss'),
     });
+    expect(useLaunchStore.getState().date.valueOf()).toBe(changedDate.valueOf());
     expect(
       await screen.findByText('The enabled destinations are scheduled.')
     ).toBeTruthy();
+  });
+
+  it('keeps retry available when the captured schedule expires during preflight', async () => {
+    const scheduledDate = useLaunchStore
+      .getState()
+      .date.year(2035)
+      .month(3)
+      .date(12)
+      .hour(16)
+      .minute(45)
+      .second(0);
+    let now = scheduledDate.valueOf() - 10_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    useLaunchStore.getState().setDate(scheduledDate);
+    let resolvePreflight: ((response: any) => void) | undefined;
+    const pendingPreflight = new Promise<any>((resolve) => {
+      resolvePreflight = resolve;
+    });
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url === '/posts/should-shortlink') {
+        return pendingPreflight;
+      }
+      if (url === '/posts') {
+        throw new Error('The post request must not be attempted.');
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    try {
+      renderGuidedManageModal();
+      fireEvent.click(screen.getByRole('radio', { name: /Schedule/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }));
+
+      await waitFor(() =>
+        expect(
+          mockFetch.mock.calls.some(
+            ([url]) => url === '/posts/should-shortlink'
+          )
+        ).toBe(true)
+      );
+      now = scheduledDate.startOf('second').valueOf();
+      await act(async () => {
+        resolvePreflight?.({ ok: true, json: async () => ({ ask: false }) });
+      });
+
+      expect(postPayload()).toBeUndefined();
+      expect(
+        await screen.findAllByText(
+          'Choose a scheduled time that is in the future.'
+        )
+      ).not.toHaveLength(0);
+      expect(
+        screen.getByRole('button', { name: 'Prepare retry' })
+      ).toBeTruthy();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('routes guided provider validation failures to the existing settings form and retries with corrected values', async () => {
@@ -480,6 +557,11 @@ describe('ManageModal guided publishing bridge', () => {
     providerResults[0].fix = jest.fn(() =>
       useLaunchStore.getState().setCurrent(founderLinkedIn.id)
     );
+    act(() => {
+      useGuidedComposerStore
+        .getState()
+        .setReviewDestinationEnabled(companyLinkedIn.id, false);
+    });
     useGuidedComposerStore.getState().setComposerStep('publish');
     renderGuidedManageModal();
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
@@ -518,6 +600,11 @@ describe('ManageModal guided publishing bridge', () => {
         visibility: 'CONNECTIONS',
       },
     };
+    act(() => {
+      useGuidedComposerStore
+        .getState()
+        .setReviewDestinationEnabled(companyLinkedIn.id, true);
+    });
 
     fireEvent.click(
       await screen.findByRole('button', { name: 'Prepare retry' })
@@ -525,6 +612,14 @@ describe('ManageModal guided publishing bridge', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
 
     await waitFor(() => expect(postPayload()).toBeTruthy());
+    expect(mockCheckAllValid).toHaveBeenNthCalledWith(1, [
+      founderLinkedIn.id,
+    ]);
+    expect(mockCheckAllValid).toHaveBeenNthCalledWith(2, [
+      founderLinkedIn.id,
+      companyLinkedIn.id,
+    ]);
+    expect(postPayload().posts).toHaveLength(2);
     expect(postPayload().posts[0]).toMatchObject({
       integration: { id: founderLinkedIn.id },
       settings: {
@@ -541,6 +636,99 @@ describe('ManageModal guided publishing bridge', () => {
       )
     ).toHaveLength(1);
   });
+
+  it.each<[
+    string,
+    () => Promise<any>
+  ]>([
+    [
+      'a rejected request',
+      () => Promise.reject(new Error('Shortlink service unavailable.')),
+    ],
+    [
+      'a non-2xx response',
+      () =>
+        Promise.resolve({
+          ok: false,
+          json: async () => ({ ask: false }),
+        }),
+    ],
+    [
+      'invalid JSON',
+      () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            throw new SyntaxError('Invalid JSON.');
+          },
+        }),
+    ],
+    [
+      'a malformed response',
+      () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ ask: 'yes' }),
+        }),
+    ],
+  ])(
+    'allows a safe retry when shortlink preflight returns %s',
+    async (_label, firstPreflight) => {
+      let preflightAttempts = 0;
+      mockFetch.mockImplementation(
+        async (url: string, options?: RequestInit) => {
+          if (url === '/posts/should-shortlink') {
+            preflightAttempts += 1;
+            if (preflightAttempts === 1) {
+              return firstPreflight();
+            }
+            return { ok: true, json: async () => ({ ask: false }) };
+          }
+          if (url === '/posts' && options?.method === 'POST') {
+            const payload = JSON.parse(options.body as string);
+            return {
+              ok: true,
+              json: async () =>
+                payload.posts.map((post: any) => ({
+                  postId: `post-${post.integration.id}`,
+                  integration: post.integration.id,
+                })),
+            };
+          }
+          if (url.startsWith('/posts/post-')) {
+            const postId = url.slice('/posts/'.length);
+            return {
+              ok: true,
+              json: async () => ({
+                posts: [{ id: postId, state: 'PUBLISHED' }],
+              }),
+            };
+          }
+          throw new Error(`Unexpected request: ${url}`);
+        }
+      );
+
+      renderGuidedManageModal();
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Publish now' })
+      );
+
+      expect((await screen.findByRole('alert')).textContent).toContain(
+        'The shortlink check could not be completed. Please try again.'
+      );
+      expect(postPayload()).toBeUndefined();
+      fireEvent.click(screen.getByRole('button', { name: 'Prepare retry' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+
+      await waitFor(() => expect(postPayload()).toBeTruthy());
+      expect(preflightAttempts).toBe(2);
+      expect(
+        mockFetch.mock.calls.filter(
+          ([url, options]) => url === '/posts' && options?.method === 'POST'
+        )
+      ).toHaveLength(1);
+    }
+  );
 
   it('treats every guided non-2xx post response as ambiguous and locks retry', async () => {
     mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {

@@ -61,6 +61,7 @@ import { GenerateMediaCopyResponse } from '@gitroom/nestjs-libraries/dtos/copy-g
 import {
   GuidedPublishRequest,
   GuidedPublishSubmitResult,
+  isGuidedScheduleDateFuture,
   useRegisterGuidedComposerPublish,
 } from '@gitroom/frontend/components/new-launch/guided.composer.publish';
 import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
@@ -846,11 +847,16 @@ export const ManageModal: FC<
       type: 'draft' | 'now' | 'schedule' | 'update',
       guidedRequest?: GuidedPublishRequest
     ): Promise<GuidedPublishSubmitResult> => {
+      const submissionDate =
+        guidedRequest?.type === 'schedule'
+          ? dayjs(guidedRequest.scheduledAt)
+          : date;
+
       if (
         (type === 'now' || type === 'schedule') &&
         (existingData?.posts?.[0]?.state === 'PUBLISHED' ||
           (existingData?.posts?.[0]?.state === 'QUEUE' &&
-            dayjs().isAfter(date.utc())))
+            dayjs().isAfter(submissionDate.utc())))
       ) {
         const whatToDo = await new Promise((resolve) => {
           modal.openModal({
@@ -1021,16 +1027,44 @@ export const ManageModal: FC<
       let shortLink = false;
 
       if (!dummy && shortlinkPreference !== 'NO') {
-        const shortLinkUrl = await (
-          await fetch('/posts/should-shortlink', {
+        let shortLinkUrl: any;
+
+        try {
+          const response = await fetch('/posts/should-shortlink', {
             method: 'POST',
             body: JSON.stringify({
               messages: checkAllValid.flatMap((p: any) =>
                 p.values.flatMap((a: any) => a.content)
               ),
             }),
-          })
-        ).json();
+          });
+
+          if (guidedRequest && !response.ok) {
+            throw new Error('The shortlink check was unsuccessful.');
+          }
+
+          const responseBody = await response.json();
+          if (guidedRequest && typeof responseBody?.ask !== 'boolean') {
+            throw new Error('The shortlink check returned an invalid response.');
+          }
+
+          shortLinkUrl = responseBody;
+        } catch (error) {
+          if (!guidedRequest) {
+            throw error;
+          }
+
+          const message =
+            'The shortlink check could not be completed. Please try again.';
+          toaster.show(message, 'warning');
+          setLoading(false);
+          return {
+            ok: false,
+            kind: 'preflight',
+            message,
+            ambiguous: false,
+          };
+        }
 
         if (shortLinkUrl.ask) {
           if (shortlinkPreference === 'YES') {
@@ -1053,7 +1087,7 @@ export const ManageModal: FC<
         ...(repeater ? { inter: repeater } : {}),
         tags,
         shortLink,
-        date: date.utc().format('YYYY-MM-DDTHH:mm:ss'),
+        date: submissionDate.utc().format('YYYY-MM-DDTHH:mm:ss'),
         posts: checkAllValid.map((post: any) => ({
           integration: {
             id: post.integration.id,
@@ -1101,6 +1135,22 @@ export const ManageModal: FC<
           if (addEditSets) {
             await addEditSets(data);
           } else {
+            if (
+              guidedRequest?.type === 'schedule' &&
+              !isGuidedScheduleDateFuture(submissionDate)
+            ) {
+              const message =
+                'Choose a scheduled time that is in the future.';
+              toaster.show(message, 'warning');
+              setLoading(false);
+              return {
+                ok: false,
+                kind: 'preflight',
+                message,
+                ambiguous: false,
+              };
+            }
+
             const response = await fetch('/posts', {
               method: 'POST',
               body: JSON.stringify(data),
