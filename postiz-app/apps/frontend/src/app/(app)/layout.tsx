@@ -98,7 +98,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <html suppressHydrationWarning>
       <head>
-        <link rel="icon" type="image/png" href="/branding/favicon.png" />
+        <link
+          rel="icon"
+          type="image/svg+xml"
+          href="/branding/everywhereposter-icon-black.svg"
+        />
         <Script
           id="strip-extension-hydration-attributes"
           strategy="beforeInteractive"
