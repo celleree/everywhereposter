@@ -30,7 +30,7 @@
     ['Postiz To Grow Their Social Presence', 'EverywherePoster To Grow Their Social Presence'],
     ['How to Use Postiz', 'How to Use EverywherePoster'],
     ['Use Postiz', 'Use EverywherePoster'],
-    ['Join 10,000+ Entrepreneurs Who Use Postiz', 'EverywherePoster To Grow Their Social Presence'],
+    ['Join 10,000+ Entrepreneurs Who Use Postiz', 'Join 10,000+ Entrepreneurs Who Use EverywherePoster'],
     ['watch this short video to learn how to get the most out of Postiz', 'watch this short video to learn how to get the most out of EverywherePoster'],
     ['Watch this short video to learn how to get the most out of Postiz', 'Watch this short video to learn how to get the most out of EverywherePoster'],
     ['Postiz', BRAND_NAME],
