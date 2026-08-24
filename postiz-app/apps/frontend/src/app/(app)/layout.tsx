@@ -101,7 +101,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <link
           rel="icon"
           type="image/svg+xml"
-          href="/branding/favicon.svg?v=20260823"
+          href="/branding/favicon.svg?v=20260823-3"
         />
         <Script
           id="strip-extension-hydration-attributes"

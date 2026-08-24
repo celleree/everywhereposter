@@ -3,7 +3,7 @@
   const MARKETING_ORIGIN = 'https://everywhereposter.com';
   const BRAND_ASSET_BLACK = '/branding/everywhereposter-icon-black.svg';
   const BRAND_ASSET_WHITE = '/branding/everywhereposter-icon-white.svg';
-  const FAVICON_ASSET = '/branding/favicon.svg';
+  const FAVICON_ASSET = '/branding/favicon.svg?v=20260823-3';
   const IMAGE_ASSET_PATHS = [
     '/logo.svg',
     '/logo-text.svg',
