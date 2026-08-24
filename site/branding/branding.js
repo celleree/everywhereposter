@@ -3,7 +3,7 @@
   const MARKETING_ORIGIN = 'https://everywhereposter.com';
   const BRAND_ASSET_BLACK = '/branding/everywhereposter-icon-black.svg';
   const BRAND_ASSET_WHITE = '/branding/everywhereposter-icon-white.svg';
-  const FAVICON_ASSET = '/branding/favicon.svg';
+  const FAVICON_ASSET = '/branding/favicon.svg?v=20260823-3';
   const IMAGE_ASSET_PATHS = [
     '/logo.svg',
     '/logo-text.svg',
@@ -30,7 +30,7 @@
     ['Postiz To Grow Their Social Presence', 'EverywherePoster To Grow Their Social Presence'],
     ['How to Use Postiz', 'How to Use EverywherePoster'],
     ['Use Postiz', 'Use EverywherePoster'],
-    ['Join 10,000+ Entrepreneurs Who Use Postiz', 'Join 10,000+ Entrepreneurs Who Use EverywherePoster'],
+    ['Join 10,000+ Entrepreneurs Who Use Postiz', 'EverywherePoster To Grow Their Social Presence'],
     ['watch this short video to learn how to get the most out of Postiz', 'watch this short video to learn how to get the most out of EverywherePoster'],
     ['Watch this short video to learn how to get the most out of Postiz', 'Watch this short video to learn how to get the most out of EverywherePoster'],
     ['Postiz', BRAND_NAME],
