@@ -7,6 +7,7 @@ RUNTIME_IMAGE="${RUNTIME_IMAGE:-publish-everywhere/postiz-app:custom}"
 ROLLBACK_IMAGE="${ROLLBACK_IMAGE:-publish-everywhere/postiz-app:previous}"
 SERVICE_NAME="${SERVICE_NAME:-postiz}"
 CONTAINER_NAME="${CONTAINER_NAME:-postiz}"
+PUBLIC_WEB_CONTAINER="${PUBLIC_WEB_CONTAINER:-publish-everywhere-web}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-45}"
 PRUNE_UNUSED_IMAGES="${PRUNE_UNUSED_IMAGES:-false}"
 ROLLBACK_GUARD_CONTAINER="${ROLLBACK_GUARD_CONTAINER:-everywhereposter-rollback-prune-guard}"
@@ -100,6 +101,21 @@ if [ "$RUNNING_IMAGE_ID" != "$EXPECTED_IMAGE_ID" ]; then
   docker logs --tail 120 "$CONTAINER_NAME" || true
   fail "The running container image does not match the requested full-SHA image."
 fi
+
+if ! docker inspect "$PUBLIC_WEB_CONTAINER" >/dev/null 2>&1; then
+  fail "The public proxy container ${PUBLIC_WEB_CONTAINER} does not exist."
+fi
+
+PUBLIC_WEB_RUNNING="$(docker inspect "$PUBLIC_WEB_CONTAINER" --format '{{.State.Running}}')"
+if [ "$PUBLIC_WEB_RUNNING" != "true" ]; then
+  fail "The public proxy container ${PUBLIC_WEB_CONTAINER} is not running."
+fi
+
+docker exec "$PUBLIC_WEB_CONTAINER" nginx -t
+docker exec "$PUBLIC_WEB_CONTAINER" nginx -s reload
+sleep 2
+printf 'Reloaded %s so Nginx resolves the recreated %s container.\n' \
+  "$PUBLIC_WEB_CONTAINER" "$CONTAINER_NAME"
 
 docker logs --tail 120 "$CONTAINER_NAME"
 printf 'DEPLOYED_SHA=%s\n' "$TARGET_SHA"
