@@ -86,7 +86,7 @@ Responsibilities:
 6. A draft pull request is opened.
 7. A separate fresh-context reviewer checks the exact current HEAD, issue, diff, tests, and product contracts.
 8. The original implementation session or repair agent addresses verified findings.
-9. Verification and, when required, fresh exact-SHA review run again after material fixes.
+9. Verification and, when required, fresh exact-SHA review run again after any HEAD change. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
 10. GitHub Actions runs the full pull-request checks.
 11. A human decides whether to merge.
 12. The coordinator prepares deployment steps and any proposed durable learning.
@@ -104,7 +104,7 @@ After three passes, ordinary residual edge cases are documented as remaining ris
 
 Continue beyond three passes only while an unresolved or newly discovered material high-severity risk remains, including security/authentication/authorization failures, exposed secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment risk, unauthorized publishing, or another comparably consequential failure.
 
-A material change to HEAD invalidates a prior exact-SHA review when that review is a required merge gate.
+Any HEAD change after a required exact-SHA review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
 
 ## PR Reviewability
 
