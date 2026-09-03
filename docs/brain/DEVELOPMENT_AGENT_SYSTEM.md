@@ -94,17 +94,19 @@ Responsibilities:
 
 ## Review Depth
 
-Default to a maximum of three independent review passes for one bounded change. The goal is realistic coverage, not infinite hypothetical edge-case enumeration.
+Default to a maximum of three independent broad review passes for one bounded change. The goal is realistic coverage, not infinite hypothetical edge-case enumeration.
 
 - Pass 1: correctness, acceptance criteria, regressions, realistic edge cases, product contracts, and safety.
 - Pass 2: verify repairs and target missed realistic edge cases/shared contracts.
 - Pass 3: final bounded challenge pass when warranted.
 
-After three passes, ordinary residual edge cases are documented as remaining risk or follow-up work rather than causing another automatic review cycle.
+After three passes, ordinary residual edge cases are documented as remaining risk or follow-up work rather than causing another automatic broad review cycle.
 
-Continue beyond three passes only while an unresolved or newly discovered material high-severity risk remains, including security/authentication/authorization failures, exposed secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment risk, unauthorized publishing, or another comparably consequential failure.
+Continue broad review beyond three passes only while an unresolved or newly discovered material high-severity risk remains, including security/authentication/authorization failures, exposed secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment risk, unauthorized publishing, or another comparably consequential failure.
 
 Any HEAD change after a required exact-SHA review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
+
+After pass 3, when a concrete finding is repaired and changes HEAD, the required fresh exact-SHA review may be narrowly scoped to the repair and the interactions needed to validate it. This scoped repair verification does not count as a new broad review pass and must not resume unrelated edge-case discovery. If it finds a concrete defect in the repair, fix and re-verify the new SHA in the same narrow scope.
 
 ## PR Reviewability
 

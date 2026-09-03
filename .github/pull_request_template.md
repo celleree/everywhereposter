@@ -39,7 +39,7 @@
 - Reviewer/session:
 - Fresh context confirmed: yes / no
 - Reviewed HEAD SHA:
-- Review pass: 1 / 2 / 3 / exceptional high-severity continuation
+- Review pass: 1 / 2 / 3 / scoped repair verification / exceptional high-severity continuation
 - Findings/conclusion:
 - Resolution and re-verification:
 

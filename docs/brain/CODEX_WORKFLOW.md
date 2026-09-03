@@ -41,15 +41,17 @@ Simple low-risk mechanical changes may combine planning and implementation when 
 
 Do not spend unlimited cycles inventing increasingly remote edge cases.
 
-Default maximum: three independent review passes for the same bounded change.
+Default maximum: three independent broad review passes for the same bounded change.
 
 - First pass: acceptance criteria, correctness, regressions, realistic edge cases, product contracts, and safety.
 - Second pass: verify fixes and look deliberately for missed realistic edge cases or shared-contract breakage.
 - Third pass: final bounded challenge pass when warranted.
 
-After three passes, ordinary unresolved edge cases should be disclosed as remaining risk or moved to follow-up work rather than causing automatic additional review cycles.
+After three passes, ordinary unresolved edge cases should be disclosed as remaining risk or moved to follow-up work rather than causing another automatic broad review cycle.
 
-Continue beyond three passes only while there is an unresolved or newly discovered material high-severity risk involving security/authentication/authorization, secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment, unauthorized publishing, or another comparably consequential failure.
+Continue broad review beyond three passes only while there is an unresolved or newly discovered material high-severity risk involving security/authentication/authorization, secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment, unauthorized publishing, or another comparably consequential failure.
+
+After pass 3, when a concrete finding is repaired and changes HEAD, the required fresh exact-SHA review may be narrowly scoped to the repair and the interactions needed to validate it. This scoped repair verification does not count as a new broad review pass and must not resume unrelated edge-case discovery. If it finds a concrete defect in the repair, fix and re-verify the new SHA in the same narrow scope.
 
 ## Brain Update Protocol
 

@@ -128,17 +128,19 @@ Simple low-risk mechanical work may combine investigation and implementation whe
 
 Do not create infinite review loops trying to enumerate every theoretical edge case.
 
-Default maximum: **three independent review passes for the same bounded change**.
+Default maximum: **three independent broad review passes for the same bounded change**.
 
 - Pass 1: correctness, acceptance criteria, regressions, obvious edge cases, product contracts, and safety.
 - Pass 2: verify fixes and deliberately look for missed realistic edge cases or shared-contract breakage.
 - Pass 3: final bounded challenge pass when the change warrants it.
 
-After three passes, unresolved ordinary edge cases should be documented as remaining risk or follow-up work rather than causing endless review cycles.
+After three passes, unresolved ordinary edge cases should be documented as remaining risk or follow-up work rather than causing another broad review cycle.
 
-Continue beyond three passes only when a review still finds or strongly indicates a **material high-severity risk**, including security/authentication/authorization failures, exposed secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment risk, unauthorized publishing, or another comparably consequential failure. Stop once those material findings are resolved and the required fresh review passes.
+Continue broad review beyond three passes only when a review still finds or strongly indicates a **material high-severity risk**, including security/authentication/authorization failures, exposed secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment risk, unauthorized publishing, or another comparably consequential failure. Stop once those material findings are resolved and the required fresh review passes.
 
-Do not extend review merely because another hypothetical low-impact edge case can be imagined.
+After pass 3, when a concrete finding is repaired and changes HEAD, the required fresh exact-SHA review may be narrowly scoped to the repair and the interactions needed to validate it. This scoped repair verification does not count as a new broad review pass and must not resume unrelated edge-case discovery. If it finds a concrete defect in the repair, fix and re-verify the new SHA in the same narrow scope.
+
+Do not extend broad review merely because another hypothetical low-impact edge case can be imagined.
 
 ## Parallel decision
 
