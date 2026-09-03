@@ -54,7 +54,7 @@ For manual ChatGPT <-> Codex handoffs, review depth, PR reviewability, and paral
 - Default maximum: three independent review passes for the same bounded change.
 - After three passes, unresolved ordinary edge cases become disclosed remaining risk or follow-up work rather than another automatic review cycle.
 - Continue beyond three passes only while a review still finds or strongly indicates a material high-severity risk such as security/auth failures, exposed secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment risk, unauthorized publishing, or another comparably consequential failure.
-- A materially changed HEAD invalidates an earlier exact-SHA independent review when that review is required.
+- Any HEAD change after a required exact-SHA independent review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
 
 ## Avoid
 
