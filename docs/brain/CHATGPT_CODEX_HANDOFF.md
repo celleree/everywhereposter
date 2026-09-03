@@ -119,7 +119,7 @@ For bounded implementation work coordinated manually between ChatGPT and Codex, 
 3. **Implementation.** Continue the original implementation session and implement only the approved plan. Run focused verification before broader PR checks.
 4. **Independent review.** Use a fresh Codex session for the exact current PR/HEAD SHA when independent review is required. The reviewer should return findings, not silently repair the implementation.
 5. **Repair.** Send verified findings back to the original implementation session. Keep fixes inside the approved scope unless a new decision is explicitly reviewed.
-6. **Re-verify.** Re-run the relevant checks. A materially changed HEAD invalidates an earlier exact-SHA review when that review is required.
+6. **Re-verify.** Re-run the relevant checks. Any HEAD change after a required exact-SHA review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
 7. **Merge/deploy gate.** Merge or deployment still requires the repository's normal human approvals and operational rules.
 
 Simple low-risk mechanical work may combine investigation and implementation when there is no meaningful design decision, review boundary, or value from a separate checkpoint.
