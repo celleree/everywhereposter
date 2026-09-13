@@ -11,6 +11,7 @@ PUBLIC_WEB_CONTAINER="${PUBLIC_WEB_CONTAINER:-publish-everywhere-web}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-45}"
 PRUNE_UNUSED_IMAGES="${PRUNE_UNUSED_IMAGES:-false}"
 ROLLBACK_GUARD_CONTAINER="${ROLLBACK_GUARD_CONTAINER:-everywhereposter-rollback-prune-guard}"
+PRODUCTION_EMAIL_FROM_ADDRESS="${PRODUCTION_EMAIL_FROM_ADDRESS:-noreply@everywhereposter.com}"
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -82,6 +83,8 @@ fi
 
 docker tag "$TARGET_IMAGE" "$RUNTIME_IMAGE"
 
+export EMAIL_FROM_ADDRESS="$PRODUCTION_EMAIL_FROM_ADDRESS"
+
 docker compose run --rm --no-deps --entrypoint /bin/sh \
   "$SERVICE_NAME" -lc \
   'cd /app && pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma'
@@ -91,6 +94,7 @@ sleep "$STARTUP_WAIT_SECONDS"
 
 RUNNING="$(docker inspect "$CONTAINER_NAME" --format '{{.State.Running}}')"
 RUNNING_IMAGE_ID="$(docker inspect "$CONTAINER_NAME" --format '{{.Image}}')"
+RUNNING_EMAIL_FROM_ADDRESS="$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^EMAIL_FROM_ADDRESS=//p' | head -n 1)"
 
 if [ "$RUNNING" != "true" ]; then
   docker logs --tail 120 "$CONTAINER_NAME" || true
@@ -100,6 +104,11 @@ fi
 if [ "$RUNNING_IMAGE_ID" != "$EXPECTED_IMAGE_ID" ]; then
   docker logs --tail 120 "$CONTAINER_NAME" || true
   fail "The running container image does not match the requested full-SHA image."
+fi
+
+if [ "$RUNNING_EMAIL_FROM_ADDRESS" != "$PRODUCTION_EMAIL_FROM_ADDRESS" ]; then
+  docker logs --tail 120 "$CONTAINER_NAME" || true
+  fail "The running container does not use the expected production email sender."
 fi
 
 if ! docker inspect "$PUBLIC_WEB_CONTAINER" >/dev/null 2>&1; then
@@ -120,4 +129,5 @@ printf 'Reloaded %s so Nginx resolves the recreated %s container.\n' \
 docker logs --tail 120 "$CONTAINER_NAME"
 printf 'DEPLOYED_SHA=%s\n' "$TARGET_SHA"
 printf 'DEPLOYED_IMAGE_ID=%s\n' "$RUNNING_IMAGE_ID"
+printf 'EMAIL_FROM_ADDRESS=%s\n' "$RUNNING_EMAIL_FROM_ADDRESS"
 printf 'ROLLBACK_IMAGE_ID=%s\n' "${PREVIOUS_IMAGE_ID:-not-updated}"
