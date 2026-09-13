@@ -97,9 +97,12 @@ export function RegisterAfter({
     frontEndUrl,
   } =
     useVariables();
-  const legalBaseUrl = frontEndUrl?.replace(/\/$/, '') || '';
-  const termsHref = legalBaseUrl ? `${legalBaseUrl}/terms` : '/terms';
-  const privacyHref = legalBaseUrl ? `${legalBaseUrl}/privacy` : '/privacy';
+  const legalBaseUrl =
+    frontEndUrl
+      ?.replace(/^(https?:\/\/)app\./, '$1')
+      .replace(/\/$/, '') || '';
+  const termsHref = legalBaseUrl ? `${legalBaseUrl}/terms/` : '/terms/';
+  const privacyHref = legalBaseUrl ? `${legalBaseUrl}/privacy/` : '/privacy/';
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const fireEvents = useFireEvents();
