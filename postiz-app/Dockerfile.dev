@@ -17,15 +17,27 @@ RUN addgroup --system www \
  && mkdir -p /www \
  && chown -R www:www /www /var/lib/nginx
 
-
 RUN npm --no-update-notifier --no-fund --global install pnpm@10.6.1 pm2
 
 WORKDIR /app
 
+# Keep dependency installation cacheable across normal source-code changes.
+# The Prisma schema is required because the root package runs prisma-generate
+# during postinstall.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY apps/backend/package.json ./apps/backend/package.json
+COPY apps/commands/package.json ./apps/commands/package.json
+COPY apps/extension/package.json ./apps/extension/package.json
+COPY apps/frontend/package.json ./apps/frontend/package.json
+COPY apps/orchestrator/package.json ./apps/orchestrator/package.json
+COPY apps/sdk/package.json ./apps/sdk/package.json
+COPY libraries/nestjs-libraries/src/database/prisma/schema.prisma ./libraries/nestjs-libraries/src/database/prisma/schema.prisma
+
+RUN pnpm install --frozen-lockfile
+
 COPY . /app
 COPY var/docker/nginx.conf /etc/nginx/nginx.conf
 
-RUN pnpm install
 RUN NODE_OPTIONS="--max-old-space-size=4096" pnpm run build
 
 CMD ["sh", "-c", "nginx && pnpm run pm2"]
