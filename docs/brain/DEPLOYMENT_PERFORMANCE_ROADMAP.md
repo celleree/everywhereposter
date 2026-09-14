@@ -68,6 +68,10 @@ Use a fresh independent reviewer when repository policy requires it. Infrastruct
 
 ## Phase 0 — Baseline and dependency graph
 
+### Status
+
+COMPLETE.
+
 ### Goal
 
 Measure the current pipeline and identify the real critical path before changing implementation.
@@ -111,6 +115,14 @@ Do not start Phase 1 until the baseline is recorded and the first optimization c
 
 ## Phase 1 — Low-risk CI and deploy quick wins
 
+### Status
+
+ACTIVE.
+
+Phase 1A is complete via PR #100. The measured Docker-required PR elapsed time fell from 13m46s–13m55s to 10m05s in the first post-change observation, with 3m56s of actual quality/Docker overlap (about 27% faster). This proves the serialized quality wait was removed; it does not demonstrate faster image compilation or cache export.
+
+Phase 1B is active: add observational deployment-stage timing so later pull/prune/readiness optimizations can be based on instrumented command durations rather than adjacent log markers.
+
 ### Goal
 
 Remove avoidable waiting and serialization without redesigning the production image.
@@ -136,6 +148,8 @@ Only implement items supported by Phase 0 evidence. Likely candidates include:
 ### Verification
 
 Compare representative before/after PR and deploy timings.
+
+For Phase 1B specifically, keep instrumentation observational only. Emit timings for major deploy stages without changing waits, readiness checks, pruning defaults, rollback semantics, image selection, migrations, or service recreation behavior. Use the next controlled deployment to populate the instrumented measurements before choosing the next deploy optimization.
 
 ## Phase 2 — Production multi-stage runtime image
 
