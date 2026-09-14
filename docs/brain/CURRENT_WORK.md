@@ -43,12 +43,13 @@ The current pipeline is much slower than the TRA/Vercel workflow because Everywh
 Current checkpoint:
 
 - Phase 0 baseline / dependency graph — COMPLETE.
-- Phase 1A — NEXT: parallelize PR Docker validation with quality checks while preserving the existing final `Docker build` gate as fail-closed.
+- Phase 1A — COMPLETE via PR #100. PR CI fell from the 13m46s–13m55s baseline to 10m05s on the measured post-change run, with 3m56s of actual quality/Docker overlap (about 27% faster).
+- Phase 1B — ACTIVE: add deployment-stage timing instrumentation without changing deployment behavior so later readiness/pull/prune optimizations can be measured precisely.
 - Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
 
 Remaining roadmap:
 
-1. Phase 1 — low-risk CI/deploy improvements supported by the Phase 0 evidence.
+1. Phase 1 — finish low-risk CI/deploy improvements supported by the Phase 0 evidence.
 2. Phase 2 — production multi-stage runtime image. GitHub Issue #15 owns the production Dockerfile objective.
 3. Phase 3 — BuildKit/pnpm cache optimization and safe build concurrency based on measured evidence.
 4. Phase 4 — avoid unnecessary Docker packaging for changes that do not require it while preserving deterministic CI gates.
@@ -88,6 +89,7 @@ Do not automatically prioritize these above provider verification or release blo
 - PR #96 — agent grounding/current-work system.
 - PR #97 — deployment-performance roadmap.
 - Deployment-performance Phase 0 — completed as an audit-only checkpoint with no repository or production changes.
+- PR #100 — Phase 1A parallel PR Docker validation, measured at 10m05s versus the 13m46s–13m55s baseline.
 
 A merged production/config fix is not proof of runtime behavior until the applicable production deployment/configuration has been verified.
 
@@ -99,11 +101,11 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-The default next engineering task is **CI / Docker / Hetzner performance Phase 1A: parallelize PR Docker validation with quality checks while preserving the existing final `Docker build` gate as fail-closed.**
+The active bounded task is **Phase 1B: instrument major stages in `scripts/deploy-production.sh` so pull, optional prune, runtime-image preparation, migration, container recreate, fixed startup wait, container verification, public-proxy reload, and total deployment time are emitted explicitly.**
 
-Keep Phase 1A narrow. Do not combine cache redesign, readiness changes, pruning changes, test deduplication, production image redesign, production publishing changes, branch-protection changes, or classifier allowlist changes.
+Keep Phase 1B observational only. Do not change startup waits, readiness behavior, pruning defaults, rollback behavior, Docker image structure, cache policy, or production deployment semantics.
 
-After implementation, measure actual job overlap and total PR time against the Phase 0 baseline. Use a fresh GPT-5.6 Sol / High independent review against the exact PR HEAD before merge. Merge remains a human approval gate.
+After Phase 1B merges, use the timing output from the next controlled deployment to decide the next evidence-supported Phase 1 optimization. Meaningful readiness remains owned by Issue #18 and should stay a separate high-risk review boundary.
 
 ## Update rule
 
