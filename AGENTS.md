@@ -7,6 +7,7 @@ Keep normal AI/Codex context small. Read only what the current task requires.
 - For a narrow issue with an explicit file/error: start from that issue/error and the directly relevant code/tests.
 - For product behavior, UX copy, platform promises, or capability claims: read `docs/brain/PRODUCT_TRUTH.md`.
 - For “continue the project,” roadmap, prioritization, or deciding what to do next: read `docs/brain/CURRENT_WORK.md`.
+- For long-running local Codex Desktop orchestration across bounded worker sessions: follow `docs/brain/ORCHESTRATOR_PROTOCOL.md`.
 - For locating the owning subsystem: read `docs/brain/REPOSITORY_ROUTING.md`.
 - For operational, deploy, Docker, database, environment, or production work: read `OPERATING-MANUAL.md` first.
 - For manual ChatGPT <-> Codex handoffs, review depth, PR reviewability, and parallel-work decisions: follow `docs/brain/CHATGPT_CODEX_HANDOFF.md`.
@@ -87,7 +88,7 @@ Prefer the smallest coherent, self-contained pull request that leaves the reposi
 ## Controlled multi-agent work
 
 - Default to one implementation agent.
-- Subagents are allowed only when the user explicitly requests multi-agent work or the issue is agent-ready and `docs/brain/DEVELOPMENT_AGENT_SYSTEM.md` is followed.
+- Subagents are allowed when the user explicitly requests multi-agent work, when a root orchestrator is operating under `docs/brain/ORCHESTRATOR_PROTOCOL.md`, or when the issue is agent-ready and `docs/brain/DEVELOPMENT_AGENT_SYSTEM.md` is followed.
 - Add parallel implementation only when tasks are independently bounded, do not depend on an unresolved shared contract, have low file/subsystem overlap, can be developed and verified independently, and are likely to save meaningful time after coordination cost.
 - Start with at most two concurrent implementation agents unless the user explicitly approves more.
 - Assign separate planner, implementer, and reviewer roles when those roles are needed. The implementer must not serve as the final independent reviewer.
@@ -136,15 +137,19 @@ Do not retry a failed model/reasoning configuration unchanged without new eviden
 ## Operational rules for this repo
 
 - Work one step at a time, especially for server and production tasks.
-- The usual live working environment is Hetzner SSH at `/home/arund/publish-everywhere-git`, not local WSL.
-- Do not start Docker Desktop, the local WSL Postiz stack, or local cloudflared unless local work is intentional.
-- Before normal coding sessions, run `sh scripts/install-git-guardrails.sh`, then `sh scripts/check-repository-state.sh`. Stop if either fails.
+- The default development environment is the WSL-native ext4 checkout at `/home/arund/dev/everywhereposter`.
+- Do not use the old Windows-mounted checkout at `/mnt/c/dev/everywhereposter`; it is preserved only as historical local state and previously showed false CRLF/LF modifications.
+- Keep the canonical local checkout on clean `main`; implementation/review workers should use isolated WSL-native worktrees/branches when operating under the root orchestrator protocol.
+- Hetzner SSH at `/home/arund/publish-everywhere-git` is reserved for production-specific measurements, runtime verification, and explicitly approved deployment work.
+- Do not start Docker Desktop, the local WSL Postiz stack, or local cloudflared unless local runtime work is intentionally required.
+- Before normal single-checkout coding sessions, run `sh scripts/install-git-guardrails.sh`, then `sh scripts/check-repository-state.sh`. Stop if either fails.
+- In orchestrated worktree mode, the root orchestrator should validate the canonical checkout first and create isolated worktrees directly from current `main`; do not run `scripts/start-change.sh` from the canonical checkout because it switches the active checkout.
 - Exception: the trusted automated agent wrapper completes its own repository checks before the Codex sandbox starts; do not rerun checks inside that sandbox when `.git` is intentionally read-only.
 - The installed pre-push hook blocks direct pushes to `main`, pushes to the obsolete snapshot, and force pushes from this checkout.
-- Start every new issue from current `main` with `sh scripts/start-change.sh fix/<short-name>` (or `feature/`, `chore/`, `docs/`, `agent/`).
+- Outside orchestrated worktree mode, start new work from current `main` with `sh scripts/start-change.sh fix/<short-name>` (or `feature/`, `chore/`, `docs/`, `agent/`).
 - Never edit directly on `main`; use a short-lived branch and a pull request targeting `main`.
 - The canonical active branch is `main`. The old snapshot branch is historical only.
-- Use VS Code SSH for editing and the Hetzner console for heavy Docker operations when such work is explicitly required.
+- Use the local WSL checkout for normal development. Use Hetzner tools only when production evidence or an approved production action is required.
 
 ## Human approval gates
 
