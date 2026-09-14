@@ -1,6 +1,6 @@
 # Deployment Performance Roadmap
 
-Updated: 2026-09-13
+Updated: 2026-09-14
 
 ## Purpose
 
@@ -66,6 +66,12 @@ Use a fresh independent reviewer when repository policy requires it. Infrastruct
 - Record timings from actual workflow/build/deploy evidence, not estimates.
 - Do not run destructive Docker-volume or database operations as part of performance work.
 
+### Roadmap-specific merge authorization
+
+For pull requests bounded to this roadmap, the root orchestrator or assigned responsible agent may merge without another confirmation only when the independent exact-HEAD review passes, all required CI/checks are green, the reviewed HEAD is unchanged, GitHub reports the PR mergeable, and no review finding remains unresolved. The authoritative procedure is in `docs/brain/ORCHESTRATOR_PROTOCOL.md`.
+
+This exception authorizes merge only. It does not authorize an otherwise blocked implementation or production deployment, and it does not change merge gates outside this roadmap. After merging, verify live `main`, reconcile affected worktrees and dependencies, and continue newly unblocked roadmap work.
+
 ## Phase 0 — Baseline and dependency graph
 
 ### Status
@@ -121,7 +127,7 @@ ACTIVE.
 
 Phase 1A is complete via PR #100. The measured Docker-required PR elapsed time fell from 13m46s–13m55s to 10m05s in the first post-change observation, with 3m56s of actual quality/Docker overlap (about 27% faster). This proves the serialized quality wait was removed; it does not demonstrate faster image compilation or cache export.
 
-Phase 1B is active: add observational deployment-stage timing so later pull/prune/readiness optimizations can be based on instrumented command durations rather than adjacent log markers.
+Phase 1B instrumentation is repository-complete via PR #101. Production timing remains unmeasured until an explicitly approved controlled deployment runs the instrumented script.
 
 ### Goal
 
@@ -154,6 +160,10 @@ For Phase 1B specifically, keep instrumentation observational only. Emit timings
 ## Phase 2 — Production multi-stage runtime image
 
 Related issue: GitHub Issue #15.
+
+### Status
+
+BLOCKED BEFORE EDITS by the prior automatic approval review of the planned Dockerfile/workflow patch. The roadmap merge exception does not itself unblock that rejected action.
 
 ### Goal
 
@@ -195,6 +205,10 @@ Do not adopt the new image for production until CI builds it successfully and a 
 
 ## Phase 3 — BuildKit and dependency-cache optimization
 
+### Status
+
+READ-ONLY ANALYSIS COMPLETE. Implementation waits for a settled Phase 2 runtime image and representative post-Phase-2 measurements.
+
 ### Goal
 
 Make normal source-only image builds reuse dependency and intermediate build work effectively.
@@ -222,6 +236,10 @@ Make normal source-only image builds reuse dependency and intermediate build wor
 Run at least one representative source-only change and one dependency-affecting change.
 
 ## Phase 4 — Avoid unnecessary Docker work
+
+### Status
+
+REPOSITORY COMPLETE via PR #103 for the bounded excluded-Markdown classifier change. It preserves fail-closed classification for other paths; no production timing claim is attached to this change.
 
 ### Goal
 
@@ -252,6 +270,10 @@ Test classifier behavior against representative safe-only and Docker-required di
 ## Phase 5 — Hetzner deployment and readiness optimization
 
 Related issue: GitHub Issue #18 for meaningful application readiness checks.
+
+### Status
+
+BLOCKED on explicit approval for a controlled instrumented production deployment and its measurements.
 
 ### Goal
 
@@ -287,6 +309,10 @@ Run a controlled exact-SHA deployment and capture:
 - rollback evidence if the change modifies rollback mechanics.
 
 ## Phase 6 — Benchmark, consolidate, and document
+
+### Status
+
+BENCHMARK PREPARATION COMPLETE. Final representative measurements and consolidation have not started.
 
 ### Goal
 

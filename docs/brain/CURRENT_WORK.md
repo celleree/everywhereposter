@@ -1,6 +1,6 @@
 # Current Work
 
-Updated: 2026-09-13
+Updated: 2026-09-14
 
 Use this file when the user asks to continue the project, continue a roadmap, decide what to do next, or coordinate work across multiple EverywherePoster workstreams. Do not load it for a narrow bug with an already-named issue or file unless the current priority matters.
 
@@ -44,7 +44,11 @@ Current checkpoint:
 
 - Phase 0 baseline / dependency graph — COMPLETE.
 - Phase 1A — COMPLETE via PR #100. PR CI fell from the 13m46s–13m55s baseline to 10m05s on the measured post-change run, with 3m56s of actual quality/Docker overlap (about 27% faster).
-- Phase 1B — ACTIVE: add deployment-stage timing instrumentation without changing deployment behavior so later readiness/pull/prune optimizations can be measured precisely.
+- Phase 1B — REPOSITORY COMPLETE via PR #101. Instrumentation is merged; no production deployment timing has been captured yet.
+- Phase 4 — REPOSITORY COMPLETE via PR #103 for the bounded excluded-Markdown classifier change; no production timing claim is attached to it.
+- Phase 2 — BLOCKED BEFORE EDITS: the prior automatic approval review rejected the planned Dockerfile/workflow patch; the roadmap merge exception does not itself unblock that action.
+- Phase 3 — READ-ONLY ANALYSIS COMPLETE: implementation waits for a settled Phase 2 image and representative post-Phase-2 measurements.
+- Phase 6 — BENCHMARK PREPARATION COMPLETE: final representative measurements and consolidation have not started.
 - Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
 
 Remaining roadmap:
@@ -90,6 +94,8 @@ Do not automatically prioritize these above provider verification or release blo
 - PR #97 — deployment-performance roadmap.
 - Deployment-performance Phase 0 — completed as an audit-only checkpoint with no repository or production changes.
 - PR #100 — Phase 1A parallel PR Docker validation, measured at 10m05s versus the 13m46s–13m55s baseline.
+- PR #101 — Phase 1B observational deployment-stage timing instrumentation; production timings remain pending.
+- PR #103 — Phase 4 Docker classifier skips explicitly excluded Markdown changes while retaining fail-closed behavior.
 
 A merged production/config fix is not proof of runtime behavior until the applicable production deployment/configuration has been verified.
 
@@ -101,11 +107,9 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-The active bounded task is **Phase 1B: instrument major stages in `scripts/deploy-production.sh` so pull, optional prune, runtime-image preparation, migration, container recreate, fixed startup wait, container verification, public-proxy reload, and total deployment time are emitted explicitly.**
+The next measured roadmap action is an explicitly approved controlled deployment to collect the Phase 1B production timings before choosing a readiness, pull, or pruning optimization. The planned Phase 2 patch remains blocked by its prior pre-edit approval rejection, Phase 3 implementation waits for Phase 2, Phase 5 waits for deployment measurements, and Phase 6 final measurements remain pending.
 
-Keep Phase 1B observational only. Do not change startup waits, readiness behavior, pruning defaults, rollback behavior, Docker image structure, cache policy, or production deployment semantics.
-
-After Phase 1B merges, use the timing output from the next controlled deployment to decide the next evidence-supported Phase 1 optimization. Meaningful readiness remains owned by Issue #18 and should stay a separate high-risk review boundary.
+The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 
 ## Update rule
 
