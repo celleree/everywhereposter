@@ -96,6 +96,35 @@ mkdir -p "$case_dir/docs/brain"
 printf 'notes\n' > "$case_dir/docs/brain/notes.md"
 finish_case nested-docs false safe-only-paths
 
+new_repo unicode-docs
+mkdir -p "$case_dir/docs"
+printf 'notes\n' > "$case_dir/docs/résumé.md"
+finish_case unicode-docs false safe-only-paths
+
+new_repo newline-docs
+mkdir -p "$case_dir/docs"
+newline_doc=$'notes\nsecond-line.md'
+printf 'notes\n' > "$case_dir/docs/$newline_doc"
+finish_case newline-docs false safe-only-paths
+
+new_repo app-markdown
+mkdir -p "$case_dir/postiz-app/apps/frontend"
+printf 'docs\n' > "$case_dir/postiz-app/README.md"
+printf 'docs\n' > "$case_dir/postiz-app/apps/frontend/README.md"
+finish_case app-markdown false safe-only-paths
+
+new_repo app-markdown-with-source
+mkdir -p "$case_dir/postiz-app/apps/frontend"
+printf 'docs\n' > "$case_dir/postiz-app/README.md"
+printf 'export {};\n' > "$case_dir/postiz-app/apps/frontend/main.ts"
+finish_case app-markdown-with-source true docker-required-path
+
+new_repo app-markdown-with-lockfile
+mkdir -p "$case_dir/postiz-app"
+printf 'docs\n' > "$case_dir/postiz-app/README.md"
+printf 'lockfileVersion: 9.0\n' > "$case_dir/postiz-app/pnpm-lock.yaml"
+finish_case app-markdown-with-lockfile true docker-required-path
+
 new_repo tests-only
 mkdir -p "$case_dir/postiz-app/tests/example"
 printf 'test\n' > "$case_dir/postiz-app/tests/example/sample.spec.ts"

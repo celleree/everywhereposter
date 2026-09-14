@@ -45,7 +45,7 @@ if (( ${#changed_files[@]} == 0 )); then
 fi
 
 echo "Changed files from the pull-request merge base:"
-printf '  %s\n' "${changed_files[@]}"
+printf '  %q\n' "${changed_files[@]}"
 
 should_build=false
 for file in "${changed_files[@]}"; do
@@ -57,14 +57,16 @@ for file in "${changed_files[@]}"; do
     safe_only=true
   elif [[ "$file" == docs/*.md ]]; then
     safe_only=true
+  elif [[ "$file" == postiz-app/*.md ]]; then
+    safe_only=true
   elif [[ "$file" == postiz-app/tests/* ]]; then
     safe_only=true
   fi
 
   if [[ "$safe_only" == "true" ]]; then
-    echo "SAFE-ONLY: $file"
+    printf 'SAFE-ONLY: %q\n' "$file"
   else
-    echo "DOCKER REQUIRED: $file"
+    printf 'DOCKER REQUIRED: %q\n' "$file"
     should_build=true
   fi
 done

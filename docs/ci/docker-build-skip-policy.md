@@ -9,11 +9,16 @@ The image build may be skipped only when all changed files are in this allowlist
 - `AGENTS.md`
 - root-level Markdown files
 - Markdown files under `docs/**`
+- Markdown files under `postiz-app/**`
 - files under `postiz-app/tests/**`
 
 Locale JSON, application source, dependencies, lockfiles, Dockerfiles, migrations, runtime configuration, deployment files, workflow files, and unknown paths require the real Docker build.
 
+The `postiz-app/**` Markdown exemption depends on `postiz-app/.dockerignore` excluding `**/*.md` from the Docker context. Revisit this exemption if that exclusion or the build context changes. Mixed changes containing runtime source, dependencies, or Docker configuration still require Docker validation.
+
 ## Classification behavior
+
+Paths are read as NUL-delimited Git filenames and shell-escaped in logs. This preserves exact allowlist matching for Unicode or newline-containing Markdown filenames without splitting their log entries.
 
 The classifier compares the pull request head against its merge base so unrelated commits that later land on `main` are not treated as pull request changes.
 
