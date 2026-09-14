@@ -24,6 +24,8 @@ Classification fails closed:
 - failed, cancelled, or skipped prerequisite jobs fail the protected check
 - manual workflow dispatch always builds
 
+The classifier writes an explicit `reason` alongside `should_build`: `manual-dispatch`, `missing-revision`, `diff-unavailable`, `no-changes`, `docker-required-path`, or `safe-only-paths`.
+
 Only an explicit `should_build=false` skips Docker validation. Only an explicit `should_build=true` starts Docker validation.
 
 ## Parallel validation and final gate
