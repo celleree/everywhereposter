@@ -24,8 +24,21 @@ Classification fails closed:
 - failed, cancelled, or skipped prerequisite jobs fail the protected check
 - manual workflow dispatch always builds
 
-Only an explicit `should_build=false` skips the image build. Only an explicit `should_build=true` starts the image build.
+Only an explicit `should_build=false` skips Docker validation. Only an explicit `should_build=true` starts Docker validation.
+
+## Parallel validation and final gate
+
+For Docker-required pull requests, the **Docker validation** worker starts after the repository guard and classifier succeed. It does not wait for the quality job, so Docker validation and quality checks can run in parallel.
+
+The required **Docker build** check remains a final aggregate gate. It waits for the repository guard, quality checks, classifier, and Docker-validation worker, then fails closed unless:
+
+- repository guard, quality, and classifier all succeeded;
+- classifier output is literally `true` or `false`;
+- `true` classification has a successful Docker-validation worker; or
+- `false` classification has an intentionally skipped Docker-validation worker.
+
+A failed, cancelled, missing, or unexpectedly skipped prerequisite cannot produce a green **Docker build** gate.
 
 ## Expected checks
 
-Repository guards, typechecks, and stable unit tests still run for every pull request. When the image build is skipped, the required **Docker build** check remains present and succeeds after validating all prerequisites and classifier output.
+Repository guards, typechecks, and stable unit tests still run for every pull request. When Docker validation is intentionally skipped for a safe-only change, the required **Docker build** check remains present and succeeds only after validating all prerequisites and classifier output.
