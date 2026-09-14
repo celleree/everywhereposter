@@ -23,14 +23,14 @@
 
 Default policy for routine, related, low-risk work:
 
-- Group approximately 3–6 related tasks into one short-lived branch and one pull request.
-- Agree on the batch scope before implementation.
-- Keep one focused commit per task so each change remains reviewable and reversible.
-- Run the narrowest relevant local validation after each task.
-- Run full pull-request CI only after the agreed batch is complete.
-- Merge once and allow the production image workflow to run once.
-- Before opening a standalone pull request, check whether the task belongs in the active batch.
+- Prefer the smallest coherent, self-contained change that leaves the repository valid.
+- Batch tiny related work only when the combined pull request is easier to understand, test, review, and roll back than separate pull requests.
+- Do not use a fixed number of tasks as the default batch size.
+- Agree on the batch scope before implementation when multiple tasks are intentionally grouped.
+- Keep unrelated product areas out of the same branch.
+- Run the narrowest relevant local validation while iterating and let pull-request CI provide broad regression coverage by default.
 - Stop expanding a batch when review, diagnosis, or safe rollback becomes difficult.
+- Follow the PR-size and reviewability guidance in `AGENTS.md` and `docs/brain/CHATGPT_CODEX_HANDOFF.md`.
 
 Do not batch:
 

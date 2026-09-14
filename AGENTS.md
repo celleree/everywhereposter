@@ -1,105 +1,177 @@
-# Codex Instructions
+# EverywherePoster Agent Instructions
 
-Work in credit-saving mode.
+Keep normal AI/Codex context small. Read only what the current task requires.
 
-Before operational, deploy, Docker, database, or production work, read OPERATING-MANUAL.md first. If this file conflicts with older docs, treat OPERATING-MANUAL.md as the current source of truth unless the user says otherwise.
+## Start here
 
-For manual ChatGPT <-> Codex handoffs, review depth, PR reviewability, and parallel-work decisions, follow `docs/brain/CHATGPT_CODEX_HANDOFF.md`.
+- For a narrow issue with an explicit file/error: start from that issue/error and the directly relevant code/tests.
+- For product behavior, UX copy, platform promises, or capability claims: read `docs/brain/PRODUCT_TRUTH.md`.
+- For “continue the project,” roadmap, prioritization, or deciding what to do next: read `docs/brain/CURRENT_WORK.md`.
+- For locating the owning subsystem: read `docs/brain/REPOSITORY_ROUTING.md`.
+- For operational, deploy, Docker, database, environment, or production work: read `OPERATING-MANUAL.md` first.
+- For manual ChatGPT <-> Codex handoffs, review depth, PR reviewability, and parallel-work decisions: follow `docs/brain/CHATGPT_CODEX_HANDOFF.md`.
+- Load `docs/brain/CODEX_WORKFLOW.md` or `docs/brain/DEVELOPMENT_AGENT_SYSTEM.md` only when planning/review/multi-agent coordination actually needs them.
 
-## Default Workflow
+Do not recursively load the repository, all docs, old PRs, Git history, or every brain file by default.
 
+## Source-of-truth precedence
+
+Use the narrowest current source that actually governs the task:
+
+1. Runtime code/tests/config for what is implemented.
+2. `docs/brain/PRODUCT_TRUTH.md` for durable product promises and constraints.
+3. `docs/brain/CURRENT_WORK.md` for current priorities and roadmap/checkpoint state.
+4. Current GitHub Issue/task acceptance criteria for a bounded change; it supersedes broader product docs only when it explicitly records a newer decision.
+5. `OPERATING-MANUAL.md` for deployment/operations/database/environment rules.
+6. Relevant current subsystem docs/specs.
+7. Older docs, PR descriptions, and historical plans only when they do not conflict with the sources above.
+
+Live GitHub state is authoritative for current branch/PR/HEAD/check status. Repository configuration does not prove an external provider dashboard has approved or accepted the app.
+
+If documentation conflicts with executable code/config about current runtime behavior, code/config is authoritative. Correct stale durable documentation when the conflict represents a real project-state change.
+
+## Current product direction
+
+EverywherePoster is source-content-first, not video-only. The main value is AI-assisted repurposing, platform adaptation where useful, multi-account distribution, and publishing from one place.
+
+Do not claim that one uploaded video becomes many entirely new AI-generated videos or new video concepts. Existing uploaded video may be edited/adapted when supported, and source content may produce captions, text posts, images/image-post concepts, and other implemented assets.
+
+For the current release objective and active workstreams, use `docs/brain/CURRENT_WORK.md` rather than guessing from old Issues or PRs.
+
+## Repository routing
+
+Use `docs/brain/REPOSITORY_ROUTING.md` as the default subsystem map. Start with the smallest listed area and expand only when evidence requires it.
+
+At a high level:
+
+- frontend / guided composer -> `postiz-app/apps/frontend/`
+- backend API -> `postiz-app/apps/backend/src/api/`
+- orchestration / Temporal -> `postiz-app/apps/orchestrator/`
+- shared backend/product services -> `postiz-app/libraries/nestjs-libraries/`
+- focused tests -> `postiz-app/tests/`
+- CI / deployment -> `.github/workflows/`, `scripts/`, Docker/Compose files
+- product/current-work/agent memory -> `docs/brain/`
+
+Do not search every provider or service when the failing route/component already identifies the relevant path.
+
+## Default workflow
+
+- Work in credit-saving mode.
 - Prefer small, targeted fixes.
 - Do not scan the entire repository unless necessary.
-- Do not edit files until you have explained the plan.
-- Before editing, identify the likely root cause, smallest fix, files to change, and verification command.
-- Ask before making broad changes.
-- Inspect only the files directly related to the task, error, or current issue.
-- If more context is needed, ask for the exact file names before reading them.
+- Do not edit files until you have explained the plan for meaningful non-mechanical work.
+- Before editing, identify the likely root cause, smallest coherent fix, files to change, and verification command.
+- Inspect only the files directly related to the task, error, current issue, or governing contract.
 - Do not refactor unrelated code.
 - Do not rename things unless required.
 - Do not change formatting unless required.
 - Do not add dependencies unless explicitly approved.
-- Run the narrowest relevant test or check, not the full suite.
-- Show the diff after changes.
-- Stop after the first working fix.
+- Run the narrowest relevant tests/checks while iterating; let CI provide broad regression coverage by default.
+- Show/review the final diff and verification evidence.
+- Stop after the approved bounded task is correctly verified; do not continue into adjacent cleanup.
 
-## PR Scope and Reviewability
+## PR scope and reviewability
 
-- Prefer the smallest coherent, self-contained pull request that leaves the repository valid.
+Prefer the smallest coherent, self-contained pull request that leaves the repository valid.
+
 - Preferred target: <=200 substantive changed lines when practical.
 - Normal soft ceiling: <=400 substantive changed lines.
-- Split or explicitly justify work that touches more than 10 substantive files.
-- High-risk changes should prefer <=200 substantive changed lines.
-- Batch tiny related low-risk work only when the batch is easier to understand, test, review, and roll back than separate PRs.
-- Do not use an arbitrary number of tasks as the default batching target.
+- Split or explicitly justify work touching more than 10 substantive files.
+- High-risk work should prefer <=200 substantive changed lines.
+- Batch tiny related low-risk work only when the combined PR is easier to understand, test, review, and roll back than separate PRs.
+- Do not use an arbitrary fixed number of tasks as the default batch size.
 - Generated files, lockfiles, snapshots, mechanical formatting, and bulk moves/renames do not count the same as substantive handwritten review work.
 - AI generation speed is never justification for a larger PR.
-- If a coherent change cannot be split without reducing correctness or creating an invalid intermediate state, keep it together and explain the large-PR justification and review order.
+- If splitting would reduce correctness or create an invalid intermediate state, keep the coherent change together and document the justification and review order.
 
-## Controlled Multi-Agent Work
+## Controlled multi-agent work
 
 - Default to one implementation agent.
-- Subagents are allowed only when the user explicitly requests multi-agent work or the issue is marked agent-ready and the workflow in `docs/brain/DEVELOPMENT_AGENT_SYSTEM.md` is followed.
+- Subagents are allowed only when the user explicitly requests multi-agent work or the issue is agent-ready and `docs/brain/DEVELOPMENT_AGENT_SYSTEM.md` is followed.
 - Add parallel implementation only when tasks are independently bounded, do not depend on an unresolved shared contract, have low file/subsystem overlap, can be developed and verified independently, and are likely to save meaningful time after coordination cost.
 - Start with at most two concurrent implementation agents unless the user explicitly approves more.
-- Assign separate planner, implementer, and reviewer roles. The implementer must not serve as the final reviewer.
-- Parallel agents require isolated branches or worktrees, explicit file ownership, and one named integrator.
+- Assign separate planner, implementer, and reviewer roles when those roles are needed. The implementer must not serve as the final independent reviewer.
+- Parallel agents require isolated branches/worktrees, explicit file ownership, and one named integrator.
 - If a supposedly independent workstream discovers a shared-contract dependency, stop that workstream and report the dependency instead of inventing a competing design.
-- Do not use parallel agents for authentication, security, database migrations, destructive data changes, deployment, infrastructure, or unclear product behavior.
+- Do not use parallel implementation for authentication, security, database migrations, destructive data changes, deployment, infrastructure, or unclear product behavior.
 - Agents may not merge, deploy, force-push, access production secrets, or expand scope without explicit human approval.
 
-## Review Depth
+## Review depth and risk
 
-- Do not create infinite review loops trying to enumerate every theoretical edge case.
+Do not create infinite review loops trying to enumerate every theoretical edge case.
+
 - Default maximum: three independent broad review passes for the same bounded change.
 - After three passes, unresolved ordinary edge cases become disclosed remaining risk or follow-up work rather than another automatic broad review cycle.
-- Continue broad review beyond three passes only while a review still finds or strongly indicates a material high-severity risk such as security/auth failures, exposed secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment risk, unauthorized publishing, or another comparably consequential failure.
-- Any HEAD change after a required exact-SHA independent review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
-- After pass 3, when a concrete finding is repaired and changes HEAD, the required fresh exact-SHA review may be narrowly scoped to the repair and the interactions needed to validate it. This scoped repair verification does not count as a new broad review pass and must not resume unrelated edge-case discovery. If it finds a concrete defect in the repair, fix and re-verify the new SHA in the same narrow scope.
+- Continue broad review beyond three passes only while a material high-severity risk remains, such as auth/security failure, exposed secrets, destructive production behavior, persistent customer-data loss/corruption, billing/payment risk, unauthorized publishing, or a comparably consequential failure.
+- Any HEAD change after a required exact-SHA independent review invalidates that review. A trivial repair may receive a narrowly scoped fresh exact-SHA verification without reopening unrelated broad review.
 
-## Avoid
+Risk starting points:
 
-- Do not perform broad cleanup.
-- Do not improve unrelated code.
-- Do not explore unrelated folders.
-- Do not run long commands without explaining why.
+- LOW: docs/copy/simple styling/additive tests or similarly contained reversible work.
+- MEDIUM: runtime/business logic, APIs, data mappings, storage/media/creative behavior, meaningful external integrations.
+- HIGH: auth/authz, secrets/security boundaries, billing/payment, database schema/migrations, destructive production operations, production data/assets, deployment/infrastructure safeguards, or unauthorized publishing risk.
+
+Meaningful MEDIUM integration/runtime changes should receive independent review. HIGH changes always require fresh independent review of the final exact HEAD before merge.
+
+## Model and reasoning routing
+
+Optimize for the lowest expected total cost of a correct, verified result, including retries and rework. Choose model and reasoning effort separately.
+
+Starting points:
+
+- Luna: mechanical/repetitive work, extraction/classification, targeted inspection, very easy tasks.
+- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation.
+- Sol: difficult but bounded planning, debugging, unfamiliar subsystems, complex implementation, substantial independent review.
+- Astra: architecture, cross-workstream decisions, difficult root-cause debugging, high-risk review, large-context orchestration, repeated failures, or expensive mistakes.
+
+Reasoning:
+
+- Low: straightforward/local work.
+- Medium: normal implementation/investigation.
+- High: difficult ambiguity/integration/consequential review.
+- Extra-high: only when clearly justified.
+
+Do not retry a failed model/reasoning configuration unchanged without new evidence. Escalate only when difficulty, ambiguity, context, risk, or failed verification warrants it.
 
 ## Operational rules for this repo
 
-- Work one step at a time, especially for server and dev tasks.
-- For EverywherePoster, the usual live working environment is Hetzner SSH at `/home/arund/publish-everywhere-git`, not local WSL.
+- Work one step at a time, especially for server and production tasks.
+- The usual live working environment is Hetzner SSH at `/home/arund/publish-everywhere-git`, not local WSL.
 - Do not start Docker Desktop, the local WSL Postiz stack, or local cloudflared unless local work is intentional.
 - Before normal coding sessions, run `sh scripts/install-git-guardrails.sh`, then `sh scripts/check-repository-state.sh`. Stop if either fails.
-- Exception: when running through the trusted automated agent wrapper in `scripts/agents/codex-task.sh`, these checks are completed before the Codex sandbox starts. Do not rerun either command inside the sandbox; `.git` is intentionally read-only.
+- Exception: the trusted automated agent wrapper completes its own repository checks before the Codex sandbox starts; do not rerun checks inside that sandbox when `.git` is intentionally read-only.
 - The installed pre-push hook blocks direct pushes to `main`, pushes to the obsolete snapshot, and force pushes from this checkout.
-- Start every new issue from current `main` with `sh scripts/start-change.sh fix/<short-name>` (or `feature/`, `chore/`, `docs/`, or `agent/`).
+- Start every new issue from current `main` with `sh scripts/start-change.sh fix/<short-name>` (or `feature/`, `chore/`, `docs/`, `agent/`).
 - Never edit directly on `main`; use a short-lived branch and a pull request targeting `main`.
 - The canonical active branch is `main`. The old snapshot branch is historical only.
-- Use VS Code SSH for editing and the Hetzner console for heavy Docker builds.
+- Use VS Code SSH for editing and the Hetzner console for heavy Docker operations when such work is explicitly required.
 
-# EverywherePoster Codex Instructions
+## Human approval gates
 
-## Default behavior
+Explicit approval is required before:
 
-- Work in credit-saving mode.
-- Do not scan the whole repo unless explicitly asked.
-- Start from the error, issue, or most relevant file.
-- Propose a plan before editing.
-- Make the smallest useful fix.
-- Do not refactor unrelated code.
-- Do not change product promises without checking docs/brain/PRODUCT_TRUTH.md.
-- Do not add dependencies without approval.
-- Run the narrowest relevant verification command.
+- broad architectural changes;
+- adding dependencies;
+- database schema changes/migrations;
+- authentication/permission changes;
+- changing product promises or billing behavior;
+- merging a pull request;
+- deploying to production;
+- accessing production data/secrets;
+- destructive Docker/database/filesystem/Git operations.
 
-## Reference docs
+Reversible branch-local work inside an already approved bounded scope does not require repeated approval at every edit.
 
-Before product, copy, platform, workflow, or multi-agent development changes, check:
+## Durable learning
 
-- docs/brain/PRODUCT_TRUTH.md
-- docs/brain/CODEX_WORKFLOW.md
-- docs/brain/CHATGPT_CODEX_HANDOFF.md
-- docs/brain/DEVELOPMENT_AGENT_SYSTEM.md
-- docs/brain/WORKED_LEARNINGS.md
-- docs/brain/FAILED_APPROACHES.md
-- docs/brain/KNOWN_ISSUES.md
-- docs/brain/DEPLOYMENT_NOTES.md
+Prefer enforcement over prose when practical:
+
+1. regression test/eval;
+2. deterministic validation/guard;
+3. reusable helper/tool;
+4. code/config contract;
+5. canonical product/architecture/deployment documentation;
+6. GitHub Issue for deferred work;
+7. concise agent instruction when stronger enforcement is impractical.
+
+Use `docs/brain/WORKED_LEARNINGS.md`, `FAILED_APPROACHES.md`, `KNOWN_ISSUES.md`, or `DEPLOYMENT_NOTES.md` only for durable knowledge that is likely to prevent meaningful future rework. Do not store secrets, raw logs, temporary state, or routine debugging history.
