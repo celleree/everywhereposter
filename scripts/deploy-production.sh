@@ -12,10 +12,17 @@ STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-45}"
 PRUNE_UNUSED_IMAGES="${PRUNE_UNUSED_IMAGES:-false}"
 ROLLBACK_GUARD_CONTAINER="${ROLLBACK_GUARD_CONTAINER:-everywhereposter-rollback-prune-guard}"
 PRODUCTION_EMAIL_FROM_ADDRESS="${PRODUCTION_EMAIL_FROM_ADDRESS:-noreply@everywhereposter.com}"
+DEPLOY_STARTED_SECONDS=$SECONDS
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
+}
+
+log_timing() {
+  local stage="$1"
+  local started_seconds="$2"
+  printf 'DEPLOY_TIMING stage=%s seconds=%s\n' "$stage" "$((SECONDS - started_seconds))"
 }
 
 cleanup_rollback_guard() {
@@ -44,6 +51,7 @@ if [ "$PRUNE_UNUSED_IMAGES" != "true" ] && [ "$PRUNE_UNUSED_IMAGES" != "false" ]
 fi
 
 if [ "$PRUNE_UNUSED_IMAGES" = "true" ]; then
+  PRUNE_STARTED_SECONDS=$SECONDS
   cleanup_rollback_guard
 
   if docker image inspect "$ROLLBACK_IMAGE" >/dev/null 2>&1; then
@@ -54,11 +62,15 @@ if [ "$PRUNE_UNUSED_IMAGES" = "true" ]; then
 
   docker image prune -af
   cleanup_rollback_guard
+  log_timing prune_unused_images "$PRUNE_STARTED_SECONDS"
 fi
 
+PULL_STARTED_SECONDS=$SECONDS
 docker pull "$TARGET_IMAGE"
 EXPECTED_IMAGE_ID="$(docker image inspect "$TARGET_IMAGE" --format '{{.Id}}')"
+log_timing pull_image "$PULL_STARTED_SECONDS"
 
+PREPARE_STARTED_SECONDS=$SECONDS
 if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
   PREVIOUS_CONTAINER_RUNNING="$(docker inspect "$CONTAINER_NAME" --format '{{.State.Running}}')"
 
@@ -82,16 +94,25 @@ if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
 fi
 
 docker tag "$TARGET_IMAGE" "$RUNTIME_IMAGE"
+log_timing prepare_runtime_image "$PREPARE_STARTED_SECONDS"
 
 export EMAIL_FROM_ADDRESS="$PRODUCTION_EMAIL_FROM_ADDRESS"
 
+MIGRATION_STARTED_SECONDS=$SECONDS
 docker compose run --rm --no-deps --entrypoint /bin/sh \
   "$SERVICE_NAME" -lc \
   'cd /app && pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma'
+log_timing migration "$MIGRATION_STARTED_SECONDS"
 
+RECREATE_STARTED_SECONDS=$SECONDS
 docker compose up -d --no-build --no-deps --force-recreate "$SERVICE_NAME"
-sleep "$STARTUP_WAIT_SECONDS"
+log_timing recreate_container "$RECREATE_STARTED_SECONDS"
 
+STARTUP_WAIT_STARTED_SECONDS=$SECONDS
+sleep "$STARTUP_WAIT_SECONDS"
+log_timing startup_wait "$STARTUP_WAIT_STARTED_SECONDS"
+
+VERIFY_STARTED_SECONDS=$SECONDS
 RUNNING="$(docker inspect "$CONTAINER_NAME" --format '{{.State.Running}}')"
 RUNNING_IMAGE_ID="$(docker inspect "$CONTAINER_NAME" --format '{{.Image}}')"
 RUNNING_EMAIL_FROM_ADDRESS="$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^EMAIL_FROM_ADDRESS=//p' | head -n 1)"
@@ -110,7 +131,9 @@ if [ "$RUNNING_EMAIL_FROM_ADDRESS" != "$PRODUCTION_EMAIL_FROM_ADDRESS" ]; then
   docker logs --tail 120 "$CONTAINER_NAME" || true
   fail "The running container does not use the expected production email sender."
 fi
+log_timing verify_container "$VERIFY_STARTED_SECONDS"
 
+PROXY_RELOAD_STARTED_SECONDS=$SECONDS
 if ! docker inspect "$PUBLIC_WEB_CONTAINER" >/dev/null 2>&1; then
   fail "The public proxy container ${PUBLIC_WEB_CONTAINER} does not exist."
 fi
@@ -125,9 +148,11 @@ docker exec "$PUBLIC_WEB_CONTAINER" nginx -s reload
 sleep 2
 printf 'Reloaded %s so Nginx resolves the recreated %s container.\n' \
   "$PUBLIC_WEB_CONTAINER" "$CONTAINER_NAME"
+log_timing reload_public_proxy "$PROXY_RELOAD_STARTED_SECONDS"
 
 docker logs --tail 120 "$CONTAINER_NAME"
 printf 'DEPLOYED_SHA=%s\n' "$TARGET_SHA"
 printf 'DEPLOYED_IMAGE_ID=%s\n' "$RUNNING_IMAGE_ID"
 printf 'EMAIL_FROM_ADDRESS=%s\n' "$RUNNING_EMAIL_FROM_ADDRESS"
 printf 'ROLLBACK_IMAGE_ID=%s\n' "${PREVIOUS_IMAGE_ID:-not-updated}"
+log_timing total "$DEPLOY_STARTED_SECONDS"
