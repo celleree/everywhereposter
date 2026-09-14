@@ -6,6 +6,8 @@ Use this file when the user asks to continue the project, continue a roadmap, de
 
 This file is a routing/checkpoint document, not proof that code is deployed or that an external provider dashboard is configured. Live GitHub state, runtime code/tests, and direct external verification remain authoritative for those facts.
 
+For long-running local Codex Desktop orchestration, also follow `docs/brain/ORCHESTRATOR_PROTOCOL.md`.
+
 ## Current release objective
 
 Get EverywherePoster to a safe early paid launch with the core repurposing/publishing workflow usable, external social-app reviews completed, and production operations verified.
@@ -32,21 +34,26 @@ Before calling the product launch-ready or recommending that paid acquisition be
 
 Do not turn launch-readiness work into broad cleanup. Fix only blockers that materially affect launch.
 
-### 3. CI / Docker / Hetzner deployment performance — NEXT ENGINEERING WORKSTREAM
+### 3. CI / Docker / Hetzner deployment performance — ACTIVE
 
 Canonical roadmap: `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`.
 
 The current pipeline is much slower than the TRA/Vercel workflow because EverywherePoster performs full GitHub Actions validation, Docker packaging/cache export, GHCR transfer, image extraction, and container startup work.
 
-Planned checkpoints:
+Current checkpoint:
 
-1. Phase 0 — baseline current PR CI, image build/push, image size, Hetzner pull/extract, startup, and readiness timings. Audit only; no edits.
-2. Phase 1 — low-risk CI/deploy improvements such as parallelizable checks, readiness polling, and avoiding routine destructive cache pruning where safe.
-3. Phase 2 — production multi-stage runtime image. GitHub Issue #15 already owns the production Dockerfile objective.
-4. Phase 3 — BuildKit/pnpm cache optimization and safe build concurrency based on measured evidence.
-5. Phase 4 — avoid unnecessary Docker packaging for changes that do not require it while preserving deterministic CI gates.
-6. Phase 5 — optimize exact-SHA Hetzner deployment and readiness verification. GitHub Issue #18 owns meaningful application health/readiness checks.
-7. Phase 6 — benchmark representative frontend, backend, dependency, Docker, and config-only changes and update operating documentation to the proven workflow.
+- Phase 0 baseline / dependency graph — COMPLETE.
+- Phase 1A — NEXT: parallelize PR Docker validation with quality checks while preserving the existing final `Docker build` gate as fail-closed.
+- Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
+
+Remaining roadmap:
+
+1. Phase 1 — low-risk CI/deploy improvements supported by the Phase 0 evidence.
+2. Phase 2 — production multi-stage runtime image. GitHub Issue #15 owns the production Dockerfile objective.
+3. Phase 3 — BuildKit/pnpm cache optimization and safe build concurrency based on measured evidence.
+4. Phase 4 — avoid unnecessary Docker packaging for changes that do not require it while preserving deterministic CI gates.
+5. Phase 5 — optimize exact-SHA Hetzner deployment and readiness verification. GitHub Issue #18 owns meaningful application health/readiness checks.
+6. Phase 6 — benchmark representative frontend, backend, dependency, Docker, and config-only changes and update operating documentation to the proven workflow.
 
 Preserve the GitHub -> GHCR -> Hetzner architecture unless a separately approved architecture decision changes it.
 
@@ -78,20 +85,25 @@ Do not automatically prioritize these above provider verification or release blo
 - PR #93 — public Terms/Privacy links from signup for reviewer access.
 - PR #94 — Docker dependency-install cache layering.
 - PR #95 — production deploy path uses the verified `noreply@everywhereposter.com` sender and checks the container value.
+- PR #96 — agent grounding/current-work system.
+- PR #97 — deployment-performance roadmap.
+- Deployment-performance Phase 0 — completed as an audit-only checkpoint with no repository or production changes.
 
 A merged production/config fix is not proof of runtime behavior until the applicable production deployment/configuration has been verified.
 
 ## Parked / not current by default
 
 - PR #83 prompt-guided video editor work is not a current priority. Do not resume it unless the user explicitly reactivates it.
-- PR #82 Codex verification-loop automation remains separate from ordinary product work. Do not treat draft automation work as required for normal Codex use.
+- PR #82 Codex verification-loop automation remains separate from ordinary local Codex orchestration. Do not treat the draft PR as required for the root orchestrator protocol.
 - Broad rebrand cleanup in Issue #47 is a tracker. Use its outstanding items when they block launch or external verification rather than reopening completed rebrand work.
 
 ## Next bounded engineering task
 
-The default next engineering task is **CI / Docker / Hetzner performance Phase 0: baseline and audit only** unless the user explicitly chooses another workstream.
+The default next engineering task is **CI / Docker / Hetzner performance Phase 1A: parallelize PR Docker validation with quality checks while preserving the existing final `Docker build` gate as fail-closed.**
 
-The Phase 0 result should identify exact timings, artifact/image sizes, duplicated work, cache behavior, and the smallest Phase 1 change. Do not edit implementation or deployment files during the baseline audit.
+Keep Phase 1A narrow. Do not combine cache redesign, readiness changes, pruning changes, test deduplication, production image redesign, production publishing changes, branch-protection changes, or classifier allowlist changes.
+
+After implementation, measure actual job overlap and total PR time against the Phase 0 baseline. Use a fresh GPT-5.6 Sol / High independent review against the exact PR HEAD before merge. Merge remains a human approval gate.
 
 ## Update rule
 
