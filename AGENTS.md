@@ -120,10 +120,13 @@ Optimize for the lowest expected total cost of a correct, verified result, inclu
 
 Starting points:
 
-- Luna: mechanical/repetitive work, extraction/classification, targeted inspection, very easy tasks.
-- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation.
+- Local `qwen3:8b` via Ollama/Codex `--oss`: targeted inspection, extraction/classification, simple docs, repetitive edits, straightforward tests, and very bounded low-risk code changes.
+- Luna: mechanical/repetitive cloud work, extraction/classification, targeted inspection, very easy tasks when the local worker is unavailable or unsuitable.
+- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation, and the default escalation from the local worker when meaningful logic, ambiguity, or failed verification appears.
 - Sol: difficult but bounded planning, debugging, unfamiliar subsystems, complex implementation, substantial independent review.
 - Astra: architecture, cross-workstream decisions, difficult root-cause debugging, high-risk review, large-context orchestration, repeated failures, or expensive mistakes.
+
+Do not use the local worker as the final independent reviewer or for architecture, authentication/security, database migrations, deployment/infrastructure decisions, destructive operations, or other high-risk work. Follow `docs/brain/ORCHESTRATOR_PROTOCOL.md` for the complete local-worker escalation policy.
 
 Reasoning:
 

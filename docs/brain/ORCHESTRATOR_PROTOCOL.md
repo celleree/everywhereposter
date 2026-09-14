@@ -12,12 +12,40 @@ This protocol does not authorize automatic merge or production deployment. Those
 
 - Primary: GPT-6 Astra / High
 - Fallback: GPT-5.6 Sol / High when Astra is unavailable
-- Default implementation worker: GPT-5.6 Terra / Medium
-- Mechanical worker: GPT-5.6 Luna / Low or Medium
+- Local worker: `qwen3:8b` through Ollama under the Codex `--oss` harness for cheap, bounded, low-risk work
+- Default non-local implementation worker: GPT-5.6 Terra / Medium
+- Mechanical cloud worker: GPT-5.6 Luna / Low or Medium
 - Independent reviewer: GPT-5.6 Sol / High
 - Escalate difficult architecture, repeated failures, high-risk root-cause work, or large-context integration decisions to GPT-6 Astra / High
 
 Choose model and reasoning separately. Optimize for the lowest expected total cost of a correct verified result, including retries and rework.
+
+### Local worker routing
+
+Use `qwen3:8b` first when the task is narrowly bounded and low risk, especially for:
+
+- repository inspection and targeted file reading;
+- extraction, classification, and summarization;
+- simple documentation edits;
+- repetitive or mechanical edits;
+- straightforward tests and test updates;
+- very bounded low-risk code changes with clear acceptance criteria.
+
+Run it through the local Ollama-backed Codex harness, for example:
+
+`codex --oss -m qwen3:8b`
+
+Escalate from the local worker to Terra / Medium when:
+
+- implementation contains meaningful business or application logic;
+- scope grows beyond the original bounded contract;
+- requirements or root cause are ambiguous;
+- local verification fails;
+- the local worker struggles, stalls, or produces low-confidence output.
+
+Do not use the local worker as the final independent reviewer or for architecture, authentication/security, database migrations, deployment/infrastructure decisions, destructive operations, or other high-risk work.
+
+The local worker is an optional lowest-cost tier, not a requirement. If Ollama or the local model is unavailable, route directly to the appropriate cloud worker instead of blocking the task.
 
 ## Canonical local environment
 
