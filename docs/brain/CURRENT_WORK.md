@@ -34,6 +34,8 @@ Do not turn launch-readiness work into broad cleanup. Fix only blockers that mat
 
 ### 3. CI / Docker / Hetzner deployment performance — NEXT ENGINEERING WORKSTREAM
 
+Canonical roadmap: `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`.
+
 The current pipeline is much slower than the TRA/Vercel workflow because EverywherePoster performs full GitHub Actions validation, Docker packaging/cache export, GHCR transfer, image extraction, and container startup work.
 
 Planned checkpoints:
@@ -87,7 +89,7 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-After this agent-grounding checkpoint is merged, the default next engineering task is **CI / Docker / Hetzner performance Phase 0: baseline and audit only** unless the user explicitly chooses another workstream.
+The default next engineering task is **CI / Docker / Hetzner performance Phase 0: baseline and audit only** unless the user explicitly chooses another workstream.
 
 The Phase 0 result should identify exact timings, artifact/image sizes, duplicated work, cache behavior, and the smallest Phase 1 change. Do not edit implementation or deployment files during the baseline audit.
 
