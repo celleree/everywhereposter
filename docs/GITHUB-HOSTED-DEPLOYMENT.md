@@ -21,9 +21,10 @@ It does not build on Hetzner, restart unrelated services, or deploy an image tha
 13. Pulls and tags the requested full-SHA image.
 14. Runs `prisma migrate deploy` using the requested runtime image and configured database.
 15. Recreates only the `postiz` service.
-16. Confirms the container is running from the requested image ID.
-17. Prints the latest container logs and checks the public URL.
-18. Records the run in GitHub's `production` environment deployment history.
+16. Waits up to the bounded timeout for Docker health to verify backend, frontend, orchestrator/Temporal, PostgreSQL, Redis, and zero container restarts.
+17. Confirms the container is running from the requested image ID.
+18. Prints the latest container logs and checks the public URL.
+19. Records the run in GitHub's `production` environment deployment history.
 
 The workflow does not replace release-specific browser testing. Upload, composer, platform-routing, scheduling, and publishing behavior still need manual verification when those areas change.
 
@@ -111,7 +112,7 @@ Do not use `StrictHostKeyChecking=no`. The workflow intentionally fails if the s
 7. Choose `release`.
 8. Leave image pruning disabled unless disk pressure requires it.
 9. Run the workflow.
-10. Review the remote image ID, container status, logs, and public endpoint result.
+10. Review the remote image ID, container health/restart count, readiness timing, logs, and public endpoint result.
 11. Complete the release-specific browser verification checklist.
 12. Update `docs/RELEASE-LEDGER.md` after the deployment is manually verified.
 
@@ -149,7 +150,7 @@ For an emergency server-side rollback when GitHub Actions is unavailable:
 cd /home/arund/publish-everywhere-git
 docker tag publish-everywhere/postiz-app:previous publish-everywhere/postiz-app:custom
 docker compose up -d --no-build --no-deps --force-recreate postiz
-sleep 45
+bash scripts/wait-for-container-health.sh postiz 180 2
 docker logs --tail 120 postiz
 ```
 
@@ -171,9 +172,10 @@ It never runs `docker volume prune`, `docker system prune --volumes`, or `docker
 
 At minimum after deployment:
 
-1. Confirm the login or expected authentication redirect loads.
+1. Confirm the workflow reports healthy with restart count zero.
 2. Confirm the workflow's running image ID matches the requested image.
-3. Check the exact changed feature in the browser.
-4. For composer or publishing changes, use controlled test accounts and content.
-5. Verify scheduling or publishing results on each platform being claimed as validated.
-6. Record the deployed image ID and verification result in `docs/RELEASE-LEDGER.md`.
+3. Confirm the login or expected authentication redirect loads.
+4. Check the exact changed feature in the browser.
+5. For composer or publishing changes, use controlled test accounts and content.
+6. Verify scheduling or publishing results on each platform being claimed as validated.
+7. Record the deployed image ID and verification result in `docs/RELEASE-LEDGER.md`.

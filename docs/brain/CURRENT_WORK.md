@@ -49,7 +49,7 @@ Current checkpoint:
 - Phase 4 — REPOSITORY COMPLETE via PR #103 for the bounded excluded-Markdown classifier change; no production timing claim is attached to it.
 - Phase 2 — AUTHORIZED / IMPLEMENTATION UNDERWAY: the corrected production-image contract and exact infrastructure scope are approved. Production adoption remains separately gated.
 - Phase 3 — READ-ONLY ANALYSIS COMPLETE: implementation waits for a settled Phase 2 image and representative post-Phase-2 measurements.
-- Phase 5 — REPOSITORY IMPLEMENTATION COMPLETE via PR #105 (merge `44b9049be7ec77e973ba89ea53711aa16269ff78`; independently reviewed head `0aeab45f6a1e4d74278c42871f99c9e4efcd95a9`). Exact-head CI run [34913229338](https://github.com/celleree/everywhereposter/actions/runs/34913229338) passed: Docker validation 10m33s, quality 3m50s, and required aggregate gate 6s. The fixed wait is replaced by bounded health polling across frontend, backend, orchestrator/Temporal, PostgreSQL, and Redis, and the gate requires zero container restarts. Production validation still requires separate approval; repository success does not prove production readiness or a deployment speedup.
+- Phase 5 — PARTIAL; INTERNAL READINESS PRODUCTION VERIFIED via PR #105 (merge `44b9049be7ec77e973ba89ea53711aa16269ff78`; reviewed head `0aeab45f6a1e4d74278c42871f99c9e4efcd95a9`). Controlled run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122) reached healthy in 47s, with a 61s deploy script and 119s workflow. It used the same already-running image with pruning disabled and no pending or applied migrations, so comparison with the prior 56s/91s warm run does not establish a speedup. Public retry/backoff remains Phase 5B work.
 - Phase 6 — PARTIAL: docs-only PR #104 run [34912004960](https://github.com/celleree/everywhereposter/actions/runs/34912004960) completed in 313s with a 285s active critical path and skipped Docker validation/package work. This single observation does not establish causal speedup or complete the representative matrix.
 - Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
 
@@ -57,7 +57,7 @@ Remaining roadmap:
 
 1. Phase 2 — complete and verify the production multi-stage runtime image under Issue #15.
 2. Phase 3 — optimize BuildKit/pnpm caching against the settled Phase 2 image and measurements.
-3. Phase 5 — run a separately approved controlled production validation of the merged readiness path under Issue #18.
+3. Phase 5 — complete the bounded public retry/backoff path under Issue #18; any further production validation remains separately gated.
 4. Phase 6 — finish the representative frontend, backend, dependency, Docker, and config benchmark matrix and update operating documentation to verified behavior.
 
 Preserve the GitHub -> GHCR -> Hetzner architecture unless a separately approved architecture decision changes it.
@@ -97,7 +97,7 @@ Do not automatically prioritize these above provider verification or release blo
 - PR #101 — Phase 1B observational deployment-stage timing instrumentation, exercised successfully in controlled run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355).
 - PR #103 — Phase 4 Docker classifier skips explicitly excluded Markdown changes while retaining fail-closed behavior.
 - PR #104 — deployment-performance policy and measurement checkpoint; its docs-only CI run skipped Docker validation/package work.
-- PR #105 — bounded application readiness and deployment health polling; repository validation complete, production validation pending separate approval.
+- PR #105 — bounded application readiness and deployment health polling; internal readiness production-verified in controlled run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122).
 
 A merged production/config fix is not proof of runtime behavior until the applicable production deployment/configuration has been verified.
 
@@ -109,7 +109,7 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-Phase 2 implementation is underway under its corrected approved contract. Phase 3 waits for that image to settle. Phase 5 repository implementation is merged, while its controlled production validation requires separate approval. Phase 6 has one docs-only observation; the remaining representative matrix and final consolidation are pending.
+Phase 2 implementation is underway under its corrected approved contract, and Phase 3 waits for that image to settle. Phase 5B public retry/backoff implementation is underway; production use of that follow-up is not approved. Phase 6 has one docs-only observation, with the remaining representative matrix and final consolidation pending.
 
 The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 
