@@ -2,7 +2,7 @@
 
 This workflow deploys an already-built full-SHA EverywherePoster image from GitHub Actions to the existing Hetzner host over SSH.
 
-It does not build on Hetzner, modify database state, restart unrelated services, or deploy an image that lacks a successful `Build EverywherePoster image` workflow run.
+It does not build on Hetzner, restart unrelated services, or deploy an image that lacks a successful `Build EverywherePoster image` workflow run. Before recreating the app, it runs the existing Prisma migration deployment against the configured database.
 
 ## What the workflow does
 
@@ -19,10 +19,11 @@ It does not build on Hetzner, modify database state, restart unrelated services,
 11. Revalidates ancestry and release freshness immediately before deployment.
 12. Retains the current runtime image as `publish-everywhere/postiz-app:previous`.
 13. Pulls and tags the requested full-SHA image.
-14. Recreates only the `postiz` service.
-15. Confirms the container is running from the requested image ID.
-16. Prints the latest container logs and checks the public URL.
-17. Records the run in GitHub's `production` environment deployment history.
+14. Runs `prisma migrate deploy` using the requested runtime image and configured database.
+15. Recreates only the `postiz` service.
+16. Confirms the container is running from the requested image ID.
+17. Prints the latest container logs and checks the public URL.
+18. Records the run in GitHub's `production` environment deployment history.
 
 The workflow does not replace release-specific browser testing. Upload, composer, platform-routing, scheduling, and publishing behavior still need manual verification when those areas change.
 
