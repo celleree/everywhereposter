@@ -165,7 +165,7 @@ Related issue: GitHub Issue #15.
 
 ### Status
 
-FINAL CI. PR #106 is at independently reviewed head `b833635ce7a9fbf117a16bf7a209253e6e9d7f1b`. Merge remains gated on final CI, and production adoption still requires controlled runtime verification of required services.
+CI STORAGE REPAIR UNDERWAY. Required PR #106 CI run [34915195225](https://github.com/celleree/everywhereposter/actions/runs/34915195225) failed during Docker image loading when the hosted runner exhausted its disk. The local runtime build/verifier and independent exact-head review passed, but they do not replace the required CI gate. A bounded non-destructive storage repair is underway; merge and production adoption remain gated.
 
 ### Goal
 
