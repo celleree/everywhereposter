@@ -23,7 +23,7 @@ It does not build on Hetzner, restart unrelated services, or deploy an image tha
 15. Recreates only the `postiz` service.
 16. Waits up to the bounded timeout for Docker health to verify backend, frontend, orchestrator/Temporal, PostgreSQL, Redis, and zero container restarts.
 17. Confirms the container is running from the requested image ID.
-18. Prints the latest container logs and checks the public URL.
+18. Prints the latest container logs, then checks public readiness for up to 60 seconds with bounded retry/backoff.
 19. Records the run in GitHub's `production` environment deployment history.
 
 The workflow does not replace release-specific browser testing. Upload, composer, platform-routing, scheduling, and publishing behavior still need manual verification when those areas change.
@@ -112,7 +112,7 @@ Do not use `StrictHostKeyChecking=no`. The workflow intentionally fails if the s
 7. Choose `release`.
 8. Leave image pruning disabled unless disk pressure requires it.
 9. Run the workflow.
-10. Review the remote image ID, container health/restart count, readiness timing, logs, and public endpoint result.
+10. Review the remote image ID, container health/restart count, internal and public readiness timing, logs, and public endpoint result.
 11. Complete the release-specific browser verification checklist.
 12. Update `docs/RELEASE-LEDGER.md` after the deployment is manually verified.
 
@@ -169,6 +169,8 @@ docker image prune -af
 It never runs `docker volume prune`, `docker system prune --volumes`, or `docker compose down -v`.
 
 ## Manual verification
+
+The workflow's public check retries network errors, HTTP 429, and 5xx responses with bounded exponential backoff. It accepts 2xx/3xx responses and fails other statuses or deadline exhaustion. This automated check does not replace release-specific browser or product-flow verification.
 
 At minimum after deployment:
 

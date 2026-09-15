@@ -165,7 +165,7 @@ Related issue: GitHub Issue #15.
 
 ### Status
 
-AUTHORIZED / IMPLEMENTATION UNDERWAY. The corrected production-image contract and exact infrastructure scope are approved. Production adoption remains separately gated and still requires successful CI plus controlled runtime verification of required services.
+FINAL CI. PR #106 is at independently reviewed head `b833635ce7a9fbf117a16bf7a209253e6e9d7f1b`. Merge remains gated on final CI, and production adoption still requires controlled runtime verification of required services.
 
 ### Goal
 
@@ -275,7 +275,7 @@ Related issue: GitHub Issue #18 for meaningful application readiness checks.
 
 ### Status
 
-PARTIAL. Phase 5A internal readiness is repository-complete via PR #105 (merge `44b9049be7ec77e973ba89ea53711aa16269ff78`; independently reviewed head `0aeab45f6a1e4d74278c42871f99c9e4efcd95a9`) and production-verified by controlled run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122). Phase 5B public retry/backoff remains underway, so the full phase is not complete.
+REPOSITORY COMPLETE; COMBINED DEPLOYMENT VALIDATION PENDING. Phase 5A internal readiness is repository-complete via PR #105 (merge `44b9049be7ec77e973ba89ea53711aa16269ff78`; independently reviewed head `0aeab45f6a1e4d74278c42871f99c9e4efcd95a9`) and production-verified by controlled run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122). Phase 5B bounded public retry/backoff is repository-complete via PR #108 (merge `a4cd3c16e63729d5afb65d8a7b6e6efb16109a11`; independently reviewed head `a1386c62d93f88ab62250eadb120679517f10b80`). Exact-head application CI run [34915571174](https://github.com/celleree/everywhereposter/actions/runs/34915571174) passed with Docker validation 9m33s and quality 3m52s.
 
 The merged contract replaces the fixed 45-second sleep with bounded Docker health polling. Readiness requires the backend API, frontend login route, orchestrator/Temporal health, PostgreSQL `SELECT 1`, Redis `PING`, and zero container restarts. Checked-in tests cover probe success and failure with injected clients. Before merge, separate real-SDK smoke exercised Prisma 6.5.0 and ioredis 5.10.0 success against disposable services and bounded unavailable-dependency failure. It used cached immutable local image `sha256:178ffae90d15786ae38ba9bbe9159f13ad7828b75651e4e1e5848f59c596f1ed`, whose SDK versions matched the lockfile but which was not the deployed image. The controlled run below subsequently verified the helper against the existing production image and real dependencies; a new Phase 2 image still requires separate package and runtime parity verification.
 
@@ -283,7 +283,9 @@ The implementation was motivated by the first controlled measurement: frontend r
 
 The controlled production run used the same already-running full-SHA image with pruning disabled and no pending or applied migrations. Stage timings were pull 4s, runtime-image preparation 0s, migration 4s, recreate 3s, internal readiness 47s, verification 0s, proxy reload 2s, and deploy total 61s; the workflow took 119s. The container was healthy with zero restarts, and five recent health samples exited 0 in about 0.397–0.577s. Backend, frontend login, and orchestrator/Temporal checks returned their expected HTTP 200 responses. The public root returned HTTP 307 and an anonymous browser rendered the login page with HTTP 200 and visible controls; React hydration error #418 persisted, and authenticated or publishing flows were not tested.
 
-The prior fixed-wait warm run measured 56s for the script and 91s for the workflow. Different readiness behavior and ordinary run variability mean the 61s/119s result does not prove either a speedup or regression. The current public check is still a single request; bounded retry/backoff remains before Phase 5 completion and any production use of that follow-up requires separate approval.
+The prior fixed-wait warm run measured 56s for the script and 91s for the workflow. Different readiness behavior and ordinary run variability mean the 61s/119s result does not prove either a speedup or regression.
+
+The Phase 5B helper retries network errors, HTTP 429, and 5xx responses with bounded exponential backoff, accepts 2xx/3xx responses, and fails terminal statuses or deadline exhaustion. A read-only run of the merged helper against the public root returned HTTP 307 on attempt 1 in 1s. No deployment occurred after PR #108, so this proves the live healthy-response path but does not verify the new public stage together with image selection, migration, recreation, internal health, and proxy reload. That combined verification remains separately gated.
 
 ### Goal
 

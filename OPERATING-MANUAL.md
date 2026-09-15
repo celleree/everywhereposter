@@ -88,10 +88,10 @@ Rules:
 - Tag it locally as publish-everywhere/postiz-app:custom.
 - Run the required migration procedure, then recreate only postiz without rebuilding or restarting dependent services.
 - Wait up to the bounded timeout for container health across application and dependency checks, with zero restarts.
-- Confirm the exact image ID, health, logs, and public endpoint.
+- Confirm the exact image ID and internal health, then use the bounded public readiness retry before manual browser verification.
 - Verify the exact app behavior manually.
 
-Use the manual GitHub-hosted production workflow described in `docs/GITHUB-HOSTED-DEPLOYMENT.md`. Normal deployments leave image pruning disabled and use `scripts/deploy-production.sh` for migration, recreation, bounded readiness polling, exact-image verification, and timing output. Production deployment still requires explicit human approval.
+Use the manual GitHub-hosted production workflow described in `docs/GITHUB-HOSTED-DEPLOYMENT.md`. Normal deployments leave image pruning disabled and use `scripts/deploy-production.sh` for migration, recreation, bounded internal readiness polling, exact-image verification, and timing output. The workflow then applies bounded public readiness retry/backoff. Production deployment still requires explicit human approval.
 
 ## What Counts As Deployed
 
