@@ -7,15 +7,25 @@ command -v nginx >/dev/null
 command -v ffmpeg >/dev/null
 command -v ffprobe >/dev/null
 
-! command -v g++ >/dev/null
-! command -v make >/dev/null
-! command -v python3 >/dev/null
-! command -v pip >/dev/null
-! command -v pm2 >/dev/null
+assert_command_absent() {
+  if command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: production runtime includes forbidden command: $1" >&2
+    return 1
+  fi
+}
+
+assert_command_absent g++
+assert_command_absent make
+assert_command_absent python3
+assert_command_absent pip
+assert_command_absent pm2
 test ! -e /app/node_modules/jest
 test ! -e /app/apps/frontend/.next/cache
-! find /app/apps/backend/dist /app/apps/orchestrator/dist \
-    -type f \( -name '*.d.ts' -o -name '*.tsbuildinfo' \) | grep -q .
+if find /app/apps/backend/dist /app/apps/orchestrator/dist \
+    -type f \( -name '*.d.ts' -o -name '*.tsbuildinfo' \) | grep -q .; then
+  echo 'ERROR: production runtime includes TypeScript build metadata.' >&2
+  exit 1
+fi
 
 test -f /app/apps/frontend/.next/BUILD_ID
 test -f /app/apps/frontend/next.config.js
