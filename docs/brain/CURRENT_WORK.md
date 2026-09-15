@@ -47,20 +47,18 @@ Current checkpoint:
 - Phase 1B — COMPLETE via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). The deploy script measured 56s total at whole-second resolution: pull 2s, runtime-image preparation 0s, migration 3s, recreate 3s, fixed wait 45s, container verification 0s, and proxy reload 3s. The full workflow took 91s.
 - Controlled runtime/public smoke — LIMITED PASS: Nginx-proxied backend `/api/`, frontend `/auth/login`, and orchestrator `/health/status` returned HTTP 200; the orchestrator response was `{"status":"ok"}`. A fresh anonymous browser context rendered `/auth/login` with the expected title and login controls. One React hydration error #418 appeared; authenticated login, form submission, and publishing were not tested.
 - Phase 4 — REPOSITORY COMPLETE via PR #103 for the bounded excluded-Markdown classifier change; no production timing claim is attached to it.
-- Phase 2 — BLOCKED BEFORE EDITS: the prior automatic approval review rejected the planned Dockerfile/workflow patch; the roadmap merge exception does not itself unblock that action.
+- Phase 2 — AUTHORIZED / IMPLEMENTATION UNDERWAY: the corrected production-image contract and exact infrastructure scope are approved. Production adoption remains separately gated.
 - Phase 3 — READ-ONLY ANALYSIS COMPLETE: implementation waits for a settled Phase 2 image and representative post-Phase-2 measurements.
-- Phase 5 — BOUNDED READINESS WORK UNDERWAY: frontend readiness appeared about 31.5s after container start, while orchestrator Nest startup appeared about 50.9s after start. The current 45s process check can run before all managed processes report startup and does not prove full readiness. Post-deploy checks confirmed the existing frontend and orchestrator health routes returned HTTP 200.
-- Phase 6 — BENCHMARK PREPARATION COMPLETE: final representative measurements and consolidation have not started.
+- Phase 5 — REPOSITORY IMPLEMENTATION COMPLETE via PR #105 (merge `44b9049be7ec77e973ba89ea53711aa16269ff78`; independently reviewed head `0aeab45f6a1e4d74278c42871f99c9e4efcd95a9`). Exact-head CI run [34913229338](https://github.com/celleree/everywhereposter/actions/runs/34913229338) passed: Docker validation 10m33s, quality 3m50s, and required aggregate gate 6s. The fixed wait is replaced by bounded health polling across frontend, backend, orchestrator/Temporal, PostgreSQL, and Redis, and the gate requires zero container restarts. Production validation still requires separate approval; repository success does not prove production readiness or a deployment speedup.
+- Phase 6 — PARTIAL: docs-only PR #104 run [34912004960](https://github.com/celleree/everywhereposter/actions/runs/34912004960) completed in 313s with a 285s active critical path and skipped Docker validation/package work. This single observation does not establish causal speedup or complete the representative matrix.
 - Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
 
 Remaining roadmap:
 
-1. Phase 1 — finish low-risk CI/deploy improvements supported by the Phase 0 evidence.
-2. Phase 2 — production multi-stage runtime image. GitHub Issue #15 owns the production Dockerfile objective.
-3. Phase 3 — BuildKit/pnpm cache optimization and safe build concurrency based on measured evidence.
-4. Phase 4 — avoid unnecessary Docker packaging for changes that do not require it while preserving deterministic CI gates.
-5. Phase 5 — optimize exact-SHA Hetzner deployment and readiness verification. GitHub Issue #18 owns meaningful application health/readiness checks.
-6. Phase 6 — benchmark representative frontend, backend, dependency, Docker, and config-only changes and update operating documentation to the proven workflow.
+1. Phase 2 — complete and verify the production multi-stage runtime image under Issue #15.
+2. Phase 3 — optimize BuildKit/pnpm caching against the settled Phase 2 image and measurements.
+3. Phase 5 — run a separately approved controlled production validation of the merged readiness path under Issue #18.
+4. Phase 6 — finish the representative frontend, backend, dependency, Docker, and config benchmark matrix and update operating documentation to verified behavior.
 
 Preserve the GitHub -> GHCR -> Hetzner architecture unless a separately approved architecture decision changes it.
 
@@ -98,6 +96,8 @@ Do not automatically prioritize these above provider verification or release blo
 - PR #100 — Phase 1A parallel PR Docker validation, measured at 10m05s versus the 13m46s–13m55s baseline.
 - PR #101 — Phase 1B observational deployment-stage timing instrumentation, exercised successfully in controlled run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355).
 - PR #103 — Phase 4 Docker classifier skips explicitly excluded Markdown changes while retaining fail-closed behavior.
+- PR #104 — deployment-performance policy and measurement checkpoint; its docs-only CI run skipped Docker validation/package work.
+- PR #105 — bounded application readiness and deployment health polling; repository validation complete, production validation pending separate approval.
 
 A merged production/config fix is not proof of runtime behavior until the applicable production deployment/configuration has been verified.
 
@@ -109,7 +109,7 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-Bounded Phase 5 readiness work under Issue #18 is now underway based on the controlled measurement. The run redeployed the same already-running full-SHA image with pruning disabled and no pending or applied migrations, so its 2s pull is a warm/no-change observation rather than a cold-pull benchmark. The planned Phase 2 patch remains blocked by its prior pre-edit approval rejection, Phase 3 implementation waits for Phase 2, and Phase 6 final measurements remain pending.
+Phase 2 implementation is underway under its corrected approved contract. Phase 3 waits for that image to settle. Phase 5 repository implementation is merged, while its controlled production validation requires separate approval. Phase 6 has one docs-only observation; the remaining representative matrix and final consolidation are pending.
 
 The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 

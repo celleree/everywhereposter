@@ -165,7 +165,7 @@ Related issue: GitHub Issue #15.
 
 ### Status
 
-BLOCKED BEFORE EDITS by the prior automatic approval review of the planned Dockerfile/workflow patch. The roadmap merge exception does not itself unblock that rejected action.
+AUTHORIZED / IMPLEMENTATION UNDERWAY. The corrected production-image contract and exact infrastructure scope are approved. Production adoption remains separately gated and still requires successful CI plus controlled runtime verification of required services.
 
 ### Goal
 
@@ -275,7 +275,11 @@ Related issue: GitHub Issue #18 for meaningful application readiness checks.
 
 ### Status
 
-BOUNDED IMPLEMENTATION UNDERWAY. In the first controlled measurement, frontend readiness appeared about 31.5s after container start and orchestrator Nest startup appeared about 50.9s after start. This proves the fixed 45s process check can run before all managed processes report startup; it does not prove full application readiness or determine the final readiness timeout. Post-deploy container-local checks confirmed HTTP 200 from the Nginx-proxied backend `/api/`, frontend `/auth/login`, and orchestrator `/health/status`; the existing orchestrator route checks the Temporal namespace.
+REPOSITORY IMPLEMENTATION COMPLETE via PR #105 (merge `44b9049be7ec77e973ba89ea53711aa16269ff78`; independently reviewed head `0aeab45f6a1e4d74278c42871f99c9e4efcd95a9`). Exact-head CI run [34913229338](https://github.com/celleree/everywhereposter/actions/runs/34913229338) passed: Docker validation 10m33s, quality 3m50s, and required aggregate gate 6s. Production validation remains pending separate approval; no production-readiness or deployment-speed claim is attached to the repository result.
+
+The merged contract replaces the fixed 45-second sleep with bounded Docker health polling. Readiness requires the backend API, frontend login route, orchestrator/Temporal health, PostgreSQL `SELECT 1`, Redis `PING`, and zero container restarts. Checked-in tests cover probe success and failure with injected clients. Separate real-SDK smoke exercised Prisma 6.5.0 and ioredis 5.10.0 success against disposable services and bounded unavailable-dependency failure. It used cached immutable local image `sha256:178ffae90d15786ae38ba9bbe9159f13ad7828b75651e4e1e5848f59c596f1ed`, whose SDK versions matched the lockfile, but that was not the deployed production image; package provenance and runtime behavior still require controlled production validation.
+
+The implementation was motivated by the first controlled measurement: frontend readiness appeared about 31.5s after container start and orchestrator Nest startup appeared about 50.9s after start. This proved the old 45-second process check could run before all managed processes reported startup, but did not establish full application readiness or the new path's production timing.
 
 ### Goal
 
@@ -314,7 +318,7 @@ Run a controlled exact-SHA deployment and capture:
 
 ### Status
 
-BENCHMARK PREPARATION COMPLETE. Final representative measurements and consolidation have not started.
+PARTIAL. Docs-only PR #104 run [34912004960](https://github.com/celleree/everywhereposter/actions/runs/34912004960) completed successfully in 313s with a 285s active critical path. All six Markdown files were classified safe-only, Docker validation and image packaging were skipped, and the required aggregate gate passed. This is one docs-only observation, not a causal speedup claim or completion of the representative matrix.
 
 ### Goal
 
