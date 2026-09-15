@@ -25,7 +25,8 @@ COPY apps/orchestrator/package.json ./apps/orchestrator/package.json
 COPY apps/sdk/package.json ./apps/sdk/package.json
 COPY libraries/nestjs-libraries/src/database/prisma/schema.prisma ./libraries/nestjs-libraries/src/database/prisma/schema.prisma
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 COPY . /app
 
@@ -36,7 +37,8 @@ RUN NODE_OPTIONS="--max-old-space-size=4096" pnpm run build \
 
 # Workspace pruning is not recursive. Reinstall from the populated store so
 # the copied tree excludes development dependencies without rebuilding apps.
-RUN rm -rf node_modules \
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    rm -rf node_modules \
  && pnpm install --prod --frozen-lockfile
 
 FROM node:22.20-bookworm-slim AS runtime
@@ -83,3 +85,12 @@ EXPOSE 5000
 
 # Production Compose supplies the reviewed repository-level startup script.
 CMD ["/bin/sh", "/start-postiz.sh"]
+
+FROM runtime AS verification
+
+COPY --from=builder /app/var/docker/verify-production-runtime.sh /tmp/verify-production-runtime.sh
+RUN /tmp/verify-production-runtime.sh \
+ && rm /tmp/verify-production-runtime.sh
+
+# Keep the default and published result identical to the reviewed runtime stage.
+FROM runtime AS production
