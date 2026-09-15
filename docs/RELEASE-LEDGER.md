@@ -14,6 +14,18 @@ Update this ledger after each verified deployment and after any rollback. Record
 
 ## Current Verified Production Deployment
 
+- Deployment date: `2026-09-15 UTC` (`2026-09-14` in America/Los_Angeles)
+- Merged PR: `#105`
+- Server `main` revision: `44b9049be7ec77e973ba89ea53711aa16269ff78`
+- Full image commit SHA: `737b282c7d0d4f49c0379f37b563ff0ed93f9fcf`
+- GHCR image tag: `ghcr.io/celleree/publish-everywhere-postiz:737b282c7d0d4f49c0379f37b563ff0ed93f9fcf`
+- Deployed Docker image ID: `sha256:bb5961f02b29618bdebedbadf958bc3ae8608abb5abb03d6df9a28de4fb79772`
+- Verification result: controlled run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122) redeployed the same already-running image with pruning disabled and no pending or applied migrations. Timings were pull 4s, runtime-image preparation 0s, migration 4s, recreate 3s, internal readiness 47s, verification 0s, proxy reload 2s, deploy total 61s, and workflow 119s. The container was healthy with restart count 0; five recent health probes exited 0 in 0.397–0.577s. Internal backend, frontend login, and orchestrator/Temporal checks returned expected HTTP 200 responses. The public root returned HTTP 307, and an anonymous browser rendered `/auth/login` with HTTP 200 and visible login controls. React hydration error #418 persisted; authenticated login, form submission, and publishing were not tested. This warm same-image run does not establish a deployment speedup.
+- Pre-deployment backup: `/home/arund/publish-everywhere-git/backups/postiz-20260915-004203.sql`, 989,149 bytes, verified nonempty against the intended `postiz-db-local` database before deployment.
+- Rollback reference: `publish-everywhere/postiz-app:previous` remained at `sha256:f203eb4823f0eb9d73949d9dd47c6f241b03ee4fd2e77e67785629e290863c86`; no rollback was executed.
+
+## Previous Verified Production Deployment — 2026-09-14 (pre-readiness)
+
 - Deployment date: `2026-09-14`
 - Merged PRs: `#101` deployment timing instrumentation and `#103` Docker classifier hardening; neither changed application image content.
 - Server `main` revision: `6ca19706b5c4dfb84f116a50ae5621b7aa09ed9f`
@@ -24,7 +36,7 @@ Update this ledger after each verified deployment and after any rollback. Record
 - Pre-deployment backup: `/home/arund/publish-everywhere-git/backups/postiz-20260914-235050.sql`, 989,170 bytes, verified against the intended database before deployment.
 - Rollback reference: `publish-everywhere/postiz-app:previous` remained at `sha256:f203eb4823f0eb9d73949d9dd47c6f241b03ee4fd2e77e67785629e290863c86`; no rollback was executed.
 
-## Previous Verified Production Deployment — 2026-07-24
+## Earlier Verified Production Deployment — 2026-07-24
 
 - Deployment date: `2026-07-24`
 - Merged PR: `#39`
@@ -34,7 +46,7 @@ Update this ledger after each verified deployment and after any rollback. Record
 - Verification result: runtime container `postiz` started cleanly; the public app returned its expected authentication redirect; `ffmpeg` was present; and a 94,078,108-byte live video produced a 548-character transcript in 10 seconds.
 - Rollback reference: `publish-everywhere/postiz-app:rollback-before-13808b9`
 
-## Earlier Verified Production Deployment
+## Earlier Verified Production Deployment — date not recorded
 
 - Deployment date: not recorded
 - Merged PR: `#9`
