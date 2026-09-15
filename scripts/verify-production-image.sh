@@ -47,7 +47,7 @@ docker run --rm --entrypoint /bin/sh "$IMAGE_TAG" -ec '
   node -e "const p=require(\"prisma/package.json\"); if(p.version!==\"6.5.0\") process.exit(1)"
   CHECKPOINT_DISABLE=1 PRISMA_HIDE_UPDATE_MESSAGE=1 \
     DATABASE_URL=postgresql://runtime:runtime@127.0.0.1:5432/runtime \
-    /app/node_modules/.bin/prisma validate \
+    pnpm exec prisma validate \
       --schema /app/libraries/nestjs-libraries/src/database/prisma/schema.prisma >/dev/null
   node <<"NODE"
 const bcrypt = require("bcrypt");
