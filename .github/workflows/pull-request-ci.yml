@@ -68,6 +68,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: postiz-app/pnpm-lock.yaml
 
+      - name: Test production readiness checks
+        working-directory: .
+        run: |
+          node --test scripts/test-check-postiz-readiness.mjs
+          bash scripts/test-wait-for-container-health.sh
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
