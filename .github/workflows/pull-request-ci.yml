@@ -73,6 +73,7 @@ jobs:
         run: |
           node --test scripts/test-check-postiz-readiness.mjs
           bash scripts/test-wait-for-container-health.sh
+          bash scripts/test-wait-for-public-readiness.sh
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
