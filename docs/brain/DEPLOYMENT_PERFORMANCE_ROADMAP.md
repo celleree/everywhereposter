@@ -1,6 +1,6 @@
 # Deployment Performance Roadmap
 
-Updated: 2026-09-13
+Updated: 2026-09-14
 
 ## Purpose
 
@@ -66,6 +66,12 @@ Use a fresh independent reviewer when repository policy requires it. Infrastruct
 - Record timings from actual workflow/build/deploy evidence, not estimates.
 - Do not run destructive Docker-volume or database operations as part of performance work.
 
+### Roadmap-specific merge authorization
+
+For pull requests bounded to this roadmap, the root orchestrator or assigned responsible agent may merge without another confirmation only when the independent exact-HEAD review passes, all required CI/checks are green, the reviewed HEAD is unchanged, GitHub reports the PR mergeable, and no review finding remains unresolved. The authoritative procedure is in `docs/brain/ORCHESTRATOR_PROTOCOL.md`.
+
+This exception authorizes merge only. It does not authorize an otherwise blocked implementation or production deployment, and it does not change merge gates outside this roadmap. After merging, verify live `main`, reconcile affected worktrees and dependencies, and continue newly unblocked roadmap work.
+
 ## Phase 0 — Baseline and dependency graph
 
 ### Status
@@ -117,11 +123,13 @@ Do not start Phase 1 until the baseline is recorded and the first optimization c
 
 ### Status
 
-ACTIVE.
+COMPLETE.
 
 Phase 1A is complete via PR #100. The measured Docker-required PR elapsed time fell from 13m46s–13m55s to 10m05s in the first post-change observation, with 3m56s of actual quality/Docker overlap (about 27% faster). This proves the serialized quality wait was removed; it does not demonstrate faster image compilation or cache export.
 
-Phase 1B is active: add observational deployment-stage timing so later pull/prune/readiness optimizations can be based on instrumented command durations rather than adjacent log markers.
+Phase 1B is complete via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). At whole-second resolution the deploy script measured: pull 2s, runtime-image preparation 0s, migration 3s, recreate 3s, fixed startup wait 45s, container verification 0s, proxy reload 3s, and total 56s; the full workflow took 91s.
+
+The run redeployed the same already-running full-SHA image with pruning disabled and no pending or applied migrations. Treat the 2s pull as a warm/no-change observation, not a cold-pull benchmark.
 
 ### Goal
 
@@ -149,11 +157,15 @@ Only implement items supported by Phase 0 evidence. Likely candidates include:
 
 Compare representative before/after PR and deploy timings.
 
-For Phase 1B specifically, keep instrumentation observational only. Emit timings for major deploy stages without changing waits, readiness checks, pruning defaults, rollback semantics, image selection, migrations, or service recreation behavior. Use the next controlled deployment to populate the instrumented measurements before choosing the next deploy optimization.
+Phase 1B instrumentation remains observational only: it emits major-stage timings without changing waits, readiness checks, pruning defaults, rollback semantics, image selection, migrations, or service recreation behavior. Run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355) supplies the first controlled measurement; retain the instrumentation for representative future deployments.
 
 ## Phase 2 — Production multi-stage runtime image
 
 Related issue: GitHub Issue #15.
+
+### Status
+
+BLOCKED BEFORE EDITS by the prior automatic approval review of the planned Dockerfile/workflow patch. The roadmap merge exception does not itself unblock that rejected action.
 
 ### Goal
 
@@ -195,6 +207,10 @@ Do not adopt the new image for production until CI builds it successfully and a 
 
 ## Phase 3 — BuildKit and dependency-cache optimization
 
+### Status
+
+READ-ONLY ANALYSIS COMPLETE. Implementation waits for a settled Phase 2 runtime image and representative post-Phase-2 measurements.
+
 ### Goal
 
 Make normal source-only image builds reuse dependency and intermediate build work effectively.
@@ -222,6 +238,10 @@ Make normal source-only image builds reuse dependency and intermediate build wor
 Run at least one representative source-only change and one dependency-affecting change.
 
 ## Phase 4 — Avoid unnecessary Docker work
+
+### Status
+
+REPOSITORY COMPLETE via PR #103 for the bounded excluded-Markdown classifier change. It preserves fail-closed classification for other paths; no production timing claim is attached to this change.
 
 ### Goal
 
@@ -252,6 +272,10 @@ Test classifier behavior against representative safe-only and Docker-required di
 ## Phase 5 — Hetzner deployment and readiness optimization
 
 Related issue: GitHub Issue #18 for meaningful application readiness checks.
+
+### Status
+
+BOUNDED IMPLEMENTATION UNDERWAY. In the first controlled measurement, frontend readiness appeared about 31.5s after container start and orchestrator Nest startup appeared about 50.9s after start. This proves the fixed 45s process check can run before all managed processes report startup; it does not prove full application readiness or determine the final readiness timeout. Post-deploy container-local checks confirmed HTTP 200 from the Nginx-proxied backend `/api/`, frontend `/auth/login`, and orchestrator `/health/status`; the existing orchestrator route checks the Temporal namespace.
 
 ### Goal
 
@@ -287,6 +311,10 @@ Run a controlled exact-SHA deployment and capture:
 - rollback evidence if the change modifies rollback mechanics.
 
 ## Phase 6 — Benchmark, consolidate, and document
+
+### Status
+
+BENCHMARK PREPARATION COMPLETE. Final representative measurements and consolidation have not started.
 
 ### Goal
 

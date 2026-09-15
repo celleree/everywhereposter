@@ -95,7 +95,7 @@ Prefer the smallest coherent, self-contained pull request that leaves the reposi
 - Parallel agents require isolated branches/worktrees, explicit file ownership, and one named integrator.
 - If a supposedly independent workstream discovers a shared-contract dependency, stop that workstream and report the dependency instead of inventing a competing design.
 - Do not use parallel implementation for authentication, security, database migrations, destructive data changes, deployment, infrastructure, or unclear product behavior.
-- Agents may not merge, deploy, force-push, access production secrets, or expand scope without explicit human approval.
+- Agents may not deploy, force-push, access production secrets, or expand scope without explicit human approval. Pull-request merges follow the human gates below and the narrowly scoped deployment-performance roadmap exception.
 
 ## Review depth and risk
 
@@ -163,12 +163,14 @@ Explicit approval is required before:
 - database schema changes/migrations;
 - authentication/permission changes;
 - changing product promises or billing behavior;
-- merging a pull request;
+- merging a pull request outside the deployment-performance roadmap exception defined in `docs/brain/ORCHESTRATOR_PROTOCOL.md`;
 - deploying to production;
 - accessing production data/secrets;
 - destructive Docker/database/filesystem/Git operations.
 
 Reversible branch-local work inside an already approved bounded scope does not require repeated approval at every edit.
+
+For work bounded to `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`, the root orchestrator or assigned responsible agent may merge only under the five-condition authorization in `docs/brain/ORCHESTRATOR_PROTOCOL.md`. Production deployment remains an explicit human approval gate.
 
 ## Durable learning
 

@@ -1,12 +1,12 @@
 # Root Orchestrator Protocol
 
-Updated: 2026-09-13
+Updated: 2026-09-14
 
 ## Purpose
 
 Define the default hands-off coordination loop for EverywherePoster when a long-running Codex Desktop root session is orchestrating bounded implementation, review, repair, CI, and roadmap progression.
 
-This protocol does not authorize automatic merge or production deployment. Those remain explicit human gates.
+Automatic merge is authorized only for pull requests bounded to `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md` and only under the five conditions below. Production deployment and all merges outside that roadmap remain explicit human gates.
 
 ## Recommended root route
 
@@ -109,9 +109,9 @@ For each task:
 10. Send only concrete review findings or CI failures back to a repair worker/session.
 11. If HEAD changes after a required exact-SHA review, obtain fresh review of the new HEAD. A trivial repair may receive a narrowly scoped fresh review.
 12. Recheck CI and required gates.
-13. When review is clear and required CI is green, stop at the human merge gate.
-14. After human-approved merge, verify live `main` and record the durable checkpoint if project state materially changed.
-15. Select the next bounded task and repeat.
+13. When review and CI are complete, apply the roadmap-specific merge authorization below; otherwise stop at the human merge gate.
+14. After any merge, verify live `main`, reconcile affected worktrees and dependencies, record any material durable checkpoint, and continue newly unblocked work.
+15. Select the next bounded task and repeat; merge readiness alone does not end the orchestration loop.
 
 ## State machine
 
@@ -193,7 +193,7 @@ Keep raw logs and large diffs out of the root context unless they are required t
 
 The orchestrator must stop for explicit human approval before:
 
-- merging a pull request;
+- merging a pull request outside the deployment-performance roadmap exception below;
 - deploying to production;
 - accessing production secrets or production data;
 - destructive Git, filesystem, Docker, or database operations;
@@ -204,6 +204,20 @@ The orchestrator must stop for explicit human approval before:
 - broad architecture changes not already approved by the active roadmap or issue.
 
 An already-approved bounded architecture/roadmap does not require repeated human confirmation for every reversible branch-local implementation step.
+
+### Deployment-performance roadmap merge authorization
+
+For a pull request bounded to `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`, the user authorizes the root orchestrator or assigned responsible agent to merge without another confirmation only when all five conditions are true at the same time:
+
+1. An independent reviewer reports PASS against the exact current HEAD SHA.
+2. All required CI jobs and status checks are green.
+3. The reviewed HEAD SHA is still the current PR HEAD.
+4. GitHub reports the pull request mergeable.
+5. No review finding remains unresolved.
+
+Immediately before merging, re-read the live PR HEAD, review result, required checks, mergeability, and unresolved findings. If any condition is false or unknown, repair, wait, or use the applicable human gate. This authorization covers merge only; it does not authorize a previously blocked implementation, broaden scope, access production, deploy, or alter any other approval gate.
+
+After an authorized merge, verify that live `main` contains the merged result, reconcile affected worktrees and dependency assumptions, and continue the next newly unblocked roadmap task.
 
 ## Production boundary
 
@@ -231,5 +245,11 @@ The GitHub unattended queue may remain more restrictive than the local root orch
 For `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`:
 
 - Phase 0 is complete.
-- The next bounded implementation is Phase 1A: parallelize PR Docker validation with quality checks while preserving the existing final `Docker build` gate as fail-closed.
+- Phase 1A is complete via PR #100.
+- Phase 1B is complete via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). The same already-running image was redeployed with pruning disabled and no pending or applied migrations; this was not a cold-pull measurement.
+- Phase 4's excluded-Markdown classifier change is repository-complete via PR #103.
+- The planned Phase 2 patch remains blocked by the prior pre-edit automatic approval review; the merge exception above does not itself authorize that rejected action.
+- Phase 3 read-only analysis is complete; implementation waits for a settled Phase 2 image and representative measurements.
+- Phase 5 bounded readiness work is underway from initial startup evidence: frontend readiness appeared about 31.5s after container start, while orchestrator Nest startup appeared about 50.9s after start. The fixed 45s process check can precede all managed-process startup and does not establish full application readiness. Existing frontend and orchestrator health routes returned HTTP 200 after deployment.
+- Phase 6 benchmark preparation is complete; final measurements remain pending.
 - Do not redo Phase 0 unless new evidence materially contradicts the recorded baseline.
