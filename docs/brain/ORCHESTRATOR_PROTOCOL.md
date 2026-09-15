@@ -246,9 +246,10 @@ For `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`:
 
 - Phase 0 is complete.
 - Phase 1A is complete via PR #100.
-- Phase 1B instrumentation is repository-complete via PR #101; production timings remain unmeasured until an explicitly approved controlled deployment.
+- Phase 1B is complete via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). The same already-running image was redeployed with pruning disabled and no pending or applied migrations; this was not a cold-pull measurement.
 - Phase 4's excluded-Markdown classifier change is repository-complete via PR #103.
 - The planned Phase 2 patch remains blocked by the prior pre-edit automatic approval review; the merge exception above does not itself authorize that rejected action.
 - Phase 3 read-only analysis is complete; implementation waits for a settled Phase 2 image and representative measurements.
-- Phase 5 waits for the approved instrumented deployment. Phase 6 benchmark preparation is complete; final measurements remain pending.
+- Phase 5 bounded readiness work is underway from initial startup evidence: frontend readiness appeared about 31.5s after container start, while orchestrator Nest startup appeared about 50.9s after start. The fixed 45s process check can precede all managed-process startup and does not establish full application readiness. Existing frontend and orchestrator health routes returned HTTP 200 after deployment.
+- Phase 6 benchmark preparation is complete; final measurements remain pending.
 - Do not redo Phase 0 unless new evidence materially contradicts the recorded baseline.

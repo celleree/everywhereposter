@@ -44,10 +44,12 @@ Current checkpoint:
 
 - Phase 0 baseline / dependency graph — COMPLETE.
 - Phase 1A — COMPLETE via PR #100. PR CI fell from the 13m46s–13m55s baseline to 10m05s on the measured post-change run, with 3m56s of actual quality/Docker overlap (about 27% faster).
-- Phase 1B — REPOSITORY COMPLETE via PR #101. Instrumentation is merged; no production deployment timing has been captured yet.
+- Phase 1B — COMPLETE via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). The deploy script measured 56s total at whole-second resolution: pull 2s, runtime-image preparation 0s, migration 3s, recreate 3s, fixed wait 45s, container verification 0s, and proxy reload 3s. The full workflow took 91s.
+- Controlled runtime/public smoke — LIMITED PASS: frontend `/api/`, frontend `/auth/login`, and orchestrator `/health/status` returned HTTP 200; the orchestrator response was `{"status":"ok"}`. A fresh anonymous browser context rendered `/auth/login` with the expected title and login controls. One React hydration error #418 appeared; authenticated login, form submission, and publishing were not tested.
 - Phase 4 — REPOSITORY COMPLETE via PR #103 for the bounded excluded-Markdown classifier change; no production timing claim is attached to it.
 - Phase 2 — BLOCKED BEFORE EDITS: the prior automatic approval review rejected the planned Dockerfile/workflow patch; the roadmap merge exception does not itself unblock that action.
 - Phase 3 — READ-ONLY ANALYSIS COMPLETE: implementation waits for a settled Phase 2 image and representative post-Phase-2 measurements.
+- Phase 5 — BOUNDED READINESS WORK UNDERWAY: frontend readiness appeared about 31.5s after container start, while orchestrator Nest startup appeared about 50.9s after start. The current 45s process check can run before all managed processes report startup and does not prove full readiness. Post-deploy checks confirmed the existing frontend and orchestrator health routes returned HTTP 200.
 - Phase 6 — BENCHMARK PREPARATION COMPLETE: final representative measurements and consolidation have not started.
 - Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
 
@@ -94,7 +96,7 @@ Do not automatically prioritize these above provider verification or release blo
 - PR #97 — deployment-performance roadmap.
 - Deployment-performance Phase 0 — completed as an audit-only checkpoint with no repository or production changes.
 - PR #100 — Phase 1A parallel PR Docker validation, measured at 10m05s versus the 13m46s–13m55s baseline.
-- PR #101 — Phase 1B observational deployment-stage timing instrumentation; production timings remain pending.
+- PR #101 — Phase 1B observational deployment-stage timing instrumentation, exercised successfully in controlled run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355).
 - PR #103 — Phase 4 Docker classifier skips explicitly excluded Markdown changes while retaining fail-closed behavior.
 
 A merged production/config fix is not proof of runtime behavior until the applicable production deployment/configuration has been verified.
@@ -107,7 +109,7 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-The next measured roadmap action is an explicitly approved controlled deployment to collect the Phase 1B production timings before choosing a readiness, pull, or pruning optimization. The planned Phase 2 patch remains blocked by its prior pre-edit approval rejection, Phase 3 implementation waits for Phase 2, Phase 5 waits for deployment measurements, and Phase 6 final measurements remain pending.
+Bounded Phase 5 readiness work under Issue #18 is now underway based on the controlled measurement. The run redeployed the same already-running full-SHA image with pruning disabled and no pending or applied migrations, so its 2s pull is a warm/no-change observation rather than a cold-pull benchmark. The planned Phase 2 patch remains blocked by its prior pre-edit approval rejection, Phase 3 implementation waits for Phase 2, and Phase 6 final measurements remain pending.
 
 The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 

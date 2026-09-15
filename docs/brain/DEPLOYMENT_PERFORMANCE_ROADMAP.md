@@ -123,11 +123,13 @@ Do not start Phase 1 until the baseline is recorded and the first optimization c
 
 ### Status
 
-ACTIVE.
+COMPLETE.
 
 Phase 1A is complete via PR #100. The measured Docker-required PR elapsed time fell from 13m46s–13m55s to 10m05s in the first post-change observation, with 3m56s of actual quality/Docker overlap (about 27% faster). This proves the serialized quality wait was removed; it does not demonstrate faster image compilation or cache export.
 
-Phase 1B instrumentation is repository-complete via PR #101. Production timing remains unmeasured until an explicitly approved controlled deployment runs the instrumented script.
+Phase 1B is complete via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). At whole-second resolution the deploy script measured: pull 2s, runtime-image preparation 0s, migration 3s, recreate 3s, fixed startup wait 45s, container verification 0s, proxy reload 3s, and total 56s; the full workflow took 91s.
+
+The run redeployed the same already-running full-SHA image with pruning disabled and no pending or applied migrations. Treat the 2s pull as a warm/no-change observation, not a cold-pull benchmark.
 
 ### Goal
 
@@ -155,7 +157,7 @@ Only implement items supported by Phase 0 evidence. Likely candidates include:
 
 Compare representative before/after PR and deploy timings.
 
-For Phase 1B specifically, keep instrumentation observational only. Emit timings for major deploy stages without changing waits, readiness checks, pruning defaults, rollback semantics, image selection, migrations, or service recreation behavior. Use the next controlled deployment to populate the instrumented measurements before choosing the next deploy optimization.
+Phase 1B instrumentation remains observational only: it emits major-stage timings without changing waits, readiness checks, pruning defaults, rollback semantics, image selection, migrations, or service recreation behavior. Run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355) supplies the first controlled measurement; retain the instrumentation for representative future deployments.
 
 ## Phase 2 — Production multi-stage runtime image
 
@@ -273,7 +275,7 @@ Related issue: GitHub Issue #18 for meaningful application readiness checks.
 
 ### Status
 
-BLOCKED on explicit approval for a controlled instrumented production deployment and its measurements.
+BOUNDED IMPLEMENTATION UNDERWAY. In the first controlled measurement, frontend readiness appeared about 31.5s after container start and orchestrator Nest startup appeared about 50.9s after start. This proves the fixed 45s process check can run before all managed processes report startup; it does not prove full application readiness or determine the final readiness timeout. Post-deploy container-local checks confirmed HTTP 200 from frontend `/api/` and `/auth/login` and from orchestrator `/health/status`; the existing orchestrator route checks the Temporal namespace.
 
 ### Goal
 
