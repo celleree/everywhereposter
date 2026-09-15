@@ -275,7 +275,7 @@ Related issue: GitHub Issue #18 for meaningful application readiness checks.
 
 ### Status
 
-BOUNDED IMPLEMENTATION UNDERWAY. In the first controlled measurement, frontend readiness appeared about 31.5s after container start and orchestrator Nest startup appeared about 50.9s after start. This proves the fixed 45s process check can run before all managed processes report startup; it does not prove full application readiness or determine the final readiness timeout. Post-deploy container-local checks confirmed HTTP 200 from frontend `/api/` and `/auth/login` and from orchestrator `/health/status`; the existing orchestrator route checks the Temporal namespace.
+BOUNDED IMPLEMENTATION UNDERWAY. In the first controlled measurement, frontend readiness appeared about 31.5s after container start and orchestrator Nest startup appeared about 50.9s after start. This proves the fixed 45s process check can run before all managed processes report startup; it does not prove full application readiness or determine the final readiness timeout. Post-deploy container-local checks confirmed HTTP 200 from the Nginx-proxied backend `/api/`, frontend `/auth/login`, and orchestrator `/health/status`; the existing orchestrator route checks the Temporal namespace.
 
 ### Goal
 
