@@ -142,7 +142,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./postiz-app
-          file: ./postiz-app/Dockerfile.dev
+          file: ./postiz-app/Dockerfile.production
           platforms: linux/amd64
           push: true
           build-args: |
