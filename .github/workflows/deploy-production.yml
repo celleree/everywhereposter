@@ -138,6 +138,11 @@ jobs:
       PRUNE_UNUSED_IMAGES: ${{ inputs.prune_unused_images }}
       REMOTE_DOCKER_CONFIG: /tmp/everywhereposter-ghcr-${{ github.run_id }}
     steps:
+      - name: Check out public readiness helper
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Validate deployment configuration
         run: |
           set -euo pipefail
@@ -224,23 +229,7 @@ jobs:
           REMOTE
 
       - name: Verify the public endpoint
-        run: |
-          set -euo pipefail
-          HTTP_STATUS="$(curl --silent --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --max-time 30 \
-            https://app.everywhereposter.com/)"
-
-          case "$HTTP_STATUS" in
-            2??|3??)
-              echo "Public endpoint returned HTTP $HTTP_STATUS."
-              ;;
-            *)
-              echo "ERROR: public endpoint returned HTTP $HTTP_STATUS."
-              exit 1
-              ;;
-          esac
+        run: bash scripts/wait-for-public-readiness.sh https://app.everywhereposter.com/ 60 2 10
 
       - name: Record deployment summary
         run: |

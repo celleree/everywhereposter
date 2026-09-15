@@ -86,23 +86,12 @@ Rules:
 - Deploy from the full SHA image, not a short SHA.
 - Pull the exact GHCR full-SHA image.
 - Tag it locally as publish-everywhere/postiz-app:custom.
-- Restart only postiz.
-- Check logs.
+- Run the required migration procedure, then recreate only postiz without rebuilding or restarting dependent services.
+- Wait up to the bounded timeout for container health across application and dependency checks, with zero restarts.
+- Confirm the exact image ID and internal health, then use the bounded public readiness retry before manual browser verification.
 - Verify the exact app behavior manually.
 
-Command reference:
-
-```bash
-docker image prune -af
-
-cd /home/arund/publish-everywhere-git
-FULL_SHA=$(git rev-parse HEAD)
-docker pull ghcr.io/celleree/publish-everywhere-postiz:${FULL_SHA}
-docker tag ghcr.io/celleree/publish-everywhere-postiz:${FULL_SHA} publish-everywhere/postiz-app:custom
-docker compose up -d --no-build --no-deps --force-recreate postiz
-sleep 45
-docker logs --tail 120 postiz
-```
+Use the manual GitHub-hosted production workflow described in `docs/GITHUB-HOSTED-DEPLOYMENT.md`. Normal deployments leave image pruning disabled and use `scripts/deploy-production.sh` for migration, recreation, bounded internal readiness polling, exact-image verification, and timing output. The workflow then applies bounded public readiness retry/backoff. Production deployment still requires explicit human approval.
 
 ## What Counts As Deployed
 
@@ -110,7 +99,7 @@ docker logs --tail 120 postiz
 - Exact full-SHA image pulled.
 - Local custom tag points to intended image.
 - postiz container recreated.
-- Logs healthy.
+- Container health is healthy with restart count zero after application and dependency checks.
 - Browser app loads.
 - Exact changed behavior manually verified.
 
@@ -124,15 +113,14 @@ docker logs --tail 120 postiz
 
 ## Docker And Disk Safety
 
-Safe cleanup:
+Normal deployments leave pruning disabled. Inspect disk usage first:
 
 ```bash
-docker image prune -af
-docker builder prune -af
-docker container prune -f
 df -h / /mnt/volume-hel1-1
 docker system df
 ```
+
+For approved image cleanup under disk pressure, use the deployment workflow's `prune_unused_images` input. Its guard preserves the running and previous rollback images. Plan any other cleanup separately before running mutating commands.
 
 Forbidden unless explicitly planned:
 
@@ -146,7 +134,7 @@ rm -rf /mnt/volume-hel1-1/containerd
 
 Explain:
 
-- Images/build cache/stopped containers can be pruned.
+- Images, build cache, and stopped containers may be cleaned only under an explicit plan that preserves required rollback state.
 - Volumes may contain Postgres, Redis, Temporal, or uploaded data.
 - Never delete Docker volumes casually.
 
@@ -260,8 +248,6 @@ List known stale/conflicting docs:
 
 ## Future Improvement Backlog
 
-- Add release ledger.
-- Add deploy verification scripts.
 - Add platform-contract docs.
 - Add analytics metric definitions.
 - Add smoke tests for fragile flows.
