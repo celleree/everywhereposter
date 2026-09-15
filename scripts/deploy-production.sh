@@ -8,7 +8,8 @@ ROLLBACK_IMAGE="${ROLLBACK_IMAGE:-publish-everywhere/postiz-app:previous}"
 SERVICE_NAME="${SERVICE_NAME:-postiz}"
 CONTAINER_NAME="${CONTAINER_NAME:-postiz}"
 PUBLIC_WEB_CONTAINER="${PUBLIC_WEB_CONTAINER:-publish-everywhere-web}"
-STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-45}"
+STARTUP_TIMEOUT_SECONDS="${STARTUP_TIMEOUT_SECONDS:-180}"
+STARTUP_POLL_SECONDS="${STARTUP_POLL_SECONDS:-2}"
 PRUNE_UNUSED_IMAGES="${PRUNE_UNUSED_IMAGES:-false}"
 ROLLBACK_GUARD_CONTAINER="${ROLLBACK_GUARD_CONTAINER:-everywhereposter-rollback-prune-guard}"
 PRODUCTION_EMAIL_FROM_ADDRESS="${PRODUCTION_EMAIL_FROM_ADDRESS:-noreply@everywhereposter.com}"
@@ -108,18 +109,25 @@ RECREATE_STARTED_SECONDS=$SECONDS
 docker compose up -d --no-build --no-deps --force-recreate "$SERVICE_NAME"
 log_timing recreate_container "$RECREATE_STARTED_SECONDS"
 
-STARTUP_WAIT_STARTED_SECONDS=$SECONDS
-sleep "$STARTUP_WAIT_SECONDS"
-log_timing startup_wait "$STARTUP_WAIT_STARTED_SECONDS"
+STARTUP_READINESS_STARTED_SECONDS=$SECONDS
+bash scripts/wait-for-container-health.sh \
+  "$CONTAINER_NAME" "$STARTUP_TIMEOUT_SECONDS" "$STARTUP_POLL_SECONDS"
+log_timing startup_readiness "$STARTUP_READINESS_STARTED_SECONDS"
 
 VERIFY_STARTED_SECONDS=$SECONDS
 RUNNING="$(docker inspect "$CONTAINER_NAME" --format '{{.State.Running}}')"
+RUNNING_RESTART_COUNT="$(docker inspect "$CONTAINER_NAME" --format '{{.RestartCount}}')"
 RUNNING_IMAGE_ID="$(docker inspect "$CONTAINER_NAME" --format '{{.Image}}')"
 RUNNING_EMAIL_FROM_ADDRESS="$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^EMAIL_FROM_ADDRESS=//p' | head -n 1)"
 
 if [ "$RUNNING" != "true" ]; then
   docker logs --tail 120 "$CONTAINER_NAME" || true
   fail "The ${CONTAINER_NAME} container is not running."
+fi
+
+if [ "$RUNNING_RESTART_COUNT" != "0" ]; then
+  docker logs --tail 120 "$CONTAINER_NAME" || true
+  fail "The ${CONTAINER_NAME} container restarted during deployment verification."
 fi
 
 if [ "$RUNNING_IMAGE_ID" != "$EXPECTED_IMAGE_ID" ]; then
