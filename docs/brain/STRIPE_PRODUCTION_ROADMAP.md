@@ -116,13 +116,13 @@ Complete.
 
 ### Status
 
-BLOCKED - IMPLEMENTATION/CI.
+ACTIVE. Implementation/CI verified; fresh independent exact-HEAD review pending.
 
-PR #111 is open at `2dcb49c2f1f9e74b62425d237c438baad87e5b1a`, based on `main` at `1c9c6cb783f5838b3b68e2c6327d8e77ce725c82`. The compilation repair is complete. Required CI run [35308563431](https://github.com/celleree/everywhereposter/actions/runs/35308563431) and repository guard run [35308563344](https://github.com/celleree/everywhereposter/actions/runs/35308563344) passed. Fresh independent exact-HEAD review returned FINDINGS; orchestration source verification confirmed the material webhook activation-boundary defect below.
+PR #111 is open at `9f5780246681b7e8f991677d662170bddec2adf8`, based on `main` at `1c9c6cb783f5838b3b68e2c6327d8e77ce725c82`. Required CI run [35312010309](https://github.com/celleree/everywhereposter/actions/runs/35312010309) and repository guard run [35312010226](https://github.com/celleree/everywhereposter/actions/runs/35312010226) passed. All five PR CI jobs succeeded, including frontend/backend/orchestrator type checks, explicit `stripe.billing-activation.spec.ts` and `media.service.image-credits.spec.ts` execution, the existing unit suites, Docker validation, and the aggregate Docker gate.
 
-Material blocker: with `BILLING_ENABLED=false`, signed subscription-created/updated/deleted events still pass through `postiz-app/apps/backend/src/api/routes/stripe.controller.ts:41-46` and `postiz-app/libraries/nestjs-libraries/src/services/stripe.service.ts:122-160` into subscription mutation. `postiz-app/libraries/nestjs-libraries/src/database/prisma/subscriptions/subscription.service.ts:185-237` can disable integrations, change non-superadmin user access, and change active cron state; deletion also reaches this enforcement path at lines 76-84. These references are anchored to the PR HEAD above.
+The compilation repair and webhook bypass repair are present. Relative to previously reviewed HEAD `2dcb49c2f1f9e74b62425d237c438baad87e5b1a`, the repair adds activation guards to `StripeService.checkValidCard()` and shared `SubscriptionService.modifySubscription()` / `modifySubscriptionByOrg()`, a focused webhook regression suite, and two explicit CI test steps. Billing-disabled subscription bookkeeping continues; integration/user/cron enforcement and card-validation side effects are bypassed. This implementation/CI checkpoint is not an independent review verdict or production verification.
 
-Next: repair this boundary on the existing PR, preserve webhook signature validation and controlled connectivity, verify billing-disabled and billing-enabled behavior with focused regression tests, and explicitly execute the image-credit spec. Inspecting that spec or seeing broader CI pass is not proof of its execution. Require green final-HEAD CI and fresh independent exact-HEAD billing review after the repair. S1 is not complete; S2 planning and dispatch remain blocked. Reverify live GitHub before using this checkpoint.
+Next: obtain a fresh independent exact-HEAD billing review of PR #111, including the repaired paths, underlying subscription bookkeeping and its consumers, disabled/unset/invalid versus enabled behavior, signature validation, and regression/CI coverage. Check for indirect entitlement effects or weakened data-integrity protections, not only the new early returns. S1's exit gate is not yet satisfied; no merge is authorized and S2 planning/dispatch remain blocked. Reverify live GitHub before using this checkpoint.
 
 ### Goal
 
