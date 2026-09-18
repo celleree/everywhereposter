@@ -554,9 +554,21 @@ describe('Stripe S1 billing activation boundary', () => {
     ).rejects.toThrow('Billing is disabled');
     await expect(controller.crypto(org)).rejects.toThrow('Billing is disabled');
 
+    await expect(
+      harness.subscriptionService.lifeTime('org_1', 'crypto_code', 'PRO')
+    ).resolves.toBe(false);
+    await expect(
+      harness.subscriptionService.addSubscription(
+        'org_1',
+        'user_1',
+        'STANDARD'
+      )
+    ).resolves.toBe(false);
+
     expect(notificationService.sendEmail).not.toHaveBeenCalled();
     expect(nowpayments.createPaymentPage).not.toHaveBeenCalled();
     expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
+    expect(harness.organizationModel.update).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid webhook signature before subscription handling', () => {

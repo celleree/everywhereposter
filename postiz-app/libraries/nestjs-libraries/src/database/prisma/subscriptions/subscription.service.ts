@@ -297,6 +297,10 @@ export class SubscriptionService {
   }
 
   async lifeTime(orgId: string, identifier: string, subscription: any) {
+    if (!isBillingEnabled()) {
+      return false;
+    }
+
     return this.createOrUpdateSubscription(
       false,
       identifier,
@@ -311,6 +315,10 @@ export class SubscriptionService {
   }
 
   async addSubscription(orgId: string, userId: string, subscription: any) {
+    if (!isBillingEnabled()) {
+      return false;
+    }
+
     await this._subscriptionRepository.setCustomerId(orgId, userId);
     return this.createOrUpdateSubscription(
       false,
