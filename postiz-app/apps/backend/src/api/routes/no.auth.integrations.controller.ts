@@ -23,10 +23,9 @@ import {
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
-
-@ApiTags('Integrations')
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
+@ApiTags('Integrations')
 @Controller('/integrations')
 export class NoAuthIntegrationsController {
   constructor(
