@@ -135,6 +135,40 @@ export class SubscriptionRepository {
     });
   }
 
+  async bookkeepSubscriptionWhileBillingDisabled(
+    identifier: string,
+    customerId: string,
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null
+  ) {
+    const findOrg = await this.getOrganizationByCustomerId(customerId);
+    if (!findOrg) {
+      return;
+    }
+
+    const current = await this._subscription.model.subscription.findFirst({
+      where: {
+        organizationId: findOrg.id,
+        deletedAt: null,
+      },
+    });
+
+    if (!current || current.isLifetime) {
+      return;
+    }
+
+    return this._subscription.model.subscription.update({
+      where: {
+        organizationId: findOrg.id,
+      },
+      data: {
+        identifier,
+        period,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+      },
+    });
+  }
+
   async createOrUpdateSubscription(
     isTrailing: boolean,
     identifier: string,
@@ -169,7 +203,7 @@ export class SubscriptionRepository {
         totalChannels,
         period,
         identifier,
-        isLifetime: !!code,
+        ...(code ? { isLifetime: true } : {}),
         cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
         deletedAt: null,
       },

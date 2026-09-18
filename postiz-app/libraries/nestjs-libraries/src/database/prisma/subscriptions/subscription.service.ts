@@ -75,6 +75,10 @@ export class SubscriptionService {
   }
 
   async deleteSubscription(customerId: string) {
+    if (!isBillingEnabled()) {
+      return;
+    }
+
     await this.modifySubscription(
       customerId,
       pricing.FREE.channel || 0,
@@ -161,10 +165,6 @@ export class SubscriptionService {
       return false;
     }
 
-    if (!isBillingEnabled()) {
-      return true;
-    }
-
     const getOrgByCustomerId =
       await this._subscriptionRepository.getOrganizationByCustomerId(
         customerId
@@ -180,6 +180,10 @@ export class SubscriptionService {
       (getCurrentSubscription && getCurrentSubscription?.isLifetime)
     ) {
       return false;
+    }
+
+    if (!isBillingEnabled()) {
+      return true;
     }
 
     const from = pricing[getCurrentSubscription?.subscriptionTier || 'FREE'];
@@ -244,6 +248,16 @@ export class SubscriptionService {
         return {};
       }
     }
+
+    if (!code && !isBillingEnabled()) {
+      return this._subscriptionRepository.bookkeepSubscriptionWhileBillingDisabled(
+        identifier,
+        customerId,
+        period,
+        cancelAt
+      );
+    }
+
     return this._subscriptionRepository.createOrUpdateSubscription(
       isTrailing,
       identifier,
