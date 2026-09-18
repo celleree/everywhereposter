@@ -118,9 +118,11 @@ Complete.
 
 BLOCKED - IMPLEMENTATION/CI.
 
-Implementation is open in PR #111 at `336e5e9e6387465b8fa62d9ad7d20810c595e56a`, based on `main` at `1c9c6cb783f5838b3b68e2c6327d8e77ce725c82`. Required CI run [35306792288](https://github.com/celleree/everywhereposter/actions/runs/35306792288) failed backend type-checking and Docker validation; repository guard passed. A misplaced import between controller decorators is a confirmed compilation blocker.
+PR #111 is open at `2dcb49c2f1f9e74b62425d237c438baad87e5b1a`, based on `main` at `1c9c6cb783f5838b3b68e2c6327d8e77ce725c82`. The compilation repair is complete. Required CI run [35308563431](https://github.com/celleree/everywhereposter/actions/runs/35308563431) and repository guard run [35308563344](https://github.com/celleree/everywhereposter/actions/runs/35308563344) passed. Fresh independent exact-HEAD review returned FINDINGS; orchestration source verification confirmed the material webhook activation-boundary defect below.
 
-Next: repair the bounded compilation defect on PR #111, verify focused tests and all required checks on the repaired HEAD, then obtain fresh independent exact-HEAD billing review. S1 is not complete; S2 planning and dispatch remain blocked. Reverify live GitHub before using this checkpoint.
+Material blocker: with `BILLING_ENABLED=false`, signed subscription-created/updated/deleted events still pass through `postiz-app/apps/backend/src/api/routes/stripe.controller.ts:41-46` and `postiz-app/libraries/nestjs-libraries/src/services/stripe.service.ts:122-160` into subscription mutation. `postiz-app/libraries/nestjs-libraries/src/database/prisma/subscriptions/subscription.service.ts:185-237` can disable integrations, change non-superadmin user access, and change active cron state; deletion also reaches this enforcement path at lines 76-84. These references are anchored to the PR HEAD above.
+
+Next: repair this boundary on the existing PR, preserve webhook signature validation and controlled connectivity, verify billing-disabled and billing-enabled behavior with focused regression tests, and explicitly execute the image-credit spec. Inspecting that spec or seeing broader CI pass is not proof of its execution. Require green final-HEAD CI and fresh independent exact-HEAD billing review after the repair. S1 is not complete; S2 planning and dispatch remain blocked. Reverify live GitHub before using this checkpoint.
 
 ### Goal
 
