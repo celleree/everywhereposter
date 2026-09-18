@@ -14,6 +14,7 @@ const org = {
 
 describe('MediaService image credits', () => {
   const originalStripeKey = process.env.STRIPE_PUBLISHABLE_KEY;
+  const originalBillingEnabled = process.env.BILLING_ENABLED;
   const mediaRepository = {};
   const openAi = {
     generateImage: jest.fn(),
@@ -36,6 +37,7 @@ describe('MediaService image credits', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test_billing-enabled';
+    process.env.BILLING_ENABLED = 'true';
   });
 
   afterAll(() => {
@@ -43,6 +45,12 @@ describe('MediaService image credits', () => {
       delete process.env.STRIPE_PUBLISHABLE_KEY;
     } else {
       process.env.STRIPE_PUBLISHABLE_KEY = originalStripeKey;
+    }
+
+    if (originalBillingEnabled === undefined) {
+      delete process.env.BILLING_ENABLED;
+    } else {
+      process.env.BILLING_ENABLED = originalBillingEnabled;
     }
   });
 
@@ -98,8 +106,8 @@ describe('MediaService image credits', () => {
     );
   });
 
-  it('preserves image generation when billing is disabled', async () => {
-    delete process.env.STRIPE_PUBLISHABLE_KEY;
+  it('preserves image generation when billing is disabled even with Stripe credentials configured', async () => {
+    process.env.BILLING_ENABLED = 'false';
     subscriptionService.useCredit.mockImplementation(
       async (_organization: unknown, _type: string, operation: () => Promise<any>) =>
         operation()
