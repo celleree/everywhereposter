@@ -13,6 +13,7 @@ import { VariableContextComponent } from '@gitroom/react/helpers/variable.contex
 import { Fragment } from 'react';
 import { PHProvider } from '@gitroom/react/helpers/posthog';
 import UtmSaver from '@gitroom/helpers/utils/utm.saver';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 import { DubAnalytics } from '@gitroom/frontend/components/layout/dubAnalytics';
 import { FacebookComponent } from '@gitroom/frontend/components/layout/facebook.component';
 import { cookies } from 'next/headers';
@@ -171,7 +172,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           backendUrl={BACKEND_URL}
           plontoKey={process.env.NEXT_PUBLIC_POLOTNO!}
           stripeClient={process.env.STRIPE_PUBLISHABLE_KEY!}
-          billingEnabled={!!process.env.STRIPE_PUBLISHABLE_KEY}
+          billingEnabled={isBillingEnabled()}
           discordUrl={process.env.NEXT_PUBLIC_DISCORD_SUPPORT!}
           frontEndUrl={process.env.FRONTEND_URL || process.env.PUBLIC_BASE_URL || ''}
           isGeneral={parseBooleanEnv(process.env.IS_GENERAL)}
