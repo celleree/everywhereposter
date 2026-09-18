@@ -91,6 +91,7 @@ export class SubscriptionRepository {
   deleteSubscriptionByCustomerId(customerId: string) {
     return this._subscription.model.subscription.deleteMany({
       where: {
+        isLifetime: false,
         organization: {
           paymentId: customerId,
         },

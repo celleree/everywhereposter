@@ -80,7 +80,7 @@ export class UsersController {
       // @ts-ignore
       totalChannels: !billingEnabled ? 10000 : organization?.subscription?.totalChannels || pricing.FREE.channel,
       // @ts-ignore
-      tier: organization?.subscription?.subscriptionTier || (!billingEnabled ? 'ULTIMATE' : 'FREE'),
+      tier: !billingEnabled ? 'ULTIMATE' : organization?.subscription?.subscriptionTier || 'FREE',
       // @ts-ignore
       role: organization?.users[0]?.role,
       // @ts-ignore

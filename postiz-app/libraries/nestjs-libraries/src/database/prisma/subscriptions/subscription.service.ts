@@ -79,11 +79,15 @@ export class SubscriptionService {
       return;
     }
 
-    await this.modifySubscription(
+    const modified = await this.modifySubscription(
       customerId,
       pricing.FREE.channel || 0,
       'FREE'
     );
+    if (!modified) {
+      return false;
+    }
+
     return this._subscriptionRepository.deleteSubscriptionByCustomerId(
       customerId
     );

@@ -1,8 +1,10 @@
 import { BillingController } from '../../apps/backend/src/api/routes/billing.controller';
+import { UsersController } from '../../apps/backend/src/api/routes/users.controller';
 import { StripeController } from '../../apps/backend/src/api/routes/stripe.controller';
 import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
+import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 
 const originalBillingEnabled = process.env.BILLING_ENABLED;
 const originalSigningKey = process.env.STRIPE_SIGNING_KEY;
@@ -131,10 +133,22 @@ const makeHarness = (
       subscriptionState = { ...subscriptionState, ...data };
       return subscriptionState;
     }),
-    deleteMany: jest.fn(async () => {
-      const count = subscriptionState ? 1 : 0;
+    deleteMany: jest.fn(async ({ where }: any = {}) => {
+      if (!subscriptionState) {
+        return { count: 0 };
+      }
+      if (where?.isLifetime === false && subscriptionState.isLifetime) {
+        return { count: 0 };
+      }
+      if (
+        where?.organization?.paymentId &&
+        where.organization.paymentId !== organizationState.paymentId
+      ) {
+        return { count: 0 };
+      }
+
       subscriptionState = null;
-      return { count };
+      return { count: 1 };
     }),
   };
 
@@ -292,24 +306,75 @@ describe('Stripe S1 billing activation boundary', () => {
     }
   );
 
-  it('preserves lifetime subscription integrity while billing is disabled', async () => {
-    setBillingEnabled('false');
+  it.each([
+    ['unset', undefined],
+    ['false', 'false'],
+    ['invalid', 'not-true'],
+  ])(
+    'preserves lifetime subscription integrity while billing is %s',
+    async (_label, billingValue) => {
+      setBillingEnabled(billingValue);
+      const harness = makeHarness(lifetimeSubscription());
+
+      await harness.stripeService.createSubscription(
+        makeEvent('customer.subscription.created')
+      );
+      await harness.stripeService.updateSubscription(
+        makeEvent('customer.subscription.updated')
+      );
+      await harness.stripeService.deleteSubscription(
+        makeEvent('customer.subscription.deleted')
+      );
+
+      expect(harness.getSubscription()).toEqual(lifetimeSubscription());
+      expect(harness.subscriptionModel.update).not.toHaveBeenCalled();
+      expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
+      expect(harness.subscriptionModel.deleteMany).not.toHaveBeenCalled();
+    }
+  );
+
+  it('preserves a lifetime subscription on an enabled deletion webhook and at repository persistence', async () => {
+    setBillingEnabled('true');
     const harness = makeHarness(lifetimeSubscription());
 
-    await harness.stripeService.createSubscription(
-      makeEvent('customer.subscription.created')
-    );
-    await harness.stripeService.updateSubscription(
-      makeEvent('customer.subscription.updated')
-    );
     await harness.stripeService.deleteSubscription(
       makeEvent('customer.subscription.deleted')
     );
 
     expect(harness.getSubscription()).toEqual(lifetimeSubscription());
-    expect(harness.subscriptionModel.update).not.toHaveBeenCalled();
-    expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
     expect(harness.subscriptionModel.deleteMany).not.toHaveBeenCalled();
+
+    await expect(
+      harness.subscriptionRepository.deleteSubscriptionByCustomerId('cus_1')
+    ).resolves.toEqual({ count: 0 });
+    expect(harness.getSubscription()).toEqual(lifetimeSubscription());
+    expect(harness.subscriptionModel.deleteMany).toHaveBeenCalledWith({
+      where: {
+        isLifetime: false,
+        organization: {
+          paymentId: 'cus_1',
+        },
+      },
+    });
+  });
+
+  it('still deletes an ordinary non-lifetime subscription on an enabled deletion webhook', async () => {
+    setBillingEnabled('true');
+    const harness = makeHarness(normalSubscription());
+
+    await harness.stripeService.deleteSubscription(
+      makeEvent('customer.subscription.deleted')
+    );
+
+    expect(harness.getSubscription()).toBeNull();
+    expect(harness.subscriptionModel.deleteMany).toHaveBeenCalledWith({
+      where: {
+        isLifetime: false,
+        organization: {
+          paymentId: 'cus_1',
+        },
+      },
+    });
   });
 
   it('does not let a non-code repository upsert alter an existing lifetime subscription', async () => {
@@ -569,6 +634,80 @@ describe('Stripe S1 billing activation boundary', () => {
     expect(nowpayments.createPaymentPage).not.toHaveBeenCalled();
     expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
     expect(harness.organizationModel.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unset', undefined],
+    ['false', 'false'],
+    ['invalid', 'not-true'],
+  ])(
+    '/user/self exposes the disabled capability baseline instead of a persisted tier when billing is %s',
+    async (_label, billingValue) => {
+      setBillingEnabled(billingValue);
+      const harness = makeHarness();
+      const controller = new UsersController(
+        harness.subscriptionService,
+        harness.stripeService,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any
+      );
+      const organization = {
+        ...harness.getOrganization(),
+        subscription: {
+          subscriptionTier: 'STANDARD',
+          totalChannels: 1,
+          isLifetime: false,
+        },
+        users: [{ role: 'ADMIN' }],
+        apiKey: 'api_key',
+      } as any;
+
+      const result = await controller.getSelf(
+        { id: 'user_1', isSuperAdmin: false } as any,
+        organization,
+        { cookies: {}, headers: {} } as any
+      );
+
+      expect(result.tier).toBe('ULTIMATE');
+      expect(result.totalChannels).toBe(10000);
+      expect(result.isTrailing).toBe(false);
+      expect(pricing[result.tier]).toEqual(pricing.ULTIMATE);
+    }
+  );
+
+  it('/user/self preserves the persisted subscription tier when billing is enabled', async () => {
+    setBillingEnabled('true');
+    const harness = makeHarness();
+    const controller = new UsersController(
+      harness.subscriptionService,
+      harness.stripeService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any
+    );
+    const organization = {
+      ...harness.getOrganization(),
+      subscription: {
+        subscriptionTier: 'STANDARD',
+        totalChannels: 1,
+        isLifetime: false,
+      },
+      users: [{ role: 'ADMIN' }],
+      apiKey: 'api_key',
+    } as any;
+
+    const result = await controller.getSelf(
+      { id: 'user_1', isSuperAdmin: false } as any,
+      organization,
+      { cookies: {}, headers: {} } as any
+    );
+
+    expect(result.tier).toBe('STANDARD');
+    expect(result.totalChannels).toBe(1);
+    expect(pricing[result.tier]).toEqual(pricing.STANDARD);
   });
 
   it('rejects an invalid webhook signature before subscription handling', () => {
