@@ -41,7 +41,7 @@ Canonical roadmap: `docs/brain/STRIPE_PRODUCTION_ROADMAP.md`.
 Current checkpoint:
 
 - S0 billing contract — COMPLETE. Launch contract is one plan at $9/month or $90/year, no permanent free plan, 7-day card-required trial, unlimited supported connected accounts, unlimited ordinary publishing/scheduling where the underlying platform/API does not charge per post, and AI usage billed separately through prepaid balance or OpenAI BYOK.
-- S1 explicit billing activation boundary — ACTIVE. Stripe credential presence must be separated from entitlement enforcement before live credentials are installed.
+- S1 explicit billing activation boundary — BLOCKED - IMPLEMENTATION/CI. PR #111 is open at `336e5e9e6387465b8fa62d9ad7d20810c595e56a`, based on `main` at `1c9c6cb783f5838b3b68e2c6327d8e77ce725c82`. Required CI run [35306792288](https://github.com/celleree/everywhereposter/actions/runs/35306792288) failed backend type-checking and Docker validation; repository guard passed. Repair the compilation blocker, verify the repaired HEAD, then obtain fresh independent exact-HEAD billing review. Reverify live GitHub before using this checkpoint.
 - Subscription billing and prepaid AI balance are separate systems. Stripe handles payment/money movement; EverywherePoster owns the internal AI wallet ledger and usage accounting.
 - Every later Stripe phase has a decision gate: do not plan detailed implementation for the next phase until the prior phase is verified and any unresolved product, accounting, security, data-model, Stripe-dashboard, UX, or operational decisions for the next phase are explicitly settled.
 - Production billing activation and production secret/config changes remain explicit human gates.
@@ -122,9 +122,9 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-Stripe S1: implement the explicit billing activation boundary so Stripe credentials can be configured without automatically enforcing subscription restrictions. Keep the change bounded to the activation contract and focused regression coverage; do not pull S2 pricing or AI-wallet work into S1.
+Stripe S1: repair the misplaced `isBillingEnabled` import in `postiz-app/apps/backend/src/api/routes/no.auth.integrations.controller.ts` on PR #111. Keep the controller decorators attached to the class, run focused activation tests and affected type checks, and verify required CI on the repaired HEAD before fresh independent exact-HEAD review. Keep the repair within S1; do not pull S2 pricing, AI-wallet, BYOK, or unrelated open-PR work into it.
 
-After S1 is verified, stop and run the next-phase decision gate in `docs/brain/STRIPE_PRODUCTION_ROADMAP.md` before planning S2 in detail.
+S1 is not complete. After S1 is verified, stop and run the next-phase decision gate in `docs/brain/STRIPE_PRODUCTION_ROADMAP.md` before planning S2 in detail.
 
 Production deployment, production secrets, billing activation, and merges outside any documented exception remain explicit human gates.
 
