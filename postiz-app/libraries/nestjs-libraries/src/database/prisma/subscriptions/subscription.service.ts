@@ -7,6 +7,7 @@ import { Organization, Prisma } from '@prisma/client';
 import dayjs, { Dayjs } from 'dayjs';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 type OrganizationSubscription = {
   subscriptionTier?: string | null;
@@ -107,6 +108,10 @@ export class SubscriptionService {
       return false;
     }
 
+    if (!isBillingEnabled()) {
+      return true;
+    }
+
     const getCurrentSubscription =
       (await this._subscriptionRepository.getSubscriptionByOrgId(
         organizationId
@@ -154,6 +159,10 @@ export class SubscriptionService {
   ) {
     if (!customerId) {
       return false;
+    }
+
+    if (!isBillingEnabled()) {
+      return true;
     }
 
     const getOrgByCustomerId =

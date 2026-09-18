@@ -11,6 +11,7 @@ import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { TrackService } from '@gitroom/nestjs-libraries/track/track.service';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
 import { TrackEnum } from '@gitroom/nestjs-libraries/user/track.enum';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_nothing');
 
@@ -31,6 +32,10 @@ export class StripeService {
       | Stripe.CustomerSubscriptionCreatedEvent
       | Stripe.CustomerSubscriptionUpdatedEvent
   ) {
+    if (!isBillingEnabled()) {
+      return true;
+    }
+
     if (event.data.object.status === 'incomplete') {
       return false;
     }
