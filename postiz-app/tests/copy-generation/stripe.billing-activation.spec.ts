@@ -312,22 +312,24 @@ describe('Stripe S1 billing activation boundary', () => {
     expect(harness.subscriptionModel.deleteMany).not.toHaveBeenCalled();
   });
 
-  it('does not let a non-code repository upsert clear an existing lifetime flag', async () => {
+  it('does not let a non-code repository upsert alter an existing lifetime subscription', async () => {
     const harness = makeHarness(lifetimeSubscription());
 
-    await harness.subscriptionRepository.createOrUpdateSubscription(
-      false,
-      'stripe_identifier',
-      'cus_1',
-      5,
-      'STANDARD',
-      'MONTHLY',
-      null
-    );
+    await expect(
+      harness.subscriptionRepository.createOrUpdateSubscription(
+        false,
+        'stripe_identifier',
+        'cus_1',
+        5,
+        'STANDARD',
+        'MONTHLY',
+        null
+      )
+    ).resolves.toEqual(lifetimeSubscription());
 
-    const upsert = harness.subscriptionModel.upsert.mock.calls[0][0];
-    expect(upsert.update).not.toHaveProperty('isLifetime');
-    expect(harness.getSubscription()?.isLifetime).toBe(true);
+    expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
+    expect(harness.organizationModel.update).not.toHaveBeenCalled();
+    expect(harness.getSubscription()).toEqual(lifetimeSubscription());
   });
 
   it('does not link a new unvalidated subscription to existing paid state while billing is disabled', async () => {

@@ -190,6 +190,17 @@ export class SubscriptionRepository {
       return;
     }
 
+    const current = await this._subscription.model.subscription.findFirst({
+      where: {
+        organizationId: findOrg.id,
+        deletedAt: null,
+      },
+    });
+
+    if (!code && current?.isLifetime) {
+      return current;
+    }
+
     await this._subscription.model.subscription.upsert({
       where: {
         organizationId: findOrg.id,
