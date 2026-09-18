@@ -81,6 +81,12 @@ const makeHarness = (
   let subscriptionState = initialSubscription
     ? { ...initialSubscription }
     : null;
+  let beforeUpdateMany:
+    | (() => void | Promise<void>)
+    | undefined;
+  let beforeDeleteMany:
+    | (() => void | Promise<void>)
+    | undefined;
   const organizationState = {
     id: 'org_1',
     name: 'Example org',
@@ -133,8 +139,69 @@ const makeHarness = (
       subscriptionState = { ...subscriptionState, ...data };
       return subscriptionState;
     }),
-    deleteMany: jest.fn(async ({ where }: any = {}) => {
+    updateMany: jest.fn(async ({ where, data }: any) => {
+      if (beforeUpdateMany) {
+        const hook = beforeUpdateMany;
+        beforeUpdateMany = undefined;
+        await hook();
+      }
+
       if (!subscriptionState) {
+        return { count: 0 };
+      }
+      if (
+        where?.organizationId &&
+        where.organizationId !== subscriptionState.organizationId
+      ) {
+        return { count: 0 };
+      }
+      if (where?.isLifetime === false && subscriptionState.isLifetime) {
+        return { count: 0 };
+      }
+      if (
+        where?.identifier &&
+        where.identifier !== subscriptionState.identifier
+      ) {
+        return { count: 0 };
+      }
+      if (where?.deletedAt === null && subscriptionState.deletedAt !== null) {
+        return { count: 0 };
+      }
+      if (
+        where?.organization?.paymentId &&
+        where.organization.paymentId !== organizationState.paymentId
+      ) {
+        return { count: 0 };
+      }
+
+      subscriptionState = { ...subscriptionState, ...data };
+      return { count: 1 };
+    }),
+    createMany: jest.fn(async ({ data }: any) => {
+      if (subscriptionState) {
+        return { count: 0 };
+      }
+
+      subscriptionState = {
+        id: 'stored_subscription',
+        ...data,
+      };
+      return { count: 1 };
+    }),
+    deleteMany: jest.fn(async ({ where }: any = {}) => {
+      if (beforeDeleteMany) {
+        const hook = beforeDeleteMany;
+        beforeDeleteMany = undefined;
+        await hook();
+      }
+
+      if (!subscriptionState) {
+        return { count: 0 };
+      }
+      if (
+        where?.organizationId &&
+        where.organizationId !== subscriptionState.organizationId
+      ) {
         return { count: 0 };
       }
       if (where?.isLifetime === false && subscriptionState.isLifetime) {
@@ -199,11 +266,23 @@ const makeHarness = (
     disableOrEnableNonSuperAdminUsers: jest.fn().mockResolvedValue(undefined),
   };
 
+  const transactionClient = {
+    subscription: subscriptionModel,
+    organization: organizationModel,
+  };
+  const prismaTransaction = {
+    model: {
+      $transaction: jest.fn(async (operation: any) =>
+        operation(transactionClient)
+      ),
+    },
+  };
+
   const subscriptionService = new SubscriptionService(
     subscriptionRepository,
     integrationService as any,
     entitlementOrganizationService as any,
-    undefined
+    prismaTransaction as any
   );
 
   const stripeOrganizationService = {
@@ -243,6 +322,16 @@ const makeHarness = (
     stripeOrganizationService,
     stripeUserService,
     trackService,
+    prismaTransaction,
+    setBeforeUpdateMany: (hook: () => void | Promise<void>) => {
+      beforeUpdateMany = hook;
+    },
+    setBeforeDeleteMany: (hook: () => void | Promise<void>) => {
+      beforeDeleteMany = hook;
+    },
+    setSubscription: (state: SubscriptionState | null) => {
+      subscriptionState = state ? { ...state } : null;
+    },
     getSubscription: () =>
       subscriptionState ? { ...subscriptionState } : null,
     getOrganization: () => ({ ...organizationState }),
@@ -291,7 +380,7 @@ describe('Stripe S1 billing activation boundary', () => {
         allowTrial: true,
         isTrailing: true,
       });
-      expect(harness.subscriptionModel.update).toHaveBeenCalledTimes(2);
+      expect(harness.subscriptionModel.updateMany).toHaveBeenCalledTimes(2);
       expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
       expect(harness.subscriptionModel.deleteMany).not.toHaveBeenCalled();
       expect(
@@ -327,7 +416,7 @@ describe('Stripe S1 billing activation boundary', () => {
       );
 
       expect(harness.getSubscription()).toEqual(lifetimeSubscription());
-      expect(harness.subscriptionModel.update).not.toHaveBeenCalled();
+      expect(harness.subscriptionModel.updateMany).toHaveBeenCalledTimes(2);
       expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
       expect(harness.subscriptionModel.deleteMany).not.toHaveBeenCalled();
     }
@@ -377,7 +466,7 @@ describe('Stripe S1 billing activation boundary', () => {
     });
   });
 
-  it('does not let a non-code repository upsert alter an existing lifetime subscription', async () => {
+  it('does not let sequential ordinary persistence alter an existing lifetime subscription', async () => {
     const harness = makeHarness(lifetimeSubscription());
 
     await expect(
@@ -390,11 +479,121 @@ describe('Stripe S1 billing activation boundary', () => {
         'MONTHLY',
         null
       )
-    ).resolves.toEqual(lifetimeSubscription());
+    ).resolves.toEqual({ applied: false });
 
+    expect(harness.subscriptionModel.updateMany).toHaveBeenCalledTimes(1);
     expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
     expect(harness.organizationModel.update).not.toHaveBeenCalled();
     expect(harness.getSubscription()).toEqual(lifetimeSubscription());
+  });
+
+  it('prevents an enabled ordinary Stripe update from overwriting a concurrent lifetime conversion', async () => {
+    setBillingEnabled('true');
+    const harness = makeHarness(normalSubscription());
+    const wonLifetime = {
+      ...lifetimeSubscription(),
+      period: 'YEARLY' as const,
+      cancelAt: new Date('2030-01-01T00:00:00.000Z'),
+      deletedAt: null,
+    };
+
+    harness.setBeforeUpdateMany(() => {
+      harness.setSubscription(wonLifetime);
+    });
+
+    await harness.stripeService.updateSubscription(
+      makeEvent('customer.subscription.updated')
+    );
+
+    expect(harness.getSubscription()).toEqual(wonLifetime);
+    expect(harness.integrationService.getIntegrationsList).not.toHaveBeenCalled();
+    expect(harness.integrationService.disableIntegrations).not.toHaveBeenCalled();
+    expect(
+      harness.entitlementOrganizationService.disableOrEnableNonSuperAdminUsers
+    ).not.toHaveBeenCalled();
+    expect(harness.integrationService.changeActiveCron).not.toHaveBeenCalled();
+    expect(harness.organizationModel.update).not.toHaveBeenCalled();
+  });
+
+  it('prevents enabled deletion side effects when a concurrent lifetime conversion wins', async () => {
+    setBillingEnabled('true');
+    const harness = makeHarness(normalSubscription());
+    const wonLifetime = {
+      ...lifetimeSubscription(),
+      cancelAt: new Date('2030-02-01T00:00:00.000Z'),
+    };
+
+    harness.setBeforeDeleteMany(() => {
+      harness.setSubscription(wonLifetime);
+    });
+
+    await harness.stripeService.deleteSubscription(
+      makeEvent('customer.subscription.deleted')
+    );
+
+    expect(harness.getSubscription()).toEqual(wonLifetime);
+    expect(harness.integrationService.getIntegrationsList).not.toHaveBeenCalled();
+    expect(harness.integrationService.disableIntegrations).not.toHaveBeenCalled();
+    expect(
+      harness.entitlementOrganizationService.disableOrEnableNonSuperAdminUsers
+    ).not.toHaveBeenCalled();
+    expect(harness.integrationService.changeActiveCron).not.toHaveBeenCalled();
+  });
+
+  it('prevents disabled bookkeeping from mutating a concurrent lifetime conversion', async () => {
+    setBillingEnabled('false');
+    const harness = makeHarness(normalSubscription());
+    const wonLifetime = {
+      ...lifetimeSubscription(),
+      identifier: 'unique_1',
+      period: 'YEARLY' as const,
+      cancelAt: new Date('2030-03-01T00:00:00.000Z'),
+    };
+
+    harness.setBeforeUpdateMany(() => {
+      harness.setSubscription(wonLifetime);
+    });
+
+    await harness.stripeService.updateSubscription(
+      makeEvent('customer.subscription.updated')
+    );
+
+    expect(harness.getSubscription()).toEqual(wonLifetime);
+    expect(harness.organizationModel.update).not.toHaveBeenCalled();
+    expect(harness.integrationService.getIntegrationsList).not.toHaveBeenCalled();
+    expect(harness.integrationService.disableIntegrations).not.toHaveBeenCalled();
+    expect(
+      harness.entitlementOrganizationService.disableOrEnableNonSuperAdminUsers
+    ).not.toHaveBeenCalled();
+    expect(harness.integrationService.changeActiveCron).not.toHaveBeenCalled();
+  });
+
+  it('creates an ordinary non-lifetime subscription when billing is enabled and none exists', async () => {
+    setBillingEnabled('true');
+    const harness = makeHarness(null);
+
+    await harness.stripeService.createSubscription(
+      makeEvent('customer.subscription.created')
+    );
+
+    expect(harness.subscriptionModel.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDuplicates: true,
+      })
+    );
+    expect(harness.getSubscription()).toMatchObject({
+      organizationId: 'org_1',
+      subscriptionTier: 'STANDARD',
+      totalChannels: 5,
+      identifier: 'unique_1',
+      period: 'MONTHLY',
+      isLifetime: false,
+      deletedAt: null,
+    });
+    expect(harness.getOrganization()).toMatchObject({
+      allowTrial: false,
+      isTrailing: false,
+    });
   });
 
   it('does not link a new unvalidated subscription to existing paid state while billing is disabled', async () => {
@@ -420,7 +619,7 @@ describe('Stripe S1 billing activation boundary', () => {
       totalChannels: 40,
       isLifetime: false,
     });
-    expect(harness.subscriptionModel.update).not.toHaveBeenCalled();
+    expect(harness.subscriptionModel.updateMany).toHaveBeenCalledTimes(1);
     await expect(
       harness.subscriptionRepository.checkSubscription(
         'org_1',
@@ -473,7 +672,8 @@ describe('Stripe S1 billing activation boundary', () => {
     expect(
       harness.stripeOrganizationService.getOrgByCustomerId
     ).toHaveBeenCalledTimes(2);
-    expect(harness.subscriptionModel.upsert).toHaveBeenCalledTimes(2);
+    expect(harness.subscriptionModel.updateMany).toHaveBeenCalledTimes(2);
+    expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
     expect(harness.subscriptionModel.deleteMany).toHaveBeenCalledTimes(1);
     expect(harness.integrationService.disableIntegrations).toHaveBeenCalledTimes(
       3
@@ -728,7 +928,7 @@ describe('Stripe S1 billing activation boundary', () => {
     ).toThrow();
 
     expect(harness.subscriptionModel.upsert).not.toHaveBeenCalled();
-    expect(harness.subscriptionModel.update).not.toHaveBeenCalled();
+    expect(harness.subscriptionModel.updateMany).not.toHaveBeenCalled();
     expect(harness.subscriptionModel.deleteMany).not.toHaveBeenCalled();
   });
 });
