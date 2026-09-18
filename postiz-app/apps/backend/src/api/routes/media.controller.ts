@@ -30,6 +30,7 @@ import { SaveMediaInformationDto } from '@gitroom/nestjs-libraries/dtos/media/sa
 import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -65,7 +66,7 @@ export class MediaController {
     isPicturePrompt = false
   ) {
     const total = await this._subscriptionService.checkCredits(org);
-    if (process.env.STRIPE_PUBLISHABLE_KEY && total.credits <= 0) {
+    if (isBillingEnabled() && total.credits <= 0) {
       return false;
     }
 

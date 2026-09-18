@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Organization, User } from '@prisma/client';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
@@ -11,6 +11,7 @@ import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { TrackService } from '@gitroom/nestjs-libraries/track/track.service';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
 import { TrackEnum } from '@gitroom/nestjs-libraries/user/track.enum';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_nothing');
 
@@ -22,6 +23,13 @@ export class StripeService {
     private _userService: UsersService,
     private _trackService: TrackService
   ) {}
+
+  private assertBillingEnabled() {
+    if (!isBillingEnabled()) {
+      throw new ServiceUnavailableException('Billing is disabled');
+    }
+  }
+
   validateRequest(rawBody: Buffer, signature: string, endpointSecret: string) {
     return stripe.webhooks.constructEvent(rawBody, signature, endpointSecret);
   }
@@ -31,6 +39,10 @@ export class StripeService {
       | Stripe.CustomerSubscriptionCreatedEvent
       | Stripe.CustomerSubscriptionUpdatedEvent
   ) {
+    if (!isBillingEnabled()) {
+      return true;
+    }
+
     if (event.data.object.status === 'incomplete') {
       return false;
     }
@@ -163,6 +175,7 @@ export class StripeService {
   }
 
   async createOrGetCustomer(organization: Organization) {
+    this.assertBillingEnabled();
     if (organization.paymentId) {
       return organization.paymentId;
     }
@@ -204,6 +217,7 @@ export class StripeService {
   }
 
   async prorate(organizationId: string, body: BillingSubscribeDto) {
+    this.assertBillingEnabled();
     const org = await this._organizationService.getOrgById(organizationId);
     const customer = await this.createOrGetCustomer(org!);
     const priceData = pricing[body.billing];
@@ -299,6 +313,7 @@ export class StripeService {
   }
 
   async setToCancel(organizationId: string) {
+    this.assertBillingEnabled();
     const id = makeId(10);
     const org = await this._organizationService.getOrgById(organizationId);
     const customer = await this.createOrGetCustomer(org!);
@@ -363,6 +378,7 @@ export class StripeService {
   }
 
   async createBillingPortalLink(customer: string) {
+    this.assertBillingEnabled();
     return stripe.billingPortal.sessions.create({
       customer,
       return_url: process.env['FRONTEND_URL'] + '/billing',
@@ -544,6 +560,7 @@ export class StripeService {
   }
 
   async finishTrial(paymentId: string) {
+    this.assertBillingEnabled();
     const list = (
       await stripe.subscriptions.list({
         customer: paymentId,
@@ -595,6 +612,7 @@ export class StripeService {
   }
 
   async applyDiscount(customer: string) {
+    this.assertBillingEnabled();
     const check = this.checkDiscount(customer);
     if (!check) {
       return false;
@@ -656,6 +674,7 @@ export class StripeService {
     body: BillingSubscribeDto,
     allowTrial: boolean
   ) {
+    this.assertBillingEnabled();
     const id = makeId(10);
     const priceData = pricing[body.billing];
     const org = await this._organizationService.getOrgById(organizationId);
@@ -722,6 +741,7 @@ export class StripeService {
     body: BillingSubscribeDto,
     allowTrial: boolean
   ) {
+    this.assertBillingEnabled();
     const id = makeId(10);
     const priceData = pricing[body.billing];
     const org = await this._organizationService.getOrgById(organizationId);
@@ -897,6 +917,7 @@ export class StripeService {
   }
 
   async refundCharges(organizationId: string, chargeIds: string[]) {
+    this.assertBillingEnabled();
     const org = await this._organizationService.getOrgById(organizationId);
     if (!org?.paymentId) {
       throw new Error('No payment customer found for this organization');
@@ -918,6 +939,7 @@ export class StripeService {
   }
 
   async cancelSubscription(organizationId: string) {
+    this.assertBillingEnabled();
     const org = await this._organizationService.getOrgById(organizationId);
     if (!org?.paymentId) {
       throw new Error('No payment customer found for this organization');
@@ -943,6 +965,7 @@ export class StripeService {
   }
 
   async lifetimeDeal(organizationId: string, code: string) {
+    this.assertBillingEnabled();
     const getCurrentSubscription =
       await this._subscriptionService.getSubscriptionByOrganizationId(
         organizationId

@@ -7,6 +7,7 @@ import { Organization, Prisma } from '@prisma/client';
 import dayjs, { Dayjs } from 'dayjs';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 type OrganizationSubscription = {
   subscriptionTier?: string | null;
@@ -74,13 +75,38 @@ export class SubscriptionService {
   }
 
   async deleteSubscription(customerId: string) {
-    await this.modifySubscription(
-      customerId,
-      pricing.FREE.channel || 0,
-      'FREE'
-    );
-    return this._subscriptionRepository.deleteSubscriptionByCustomerId(
-      customerId
+    if (!isBillingEnabled()) {
+      return;
+    }
+
+    if (!this._transaction) {
+      throw new Error('Subscription mutation transaction is unavailable.');
+    }
+
+    return this._transaction.model.$transaction(
+      async (transaction) => {
+        const deleted =
+          await this._subscriptionRepository.deleteOrdinarySubscription(
+            transaction,
+            customerId
+          );
+
+        if (!deleted.applied) {
+          return false;
+        }
+
+        await this.applySubscriptionEntitlementSideEffects(
+          deleted.organizationId,
+          deleted.previousTier,
+          pricing.FREE.channel || 0,
+          'FREE'
+        );
+
+        return deleted.result;
+      },
+      {
+        timeout: 30_000,
+      }
     );
   }
 
@@ -98,21 +124,13 @@ export class SubscriptionService {
     );
   }
 
-  async modifySubscriptionByOrg(
+  private async applySubscriptionEntitlementSideEffects(
     organizationId: string,
+    previousTier: string,
     totalChannels: number,
     billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE'
   ) {
-    if (!organizationId) {
-      return false;
-    }
-
-    const getCurrentSubscription =
-      (await this._subscriptionRepository.getSubscriptionByOrgId(
-        organizationId
-      ))!;
-
-    const from = pricing[getCurrentSubscription?.subscriptionTier || 'FREE'];
+    const from = pricing[previousTier] || pricing.FREE;
     const to = pricing[billing];
 
     const currentTotalChannels = (
@@ -147,67 +165,30 @@ export class SubscriptionService {
     return true;
   }
 
-  async modifySubscription(
-    customerId: string,
+  async modifySubscriptionByOrg(
+    organizationId: string,
     totalChannels: number,
     billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE'
   ) {
-    if (!customerId) {
+    if (!organizationId) {
       return false;
     }
 
-    const getOrgByCustomerId =
-      await this._subscriptionRepository.getOrganizationByCustomerId(
-        customerId
-      );
+    if (!isBillingEnabled()) {
+      return true;
+    }
 
     const getCurrentSubscription =
-      (await this._subscriptionRepository.getSubscriptionByCustomerId(
-        customerId
+      (await this._subscriptionRepository.getSubscriptionByOrgId(
+        organizationId
       ))!;
 
-    if (
-      !getOrgByCustomerId ||
-      (getCurrentSubscription && getCurrentSubscription?.isLifetime)
-    ) {
-      return false;
-    }
-
-    const from = pricing[getCurrentSubscription?.subscriptionTier || 'FREE'];
-    const to = pricing[billing];
-
-    const currentTotalChannels = (
-      await this._integrationService.getIntegrationsList(
-        getOrgByCustomerId?.id!
-      )
-    ).filter((f) => !f.disabled);
-
-    if (currentTotalChannels.length > totalChannels) {
-      await this._integrationService.disableIntegrations(
-        getOrgByCustomerId?.id!,
-        currentTotalChannels.length - totalChannels
-      );
-    }
-
-    if (from.team_members && !to.team_members) {
-      await this._organizationService.disableOrEnableNonSuperAdminUsers(
-        getOrgByCustomerId?.id!,
-        true
-      );
-    }
-
-    if (!from.team_members && to.team_members) {
-      await this._organizationService.disableOrEnableNonSuperAdminUsers(
-        getOrgByCustomerId?.id!,
-        false
-      );
-    }
-
-    if (billing === 'FREE') {
-      await this._integrationService.changeActiveCron(getOrgByCustomerId?.id!);
-    }
-
-    return true;
+    return this.applySubscriptionEntitlementSideEffects(
+      organizationId,
+      getCurrentSubscription?.subscriptionTier || 'FREE',
+      totalChannels,
+      billing
+    );
   }
 
   async createOrUpdateSubscription(
@@ -221,30 +202,61 @@ export class SubscriptionService {
     code?: string,
     org?: string
   ) {
-    if (!code) {
-      try {
-        const load = await this.modifySubscription(
-          customerId,
+    if (code) {
+      return this._subscriptionRepository.createOrUpdateSubscription(
+        isTrailing,
+        identifier,
+        customerId,
+        totalChannels,
+        billing,
+        period,
+        cancelAt,
+        code,
+        org ? { id: org } : undefined
+      );
+    }
+
+    if (!isBillingEnabled()) {
+      return this._subscriptionRepository.bookkeepSubscriptionWhileBillingDisabled(
+        identifier,
+        customerId,
+        period,
+        cancelAt
+      );
+    }
+
+    if (!this._transaction) {
+      throw new Error('Subscription mutation transaction is unavailable.');
+    }
+
+    return this._transaction.model.$transaction(
+      async (transaction) => {
+        const persisted =
+          await this._subscriptionRepository.persistOrdinarySubscription(
+            transaction,
+            isTrailing,
+            identifier,
+            customerId,
+            totalChannels,
+            billing,
+            period,
+            cancelAt
+          );
+
+        if (!persisted.applied) {
+          return {};
+        }
+
+        await this.applySubscriptionEntitlementSideEffects(
+          persisted.organizationId,
+          persisted.previousTier,
           totalChannels,
           billing
         );
-        if (!load) {
-          return {};
-        }
-      } catch (e) {
-        return {};
+      },
+      {
+        timeout: 30_000,
       }
-    }
-    return this._subscriptionRepository.createOrUpdateSubscription(
-      isTrailing,
-      identifier,
-      customerId,
-      totalChannels,
-      billing,
-      period,
-      cancelAt,
-      code,
-      org ? { id: org } : undefined
     );
   }
 
@@ -274,6 +286,10 @@ export class SubscriptionService {
   }
 
   async lifeTime(orgId: string, identifier: string, subscription: any) {
+    if (!isBillingEnabled()) {
+      return false;
+    }
+
     return this.createOrUpdateSubscription(
       false,
       identifier,
@@ -288,6 +304,10 @@ export class SubscriptionService {
   }
 
   async addSubscription(orgId: string, userId: string, subscription: any) {
+    if (!isBillingEnabled()) {
+      return false;
+    }
+
     await this._subscriptionRepository.setCustomerId(orgId, userId);
     return this.createOrUpdateSubscription(
       false,
