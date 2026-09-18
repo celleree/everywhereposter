@@ -25,6 +25,8 @@ import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integration
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 
 @ApiTags('Integrations')
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
+
 @Controller('/integrations')
 export class NoAuthIntegrationsController {
   constructor(
@@ -221,7 +223,7 @@ export class NoAuthIntegrationsController {
     }
 
     if (
-      process.env.STRIPE_PUBLISHABLE_KEY &&
+      isBillingEnabled() &&
       org.isTrailing &&
       (await this._integrationService.checkPreviousConnections(
         org.id,
