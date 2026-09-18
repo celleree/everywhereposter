@@ -116,7 +116,11 @@ Complete.
 
 ### Status
 
-ACTIVE.
+BLOCKED - IMPLEMENTATION/CI.
+
+Implementation is open in PR #111 at `336e5e9e6387465b8fa62d9ad7d20810c595e56a`, based on `main` at `1c9c6cb783f5838b3b68e2c6327d8e77ce725c82`. Required CI run [35306792288](https://github.com/celleree/everywhereposter/actions/runs/35306792288) failed backend type-checking and Docker validation; repository guard passed. A misplaced import between controller decorators is a confirmed compilation blocker.
+
+Next: repair the bounded compilation defect on PR #111, verify focused tests and all required checks on the repaired HEAD, then obtain fresh independent exact-HEAD billing review. S1 is not complete; S2 planning and dispatch remain blocked. Reverify live GitHub before using this checkpoint.
 
 ### Goal
 
