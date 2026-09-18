@@ -458,6 +458,7 @@ describe('Stripe S1 billing activation boundary', () => {
     expect(harness.getSubscription()).toBeNull();
     expect(harness.subscriptionModel.deleteMany).toHaveBeenCalledWith({
       where: {
+        organizationId: 'org_1',
         isLifetime: false,
         organization: {
           paymentId: 'cus_1',

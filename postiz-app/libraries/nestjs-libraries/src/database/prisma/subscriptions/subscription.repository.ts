@@ -319,7 +319,7 @@ export class SubscriptionRepository {
       },
     });
 
-    return updated.count === 1;
+    return updated.count === 1 ? true : undefined;
   }
 
   async createOrUpdateSubscription(
