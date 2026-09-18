@@ -20,7 +20,8 @@ const makeEvent = (
     | 'customer.subscription.created'
     | 'customer.subscription.updated'
     | 'customer.subscription.deleted',
-  status = 'active'
+  status = 'active',
+  uniqueId = 'unique_1'
 ) =>
   ({
     type,
@@ -32,7 +33,7 @@ const makeEvent = (
         cancel_at: null,
         metadata: {
           service: 'gitroom',
-          uniqueId: 'unique_1',
+          uniqueId,
           billing: 'STANDARD',
           period: 'MONTHLY',
         },
@@ -56,7 +57,7 @@ const normalSubscription = (): SubscriptionState => ({
   id: 'stored_subscription',
   organizationId: 'org_1',
   subscriptionTier: 'PRO',
-  identifier: 'existing_identifier',
+  identifier: 'unique_1',
   cancelAt: null,
   period: 'YEARLY',
   totalChannels: 40,
@@ -100,6 +101,12 @@ const makeHarness = (
       if (
         where?.organization?.paymentId &&
         where.organization.paymentId !== organizationState.paymentId
+      ) {
+        return null;
+      }
+      if (
+        where?.identifier &&
+        where.identifier !== subscriptionState.identifier
       ) {
         return null;
       }
@@ -321,6 +328,38 @@ describe('Stripe S1 billing activation boundary', () => {
     const upsert = harness.subscriptionModel.upsert.mock.calls[0][0];
     expect(upsert.update).not.toHaveProperty('isLifetime');
     expect(harness.getSubscription()?.isLifetime).toBe(true);
+  });
+
+  it('does not link a new unvalidated subscription to existing paid state while billing is disabled', async () => {
+    setBillingEnabled('false');
+    const harness = makeHarness({
+      ...normalSubscription(),
+      identifier: 'existing_identifier',
+    });
+
+    await expect(
+      harness.stripeService.createSubscription(
+        makeEvent(
+          'customer.subscription.created',
+          'incomplete',
+          'unvalidated_identifier'
+        )
+      )
+    ).resolves.toBeUndefined();
+
+    expect(harness.getSubscription()).toMatchObject({
+      identifier: 'existing_identifier',
+      subscriptionTier: 'PRO',
+      totalChannels: 40,
+      isLifetime: false,
+    });
+    expect(harness.subscriptionModel.update).not.toHaveBeenCalled();
+    await expect(
+      harness.subscriptionRepository.checkSubscription(
+        'org_1',
+        'unvalidated_identifier'
+      )
+    ).resolves.toBeNull();
   });
 
   it('does not persist disabled incomplete lifecycle state as later paid entitlement', async () => {

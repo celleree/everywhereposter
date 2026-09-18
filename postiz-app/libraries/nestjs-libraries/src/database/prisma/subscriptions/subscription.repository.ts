@@ -153,7 +153,11 @@ export class SubscriptionRepository {
       },
     });
 
-    if (!current || current.isLifetime) {
+    if (
+      !current ||
+      current.isLifetime ||
+      current.identifier !== identifier
+    ) {
       return;
     }
 
@@ -162,7 +166,6 @@ export class SubscriptionRepository {
         organizationId: findOrg.id,
       },
       data: {
-        identifier,
         period,
         cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
       },
