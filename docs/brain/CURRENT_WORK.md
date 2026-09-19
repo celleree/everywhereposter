@@ -1,6 +1,6 @@
 # Current Work
 
-Updated: 2026-09-14
+Updated: 2026-09-19
 
 Use this file when the user asks to continue the project, continue a roadmap, decide what to do next, or coordinate work across multiple EverywherePoster workstreams. Do not load it for a narrow bug with an already-named issue or file unless the current priority matters.
 
@@ -51,7 +51,6 @@ Current checkpoint:
 - Phase 3 — READ-ONLY ANALYSIS COMPLETE: implementation waits for a settled Phase 2 image and representative post-Phase-2 measurements.
 - Phase 5 — REPOSITORY COMPLETE; COMBINED DEPLOYMENT VALIDATION PENDING. Phase 5A internal readiness was production-verified via PR #105/run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122). Phase 5B bounded public retry/backoff merged via PR #108 (merge `a4cd3c16e63729d5afb65d8a7b6e6efb16109a11`; reviewed head `a1386c62d93f88ab62250eadb120679517f10b80`). Exact-head CI run [34915571174](https://github.com/celleree/everywhereposter/actions/runs/34915571174) passed, and a merged-helper live probe returned HTTP 307 on attempt 1 in 1s. No deployment ran after PR #108, so the combined internal/public workflow stage still requires a separately approved production validation.
 - Phase 6 — PARTIAL: docs-only PR #104 run [34912004960](https://github.com/celleree/everywhereposter/actions/runs/34912004960) completed in 313s with a 285s active critical path and skipped Docker validation/package work. This single observation does not establish causal speedup or complete the representative matrix.
-- Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
 
 Remaining roadmap:
 
@@ -77,7 +76,23 @@ Before implementation:
 
 Create a bounded issue/plan before runtime implementation.
 
-### 5. Known guided-composer product gaps — BACKLOG / LAUNCH RELEVANCE VARIES
+### 5. Project Brain — PLANNED RESEARCH / PROTOTYPE
+
+Canonical roadmap: `docs/brain/PROJECT_BRAIN_ROADMAP.md`.
+Tracker: GitHub Issue #112.
+
+Project Brain explores whether predicted brain-response features plus ordinary multimodal analysis can improve EverywherePoster's ability to identify which source-content moments are worth repurposing.
+
+Current checkpoint:
+
+- B0 repository grounding — COMPLETE once the roadmap PR merges.
+- B1 one-video brain-response proof of concept — NEXT after the workstream is explicitly selected.
+- The first proof uses an existing pretrained model and one short video; it does not train a large model or integrate with production.
+- Treat neuroscience output as experimental signal, not ground truth.
+- Do not translate raw predictions into claims of dopamine, engagement, entertainment, virality, or individual mental state without separate validation.
+- Project Brain is not a launch blocker and does not supersede external-provider, billing, publishing, or launch-readiness work.
+
+### 6. Known guided-composer product gaps — BACKLOG / LAUNCH RELEVANCE VARIES
 
 - Issue #86: silent/no-transcript media handling and future visual-context generation.
 - Issue #87: YouTube guided-publish description mapping and AI title generation.
@@ -110,7 +125,9 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-Phase 2 PR #106 has a bounded non-destructive CI-storage repair underway after required CI failed, and Phase 3 waits for that image to settle. Phase 5 repository work is complete; the combined internal/public deployment path awaits separate production approval. Phase 6 has one docs-only observation, with the remaining representative matrix and final consolidation pending.
+Launch and deployment work retain priority by default.
+
+If the user explicitly selects Project Brain, the next bounded Project Brain task is B1: run one short real video through a suitable pretrained brain-response model outside the production app and save a reproducible time-aligned visualization plus environment/runtime/license notes.
 
 The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 
