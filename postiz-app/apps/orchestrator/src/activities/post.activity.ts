@@ -23,6 +23,7 @@ import {
   postId as postIdSearchParam,
 } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 @Injectable()
 @Activity()
@@ -85,7 +86,7 @@ export class PostActivity {
 
   @ActivityMethod()
   async getPostsList(orgId: string, postId: string) {
-    if (process.env.STRIPE_SECRET_KEY) {
+    if (isBillingEnabled()) {
       const subscription = await this._subscriptionService.getSubscription(orgId);
       if (!subscription) {
         return [];

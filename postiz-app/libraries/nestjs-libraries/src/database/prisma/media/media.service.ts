@@ -14,6 +14,8 @@ import {
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
+
 @Injectable()
 export class MediaService {
   private storage = UploadFactory.createStorage();
@@ -62,7 +64,7 @@ export class MediaService {
       );
     };
 
-    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+    if (!isBillingEnabled()) {
       return this._subscriptionService.useCredit(org, 'ai_images', generate);
     }
 

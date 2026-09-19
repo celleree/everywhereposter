@@ -409,6 +409,7 @@ model Integration {
   type                  String
   token                 String
   disabled              Boolean                @default(false)
+  disabledByBilling     Boolean                @default(false)
   tokenExpiration       DateTime?
   refreshToken          String?
   profile               String?

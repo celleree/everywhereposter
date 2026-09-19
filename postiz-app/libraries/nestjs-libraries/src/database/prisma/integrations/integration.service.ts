@@ -25,6 +25,9 @@ import utc from 'dayjs/plugin/utc';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { TemporalService } from 'nestjs-temporal-core';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
+import { TypedSearchAttributes } from '@temporalio/common';
+import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 
 dayjs.extend(utc);
 
@@ -74,13 +77,62 @@ export class IntegrationService {
     private _temporalService: TemporalService
   ) {}
 
+  private isTemporalError(error: unknown, expectedName: string) {
+    return (
+      !!error &&
+      typeof error === 'object' &&
+      'name' in error &&
+      String((error as { name?: unknown }).name || '') === expectedName
+    );
+  }
+
   async changeActiveCron(orgId: string) {
     const data = await this._autopostsRepository.getAutoposts(orgId);
 
-    for (const item of data.filter((f) => f.active)) {
+    for (const item of data.filter((autopost) => autopost.active)) {
       try {
         await this._temporalService.terminateWorkflow(`autopost-${item.id}`);
-      } catch (err) {}
+      } catch (error) {
+        if (!this.isTemporalError(error, 'WorkflowNotFoundError')) {
+          throw error;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  async restoreActiveCron(orgId: string) {
+    const data = await this._autopostsRepository.getAutoposts(orgId);
+    const client = this._temporalService.client.getRawClient();
+
+    if (!client) {
+      throw new Error('Temporal workflow client is unavailable.');
+    }
+
+    for (const item of data.filter((autopost) => autopost.active)) {
+      try {
+        await client.workflow.start('autoPostWorkflow', {
+          workflowId: `autopost-${item.id}`,
+          taskQueue: 'main',
+          args: [{ id: item.id, immediately: true }],
+          typedSearchAttributes: new TypedSearchAttributes([
+            {
+              key: organizationId,
+              value: orgId,
+            },
+          ]),
+        });
+      } catch (error) {
+        if (
+          !this.isTemporalError(
+            error,
+            'WorkflowExecutionAlreadyStartedError'
+          )
+        ) {
+          throw error;
+        }
+      }
     }
 
     return true;
@@ -312,7 +364,7 @@ export class IntegrationService {
       await this._integrationRepository.getIntegrationsList(org)
     ).filter((f) => !f.disabled);
     if (
-      !!process.env.STRIPE_PUBLISHABLE_KEY &&
+      isBillingEnabled() &&
       integrations.length >= totalChannels
     ) {
       throw new Error('You have reached the maximum number of channels');
@@ -341,6 +393,16 @@ export class IntegrationService {
 
   async disableIntegrations(org: string, totalChannels: number) {
     return this._integrationRepository.disableIntegrations(org, totalChannels);
+  }
+
+  async enableBillingDisabledIntegrations(
+    org: string,
+    totalChannels: number
+  ) {
+    return this._integrationRepository.enableBillingDisabledIntegrations(
+      org,
+      totalChannels
+    );
   }
 
   async checkForDeletedOnceAndUpdate(org: string, page: string) {

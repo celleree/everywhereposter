@@ -10,6 +10,7 @@ import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/n
 import { Request } from 'express';
 import { Nowpayments } from '@gitroom/nestjs-libraries/crypto/nowpayments';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 @ApiTags('Billing')
 @Controller('/billing')
@@ -20,6 +21,12 @@ export class BillingController {
     private _notificationService: NotificationService,
     private _nowpayments: Nowpayments
   ) {}
+
+  private assertBillingEnabled() {
+    if (!isBillingEnabled()) {
+      throw new HttpException('Billing is disabled', 503);
+    }
+  }
 
   @Get('/check/:id')
   async checkId(
@@ -42,11 +49,13 @@ export class BillingController {
 
   @Post('/apply-discount')
   async applyDiscount(@GetOrgFromRequest() org: Organization) {
+    this.assertBillingEnabled();
     await this._stripeService.applyDiscount(org.paymentId);
   }
 
   @Post('/finish-trial')
   async finishTrial(@GetOrgFromRequest() org: Organization) {
+    this.assertBillingEnabled();
     try {
       await this._stripeService.finishTrial(org.paymentId);
     } catch (err) {}
@@ -69,6 +78,7 @@ export class BillingController {
     @Body() body: BillingSubscribeDto,
     @Req() req: Request
   ) {
+    this.assertBillingEnabled();
     const uniqueId = req?.cookies?.track;
     return this._stripeService.embedded(
       uniqueId,
@@ -86,6 +96,7 @@ export class BillingController {
     @Body() body: BillingSubscribeDto,
     @Req() req: Request
   ) {
+    this.assertBillingEnabled();
     const uniqueId = req?.cookies?.track;
     return this._stripeService.subscribe(
       uniqueId,
@@ -98,6 +109,7 @@ export class BillingController {
 
   @Get('/portal')
   async modifyPayment(@GetOrgFromRequest() org: Organization) {
+    this.assertBillingEnabled();
     const customer = await this._stripeService.getCustomerByOrganizationId(
       org.id
     );
@@ -118,6 +130,7 @@ export class BillingController {
     @GetUserFromRequest() user: User,
     @Body() body: { feedback: string }
   ) {
+    this.assertBillingEnabled();
     await this._notificationService.sendEmail(
       process.env.EMAIL_FROM_ADDRESS,
       'Subscription Cancelled',
@@ -133,6 +146,7 @@ export class BillingController {
     @GetOrgFromRequest() org: Organization,
     @Body() body: BillingSubscribeDto
   ) {
+    this.assertBillingEnabled();
     return this._stripeService.prorate(org.id, body);
   }
 
@@ -141,6 +155,7 @@ export class BillingController {
     @GetOrgFromRequest() org: Organization,
     @Body() body: { code: string }
   ) {
+    this.assertBillingEnabled();
     return this._stripeService.lifetimeDeal(org.id, body.code);
   }
 
@@ -162,6 +177,7 @@ export class BillingController {
     @GetOrgFromRequest() org: Organization,
     @Body() body: { chargeIds: string[] }
   ) {
+    this.assertBillingEnabled();
     if (!user.isSuperAdmin) {
       throw new HttpException('Unauthorized', 400);
     }
@@ -174,6 +190,7 @@ export class BillingController {
     @GetUserFromRequest() user: User,
     @GetOrgFromRequest() org: Organization
   ) {
+    this.assertBillingEnabled();
     if (!user.isSuperAdmin) {
       throw new HttpException('Unauthorized', 400);
     }
@@ -187,6 +204,7 @@ export class BillingController {
     @GetUserFromRequest() user: User,
     @GetOrgFromRequest() org: Organization
   ) {
+    this.assertBillingEnabled();
     if (!user.isSuperAdmin) {
       throw new Error('Unauthorized');
     }
@@ -200,6 +218,7 @@ export class BillingController {
 
   @Get('/crypto')
   async crypto(@GetOrgFromRequest() org: Organization) {
+    this.assertBillingEnabled();
     return this._nowpayments.createPaymentPage(org.id);
   }
 }

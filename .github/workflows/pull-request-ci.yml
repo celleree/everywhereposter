@@ -125,6 +125,12 @@ jobs:
       - name: Type-check orchestrator
         run: pnpm exec tsc -p apps/orchestrator/tsconfig.build.json --noEmit
 
+      - name: Test Stripe billing activation boundary
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/stripe.billing-activation.spec.ts tests/copy-generation/stripe.entitlement-reconciliation.spec.ts
+
+      - name: Test image credit billing boundary
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/media.service.image-credits.spec.ts
+
       - name: Test video media acquisition
         run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/video-media-file.spec.ts
 

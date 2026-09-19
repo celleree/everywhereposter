@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import {
-  PrismaRepository,
-  PrismaTransaction,
-} from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import dayjs from 'dayjs';
-import { Organization } from '@prisma/client';
+import { Organization, Prisma } from '@prisma/client';
 
 @Injectable()
 export class SubscriptionRepository {
@@ -91,6 +88,7 @@ export class SubscriptionRepository {
   deleteSubscriptionByCustomerId(customerId: string) {
     return this._subscription.model.subscription.deleteMany({
       where: {
+        isLifetime: false,
         organization: {
           paymentId: customerId,
         },
@@ -135,6 +133,321 @@ export class SubscriptionRepository {
     });
   }
 
+  private async persistOrdinarySubscriptionWithClient(
+    client: Pick<Prisma.TransactionClient, 'organization' | 'subscription'>,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null
+  ) {
+    const findOrg = await client.organization.findFirst({
+      where: {
+        paymentId: customerId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!findOrg) {
+      return { applied: false as const };
+    }
+
+    const current = await client.subscription.findFirst({
+      where: {
+        organizationId: findOrg.id,
+      },
+    });
+
+    const updated = await client.subscription.updateMany({
+      where: {
+        organizationId: findOrg.id,
+        isLifetime: false,
+        organization: {
+          paymentId: customerId,
+        },
+      },
+      data: {
+        subscriptionTier: billing,
+        totalChannels,
+        period,
+        identifier,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+        deletedAt: null,
+      },
+    });
+
+    if (updated.count === 0) {
+      if (current) {
+        return { applied: false as const };
+      }
+
+      const created = await client.subscription.createMany({
+        data: {
+          organizationId: findOrg.id,
+          subscriptionTier: billing,
+          isLifetime: false,
+          totalChannels,
+          period,
+          cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+          identifier,
+          deletedAt: null,
+        },
+        skipDuplicates: true,
+      });
+
+      if (created.count !== 1) {
+        return { applied: false as const };
+      }
+    }
+
+    await client.organization.update({
+      where: {
+        id: findOrg.id,
+      },
+      data: {
+        isTrailing,
+        allowTrial: false,
+      },
+    });
+
+    return {
+      applied: true as const,
+      organizationId: findOrg.id,
+      previousTier: current?.subscriptionTier || 'FREE',
+    };
+  }
+
+  persistOrdinarySubscription(
+    transaction: Prisma.TransactionClient,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null
+  ) {
+    return this.persistOrdinarySubscriptionWithClient(
+      transaction,
+      isTrailing,
+      identifier,
+      customerId,
+      totalChannels,
+      billing,
+      period,
+      cancelAt
+    );
+  }
+
+  async deleteOrdinarySubscription(
+    transaction: Prisma.TransactionClient,
+    customerId: string
+  ) {
+    const findOrg = await transaction.organization.findFirst({
+      where: {
+        paymentId: customerId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!findOrg) {
+      return { applied: false as const };
+    }
+
+    const current = await transaction.subscription.findFirst({
+      where: {
+        organizationId: findOrg.id,
+      },
+    });
+
+    if (!current) {
+      return {
+        applied: false as const,
+        organizationId: findOrg.id,
+        reconcile: true as const,
+      };
+    }
+
+    if (current.isLifetime) {
+      return { applied: false as const };
+    }
+
+    const deleted = await transaction.subscription.deleteMany({
+      where: {
+        organizationId: findOrg.id,
+        isLifetime: false,
+        organization: {
+          paymentId: customerId,
+        },
+      },
+    });
+
+    if (deleted.count !== 1) {
+      const authoritative = await transaction.subscription.findFirst({
+        where: {
+          organizationId: findOrg.id,
+        },
+      });
+
+      if (!authoritative) {
+        return {
+          applied: false as const,
+          organizationId: findOrg.id,
+          reconcile: true as const,
+        };
+      }
+
+      return { applied: false as const };
+    }
+
+    return {
+      applied: true as const,
+      organizationId: findOrg.id,
+      previousTier: current.subscriptionTier,
+      result: deleted,
+    };
+  }
+
+  async bookkeepSubscriptionWhileBillingDisabled(
+    identifier: string,
+    customerId: string,
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null
+  ) {
+    const findOrg = await this.getOrganizationByCustomerId(customerId);
+    if (!findOrg) {
+      return;
+    }
+
+    const updated = await this._subscription.model.subscription.updateMany({
+      where: {
+        organizationId: findOrg.id,
+        isLifetime: false,
+        identifier,
+        deletedAt: null,
+        organization: {
+          paymentId: customerId,
+        },
+      },
+      data: {
+        period,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+      },
+    });
+
+    return updated.count === 1 ? true : undefined;
+  }
+
+  private async persistLifetimeSubscriptionWithClient(
+    client: Pick<
+      Prisma.TransactionClient,
+      'organization' | 'subscription' | 'usedCodes'
+    >,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null,
+    code: string,
+    org?: { id: string }
+  ) {
+    const findOrg =
+      org ||
+      (await client.organization.findFirst({
+        where: {
+          paymentId: customerId,
+        },
+        select: {
+          id: true,
+        },
+      }));
+
+    if (!findOrg) {
+      return { applied: false as const };
+    }
+
+    await client.subscription.upsert({
+      where: {
+        organizationId: findOrg.id,
+      },
+      update: {
+        subscriptionTier: billing,
+        totalChannels,
+        period,
+        identifier,
+        isLifetime: true,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+        deletedAt: null,
+      },
+      create: {
+        organizationId: findOrg.id,
+        subscriptionTier: billing,
+        isLifetime: true,
+        totalChannels,
+        period,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+        identifier,
+        deletedAt: null,
+      },
+    });
+
+    await client.organization.update({
+      where: {
+        id: findOrg.id,
+      },
+      data: {
+        isTrailing,
+        allowTrial: false,
+      },
+    });
+
+    await client.usedCodes.create({
+      data: {
+        code,
+        orgId: findOrg.id,
+      },
+    });
+
+    return {
+      applied: true as const,
+      organizationId: findOrg.id,
+    };
+  }
+
+  persistLifetimeSubscription(
+    transaction: Prisma.TransactionClient,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null,
+    code: string,
+    org?: { id: string }
+  ) {
+    return this.persistLifetimeSubscriptionWithClient(
+      transaction,
+      isTrailing,
+      identifier,
+      customerId,
+      totalChannels,
+      billing,
+      period,
+      cancelAt,
+      code,
+      org
+    );
+  }
+
   async createOrUpdateSubscription(
     isTrailing: boolean,
     identifier: string,
@@ -146,63 +459,44 @@ export class SubscriptionRepository {
     code?: string,
     org?: { id: string }
   ) {
-    const findOrg =
-      org || (await this.getOrganizationByCustomerId(customerId))!;
-
-    if (!findOrg) {
-      return;
-    }
-
-    await this._subscription.model.subscription.upsert({
-      where: {
-        organizationId: findOrg.id,
-        ...(!code
-          ? {
-              organization: {
-                paymentId: customerId,
-              },
-            }
-          : {}),
-      },
-      update: {
-        subscriptionTier: billing,
-        totalChannels,
-        period,
-        identifier,
-        isLifetime: !!code,
-        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
-        deletedAt: null,
-      },
-      create: {
-        organizationId: findOrg.id,
-        subscriptionTier: billing,
-        isLifetime: !!code,
-        totalChannels,
-        period,
-        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
-        identifier,
-        deletedAt: null,
-      },
-    });
-
-    await this._organization.model.organization.update({
-      where: {
-        id: findOrg.id,
-      },
-      data: {
+    if (!code) {
+      return this.persistOrdinarySubscriptionWithClient(
+        {
+          organization: this._organization.model.organization,
+          subscription: this._subscription.model.subscription,
+        } as unknown as Pick<
+          Prisma.TransactionClient,
+          'organization' | 'subscription'
+        >,
         isTrailing,
-        allowTrial: false,
-      },
-    });
-
-    if (code) {
-      await this._usedCodes.model.usedCodes.create({
-        data: {
-          code,
-          orgId: findOrg.id,
-        },
-      });
+        identifier,
+        customerId,
+        totalChannels,
+        billing,
+        period,
+        cancelAt
+      );
     }
+
+    return this.persistLifetimeSubscriptionWithClient(
+      {
+        organization: this._organization.model.organization,
+        subscription: this._subscription.model.subscription,
+        usedCodes: this._usedCodes.model.usedCodes,
+      } as unknown as Pick<
+        Prisma.TransactionClient,
+        'organization' | 'subscription' | 'usedCodes'
+      >,
+      isTrailing,
+      identifier,
+      customerId,
+      totalChannels,
+      billing,
+      period,
+      cancelAt,
+      code,
+      org
+    );
   }
 
   getSubscriptionByIdentifier(identifier: string) {
