@@ -83,31 +83,20 @@ export class SubscriptionService {
       throw new Error('Subscription mutation transaction is unavailable.');
     }
 
-    return this._transaction.model.$transaction(
-      async (transaction) => {
-        const deleted =
-          await this._subscriptionRepository.deleteOrdinarySubscription(
-            transaction,
-            customerId
-          );
-
-        if (!deleted.applied) {
-          return false;
-        }
-
-        await this.applySubscriptionEntitlementSideEffects(
-          deleted.organizationId,
-          deleted.previousTier,
-          pricing.FREE.channel || 0,
-          'FREE'
-        );
-
-        return deleted.result;
-      },
-      {
-        timeout: 30_000,
-      }
+    const deleted = await this._transaction.model.$transaction(
+      (transaction) =>
+        this._subscriptionRepository.deleteOrdinarySubscription(
+          transaction,
+          customerId
+        )
     );
+
+    if (!deleted.applied) {
+      return false;
+    }
+
+    await this.reconcileAuthoritativeEntitlements(deleted.organizationId);
+    return deleted.result;
   }
 
   updateCustomerId(organizationId: string, customerId: string) {
@@ -124,51 +113,133 @@ export class SubscriptionService {
     );
   }
 
-  private async applySubscriptionEntitlementSideEffects(
+  private async getAuthoritativeEntitlementState(organizationId: string) {
+    const subscription =
+      await this._subscriptionRepository.getSubscription(organizationId);
+    const tier = subscription?.subscriptionTier || 'FREE';
+    const plan = pricing[tier] || pricing.FREE;
+
+    return {
+      fingerprint: JSON.stringify({
+        id: subscription?.id || null,
+        subscriptionTier: tier,
+        totalChannels: subscription?.totalChannels ?? 0,
+        isLifetime: subscription?.isLifetime ?? false,
+        identifier: subscription?.identifier || null,
+        period: subscription?.period || null,
+        cancelAt: subscription?.cancelAt || null,
+        createdAt: subscription?.createdAt || null,
+        updatedAt: subscription?.updatedAt || null,
+      }),
+      totalChannels: subscription?.totalChannels ?? 0,
+      teamMembers: !!plan.team_members,
+      autoPost: !!plan.autoPost,
+    };
+  }
+
+  private async isEntitlementStateCurrent(
     organizationId: string,
-    previousTier: string,
-    totalChannels: number,
-    billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE'
+    fingerprint: string
   ) {
-    const from = pricing[previousTier] || pricing.FREE;
-    const to = pricing[billing];
+    return (
+      (await this.getAuthoritativeEntitlementState(organizationId))
+        .fingerprint === fingerprint
+    );
+  }
 
-    const currentTotalChannels = (
-      await this._integrationService.getIntegrationsList(organizationId)
-    ).filter((f) => !f.disabled);
+  private async reconcileIntegrationEntitlements(
+    organizationId: string,
+    totalChannels: number
+  ) {
+    const integrations =
+      await this._integrationService.getIntegrationsList(organizationId);
+    const enabled = integrations.filter((integration) => !integration.disabled);
 
-    if (currentTotalChannels.length > totalChannels) {
+    if (enabled.length > totalChannels) {
       await this._integrationService.disableIntegrations(
         organizationId,
-        currentTotalChannels.length - totalChannels
+        enabled.length - totalChannels
       );
+      return;
     }
 
-    if (from.team_members && !to.team_members) {
+    if (enabled.length >= totalChannels) {
+      return;
+    }
+
+    const billingDisabled = integrations.filter(
+      (integration) =>
+        integration.disabled && integration.disabledByBilling
+    );
+    const restoreCount = Math.min(
+      totalChannels - enabled.length,
+      billingDisabled.length
+    );
+
+    if (restoreCount > 0) {
+      await this._integrationService.enableBillingDisabledIntegrations(
+        organizationId,
+        restoreCount
+      );
+    }
+  }
+
+  private async reconcileAuthoritativeEntitlements(organizationId: string) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const desired =
+        await this.getAuthoritativeEntitlementState(organizationId);
+
+      await this.reconcileIntegrationEntitlements(
+        organizationId,
+        desired.totalChannels
+      );
+      if (
+        !(await this.isEntitlementStateCurrent(
+          organizationId,
+          desired.fingerprint
+        ))
+      ) {
+        continue;
+      }
+
       await this._organizationService.disableOrEnableNonSuperAdminUsers(
         organizationId,
-        true
+        !desired.teamMembers
       );
+      if (
+        !(await this.isEntitlementStateCurrent(
+          organizationId,
+          desired.fingerprint
+        ))
+      ) {
+        continue;
+      }
+
+      if (desired.autoPost) {
+        await this._integrationService.restoreActiveCron(organizationId);
+      } else {
+        await this._integrationService.changeActiveCron(organizationId);
+      }
+
+      if (
+        await this.isEntitlementStateCurrent(
+          organizationId,
+          desired.fingerprint
+        )
+      ) {
+        return true;
+      }
     }
 
-    if (!from.team_members && to.team_members) {
-      await this._organizationService.disableOrEnableNonSuperAdminUsers(
-        organizationId,
-        false
-      );
-    }
-
-    if (billing === 'FREE') {
-      await this._integrationService.changeActiveCron(organizationId);
-    }
-
-    return true;
+    throw new Error(
+      'Subscription changed repeatedly while entitlements were reconciling.'
+    );
   }
 
   async modifySubscriptionByOrg(
     organizationId: string,
-    totalChannels: number,
-    billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE'
+    _totalChannels: number,
+    _billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE'
   ) {
     if (!organizationId) {
       return false;
@@ -178,17 +249,7 @@ export class SubscriptionService {
       return true;
     }
 
-    const getCurrentSubscription =
-      (await this._subscriptionRepository.getSubscriptionByOrgId(
-        organizationId
-      ))!;
-
-    return this.applySubscriptionEntitlementSideEffects(
-      organizationId,
-      getCurrentSubscription?.subscriptionTier || 'FREE',
-      totalChannels,
-      billing
-    );
+    return this.reconcileAuthoritativeEntitlements(organizationId);
   }
 
   async createOrUpdateSubscription(
@@ -203,17 +264,38 @@ export class SubscriptionService {
     org?: string
   ) {
     if (code) {
-      return this._subscriptionRepository.createOrUpdateSubscription(
-        isTrailing,
-        identifier,
-        customerId,
-        totalChannels,
-        billing,
-        period,
-        cancelAt,
-        code,
-        org ? { id: org } : undefined
+      if (!isBillingEnabled()) {
+        return false;
+      }
+
+      if (!this._transaction) {
+        throw new Error('Subscription mutation transaction is unavailable.');
+      }
+
+      const persisted = await this._transaction.model.$transaction(
+        (transaction) =>
+          this._subscriptionRepository.persistLifetimeSubscription(
+            transaction,
+            isTrailing,
+            identifier,
+            customerId,
+            totalChannels,
+            billing,
+            period,
+            cancelAt,
+            code,
+            org ? { id: org } : undefined
+          )
       );
+
+      if (!persisted.applied) {
+        return;
+      }
+
+      await this.reconcileAuthoritativeEntitlements(
+        persisted.organizationId
+      );
+      return;
     }
 
     if (!isBillingEnabled()) {
@@ -229,35 +311,25 @@ export class SubscriptionService {
       throw new Error('Subscription mutation transaction is unavailable.');
     }
 
-    return this._transaction.model.$transaction(
-      async (transaction) => {
-        const persisted =
-          await this._subscriptionRepository.persistOrdinarySubscription(
-            transaction,
-            isTrailing,
-            identifier,
-            customerId,
-            totalChannels,
-            billing,
-            period,
-            cancelAt
-          );
-
-        if (!persisted.applied) {
-          return {};
-        }
-
-        await this.applySubscriptionEntitlementSideEffects(
-          persisted.organizationId,
-          persisted.previousTier,
+    const persisted = await this._transaction.model.$transaction(
+      (transaction) =>
+        this._subscriptionRepository.persistOrdinarySubscription(
+          transaction,
+          isTrailing,
+          identifier,
+          customerId,
           totalChannels,
-          billing
-        );
-      },
-      {
-        timeout: 30_000,
-      }
+          billing,
+          period,
+          cancelAt
+        )
     );
+
+    if (!persisted.applied) {
+      return {};
+    }
+
+    await this.reconcileAuthoritativeEntitlements(persisted.organizationId);
   }
 
   getSubscriptionByIdentifier(identifier: string) {

@@ -392,6 +392,9 @@ export class OrganizationRepository {
         role: {
           not: Role.SUPERADMIN,
         },
+        disabled: {
+          not: disable,
+        },
       },
       data: {
         disabled: disable,

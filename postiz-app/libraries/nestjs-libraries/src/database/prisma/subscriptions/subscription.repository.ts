@@ -322,6 +322,110 @@ export class SubscriptionRepository {
     return updated.count === 1 ? true : undefined;
   }
 
+  private async persistLifetimeSubscriptionWithClient(
+    client: Pick<
+      Prisma.TransactionClient,
+      'organization' | 'subscription' | 'usedCodes'
+    >,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null,
+    code: string,
+    org?: { id: string }
+  ) {
+    const findOrg =
+      org ||
+      (await client.organization.findFirst({
+        where: {
+          paymentId: customerId,
+        },
+        select: {
+          id: true,
+        },
+      }));
+
+    if (!findOrg) {
+      return { applied: false as const };
+    }
+
+    await client.subscription.upsert({
+      where: {
+        organizationId: findOrg.id,
+      },
+      update: {
+        subscriptionTier: billing,
+        totalChannels,
+        period,
+        identifier,
+        isLifetime: true,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+        deletedAt: null,
+      },
+      create: {
+        organizationId: findOrg.id,
+        subscriptionTier: billing,
+        isLifetime: true,
+        totalChannels,
+        period,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+        identifier,
+        deletedAt: null,
+      },
+    });
+
+    await client.organization.update({
+      where: {
+        id: findOrg.id,
+      },
+      data: {
+        isTrailing,
+        allowTrial: false,
+      },
+    });
+
+    await client.usedCodes.create({
+      data: {
+        code,
+        orgId: findOrg.id,
+      },
+    });
+
+    return {
+      applied: true as const,
+      organizationId: findOrg.id,
+    };
+  }
+
+  persistLifetimeSubscription(
+    transaction: Prisma.TransactionClient,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null,
+    code: string,
+    org?: { id: string }
+  ) {
+    return this.persistLifetimeSubscriptionWithClient(
+      transaction,
+      isTrailing,
+      identifier,
+      customerId,
+      totalChannels,
+      billing,
+      period,
+      cancelAt,
+      code,
+      org
+    );
+  }
+
   async createOrUpdateSubscription(
     isTrailing: boolean,
     identifier: string,
@@ -352,54 +456,25 @@ export class SubscriptionRepository {
       );
     }
 
-    const findOrg =
-      org || (await this.getOrganizationByCustomerId(customerId))!;
-
-    if (!findOrg) {
-      return;
-    }
-
-    await this._subscription.model.subscription.upsert({
-      where: {
-        organizationId: findOrg.id,
-      },
-      update: {
-        subscriptionTier: billing,
-        totalChannels,
-        period,
-        identifier,
-        isLifetime: true,
-        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
-        deletedAt: null,
-      },
-      create: {
-        organizationId: findOrg.id,
-        subscriptionTier: billing,
-        isLifetime: true,
-        totalChannels,
-        period,
-        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
-        identifier,
-        deletedAt: null,
-      },
-    });
-
-    await this._organization.model.organization.update({
-      where: {
-        id: findOrg.id,
-      },
-      data: {
-        isTrailing,
-        allowTrial: false,
-      },
-    });
-
-    await this._usedCodes.model.usedCodes.create({
-      data: {
-        code,
-        orgId: findOrg.id,
-      },
-    });
+    return this.persistLifetimeSubscriptionWithClient(
+      {
+        organization: this._organization.model.organization,
+        subscription: this._subscription.model.subscription,
+        usedCodes: this._usedCodes.model.usedCodes,
+      } as unknown as Pick<
+        Prisma.TransactionClient,
+        'organization' | 'subscription' | 'usedCodes'
+      >,
+      isTrailing,
+      identifier,
+      customerId,
+      totalChannels,
+      billing,
+      period,
+      cancelAt,
+      code,
+      org
+    );
   }
 
   getSubscriptionByIdentifier(identifier: string) {

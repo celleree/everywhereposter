@@ -259,6 +259,7 @@ export class IntegrationRepository {
       data: {
         ...params,
         disabled: false,
+        disabledByBilling: false,
         deletedAt: null,
       },
     });
@@ -634,6 +635,7 @@ export class IntegrationRepository {
       },
       data: {
         disabled: true,
+        disabledByBilling: false,
       },
     });
   }
@@ -646,6 +648,7 @@ export class IntegrationRepository {
       },
       data: {
         disabled: false,
+        disabledByBilling: false,
       },
     });
   }
@@ -689,6 +692,10 @@ export class IntegrationRepository {
   }
 
   async disableIntegrations(org: string, totalChannels: number) {
+    if (totalChannels <= 0) {
+      return { count: 0 };
+    }
+
     const getChannels = await this._integration.model.integration.findMany({
       where: {
         organizationId: org,
@@ -701,16 +708,66 @@ export class IntegrationRepository {
       },
     });
 
-    for (const channel of getChannels) {
-      await this._integration.model.integration.update({
-        where: {
-          id: channel.id,
-        },
-        data: {
-          disabled: true,
-        },
-      });
+    if (!getChannels.length) {
+      return { count: 0 };
     }
+
+    return this._integration.model.integration.updateMany({
+      where: {
+        organizationId: org,
+        id: {
+          in: getChannels.map((channel) => channel.id),
+        },
+        disabled: false,
+        deletedAt: null,
+      },
+      data: {
+        disabled: true,
+        disabledByBilling: true,
+      },
+    });
+  }
+
+  async enableBillingDisabledIntegrations(
+    org: string,
+    totalChannels: number
+  ) {
+    if (totalChannels <= 0) {
+      return { count: 0 };
+    }
+
+    const getChannels = await this._integration.model.integration.findMany({
+      where: {
+        organizationId: org,
+        disabled: true,
+        disabledByBilling: true,
+        deletedAt: null,
+      },
+      take: totalChannels,
+      select: {
+        id: true,
+      },
+    });
+
+    if (!getChannels.length) {
+      return { count: 0 };
+    }
+
+    return this._integration.model.integration.updateMany({
+      where: {
+        organizationId: org,
+        id: {
+          in: getChannels.map((channel) => channel.id),
+        },
+        disabled: true,
+        disabledByBilling: true,
+        deletedAt: null,
+      },
+      data: {
+        disabled: false,
+        disabledByBilling: false,
+      },
+    });
   }
 
   getPlugsByIntegrationId(org: string, id: string) {
