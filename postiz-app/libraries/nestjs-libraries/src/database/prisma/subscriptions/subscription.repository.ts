@@ -266,7 +266,15 @@ export class SubscriptionRepository {
       },
     });
 
-    if (!current || current.isLifetime) {
+    if (!current) {
+      return {
+        applied: false as const,
+        organizationId: findOrg.id,
+        reconcile: true as const,
+      };
+    }
+
+    if (current.isLifetime) {
       return { applied: false as const };
     }
 
@@ -281,6 +289,20 @@ export class SubscriptionRepository {
     });
 
     if (deleted.count !== 1) {
+      const authoritative = await transaction.subscription.findFirst({
+        where: {
+          organizationId: findOrg.id,
+        },
+      });
+
+      if (!authoritative) {
+        return {
+          applied: false as const,
+          organizationId: findOrg.id,
+          reconcile: true as const,
+        };
+      }
+
       return { applied: false as const };
     }
 

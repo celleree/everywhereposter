@@ -92,6 +92,9 @@ export class SubscriptionService {
     );
 
     if (!deleted.applied) {
+      if ('reconcile' in deleted && deleted.reconcile) {
+        await this.reconcileAuthoritativeEntitlements(deleted.organizationId);
+      }
       return false;
     }
 
