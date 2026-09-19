@@ -425,4 +425,4 @@ No Codex dependency is required for this proof. It can be executed manually with
 
 Update this roadmap when a Project Brain phase changes state, a candidate model/dataset is accepted or rejected for a durable reason, validation changes the product hypothesis, or a production decision is made.
 
-Do not turn it into a raw experiment log. Put reproducibility instructions/results in a focused experiment document or issue comment and keep this file as the durable roadmap.
+Do not turn it into a raw experiment log. Put reproducibility instructions/results in a focused experiment document, PR, or bounded task record and keep this file as the durable roadmap.
