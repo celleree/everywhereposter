@@ -37,8 +37,9 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
   const { oauth, mcpPath = '/mcp', logger } = options;
 
   const protectedResourceMetadata = generateProtectedResourceMetadata(oauth);
-  const wellKnownPath = '/.well-known/oauth-protected-resource';
-  const resourceMetadataUrl = new URL(wellKnownPath, oauth.resource).toString();
+  const metadataUrl = new URL('./.well-known/oauth-protected-resource', oauth.resource);
+  const wellKnownPath = metadataUrl.pathname;
+  const resourceMetadataUrl = metadataUrl.toString();
 
   return async function oauthMiddleware(
     req: http.IncomingMessage,

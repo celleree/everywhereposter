@@ -498,18 +498,18 @@ const PublicApiContent = () => {
         )}
         <br />
         {t(
-          'api_auth_note_line2',
-          'If you are building a product that schedules posts on behalf of other EverywherePoster users,'
+          'api_oauth_accounts_read_foundation_note',
+          'OAuth Apps currently provide the accounts:read MCP authorization foundation.'
         )}
         <br />
         {t(
-          'api_auth_note_line3',
-          'create an OAuth App under the "Apps" tab. Your users will authorize your app via OAuth2,'
+          'api_oauth_accounts_read_tools_pending_note',
+          'Connected-account MCP tools are not available yet; OAuth tokens cannot publish or schedule posts.'
         )}
         <br />
         {t(
-          'api_auth_note_line4',
-          'and you will receive a pos_ prefixed token that works with the API, MCP, and CLI — just like an API Key.'
+          'api_oauth_accounts_read_api_key_note',
+          'Use your API Key for public API automation of your own account. OAuth tokens are restricted to the OAuth MCP endpoint.'
         )}
       </div>
       <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">

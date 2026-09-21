@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpException,
   HttpStatus,
   Post,
@@ -23,7 +24,7 @@ export class OAuthController {
   @Get('/authorize')
   async authorize(@Query() query: AuthorizeOAuthQueryDto) {
     const app = await this._oauthService.validateAuthorizationRequest(
-      query.client_id
+      query
     );
 
     return {
@@ -39,6 +40,8 @@ export class OAuthController {
   }
 
   @Post('/token')
+  @Header('Cache-Control', 'no-store')
+  @Header('Pragma', 'no-cache')
   async token(@Body() body: TokenExchangeDto) {
     if (body.grant_type !== 'authorization_code') {
       throw new HttpException(
@@ -48,9 +51,7 @@ export class OAuthController {
     }
 
     return this._oauthService.exchangeCodeForToken(
-      body.code,
-      body.client_id,
-      body.client_secret
+      body
     );
   }
 }
@@ -67,7 +68,7 @@ export class OAuthAuthorizedController {
     @GetOrgFromRequest() org: Organization
   ) {
     const app = await this._oauthService.validateAuthorizationRequest(
-      body.client_id
+      body
     );
 
     if (body.action === 'deny') {
@@ -82,7 +83,8 @@ export class OAuthAuthorizedController {
     const code = await this._oauthService.createAuthorizationCode(
       app.id,
       user.id,
-      org.id
+      org.id,
+      body
     );
 
     const redirectUrl = new URL(app.redirectUrl);

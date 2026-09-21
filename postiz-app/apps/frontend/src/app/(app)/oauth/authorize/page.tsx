@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { Logo } from '@gitroom/frontend/components/new-layout/logo';
@@ -15,7 +15,13 @@ export default function OAuthAuthorizePage() {
 
   const clientId = searchParams.get('client_id');
   const responseType = searchParams.get('response_type');
-  const state = searchParams.get('state');
+  const authorization = useMemo(() => Object.fromEntries(
+    ['client_id', 'response_type', 'state', 'redirect_uri', 'scope', 'resource',
+      'code_challenge', 'code_challenge_method'].flatMap((key) => {
+        const value = searchParams.get(key);
+        return value === null ? [] : [[key, value]];
+      })
+  ), [searchParams]);
 
   useEffect(() => {
     if (!clientId || !responseType) {
@@ -29,11 +35,7 @@ export default function OAuthAuthorizePage() {
       return;
     }
 
-    const params = new URLSearchParams({
-      client_id: clientId,
-      response_type: responseType,
-      ...(state ? { state } : {}),
-    });
+    const params = new URLSearchParams(authorization);
 
     fetch(`/oauth/authorize?${params}`)
       .then((r) => r.json())
@@ -49,7 +51,7 @@ export default function OAuthAuthorizePage() {
         setError('Failed to validate OAuth request');
         setLoading(false);
       });
-  }, [clientId, responseType, state]);
+  }, [clientId, responseType, authorization]);
 
   const handleAction = useCallback(
     async (action: 'approve' | 'deny') => {
@@ -59,8 +61,7 @@ export default function OAuthAuthorizePage() {
           await fetch('/oauth/authorize', {
             method: 'POST',
             body: JSON.stringify({
-              client_id: clientId,
-              state,
+              ...authorization,
               action,
             }),
           })
@@ -74,7 +75,7 @@ export default function OAuthAuthorizePage() {
         setSubmitting(false);
       }
     },
-    [clientId, state]
+    [authorization]
   );
 
   if (loading) {
@@ -179,9 +180,7 @@ export default function OAuthAuthorizePage() {
               account. It will be able to:
             </div>
             <ul className="text-[14px] list-disc list-inside space-y-[4px]">
-              <li>Access your integrations and channels</li>
-              <li>Create and schedule posts on your behalf</li>
-              <li>Read your post analytics</li>
+              <li>Read your connected social accounts</li>
             </ul>
           </div>
 

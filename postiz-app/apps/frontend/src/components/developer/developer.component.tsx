@@ -219,13 +219,13 @@ export const DeveloperComponent: FC = () => {
       <div className="flex flex-col gap-[40px]">
         <div className="text-[14px] text-textColor leading-[1.7]">
           {t(
-            'oauth_app_note_line1',
-            'Create an OAuth App to let other EverywherePoster users authorize your product to post on their behalf.'
+            'oauth_accounts_read_foundation_note',
+            'Create an OAuth App for the accounts:read MCP authorization foundation. Connected-account tools are not available yet.'
           )}
           <br />
           {t(
-            'oauth_app_note_line2',
-            'After a user completes the OAuth2 flow, you receive a pos_ prefixed token that works everywhere an API Key does — API, MCP, and CLI.'
+            'oauth_accounts_read_token_boundary_note',
+            'OAuth tokens expire after one hour and are restricted to the OAuth MCP endpoint. They do not authorize publishing or public API access.'
           )}
         </div>
         <div className="bg-newBgColorInner rounded-[12px] border border-newBorder overflow-hidden">
@@ -272,13 +272,13 @@ export const DeveloperComponent: FC = () => {
       <div className="flex flex-col gap-[40px]">
         <div className="text-[14px] text-textColor leading-[1.7]">
           {t(
-            'oauth_app_note_line1',
-            'Create an OAuth App to let other EverywherePoster users authorize your product to post on their behalf.'
+            'oauth_accounts_read_foundation_note',
+            'Create an OAuth App for the accounts:read MCP authorization foundation. Connected-account tools are not available yet.'
           )}
           <br />
           {t(
-            'oauth_app_note_line2',
-            'After a user completes the OAuth2 flow, you receive a pos_ prefixed token that works everywhere an API Key does — API, MCP, and CLI.'
+            'oauth_accounts_read_token_boundary_note',
+            'OAuth tokens expire after one hour and are restricted to the OAuth MCP endpoint. They do not authorize publishing or public API access.'
           )}
         </div>
         <div className="bg-newBgColorInner rounded-[12px] border border-newBorder overflow-hidden">
@@ -381,13 +381,13 @@ export const DeveloperComponent: FC = () => {
     <div className="flex flex-col gap-[40px]">
       <div className="text-[14px] text-textColor leading-[1.7]">
         {t(
-          'oauth_app_note_line1',
-          'Create an OAuth App to let other EverywherePoster users authorize your product to post on their behalf.'
+          'oauth_accounts_read_foundation_note',
+          'Create an OAuth App for the accounts:read MCP authorization foundation. Connected-account tools are not available yet.'
         )}
         <br />
         {t(
-          'oauth_app_note_line2',
-          'After a user completes the OAuth2 flow, you receive a pos_ prefixed token that works everywhere an API Key does — API, MCP, and CLI.'
+          'oauth_accounts_read_token_boundary_note',
+          'OAuth tokens expire after one hour and are restricted to the OAuth MCP endpoint. They do not authorize publishing or public API access.'
         )}
       </div>
       {/* App details / edit */}

@@ -1,3 +1,4 @@
+import { OAuthAuthorization } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 
@@ -128,6 +129,10 @@ export class OAuthRepository {
     organizationId: string;
     authorizationCode: string;
     codeExpiresAt: Date;
+    scope: string;
+    resource: string;
+    redirectUri: string;
+    codeChallenge: string;
   }) {
     return this._oauthAuth.model.oAuthAuthorization.upsert({
       where: {
@@ -137,16 +142,10 @@ export class OAuthRepository {
           organizationId: data.organizationId,
         },
       },
-      create: {
-        oauthAppId: data.oauthAppId,
-        userId: data.userId,
-        organizationId: data.organizationId,
-        authorizationCode: data.authorizationCode,
-        codeExpiresAt: data.codeExpiresAt,
-      },
+      create: data,
       update: {
-        authorizationCode: data.authorizationCode,
-        codeExpiresAt: data.codeExpiresAt,
+        ...data,
+        tokenExpiresAt: null,
         accessToken: null,
         revokedAt: null,
       },
@@ -162,19 +161,30 @@ export class OAuthRepository {
     });
   }
 
-  exchangeCodeForToken(id: string, encryptedToken: string) {
-    return this._oauthAuth.model.oAuthAuthorization.update({
-      where: { id },
-      select: {
-        organizationId: true,
-        organization: {
-          select: {
-            paymentId: true,
-          }
-        }
+  exchangeCodeForToken(
+    auth: OAuthAuthorization,
+    encryptedCode: string,
+    encryptedToken: string,
+    tokenExpiresAt: Date
+  ) {
+    // One conditional UPDATE is the redemption lock, including current membership.
+    return this._oauthAuth.model.oAuthAuthorization.updateMany({
+      where: {
+        id: auth.id,
+        authorizationCode: encryptedCode,
+        revokedAt: null,
+        codeExpiresAt: { gt: new Date() },
+        oauthApp: { deletedAt: null },
+        user: {
+          activated: true,
+          organizations: {
+            some: { organizationId: auth.organizationId, disabled: false },
+          },
+        },
       },
       data: {
         accessToken: encryptedToken,
+        tokenExpiresAt,
         authorizationCode: null,
         codeExpiresAt: null,
       },
@@ -188,6 +198,7 @@ export class OAuthRepository {
         revokedAt: null,
       },
       include: {
+        oauthApp: { select: { deletedAt: true } },
         organization: {
           include: {
             subscription: {
@@ -200,7 +211,11 @@ export class OAuthRepository {
           },
         },
         user: {
-          select: { id: true },
+          select: {
+            id: true,
+            activated: true,
+            organizations: { select: { organizationId: true, disabled: true } },
+          },
         },
       },
     });

@@ -4,7 +4,7 @@ import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
 import { MCPServer } from '@mastra/mcp';
 import { randomUUID } from 'crypto';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
-import { OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
+import { ACCOUNTS_READ_SCOPE, getMcpResource, OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { runWithContext } from './async.storage';
 import { createOAuthMiddleware } from './oauth-middleware';
 const fixAcceptHeader = (req: Request) => {
@@ -24,11 +24,7 @@ export const startMcp = async (app: INestApplication) => {
   const oauthService = app.get(OAuthService, { strict: false });
 
   const resolveAuth = async (token: string) => {
-    if (token.startsWith('pos_')) {
-      const authorization = await oauthService.getOrgByOAuthToken(token);
-      if (!authorization) return null;
-      return authorization.organization;
-    }
+    if (token.startsWith('pos_')) return null;
     return organizationService.getOrgByApiKey(token);
   };
 
@@ -44,20 +40,24 @@ export const startMcp = async (app: INestApplication) => {
   };
 
   const server = new MCPServer(serverConfig);
+  // Read grants must never inherit the agent or its publishing/generation tools.
+  const readServer = new MCPServer({ name: 'EverywherePoster Accounts', version: '1.0.0', tools: {} });
+  const resource = getMcpResource();
 
   const oauthMiddleware = createOAuthMiddleware({
     oauth: {
-      resource: new URL('/mcp-oauth', process.env.NEXT_PUBLIC_BACKEND_URL!).toString(),
+      resource,
+      scopesSupported: [ACCOUNTS_READ_SCOPE],
       authorizationServers: [process.env.NEXT_PUBLIC_BACKEND_URL!],
       validateToken: async (token: string) => {
-        const org = await resolveAuth(token);
+        const org = await oauthService.getOrgByOAuthToken(token, resource, ACCOUNTS_READ_SCOPE);
         if (!org) {
-          return { valid: false, error: 'invalid_token', errorDescription: 'Invalid API Key or OAuth token' };
+          return { valid: false, error: 'invalid_token', errorDescription: 'Invalid OAuth token' };
         }
         return { valid: true, subject: token };
       },
     },
-    mcpPath: '/mcp-oauth',
+    mcpPath: new URL(resource).pathname,
   });
 
   if (process.env.OPENAI_APP_CHALLANGE) {
@@ -68,7 +68,7 @@ export const startMcp = async (app: INestApplication) => {
   }
 
   app.use('/.well-known/oauth-protected-resource', async (req: Request, res: Response) => {
-    const url = new URL('/.well-known/oauth-protected-resource', process.env.NEXT_PUBLIC_BACKEND_URL);
+    const url = new URL('./.well-known/oauth-protected-resource', resource);
     await oauthMiddleware(req, res, url);
   });
 
@@ -90,7 +90,8 @@ export const startMcp = async (app: INestApplication) => {
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code'],
       code_challenge_methods_supported: ['S256'],
-      scopes_supported: ['mcp:read', 'mcp:write'],
+      scopes_supported: [ACCOUNTS_READ_SCOPE],
+      token_endpoint_auth_methods_supported: ['client_secret_post'],
     });
   });
 
@@ -101,13 +102,14 @@ export const startMcp = async (app: INestApplication) => {
       return;
     }
 
-    const url = new URL('/mcp-oauth', process.env.NEXT_PUBLIC_BACKEND_URL);
+    const url = new URL('/mcp-oauth', resource);
 
-    const result = await oauthMiddleware(req, res, url);
+    const result = await oauthMiddleware(req, res, new URL(resource));
     if (!result.proceed) return;
 
     const token = result.tokenValidation?.subject;
-    const auth = await resolveAuth(token!);
+    const authorization = await oauthService.getOrgByOAuthToken(token!, resource, ACCOUNTS_READ_SCOPE);
+    const auth = authorization?.organization;
     if (!auth) {
       res.status(401).json({ error: 'invalid_token', error_description: 'Could not resolve organization' });
       return;
@@ -115,7 +117,7 @@ export const startMcp = async (app: INestApplication) => {
 
     fixAcceptHeader(req);
     await runWithContext({ requestId: token!, auth }, async () => {
-      await server.startHTTP({
+      await readServer.startHTTP({
         url: url,
         httpPath: url.pathname,
         options: {
