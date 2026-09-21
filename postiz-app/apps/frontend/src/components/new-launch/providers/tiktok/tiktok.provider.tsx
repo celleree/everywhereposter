@@ -33,7 +33,9 @@ const TikTokSettings: FC<{
   const [creatorInfoError, setCreatorInfoError] = useState('');
 
   const isTitle = useMemo(() => {
-    return value?.[0]?.image?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) === -1);
+    return value?.[0]?.image?.some(
+      (p) => (p?.path?.indexOf?.('mp4') ?? -1) === -1
+    );
   }, [value]);
 
   const disclose = watch('disclose');
@@ -96,7 +98,9 @@ const TikTokSettings: FC<{
 
         setCreatorInfo(data);
         setCreatorInfoLoading(false);
-        setValue('__tiktok_creator_info_loaded', true, { shouldValidate: true });
+        setValue('__tiktok_creator_info_loaded', true, {
+          shouldValidate: true,
+        });
         setValue('__tiktok_creator_info_error', '');
         setValue(
           '__tiktok_max_video_duration_sec',
@@ -152,24 +156,26 @@ const TikTokSettings: FC<{
     }
   }, [brand_content_toggle, privacy_level, setValue]);
 
+  useEffect(() => {
+    if (!disclose) {
+      setValue('brand_organic_toggle', false, { shouldValidate: true });
+      setValue('brand_content_toggle', false, { shouldValidate: true });
+    }
+  }, [disclose, setValue]);
+
   const privacyLevelLabels: Record<string, string> = {
     PUBLIC_TO_EVERYONE: t('public_to_everyone', 'Public to everyone'),
-    MUTUAL_FOLLOW_FRIENDS: t(
-      'mutual_follow_friends',
-      'Mutual follow friends'
-    ),
+    MUTUAL_FOLLOW_FRIENDS: t('mutual_follow_friends', 'Mutual follow friends'),
     FOLLOWER_OF_CREATOR: t('follower_of_creator', 'Follower of creator'),
     SELF_ONLY: t('self_only', 'Self only'),
   };
 
   const privacyLevel: TikTokPrivacyOption[] = (
     creatorInfo?.privacy_level_options || []
-  ).map(
-    (value: string) => ({
-      value,
-      label: privacyLevelLabels[value] || value,
-    })
-  );
+  ).map((value: string) => ({
+    value,
+    label: privacyLevelLabels[value] || value,
+  }));
 
   const contentPostingMethod = [
     {
@@ -203,7 +209,9 @@ const TikTokSettings: FC<{
       {/*<CheckTikTokValidity picture={props?.values?.[0]?.image?.[0]?.path} />*/}
       <div className="mb-[18px] text-[14px]">
         {creatorInfoLoading ? (
-          <span>{t('loading_tiktok_creator', 'Loading TikTok creator...')}</span>
+          <span>
+            {t('loading_tiktok_creator', 'Loading TikTok creator...')}
+          </span>
         ) : creatorInfo?.creator_nickname ? (
           <span>
             {t('posting_as_tiktok_creator', 'Posting as')}:{' '}
@@ -250,7 +258,12 @@ const TikTokSettings: FC<{
           </option>
         ))}
       </Select>
-      {isUploadMode && <div className="-mt-[23px] mb-[23px] text-red-600">After posting you fill find a notification inside your Inbox about your post (not content studio)</div>}
+      {isUploadMode && (
+        <div className="-mt-[23px] mb-[23px] text-red-600">
+          After posting you fill find a notification inside your Inbox about
+          your post (not content studio)
+        </div>
+      )}
       <Select
         label={t('label_auto_add_music', 'Auto add music')}
         {...register('autoAddMusic', {
@@ -377,7 +390,12 @@ const TikTokSettings: FC<{
           )}
         </div>
       </div>
-      <div className={clsx(!disclose && 'invisible h-0 overflow-hidden', 'mt-[20px]')}>
+      <div
+        className={clsx(
+          !disclose && 'invisible h-0 overflow-hidden',
+          'mt-[20px]'
+        )}
+      >
         <Checkbox
           variant="hollow"
           label={t('label_your_brand', 'Your brand')}
@@ -416,7 +434,6 @@ const TikTokSettings: FC<{
             'This video will be classified as Branded Content.'
           )}
         </div>
-
       </div>
       {!isUploadMode && (
         <div className="mt-[20px] border-t border-tableBorder pt-[15px] text-[14px] text-balance">
@@ -515,12 +532,18 @@ export default withProvider({
       }
 
       const videoPath = firstItems?.find(
-        (item) => (item?.path?.indexOf?.('mp4') ?? -1) > -1
+        (item) =>
+          (item as { type?: string })?.type === 'video' ||
+          (item?.path?.indexOf?.('mp4') ?? -1) > -1
       )?.path;
       const maxDuration = settings.__tiktok_max_video_duration_sec;
 
       if (videoPath) {
-        if (!maxDuration) {
+        if (
+          typeof maxDuration !== 'number' ||
+          !Number.isFinite(maxDuration) ||
+          maxDuration <= 0
+        ) {
           return 'TikTok creator video duration limit is unavailable.';
         }
 
@@ -528,6 +551,9 @@ export default withProvider({
         try {
           duration = await getVideoDuration(videoPath);
         } catch {
+          return 'Unable to verify this video duration before publishing to TikTok.';
+        }
+        if (!Number.isFinite(duration) || duration <= 0) {
           return 'Unable to verify this video duration before publishing to TikTok.';
         }
         if (duration > maxDuration) {
@@ -546,7 +572,13 @@ const getVideoDuration = async (url: string): Promise<number> => {
     const video = document.createElement('video');
     video.src = url;
     video.preload = 'metadata';
-    video.onloadedmetadata = () => resolve(video.duration);
+    video.onloadedmetadata = () => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) {
+        reject(new Error('TikTok video duration is unavailable.'));
+        return;
+      }
+      resolve(video.duration);
+    };
     video.onerror = () =>
       reject(new Error('Failed to load TikTok video metadata.'));
   });

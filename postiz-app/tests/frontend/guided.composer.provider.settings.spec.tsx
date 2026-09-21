@@ -264,18 +264,26 @@ describe('guided composer existing provider settings', () => {
         .getAllByRole('option')
         .map((o) => o.textContent)
     ).toEqual(['Select', 'Self only', 'Follower of creator']);
-    expect(screen.getByRole('checkbox', { name: 'Comments' }).getAttribute('aria-checked')).toBe(
-      'false'
-    );
-    expect(screen.getByRole('checkbox', { name: 'Comments' }).getAttribute('aria-disabled')).toBe(
-      null
-    );
-    expect(screen.getByRole('checkbox', { name: 'Duet' }).getAttribute('aria-disabled')).toBe(
-      'true'
-    );
-    expect(screen.getByRole('checkbox', { name: 'Stitch' }).getAttribute('aria-disabled')).toBe(
-      'true'
-    );
+    expect(
+      screen
+        .getByRole('checkbox', { name: 'Comments' })
+        .getAttribute('aria-checked')
+    ).toBe('false');
+    expect(
+      screen
+        .getByRole('checkbox', { name: 'Comments' })
+        .getAttribute('aria-disabled')
+    ).toBe(null);
+    expect(
+      screen
+        .getByRole('checkbox', { name: 'Duet' })
+        .getAttribute('aria-disabled')
+    ).toBe('true');
+    expect(
+      screen
+        .getByRole('checkbox', { name: 'Stitch' })
+        .getAttribute('aria-disabled')
+    ).toBe('true');
     expect(screen.getByText(/By posting, you agree to TikTok's/)).toBeTruthy();
 
     const missingPrivacy = await providerRef.current.isValid();
@@ -347,12 +355,12 @@ describe('guided composer existing provider settings', () => {
 
     await screen.findByText('Arundel Creator');
     for (const name of ['Comments', 'Duet', 'Stitch']) {
-      expect(screen.getByRole('checkbox', { name }).getAttribute('aria-checked')).toBe(
-        'false'
-      );
-      expect(screen.getByRole('checkbox', { name }).getAttribute('aria-disabled')).toBe(
-        'true'
-      );
+      expect(
+        screen.getByRole('checkbox', { name }).getAttribute('aria-checked')
+      ).toBe('false');
+      expect(
+        screen.getByRole('checkbox', { name }).getAttribute('aria-disabled')
+      ).toBe('true');
     }
   });
 
@@ -481,6 +489,103 @@ describe('guided composer existing provider settings', () => {
     } finally {
       createElementSpy.mockRestore();
     }
+  });
+
+  it('fails closed when browser video duration is not finite', async () => {
+    mockCustomProviderGet.mockResolvedValue({
+      data: {
+        creator_nickname: 'Arundel Creator',
+        privacy_level_options: ['SELF_ONLY'],
+        comment_disabled: false,
+        duet_disabled: false,
+        stitch_disabled: false,
+        max_video_post_duration_sec: 60,
+      },
+    });
+
+    const providerRef = renderProvider(
+      TikTokProvider,
+      { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
+      [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        },
+      ],
+      { content_posting_method: 'DIRECT_POST', privacy_level: 'SELF_ONLY' }
+    );
+
+    await screen.findByLabelText('Who can see this video?');
+    const originalCreateElement = document.createElement.bind(document);
+    const createElementSpy = jest
+      .spyOn(document, 'createElement')
+      .mockImplementation(((
+        tagName: string,
+        options?: ElementCreationOptions
+      ) => {
+        if (tagName === 'video') {
+          const video: any = { duration: NaN, onloadedmetadata: undefined };
+          Object.defineProperty(video, 'preload', {
+            set: () => setTimeout(() => video.onloadedmetadata?.(), 0),
+          });
+          return video;
+        }
+        return originalCreateElement(tagName, options);
+      }) as typeof document.createElement);
+
+    try {
+      expect((await providerRef.current.isValid()).errors).toBe(
+        'Unable to verify this video duration before publishing to TikTok.'
+      );
+    } finally {
+      createElementSpy.mockRestore();
+    }
+  });
+
+  it('clears both commercial subtypes when disclosure is turned off', async () => {
+    mockCustomProviderGet.mockResolvedValue({
+      data: {
+        creator_nickname: 'Arundel Creator',
+        privacy_level_options: ['PUBLIC_TO_EVERYONE'],
+        comment_disabled: false,
+        duet_disabled: false,
+        stitch_disabled: false,
+        max_video_post_duration_sec: 60,
+      },
+    });
+
+    const providerRef = renderProvider(
+      TikTokProvider,
+      { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
+      [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        },
+      ],
+      {
+        content_posting_method: 'DIRECT_POST',
+        privacy_level: 'PUBLIC_TO_EVERYONE',
+        disclose: true,
+        brand_organic_toggle: true,
+        brand_content_toggle: true,
+      }
+    );
+
+    await screen.findByText('Arundel Creator');
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Disclose Video Content' })
+    );
+
+    await waitFor(() =>
+      expect(providerRef.current.getValues().settings).toMatchObject({
+        disclose: false,
+        brand_organic_toggle: false,
+        brand_content_toggle: false,
+      })
+    );
   });
 
   it('uses the existing Pinterest form and DTO for the required board', async () => {
