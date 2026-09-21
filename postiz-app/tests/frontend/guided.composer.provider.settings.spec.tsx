@@ -19,14 +19,17 @@ jest.mock(
   '@gitroom/frontend/components/launches/helpers/use.integration',
   () => {
     const ReactModule = require('react');
-    return { IntegrationContext: ReactModule.createContext({}) };
+    const IntegrationContext = ReactModule.createContext({});
+    return {
+      IntegrationContext,
+      useIntegration: () => ReactModule.useContext(IntegrationContext),
+    };
   }
 );
 
-jest.mock(
-  '@gitroom/react/translation/get.transation.service.client',
-  () => ({ useT: () => (_key: string, fallback: string) => fallback })
-);
+jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
+  useT: () => (_key: string, fallback: string) => fallback,
+}));
 
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
   useFetch: () =>
@@ -163,7 +166,8 @@ const baseIntegration = {
 const renderProvider = (
   Provider: React.ComponentType<any>,
   integration: any,
-  media: any[]
+  media: any[],
+  settings: Record<string, unknown> = {}
 ) => {
   const providerRef = createRef<any>();
 
@@ -171,9 +175,7 @@ const renderProvider = (
     useLaunchStore.getState().reset();
     useLaunchStore.setState({
       integrations: [integration],
-      selectedIntegrations: [
-        { integration, settings: {}, ref: providerRef },
-      ],
+      selectedIntegrations: [{ integration, settings, ref: providerRef }],
       current: integration.id,
       global: [
         {
@@ -226,7 +228,7 @@ describe('guided composer existing provider settings', () => {
     });
   });
 
-  it('enforces TikTok Direct Post creator settings and duration', async () => {
+  it('uses live TikTok creator settings with safe defaults', async () => {
     mockCustomProviderGet.mockResolvedValue({
       data: {
         creator_nickname: 'Arundel Creator',
@@ -241,29 +243,37 @@ describe('guided composer existing provider settings', () => {
     const providerRef = renderProvider(
       TikTokProvider,
       { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
-      [{ id: 'video-1', path: 'https://media.example.com/video.mp4', type: 'video' }]
+      [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        },
+      ]
     );
 
     expect(await screen.findByText('Arundel Creator')).toBeTruthy();
     expect(mockCustomProviderGet).toHaveBeenCalledWith('creatorInfo');
 
-    const privacy = screen.getByLabelText('Who can see this video?') as HTMLSelectElement;
+    const privacy = screen.getByLabelText(
+      'Who can see this video?'
+    ) as HTMLSelectElement;
     expect(privacy.value).toBe('');
-    expect(within(privacy).getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'Select',
-      'Self only',
-      'Follower of creator',
-    ]);
-    expect(screen.getByRole('checkbox', { name: 'Comments' })).toHaveAttribute(
-      'aria-checked',
+    expect(
+      within(privacy)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Select', 'Self only', 'Follower of creator']);
+    expect(screen.getByRole('checkbox', { name: 'Comments' }).getAttribute('aria-checked')).toBe(
       'false'
     );
-    expect(screen.getByRole('checkbox', { name: 'Duet' })).toHaveAttribute(
-      'aria-disabled',
+    expect(screen.getByRole('checkbox', { name: 'Comments' }).getAttribute('aria-disabled')).toBe(
+      null
+    );
+    expect(screen.getByRole('checkbox', { name: 'Duet' }).getAttribute('aria-disabled')).toBe(
       'true'
     );
-    expect(screen.getByRole('checkbox', { name: 'Stitch' })).toHaveAttribute(
-      'aria-disabled',
+    expect(screen.getByRole('checkbox', { name: 'Stitch' }).getAttribute('aria-disabled')).toBe(
       'true'
     );
     expect(screen.getByText(/By posting, you agree to TikTok's/)).toBeTruthy();
@@ -272,11 +282,138 @@ describe('guided composer existing provider settings', () => {
     expect(missingPrivacy.errors).toBe(
       'Select a privacy option currently available for this TikTok creator.'
     );
+  });
 
-    fireEvent.change(privacy, { target: { value: 'SELF_ONLY' } });
+  it('clears a privacy setting that TikTok no longer permits', async () => {
+    mockCustomProviderGet.mockResolvedValue({
+      data: {
+        creator_nickname: 'Arundel Creator',
+        privacy_level_options: ['SELF_ONLY'],
+        comment_disabled: false,
+        duet_disabled: false,
+        stitch_disabled: false,
+        max_video_post_duration_sec: 60,
+      },
+    });
+
+    renderProvider(
+      TikTokProvider,
+      { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
+      [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        },
+      ],
+      { privacy_level: 'PUBLIC_TO_EVERYONE' }
+    );
+
+    const privacy = (await screen.findByLabelText(
+      'Who can see this video?'
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(privacy.value).toBe(''));
+    expect(
+      within(privacy)
+        .getAllByRole('option')
+        .map((option) => option.value)
+    ).toEqual(['', 'SELF_ONLY']);
+  });
+
+  it('disables unavailable TikTok interactions and keeps them off', async () => {
+    mockCustomProviderGet.mockResolvedValue({
+      data: {
+        creator_nickname: 'Arundel Creator',
+        privacy_level_options: ['SELF_ONLY'],
+        comment_disabled: true,
+        duet_disabled: true,
+        stitch_disabled: true,
+        max_video_post_duration_sec: 60,
+      },
+    });
+
+    renderProvider(
+      TikTokProvider,
+      { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
+      [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        },
+      ],
+      { comment: true, duet: true, stitch: true }
+    );
+
+    await screen.findByText('Arundel Creator');
+    for (const name of ['Comments', 'Duet', 'Stitch']) {
+      expect(screen.getByRole('checkbox', { name }).getAttribute('aria-checked')).toBe(
+        'false'
+      );
+      expect(screen.getByRole('checkbox', { name }).getAttribute('aria-disabled')).toBe(
+        'true'
+      );
+    }
+  });
+
+  it('blocks Direct Post when TikTok creator settings cannot be loaded', async () => {
+    mockCustomProviderGet.mockRejectedValue(new Error('TikTok unavailable'));
+
+    const providerRef = renderProvider(
+      TikTokProvider,
+      { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
+      [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        },
+      ]
+    );
+
+    expect(
+      await screen.findByText(
+        'Unable to load TikTok creator settings. Reconnect or retry before publishing.'
+      )
+    ).toBeTruthy();
+    expect((await providerRef.current.isValid()).errors).toBe(
+      'Unable to load TikTok creator settings. Reconnect or retry before publishing.'
+    );
+  });
+
+  it('enforces the live TikTok duration limit', async () => {
+    mockCustomProviderGet.mockResolvedValue({
+      data: {
+        creator_nickname: 'Arundel Creator',
+        privacy_level_options: ['SELF_ONLY'],
+        comment_disabled: false,
+        duet_disabled: false,
+        stitch_disabled: false,
+        max_video_post_duration_sec: 60,
+      },
+    });
+
+    const providerRef = renderProvider(
+      TikTokProvider,
+      { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
+      [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        },
+      ],
+      { content_posting_method: 'DIRECT_POST', privacy_level: 'SELF_ONLY' }
+    );
+
+    await screen.findByLabelText('Who can see this video?');
     const originalCreateElement = document.createElement.bind(document);
-    const createElementSpy = jest.spyOn(document, 'createElement').mockImplementation(
-      ((tagName: string, options?: ElementCreationOptions) => {
+    const createElementSpy = jest
+      .spyOn(document, 'createElement')
+      .mockImplementation(((
+        tagName: string,
+        options?: ElementCreationOptions
+      ) => {
         if (tagName === 'video') {
           const video: any = { duration: 61, onloadedmetadata: undefined };
           Object.defineProperty(video, 'preload', {
@@ -285,13 +422,62 @@ describe('guided composer existing provider settings', () => {
           return video;
         }
         return originalCreateElement(tagName, options);
-      }) as typeof document.createElement
-    );
+      }) as typeof document.createElement);
 
     try {
       expect((await providerRef.current.isValid()).errors).toBe(
         'TikTok allows this creator to post videos up to 60 seconds.'
       );
+    } finally {
+      createElementSpy.mockRestore();
+    }
+  });
+
+  it('accepts a video within the live TikTok duration limit', async () => {
+    mockCustomProviderGet.mockResolvedValue({
+      data: {
+        creator_nickname: 'Arundel Creator',
+        privacy_level_options: ['SELF_ONLY'],
+        comment_disabled: false,
+        duet_disabled: false,
+        stitch_disabled: false,
+        max_video_post_duration_sec: 60,
+      },
+    });
+
+    const providerRef = renderProvider(
+      TikTokProvider,
+      { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
+      [
+        {
+          id: 'video-1',
+          path: 'https://media.example.com/video.mp4',
+          type: 'video',
+        },
+      ],
+      { content_posting_method: 'DIRECT_POST', privacy_level: 'SELF_ONLY' }
+    );
+
+    await screen.findByLabelText('Who can see this video?');
+    const originalCreateElement = document.createElement.bind(document);
+    const createElementSpy = jest
+      .spyOn(document, 'createElement')
+      .mockImplementation(((
+        tagName: string,
+        options?: ElementCreationOptions
+      ) => {
+        if (tagName === 'video') {
+          const video: any = { duration: 60, onloadedmetadata: undefined };
+          Object.defineProperty(video, 'preload', {
+            set: () => setTimeout(() => video.onloadedmetadata?.(), 0),
+          });
+          return video;
+        }
+        return originalCreateElement(tagName, options);
+      }) as typeof document.createElement);
+
+    try {
+      expect((await providerRef.current.isValid()).errors).toBe(true);
     } finally {
       createElementSpy.mockRestore();
     }

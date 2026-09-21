@@ -45,6 +45,9 @@ const TikTokSettings: FC<{
     setCreatorInfoError('');
     setValue('__tiktok_creator_info_loaded', false, { shouldValidate: true });
     setValue('__tiktok_creator_info_error', '');
+    setValue('comment', false);
+    setValue('duet', false);
+    setValue('stitch', false);
 
     get('creatorInfo')
       .then((response) => {

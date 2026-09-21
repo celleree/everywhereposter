@@ -398,6 +398,59 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  private async validateDirectPostCreatorInfo(
+    accessToken: string,
+    settings: TikTokDto
+  ) {
+    let creatorInfo: any;
+    try {
+      creatorInfo = await this.creatorInfo(accessToken);
+    } catch {
+      throw new BadBody(
+        'tiktok_creator_info',
+        '{}',
+        '{}',
+        'Unable to load current TikTok creator settings before publishing.'
+      );
+    }
+
+    const data = creatorInfo?.data;
+    if (
+      (creatorInfo?.error?.code && creatorInfo.error.code !== 'ok') ||
+      !data ||
+      typeof data.creator_nickname !== 'string' ||
+      !data.creator_nickname.trim() ||
+      !Array.isArray(data.privacy_level_options) ||
+      !data.privacy_level_options.every(
+        (option: unknown) => typeof option === 'string'
+      ) ||
+      !Number.isFinite(data.max_video_post_duration_sec) ||
+      data.max_video_post_duration_sec < 1 ||
+      typeof data.comment_disabled !== 'boolean' ||
+      typeof data.duet_disabled !== 'boolean' ||
+      typeof data.stitch_disabled !== 'boolean'
+    ) {
+      throw new BadBody(
+        'tiktok_creator_info',
+        JSON.stringify(creatorInfo || {}),
+        '{}',
+        'Current TikTok creator settings are invalid or unavailable.'
+      );
+    }
+
+    if (
+      !settings.privacy_level ||
+      !data.privacy_level_options.includes(settings.privacy_level)
+    ) {
+      throw new BadBody(
+        'tiktok_creator_info',
+        JSON.stringify(creatorInfo),
+        '{}',
+        'Select a privacy option currently available for this TikTok creator.'
+      );
+    }
+  }
+
   private async uploadedVideoSuccess(
     id: string,
     publishId: string,
@@ -561,6 +614,10 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   ): Promise<PostResponse[]> {
     const [firstPost] = postDetails;
     const isPhoto = (firstPost?.media?.[0]?.path?.indexOf('mp4') || -1) === -1;
+
+    if (firstPost.settings.content_posting_method === 'DIRECT_POST') {
+      await this.validateDirectPostCreatorInfo(accessToken, firstPost.settings);
+    }
 
     console.log({
       ...this.buildTikokPostInfoBody(firstPost),

@@ -2,6 +2,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
@@ -15,18 +16,9 @@ export class TikTokDto {
   title: string;
 
   @ValidateIf((p) => p.content_posting_method === 'DIRECT_POST')
-  @IsIn([
-    'PUBLIC_TO_EVERYONE',
-    'MUTUAL_FOLLOW_FRIENDS',
-    'FOLLOWER_OF_CREATOR',
-    'SELF_ONLY',
-  ])
+  @IsNotEmpty()
   @IsString()
-  privacy_level?:
-    | 'PUBLIC_TO_EVERYONE'
-    | 'MUTUAL_FOLLOW_FRIENDS'
-    | 'FOLLOWER_OF_CREATOR'
-    | 'SELF_ONLY';
+  privacy_level?: string;
 
   @IsBoolean()
   duet: boolean;
