@@ -375,11 +375,9 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async maxVideoLength(accessToken: string) {
-    const {
-      data: { max_video_post_duration_sec },
-    } = await (
-      await fetch(
+  async creatorInfo(accessToken: string) {
+    return (
+      await this.fetch(
         'https://open.tiktokapis.com/v2/post/publish/creator_info/query/',
         {
           method: 'POST',
@@ -390,9 +388,13 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         }
       )
     ).json();
+  }
+
+  async maxVideoLength(accessToken: string) {
+    const { data } = await this.creatorInfo(accessToken);
 
     return {
-      maxDurationSeconds: max_video_post_duration_sec,
+      maxDurationSeconds: data?.max_video_post_duration_sec,
     };
   }
 
@@ -484,8 +486,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
             ? { title: firstPost.message }
             : {}),
           ...(isPhoto ? { description: firstPost.message } : {}),
-          privacy_level:
-            firstPost.settings.privacy_level || 'PUBLIC_TO_EVERYONE',
+          privacy_level: firstPost.settings.privacy_level,
           ...(isPhoto
             ? {}
             : { disable_duet: !firstPost.settings.duet || false }),
