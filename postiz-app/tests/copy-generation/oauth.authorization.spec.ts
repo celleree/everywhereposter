@@ -4,14 +4,17 @@ import { createHash } from 'crypto';
 import { OAuthService, getMcpResource } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { createOAuthMiddleware } from '@gitroom/nestjs-libraries/chat/oauth-middleware';
+import { runWithContext } from '@gitroom/nestjs-libraries/chat/async.storage';
 import { HEADERS_METADATA } from '@nestjs/common/constants';
 import { OAuthController } from '../../apps/backend/src/api/routes/oauth.controller';
 import { PublicAuthMiddleware } from '../../apps/backend/src/services/auth/public.auth.middleware';
 
 jest.mock('@mastra/mcp', () => ({ MCPServer: jest.fn().mockImplementation(() => ({ startHTTP: jest.fn() })) }));
+jest.mock('@mastra/core/tools', () => ({ createTool: (definition: unknown) => definition }));
 jest.mock('@gitroom/nestjs-libraries/chat/mastra.service', () => ({ MastraService: class MastraService {} }));
 import { MCPServer } from '@mastra/mcp';
 import { startMcp } from '@gitroom/nestjs-libraries/chat/start.mcp';
+import { createListConnectedAccountsTool } from '@gitroom/nestjs-libraries/chat/tools/list.connected.accounts.tool';
 
 const verifier = 'a'.repeat(43);
 const challenge = createHash('sha256').update(verifier).digest('base64url');
@@ -135,7 +138,8 @@ describe('OAuth accounts:read boundary', () => {
     } as any);
     const factory = MCPServer as jest.Mock;
     expect(factory.mock.calls[0][0]).toMatchObject({ tools: { publish: {} }, agents: { postiz: agent } });
-    expect(factory.mock.calls[1][0]).toEqual({ name: 'EverywherePoster Accounts', version: '1.0.0', tools: {} });
+    expect(Object.keys(factory.mock.calls[1][0].tools)).toEqual(['list_connected_accounts']);
+    expect(factory.mock.calls[1][0].tools.publish).toBeUndefined();
     const response = { status: jest.fn().mockReturnThis(), send: jest.fn(), setHeader: jest.fn() };
     const req = { path: '/', headers: { authorization: 'Bearer pos_token' }, rawHeaders: [], method: 'POST' };
     await handlers.get('/mcp')!(req, response, jest.fn());
@@ -145,6 +149,84 @@ describe('OAuth accounts:read boundary', () => {
     expect(oauth.getOrgByOAuthToken).toHaveBeenCalledWith('pos_token', getMcpResource(), 'accounts:read');
     expect(factory.mock.results[1].value.startHTTP).toHaveBeenCalledTimes(1);
     expect(factory.mock.results[0].value.startHTTP).not.toHaveBeenCalled();
+  });
+  it('returns only the OAuth principal organization accounts with a secret-free status projection', async () => {
+    const getIntegrationsList = jest.fn(async (organizationId: string) =>
+      organizationId === 'org'
+        ? [
+            {
+              id: 'integration-1', organizationId: 'org', providerIdentifier: 'linkedin',
+              name: 'Example Company', profile: 'example-company', picture: 'https://img.test/profile.jpg',
+              disabled: false, refreshNeeded: false, inBetweenSteps: false,
+              token: 'provider-access-token', refreshToken: 'provider-refresh-token',
+              additionalSettings: '{"apiKey":"private"}',
+            },
+            {
+              id: 'integration-2', organizationId: 'org', providerIdentifier: 'facebook',
+              name: 'Needs Login', profile: null, picture: null,
+              disabled: true, refreshNeeded: true, inBetweenSteps: false,
+              token: 'secret', refreshToken: 'secret',
+            },
+            {
+              id: 'integration-3', organizationId: 'org', providerIdentifier: 'instagram',
+              name: 'Setup Pending', profile: '@pending', picture: null,
+              disabled: false, refreshNeeded: false, inBetweenSteps: true,
+              token: 'secret', refreshToken: 'secret',
+            },
+            {
+              id: 'integration-4', organizationId: 'org', providerIdentifier: 'youtube',
+              name: 'Disabled', profile: null, picture: null,
+              disabled: true, refreshNeeded: false, inBetweenSteps: false,
+              token: 'secret', refreshToken: 'secret',
+            },
+          ]
+        : [{ id: 'other-integration', organizationId, providerIdentifier: 'x' }]
+    );
+    const tool = createListConnectedAccountsTool({ getIntegrationsList } as any) as any;
+
+    const result = await runWithContext(
+      { requestId: 'pos_token', auth: { id: 'org' } },
+      () => tool.execute({})
+    );
+
+    expect(getIntegrationsList).toHaveBeenCalledWith('org');
+    expect(result).toEqual({
+      accounts: [
+        {
+          id: 'integration-1', platform: 'linkedin', displayName: 'Example Company',
+          profile: 'example-company', picture: 'https://img.test/profile.jpg', status: 'connected',
+          usable: true, disabled: false, requiresReconnection: false, setupPending: false,
+        },
+        {
+          id: 'integration-2', platform: 'facebook', displayName: 'Needs Login',
+          profile: null, picture: null, status: 'reconnection_required',
+          usable: false, disabled: true, requiresReconnection: true, setupPending: false,
+        },
+        {
+          id: 'integration-3', platform: 'instagram', displayName: 'Setup Pending',
+          profile: '@pending', picture: null, status: 'setup_pending',
+          usable: false, disabled: false, requiresReconnection: false, setupPending: true,
+        },
+        {
+          id: 'integration-4', platform: 'youtube', displayName: 'Disabled',
+          profile: null, picture: null, status: 'disabled',
+          usable: false, disabled: true, requiresReconnection: false, setupPending: false,
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/token|refreshToken|apiKey|organizationId/);
+    expect(JSON.stringify(result)).not.toContain('other-integration');
+  });
+  it('returns an empty account array and rejects tenant selectors in input', async () => {
+    const getIntegrationsList = jest.fn().mockResolvedValue([]);
+    const tool = createListConnectedAccountsTool({ getIntegrationsList } as any) as any;
+
+    await expect(runWithContext(
+      { requestId: 'pos_token', auth: { id: 'empty-org' } },
+      () => tool.execute({})
+    )).resolves.toEqual({ accounts: [] });
+    expect(getIntegrationsList).toHaveBeenCalledWith('empty-org');
+    expect(() => tool.inputSchema.parse({ organizationId: 'other' })).toThrow();
   });
   it('denies a read token on the public API while preserving API-key auth', async () => {
     const orgs = { getOrgByApiKey: jest.fn().mockResolvedValue({ id: 'org' }) };
