@@ -52,6 +52,26 @@ const TikTokSettings: FC<{
           return;
         }
 
+        const errorCode = response?.error?.code;
+        if (errorCode && errorCode !== 'ok') {
+          const message =
+            errorCode === 'spam_risk_too_many_posts' ||
+            errorCode === 'reached_active_user_cap'
+              ? 'TikTok cannot accept another post for this creator right now. Try again later.'
+              : errorCode === 'spam_risk_user_banned_from_posting'
+              ? 'TikTok says this creator cannot publish new posts.'
+              : 'TikTok creator settings are unavailable. Try again later.';
+
+          setCreatorInfo(undefined);
+          setCreatorInfoLoading(false);
+          setCreatorInfoError(message);
+          setValue('__tiktok_creator_info_loaded', false, {
+            shouldValidate: true,
+          });
+          setValue('__tiktok_creator_info_error', message);
+          return;
+        }
+
         const data = response?.data;
         if (
           !data ||
