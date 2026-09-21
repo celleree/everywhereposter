@@ -32,7 +32,6 @@ const TikTokSettings: FC<{
   }, [value]);
 
   const disclose = watch('disclose');
-  const brand_organic_toggle = watch('brand_organic_toggle');
   const brand_content_toggle = watch('brand_content_toggle');
   const content_posting_method = watch('content_posting_method');
   const isUploadMode = content_posting_method === 'UPLOAD';
@@ -54,8 +53,13 @@ const TikTokSettings: FC<{
         const data = response?.data;
         if (
           !data ||
+          typeof data.creator_nickname !== 'string' ||
+          !data.creator_nickname.trim() ||
           !Array.isArray(data.privacy_level_options) ||
-          !Number.isFinite(data.max_video_post_duration_sec)
+          !Number.isFinite(data.max_video_post_duration_sec) ||
+          typeof data.comment_disabled !== 'boolean' ||
+          typeof data.duet_disabled !== 'boolean' ||
+          typeof data.stitch_disabled !== 'boolean'
         ) {
           throw new Error('TikTok creator information is unavailable');
         }
