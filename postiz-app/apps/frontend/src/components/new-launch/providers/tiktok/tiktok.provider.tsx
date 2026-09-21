@@ -16,6 +16,11 @@ import { Input } from '@gitroom/react/form/input';
 import { TiktokPreview } from '@gitroom/frontend/components/new-launch/providers/tiktok/tiktok.preview';
 import { useCustomProviderFunction } from '@gitroom/frontend/components/launches/helpers/use.custom.provider.function';
 
+type TikTokPrivacyOption = {
+  value: string;
+  label: string;
+};
+
 const TikTokSettings: FC<{
   values?: any;
 }> = (props) => {
@@ -157,7 +162,9 @@ const TikTokSettings: FC<{
     SELF_ONLY: t('self_only', 'Self only'),
   };
 
-  const privacyLevel = (creatorInfo?.privacy_level_options || []).map(
+  const privacyLevel: TikTokPrivacyOption[] = (
+    creatorInfo?.privacy_level_options || []
+  ).map(
     (value: string) => ({
       value,
       label: privacyLevelLabels[value] || value,
