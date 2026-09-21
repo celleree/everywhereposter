@@ -33,6 +33,18 @@ const basePost = {
   ],
 };
 
+const configureLocalUpload = () => {
+  const uploadDirectory = mkdtempSync(join(tmpdir(), 'tiktok-upload-'));
+  const mediaPath = join(uploadDirectory, 'video.mp4');
+  writeFileSync(mediaPath, 'test video');
+  process.env.UPLOAD_DIRECTORY = uploadDirectory;
+  process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY = '/uploads';
+  return {
+    mediaPath: realpathSync(mediaPath),
+    cleanup: () => rmSync(uploadDirectory, { recursive: true, force: true }),
+  };
+};
+
 const createProvider = ({
   creatorData = baseCreatorData,
   duration = 30,
@@ -252,51 +264,68 @@ describe('TikTok Direct Post provider safety', () => {
   it('rejects arbitrary media URLs before invoking ffprobe', async () => {
     process.env.CLOUDFLARE_BUCKET_URL =
       'https://media.example.com/uploads';
+    const localUpload = configureLocalUpload();
     const provider = new TiktokProvider() as any;
     provider.runMediaCommand = jest.fn();
 
-    await expect(
-      provider.probeVideoDuration(
-        'https://169.254.169.254/latest/meta-data/video.mp4'
-      )
-    ).rejects.toThrow(
-      'Selected video is not in configured application storage.'
-    );
-    expect(provider.runMediaCommand).not.toHaveBeenCalled();
+    try {
+      await expect(
+        provider.probeVideoDuration(
+          'https://evil.example/uploads/video.mp4'
+        )
+      ).rejects.toThrow(
+        'Selected video is not in configured application storage.'
+      );
+      expect(provider.runMediaCommand).not.toHaveBeenCalled();
+    } finally {
+      localUpload.cleanup();
+    }
   });
 
   it('passes only the canonical configured Cloudflare URL to ffprobe', async () => {
     process.env.CLOUDFLARE_BUCKET_URL = 'https://media.example.com/uploads';
+    const localUpload = configureLocalUpload();
     const provider = new TiktokProvider() as any;
     provider.runMediaCommand = jest.fn().mockResolvedValue({ stdout: '30\n' });
     const mediaPath =
       'https://MEDIA.EXAMPLE.COM:443/uploads/./video.mp4';
 
-    await expect(provider.probeVideoDuration(mediaPath)).resolves.toBe(30);
-    expect(provider.runMediaCommand).toHaveBeenCalledWith(
-      'ffprobe',
-      expect.any(Array),
-      expect.objectContaining({ timeout: 15_000 })
-    );
-    expect(provider.runMediaCommand.mock.calls[0][1].at(-1)).toBe(
-      'https://media.example.com/uploads/video.mp4'
-    );
+    try {
+      await expect(provider.probeVideoDuration(mediaPath)).resolves.toBe(30);
+      expect(provider.runMediaCommand).toHaveBeenCalledWith(
+        'ffprobe',
+        expect.any(Array),
+        expect.objectContaining({ timeout: 15_000 })
+      );
+      expect(provider.runMediaCommand.mock.calls[0][1].at(-1)).toBe(
+        'https://media.example.com/uploads/video.mp4'
+      );
+    } finally {
+      localUpload.cleanup();
+    }
   });
 
-  it('rejects a backslash parser-confusion URL before invoking ffprobe', async () => {
-    process.env.CLOUDFLARE_BUCKET_URL = 'https://media.example.com';
-    const provider = new TiktokProvider() as any;
-    provider.runMediaCommand = jest.fn();
+  it.each([
+    'https://media.example.com\\@127.0.0.1:4321/video.mp4',
+    'https://media.example.com\\uploads/video.mp4',
+  ])(
+    'rejects a backslash parser-confusion URL before invoking ffprobe: %s',
+    async (mediaPath) => {
+      process.env.CLOUDFLARE_BUCKET_URL = 'https://media.example.com';
+      const localUpload = configureLocalUpload();
+      const provider = new TiktokProvider() as any;
+      provider.runMediaCommand = jest.fn();
 
-    await expect(
-      provider.probeVideoDuration(
-        'https://media.example.com\\@127.0.0.1:4321/video.mp4'
-      )
-    ).rejects.toThrow(
-      'Selected video is not in configured application storage.'
-    );
-    expect(provider.runMediaCommand).not.toHaveBeenCalled();
-  });
+      try {
+        await expect(provider.probeVideoDuration(mediaPath)).rejects.toThrow(
+          'Selected video is not in configured application storage.'
+        );
+        expect(provider.runMediaCommand).not.toHaveBeenCalled();
+      } finally {
+        localUpload.cleanup();
+      }
+    }
+  );
 
   it.each([
     'https://user@media.example.com/uploads/video.mp4',
@@ -305,36 +334,42 @@ describe('TikTok Direct Post provider safety', () => {
   ])('rejects URL credentials before invoking ffprobe: %s', async (mediaPath) => {
     process.env.CLOUDFLARE_BUCKET_URL =
       'https://media.example.com/uploads';
+    const localUpload = configureLocalUpload();
     const provider = new TiktokProvider() as any;
     provider.runMediaCommand = jest.fn();
 
-    await expect(provider.probeVideoDuration(mediaPath)).rejects.toThrow(
-      'Selected video is not in configured application storage.'
-    );
-    expect(provider.runMediaCommand).not.toHaveBeenCalled();
+    try {
+      await expect(provider.probeVideoDuration(mediaPath)).rejects.toThrow(
+        'Selected video is not in configured application storage.'
+      );
+      expect(provider.runMediaCommand).not.toHaveBeenCalled();
+    } finally {
+      localUpload.cleanup();
+    }
   });
 
   it('rejects ASCII control characters before invoking ffprobe', async () => {
     process.env.CLOUDFLARE_BUCKET_URL = 'https://media.example.com/uploads';
+    const localUpload = configureLocalUpload();
     const provider = new TiktokProvider() as any;
     provider.runMediaCommand = jest.fn();
 
-    await expect(
-      provider.probeVideoDuration(
-        'https://media.example.com/uploads/video\t.mp4'
-      )
-    ).rejects.toThrow(
-      'Selected video is not in configured application storage.'
-    );
-    expect(provider.runMediaCommand).not.toHaveBeenCalled();
+    try {
+      await expect(
+        provider.probeVideoDuration(
+          'https://media.example.com/uploads/video\t.mp4'
+        )
+      ).rejects.toThrow(
+        'Selected video is not in configured application storage.'
+      );
+      expect(provider.runMediaCommand).not.toHaveBeenCalled();
+    } finally {
+      localUpload.cleanup();
+    }
   });
 
   it('preserves trusted local-file probing', async () => {
-    const uploadDirectory = mkdtempSync(join(tmpdir(), 'tiktok-upload-'));
-    const mediaPath = join(uploadDirectory, 'video.mp4');
-    writeFileSync(mediaPath, 'test video');
-    process.env.UPLOAD_DIRECTORY = uploadDirectory;
-    process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY = '/uploads';
+    const localUpload = configureLocalUpload();
     const provider = new TiktokProvider() as any;
     provider.runMediaCommand = jest.fn().mockResolvedValue({ stdout: '30\n' });
 
@@ -343,10 +378,10 @@ describe('TikTok Direct Post provider safety', () => {
         provider.probeVideoDuration('/uploads/video.mp4')
       ).resolves.toBe(30);
       expect(provider.runMediaCommand.mock.calls[0][1].at(-1)).toBe(
-        realpathSync(mediaPath)
+        localUpload.mediaPath
       );
     } finally {
-      rmSync(uploadDirectory, { recursive: true, force: true });
+      localUpload.cleanup();
     }
   });
 

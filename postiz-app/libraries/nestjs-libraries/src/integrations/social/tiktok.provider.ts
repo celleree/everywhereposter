@@ -421,10 +421,11 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
     const uploadRoot = resolve(uploadDirectory);
     let pathname = mediaPath;
-    let isRemote = false;
     try {
       const parsed = new URL(mediaPath);
-      isRemote = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return undefined;
+      }
       pathname = parsed.pathname;
     } catch {}
 
@@ -432,10 +433,8 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     let diskPath: string;
     if (pathname.startsWith(`${uploadPrefix}/`)) {
       diskPath = resolve(uploadRoot, pathname.slice(uploadPrefix.length + 1));
-    } else if (!isRemote) {
-      diskPath = resolve(uploadRoot, pathname.replace(/^\/+/, ''));
     } else {
-      return undefined;
+      diskPath = resolve(uploadRoot, pathname.replace(/^\/+/, ''));
     }
 
     if (
