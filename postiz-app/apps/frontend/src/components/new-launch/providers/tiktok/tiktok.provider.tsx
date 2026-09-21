@@ -32,7 +32,9 @@ const TikTokSettings: FC<{
   }, [value]);
 
   const disclose = watch('disclose');
+  const brand_organic_toggle = watch('brand_organic_toggle');
   const brand_content_toggle = watch('brand_content_toggle');
+  const privacy_level = watch('privacy_level');
   const content_posting_method = watch('content_posting_method');
   const isUploadMode = content_posting_method === 'UPLOAD';
 
@@ -116,6 +118,12 @@ const TikTokSettings: FC<{
     };
   }, [get, getValues, integration?.id, setValue]);
 
+  useEffect(() => {
+    if (brand_content_toggle && privacy_level === 'SELF_ONLY') {
+      setValue('privacy_level', undefined, { shouldValidate: true });
+    }
+  }, [brand_content_toggle, privacy_level, setValue]);
+
   const privacyLevelLabels: Record<string, string> = {
     PUBLIC_TO_EVERYONE: t('public_to_everyone', 'Public to everyone'),
     MUTUAL_FOLLOW_FRIENDS: t(
@@ -183,7 +191,11 @@ const TikTokSettings: FC<{
       >
         <option value="">{t('select', 'Select')}</option>
         {privacyLevel.map((item) => (
-          <option key={item.value} value={item.value}>
+          <option
+            key={item.value}
+            value={item.value}
+            disabled={brand_content_toggle && item.value === 'SELF_ONLY'}
+          >
             {item.label}
           </option>
         ))}
@@ -246,34 +258,36 @@ const TikTokSettings: FC<{
             value: false,
           })}
         />
-        <Checkbox
-          variant="hollow"
-          label={t('label_duet', 'Duet')}
-          disabled={
-            isUploadMode ||
-            isTitle ||
-            creatorInfoLoading ||
-            !!creatorInfoError ||
-            creatorInfo?.duet_disabled !== false
-          }
-          {...register('duet', {
-            value: false,
-          })}
-        />
-        <Checkbox
-          label={t('label_stitch', 'Stitch')}
-          variant="hollow"
-          disabled={
-            isUploadMode ||
-            isTitle ||
-            creatorInfoLoading ||
-            !!creatorInfoError ||
-            creatorInfo?.stitch_disabled !== false
-          }
-          {...register('stitch', {
-            value: false,
-          })}
-        />
+        {!isTitle && (
+          <>
+            <Checkbox
+              variant="hollow"
+              label={t('label_duet', 'Duet')}
+              disabled={
+                isUploadMode ||
+                creatorInfoLoading ||
+                !!creatorInfoError ||
+                creatorInfo?.duet_disabled !== false
+              }
+              {...register('duet', {
+                value: false,
+              })}
+            />
+            <Checkbox
+              label={t('label_stitch', 'Stitch')}
+              variant="hollow"
+              disabled={
+                isUploadMode ||
+                creatorInfoLoading ||
+                !!creatorInfoError ||
+                creatorInfo?.stitch_disabled !== false
+              }
+              {...register('stitch', {
+                value: false,
+              })}
+            />
+          </>
+        )}
       </div>
       <hr className="my-[15px] mb-[25px] border-tableBorder" />
       <div className="flex flex-col gap-[20px]">
@@ -292,7 +306,7 @@ const TikTokSettings: FC<{
             value: false,
           })}
         />
-        {disclose && (
+        {disclose && (brand_organic_toggle || brand_content_toggle) && (
           <div className="bg-tableBorder p-[10px] mt-[10px] rounded-[10px] flex gap-[20px] items-center">
             <div>
               <svg
@@ -309,10 +323,15 @@ const TikTokSettings: FC<{
               </svg>
             </div>
             <div>
-              {t(
-                'your_video_will_be_labeled_promotional',
-                'Your video will be labeled "Promotional Content".'
-              )}
+              {brand_content_toggle
+                ? t(
+                    'your_video_will_be_labeled_paid_partnership',
+                    'Your video will be labeled "Paid partnership".'
+                  )
+                : t(
+                    'your_video_will_be_labeled_promotional',
+                    'Your video will be labeled "Promotional content".'
+                  )}
               <br />
               {t(
                 'this_cannot_be_changed_once_posted',
@@ -375,6 +394,19 @@ const TikTokSettings: FC<{
             'by_posting_you_agree_to_tiktoks',
             "By posting, you agree to TikTok's"
           )}{' '}
+          {brand_content_toggle && (
+            <>
+              <a
+                target="_blank"
+                rel="noreferrer"
+                className="text-textColor hover:underline"
+                href="https://www.tiktok.com/legal/page/global/bc-policy/en"
+              >
+                {t('branded_content_policy', 'Branded Content Policy')}
+              </a>{' '}
+              {t('and', 'and')}{' '}
+            </>
+          )}
           <a
             target="_blank"
             rel="noreferrer"
@@ -383,20 +415,6 @@ const TikTokSettings: FC<{
           >
             {t('music_usage_confirmation', 'Music Usage Confirmation')}
           </a>
-          {brand_content_toggle && (
-            <>
-              {' '}
-              {t('and', 'and')}{' '}
-              <a
-                target="_blank"
-                rel="noreferrer"
-                className="text-textColor hover:underline"
-                href="https://www.tiktok.com/legal/page/global/bc-policy/en"
-              >
-                {t('branded_content_policy', 'Branded Content Policy')}
-              </a>
-            </>
-          )}
           .
         </div>
       )}
@@ -451,6 +469,21 @@ export default withProvider({
         return 'Select a privacy option currently available for this TikTok creator.';
       }
 
+      if (
+        settings.disclose &&
+        !settings.brand_organic_toggle &&
+        !settings.brand_content_toggle
+      ) {
+        return 'You need to indicate if your content promotes yourself, a third party, or both.';
+      }
+
+      if (
+        settings.brand_content_toggle &&
+        settings.privacy_level === 'SELF_ONLY'
+      ) {
+        return 'Branded content visibility cannot be set to private.';
+      }
+
       const videoPath = firstItems?.find(
         (item) => (item?.path?.indexOf?.('mp4') ?? -1) > -1
       )?.path;
@@ -461,7 +494,12 @@ export default withProvider({
           return 'TikTok creator video duration limit is unavailable.';
         }
 
-        const duration = await getVideoDuration(videoPath);
+        let duration: number;
+        try {
+          duration = await getVideoDuration(videoPath);
+        } catch {
+          return 'Unable to verify this video duration before publishing to TikTok.';
+        }
         if (duration > maxDuration) {
           return `TikTok allows this creator to post videos up to ${maxDuration} seconds.`;
         }
