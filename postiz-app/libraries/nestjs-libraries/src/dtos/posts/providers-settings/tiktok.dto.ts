@@ -41,6 +41,10 @@ export class TikTokDto {
   autoAddMusic: 'yes' | 'no';
 
   @IsBoolean()
+  @IsOptional()
+  disclose?: boolean;
+
+  @IsBoolean()
   brand_content_toggle: boolean;
 
   @IsBoolean()
