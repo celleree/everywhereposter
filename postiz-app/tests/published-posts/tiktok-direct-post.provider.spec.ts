@@ -1,4 +1,7 @@
 import { TiktokProvider } from '@gitroom/nestjs-libraries/integrations/social/tiktok.provider';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const baseCreatorData = {
   creator_nickname: 'Arundel Creator',
@@ -73,12 +76,33 @@ const publish = async (
 
 describe('TikTok Direct Post provider safety', () => {
   let consoleSpy: jest.SpyInstance;
+  let previousBucketUrl: string | undefined;
+  let previousUploadDirectory: string | undefined;
+  let previousUploadStaticDirectory: string | undefined;
 
   beforeEach(() => {
+    previousBucketUrl = process.env.CLOUDFLARE_BUCKET_URL;
+    previousUploadDirectory = process.env.UPLOAD_DIRECTORY;
+    previousUploadStaticDirectory =
+      process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY;
     consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
+    for (const [name, value] of [
+      ['CLOUDFLARE_BUCKET_URL', previousBucketUrl],
+      ['UPLOAD_DIRECTORY', previousUploadDirectory],
+      [
+        'NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY',
+        previousUploadStaticDirectory,
+      ],
+    ] as const) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
     consoleSpy.mockRestore();
   });
 
@@ -226,12 +250,14 @@ describe('TikTok Direct Post provider safety', () => {
   });
 
   it('rejects arbitrary media URLs before invoking ffprobe', async () => {
+    process.env.CLOUDFLARE_BUCKET_URL =
+      'https://media.example.com/uploads';
     const provider = new TiktokProvider() as any;
     provider.runMediaCommand = jest.fn();
 
     await expect(
       provider.probeVideoDuration(
-        'http://169.254.169.254/latest/meta-data/video.mp4'
+        'https://169.254.169.254/latest/meta-data/video.mp4'
       )
     ).rejects.toThrow(
       'Selected video is not in configured application storage.'
@@ -239,29 +265,88 @@ describe('TikTok Direct Post provider safety', () => {
     expect(provider.runMediaCommand).not.toHaveBeenCalled();
   });
 
-  it('allows ffprobe only against the configured Cloudflare media location', async () => {
-    const previousBucketUrl = process.env.CLOUDFLARE_BUCKET_URL;
+  it('passes only the canonical configured Cloudflare URL to ffprobe', async () => {
     process.env.CLOUDFLARE_BUCKET_URL = 'https://media.example.com/uploads';
+    const provider = new TiktokProvider() as any;
+    provider.runMediaCommand = jest.fn().mockResolvedValue({ stdout: '30\n' });
+    const mediaPath =
+      'https://MEDIA.EXAMPLE.COM:443/uploads/./video.mp4';
+
+    await expect(provider.probeVideoDuration(mediaPath)).resolves.toBe(30);
+    expect(provider.runMediaCommand).toHaveBeenCalledWith(
+      'ffprobe',
+      expect.any(Array),
+      expect.objectContaining({ timeout: 15_000 })
+    );
+    expect(provider.runMediaCommand.mock.calls[0][1].at(-1)).toBe(
+      'https://media.example.com/uploads/video.mp4'
+    );
+  });
+
+  it('rejects a backslash parser-confusion URL before invoking ffprobe', async () => {
+    process.env.CLOUDFLARE_BUCKET_URL = 'https://media.example.com';
+    const provider = new TiktokProvider() as any;
+    provider.runMediaCommand = jest.fn();
+
+    await expect(
+      provider.probeVideoDuration(
+        'https://media.example.com\\@127.0.0.1:4321/video.mp4'
+      )
+    ).rejects.toThrow(
+      'Selected video is not in configured application storage.'
+    );
+    expect(provider.runMediaCommand).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://user@media.example.com/uploads/video.mp4',
+    'https://:password@media.example.com/uploads/video.mp4',
+    'https://user:password@media.example.com/uploads/video.mp4',
+  ])('rejects URL credentials before invoking ffprobe: %s', async (mediaPath) => {
+    process.env.CLOUDFLARE_BUCKET_URL =
+      'https://media.example.com/uploads';
+    const provider = new TiktokProvider() as any;
+    provider.runMediaCommand = jest.fn();
+
+    await expect(provider.probeVideoDuration(mediaPath)).rejects.toThrow(
+      'Selected video is not in configured application storage.'
+    );
+    expect(provider.runMediaCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects ASCII control characters before invoking ffprobe', async () => {
+    process.env.CLOUDFLARE_BUCKET_URL = 'https://media.example.com/uploads';
+    const provider = new TiktokProvider() as any;
+    provider.runMediaCommand = jest.fn();
+
+    await expect(
+      provider.probeVideoDuration(
+        'https://media.example.com/uploads/video\t.mp4'
+      )
+    ).rejects.toThrow(
+      'Selected video is not in configured application storage.'
+    );
+    expect(provider.runMediaCommand).not.toHaveBeenCalled();
+  });
+
+  it('preserves trusted local-file probing', async () => {
+    const uploadDirectory = mkdtempSync(join(tmpdir(), 'tiktok-upload-'));
+    const mediaPath = join(uploadDirectory, 'video.mp4');
+    writeFileSync(mediaPath, 'test video');
+    process.env.UPLOAD_DIRECTORY = uploadDirectory;
+    process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY = '/uploads';
     const provider = new TiktokProvider() as any;
     provider.runMediaCommand = jest.fn().mockResolvedValue({ stdout: '30\n' });
 
     try {
       await expect(
-        provider.probeVideoDuration(
-          'https://media.example.com/uploads/video.mp4'
-        )
+        provider.probeVideoDuration('/uploads/video.mp4')
       ).resolves.toBe(30);
-      expect(provider.runMediaCommand).toHaveBeenCalledWith(
-        'ffprobe',
-        expect.arrayContaining(['https://media.example.com/uploads/video.mp4']),
-        expect.objectContaining({ timeout: 15_000 })
+      expect(provider.runMediaCommand.mock.calls[0][1].at(-1)).toBe(
+        realpathSync(mediaPath)
       );
     } finally {
-      if (previousBucketUrl === undefined) {
-        delete process.env.CLOUDFLARE_BUCKET_URL;
-      } else {
-        process.env.CLOUDFLARE_BUCKET_URL = previousBucketUrl;
-      }
+      rmSync(uploadDirectory, { recursive: true, force: true });
     }
   });
 

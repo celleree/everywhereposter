@@ -456,24 +456,30 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     return realDiskPath;
   }
 
-  private isConfiguredCloudflareMediaUrl(mediaPath: string) {
+  private getConfiguredCloudflareMediaUrl(mediaPath: string) {
     const bucketUrl = process.env.CLOUDFLARE_BUCKET_URL;
-    if (!bucketUrl) {
-      return false;
+    if (!bucketUrl || /[\\\u0000-\u001F\u007F]/.test(mediaPath)) {
+      return undefined;
     }
 
     try {
       const candidate = new URL(mediaPath);
       const configured = new URL(bucketUrl);
       const configuredPath = `${configured.pathname.replace(/\/+$/, '')}/`;
-      return (
+      if (
+        !candidate.username &&
+        !candidate.password &&
         candidate.protocol === 'https:' &&
         candidate.origin === configured.origin &&
         candidate.pathname.startsWith(configuredPath)
-      );
+      ) {
+        return candidate.href;
+      }
     } catch {
-      return false;
+      return undefined;
     }
+
+    return undefined;
   }
 
   private getTrustedVideoInput(mediaPath: string) {
@@ -482,8 +488,9 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       return localPath;
     }
 
-    if (this.isConfiguredCloudflareMediaUrl(mediaPath)) {
-      return mediaPath;
+    const remoteUrl = this.getConfiguredCloudflareMediaUrl(mediaPath);
+    if (remoteUrl) {
+      return remoteUrl;
     }
 
     throw new Error('Selected video is not in configured application storage.');
