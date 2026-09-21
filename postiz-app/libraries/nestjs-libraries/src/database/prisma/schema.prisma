@@ -1102,6 +1102,11 @@ model OAuthAuthorization {
   accessToken       String?
   authorizationCode String?
   codeExpiresAt     DateTime?
+  scope             String?
+  resource          String?
+  redirectUri       String?
+  codeChallenge     String?
+  tokenExpiresAt    DateTime?
   revokedAt         DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt

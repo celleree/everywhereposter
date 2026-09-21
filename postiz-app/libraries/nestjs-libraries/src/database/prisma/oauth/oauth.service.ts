@@ -2,8 +2,16 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { OAuthRepository } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.repository';
 import { CreateOAuthAppDto } from '@gitroom/nestjs-libraries/dtos/oauth/create-oauth-app.dto';
 import { UpdateOAuthAppDto } from '@gitroom/nestjs-libraries/dtos/oauth/update-oauth-app.dto';
-import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { createHash, randomBytes } from 'crypto';
+import { AuthorizeOAuthQueryDto } from '@gitroom/nestjs-libraries/dtos/oauth/authorize-oauth.dto';
+import { TokenExchangeDto } from '@gitroom/nestjs-libraries/dtos/oauth/token-exchange.dto';
+
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
+
+export const ACCOUNTS_READ_SCOPE = 'accounts:read';
+export const getMcpResource = () =>
+  `${process.env.NEXT_PUBLIC_BACKEND_URL!.replace(/\/$/, '')}/mcp-oauth`;
+const TOKEN_LIFETIME_SECONDS = 3600;
 
 @Injectable()
 export class OAuthService {
@@ -25,8 +33,8 @@ export class OAuthService {
       );
     }
 
-    const clientId = 'pca_' + makeId(32);
-    const clientSecret = 'pcs_' + makeId(48);
+    const clientId = 'pca_' + randomBytes(32).toString('base64url');
+    const clientSecret = 'pcs_' + randomBytes(48).toString('base64url');
     const encryptedSecret = AuthService.fixedEncryption(clientSecret);
 
     const app = await this._oauthRepository.createApp(orgId, {
@@ -66,16 +74,29 @@ export class OAuthService {
       throw new HttpException('No OAuth app found', HttpStatus.NOT_FOUND);
     }
 
-    const newSecret = 'pcs_' + makeId(48);
+    const newSecret = 'pcs_' + randomBytes(48).toString('base64url');
     const encrypted = AuthService.fixedEncryption(newSecret);
     await this._oauthRepository.updateClientSecret(orgId, encrypted);
     return { clientSecret: newSecret };
   }
 
-  async validateAuthorizationRequest(clientId: string) {
-    const app = await this._oauthRepository.getAppByClientId(clientId);
+  async validateAuthorizationRequest(request: AuthorizeOAuthQueryDto) {
+    const app = await this._oauthRepository.getAppByClientId(request.client_id);
     if (!app) {
       throw new HttpException('Invalid client_id', HttpStatus.BAD_REQUEST);
+    }
+    if (
+      request.response_type !== 'code' ||
+      request.redirect_uri !== app.redirectUrl ||
+      request.scope !== ACCOUNTS_READ_SCOPE ||
+      request.resource !== getMcpResource() ||
+      request.code_challenge_method !== 'S256' ||
+      !/^[A-Za-z0-9_-]{43}$/.test(request.code_challenge || '')
+    ) {
+      throw new HttpException(
+        { error: 'invalid_request' },
+        HttpStatus.BAD_REQUEST
+      );
     }
     return app;
   }
@@ -83,9 +104,10 @@ export class OAuthService {
   async createAuthorizationCode(
     oauthAppId: string,
     userId: string,
-    organizationId: string
+    organizationId: string,
+    request: AuthorizeOAuthQueryDto
   ) {
-    const code = makeId(32);
+    const code = randomBytes(32).toString('base64url');
     const encryptedCode = AuthService.fixedEncryption(code);
     const codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -95,68 +117,97 @@ export class OAuthService {
       organizationId,
       authorizationCode: encryptedCode,
       codeExpiresAt,
+      scope: request.scope,
+      resource: request.resource,
+      redirectUri: request.redirect_uri,
+      codeChallenge: request.code_challenge,
     });
 
     return code;
   }
 
-  async exchangeCodeForToken(
-    code: string,
-    clientId: string,
-    clientSecret: string
-  ) {
-    const app = await this._oauthRepository.getAppByClientId(clientId);
-    if (!app) {
+  async exchangeCodeForToken(request: TokenExchangeDto) {
+    const app = await this._oauthRepository.getAppByClientId(request.client_id);
+    if (
+      !app ||
+      app.clientSecret !== AuthService.fixedEncryption(request.client_secret)
+    ) {
       throw new HttpException(
         { error: 'invalid_client' },
         HttpStatus.UNAUTHORIZED
       );
     }
 
-    if (app.clientSecret !== AuthService.fixedEncryption(clientSecret)) {
-      throw new HttpException(
-        { error: 'invalid_client' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
-    const encryptedCode = AuthService.fixedEncryption(code);
+    const encryptedCode = AuthService.fixedEncryption(request.code);
     const auth = await this._oauthRepository.findByCode(encryptedCode);
-    if (!auth || auth.oauthAppId !== app.id) {
+    if (
+      !auth ||
+      auth.oauthAppId !== app.id ||
+      auth.revokedAt ||
+      !auth.codeExpiresAt ||
+      auth.codeExpiresAt <= new Date() ||
+      auth.scope !== ACCOUNTS_READ_SCOPE ||
+      auth.resource !== getMcpResource() ||
+      request.resource !== auth.resource ||
+      request.redirect_uri !== auth.redirectUri ||
+      !/^[A-Za-z0-9._~-]{43,128}$/.test(request.code_verifier || '') ||
+      createHash('sha256').update(request.code_verifier).digest('base64url') !==
+        auth.codeChallenge
+    ) {
       throw new HttpException(
         { error: 'invalid_grant' },
         HttpStatus.BAD_REQUEST
       );
     }
 
-    if (!auth.codeExpiresAt || new Date() > auth.codeExpiresAt) {
+    const token = 'pos_' + randomBytes(32).toString('base64url');
+    const redeemed = await this._oauthRepository.exchangeCodeForToken(
+      auth,
+      encryptedCode,
+      AuthService.fixedEncryption(token),
+      new Date(Date.now() + TOKEN_LIFETIME_SECONDS * 1000)
+    );
+    if (redeemed.count !== 1) {
       throw new HttpException(
-        { error: 'invalid_grant', error_description: 'Code has expired' },
+        { error: 'invalid_grant' },
         HttpStatus.BAD_REQUEST
       );
     }
-
-    const token = 'pos_' + makeId(40);
-    const encryptedToken = AuthService.fixedEncryption(token);
-    const {
-      organizationId,
-      organization: { paymentId },
-    } = await this._oauthRepository.exchangeCodeForToken(
-      auth.id,
-      encryptedToken
-    );
-
     return {
-      id: organizationId,
-      cus: paymentId,
       access_token: token,
       token_type: 'bearer',
+      expires_in: TOKEN_LIFETIME_SECONDS,
+      scope: auth.scope,
     };
   }
 
-  async getOrgByOAuthToken(token: string) {
-    const encrypted = AuthService.fixedEncryption(token);
-    return this._oauthRepository.findByAccessToken(encrypted);
+  async getOrgByOAuthToken(token: string, resource: string, scope: string) {
+    if (
+      !token.startsWith('pos_') ||
+      resource !== getMcpResource() ||
+      scope !== ACCOUNTS_READ_SCOPE
+    )
+      return null;
+    const auth = await this._oauthRepository.findByAccessToken(
+      AuthService.fixedEncryption(token)
+    );
+    if (
+      !auth ||
+      auth.revokedAt ||
+      auth.oauthApp.deletedAt ||
+      !auth.tokenExpiresAt ||
+      auth.tokenExpiresAt <= new Date() ||
+      auth.resource !== resource ||
+      auth.scope !== scope ||
+      !auth.user.activated ||
+      !auth.user.organizations.some(
+        (membership) =>
+          membership.organizationId === auth.organizationId &&
+          !membership.disabled
+      )
+    )
+      return null;
+    return auth;
   }
 
   async getApprovedApps(userId: string) {
