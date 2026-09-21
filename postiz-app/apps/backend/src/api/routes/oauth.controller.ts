@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpException,
   HttpStatus,
   Post,
@@ -39,6 +40,8 @@ export class OAuthController {
   }
 
   @Post('/token')
+  @Header('Cache-Control', 'no-store')
+  @Header('Pragma', 'no-cache')
   async token(@Body() body: TokenExchangeDto) {
     if (body.grant_type !== 'authorization_code') {
       throw new HttpException(

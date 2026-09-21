@@ -9,11 +9,9 @@ import { AuthService } from '@gitroom/helpers/auth/auth.service';
 // Requires an isolated, migrated PostgreSQL database. Never uses DATABASE_URL.
 const database = process.env.OAUTH_TEST_DATABASE_URL;
 (database ? describe : describe.skip)('OAuth PostgreSQL conditional redemption', () => {
-  const clients = [0, 1].map(() => new PrismaClient({ datasources: { db: { url: database } } }));
-  const repositories = clients.map((client) => new OAuthRepository(
-    { model: client } as any, { model: client } as any
-  ));
-  const services = repositories.map((repository) => new OAuthService(repository));
+  let clients: PrismaClient[];
+  let repositories: OAuthRepository[];
+  let services: OAuthService[];
   const id = randomUUID();
   const verifier = 'x'.repeat(43);
   let app: any;
@@ -24,6 +22,11 @@ const database = process.env.OAUTH_TEST_DATABASE_URL;
     ...request(), code, grant_type: 'authorization_code', client_secret: 'secret', code_verifier: verifier,
   });
   beforeAll(async () => {
+    clients = [0, 1].map(() => new PrismaClient({ datasources: { db: { url: database } } }));
+    repositories = clients.map((client) => new OAuthRepository(
+      { model: client } as any, { model: client } as any
+    ));
+    services = repositories.map((repository) => new OAuthService(repository));
     process.env.JWT_SECRET = 'oauth-test-only-secret';
     process.env.NEXT_PUBLIC_BACKEND_URL = 'https://server.test/api';
     await clients[0].organization.create({ data: { id, name: 'OAuth test' } });

@@ -4,6 +4,8 @@ import { createHash } from 'crypto';
 import { OAuthService, getMcpResource } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { createOAuthMiddleware } from '@gitroom/nestjs-libraries/chat/oauth-middleware';
+import { HEADERS_METADATA } from '@nestjs/common/constants';
+import { OAuthController } from '../../apps/backend/src/api/routes/oauth.controller';
 import { PublicAuthMiddleware } from '../../apps/backend/src/services/auth/public.auth.middleware';
 
 jest.mock('@mastra/mcp', () => ({ MCPServer: jest.fn().mockImplementation(() => ({ startHTTP: jest.fn() })) }));
@@ -46,6 +48,14 @@ describe('OAuth accounts:read boundary', () => {
   const authenticate = (service: OAuthService) =>
     service.getOrgByOAuthToken('pos_token', getMcpResource(), 'accounts:read');
 
+  it('marks token responses as non-cacheable', () => {
+    expect(Reflect.getMetadata(HEADERS_METADATA, OAuthController.prototype.token)).toEqual(
+      expect.arrayContaining([
+        { name: 'Cache-Control', value: 'no-store' },
+        { name: 'Pragma', value: 'no-cache' },
+      ])
+    );
+  });
   it('accepts the bound active grant and preserves the external API prefix', async () => {
     expect(getMcpResource()).toBe('https://server.test/api/mcp-oauth');
     await expect(authenticate(service)).resolves.toMatchObject({ organizationId: 'org' });
