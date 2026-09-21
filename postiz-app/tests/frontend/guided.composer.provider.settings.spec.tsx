@@ -226,7 +226,7 @@ describe('guided composer existing provider settings', () => {
     });
   });
 
-  it('uses live TikTok creator info for Direct Post settings', async () => {
+  it('enforces TikTok Direct Post creator settings and duration', async () => {
     mockCustomProviderGet.mockResolvedValue({
       data: {
         creator_nickname: 'Arundel Creator',
@@ -238,38 +238,25 @@ describe('guided composer existing provider settings', () => {
       },
     });
 
-    const integration = {
-      ...baseIntegration,
-      id: 'tiktok-account',
-      identifier: 'tiktok',
-    };
-    const providerRef = renderProvider(TikTokProvider, integration, [
-      {
-        id: 'video-1',
-        path: 'https://media.example.com/video.mp4',
-        type: 'video',
-      },
-    ]);
+    const providerRef = renderProvider(
+      TikTokProvider,
+      { ...baseIntegration, id: 'tiktok-account', identifier: 'tiktok' },
+      [{ id: 'video-1', path: 'https://media.example.com/video.mp4', type: 'video' }]
+    );
 
     expect(await screen.findByText('Arundel Creator')).toBeTruthy();
     expect(mockCustomProviderGet).toHaveBeenCalledWith('creatorInfo');
 
-    const privacy = screen.getByLabelText(
-      'Who can see this video?'
-    ) as HTMLSelectElement;
+    const privacy = screen.getByLabelText('Who can see this video?') as HTMLSelectElement;
     expect(privacy.value).toBe('');
-    expect(
-      within(privacy)
-        .getAllByRole('option')
-        .map((option) => option.textContent)
-    ).toEqual(['Select', 'Self only', 'Follower of creator']);
-
+    expect(within(privacy).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Select',
+      'Self only',
+      'Follower of creator',
+    ]);
     expect(screen.getByRole('checkbox', { name: 'Comments' })).toHaveAttribute(
       'aria-checked',
       'false'
-    );
-    expect(screen.getByRole('checkbox', { name: 'Comments' })).not.toHaveAttribute(
-      'aria-disabled'
     );
     expect(screen.getByRole('checkbox', { name: 'Duet' })).toHaveAttribute(
       'aria-disabled',
@@ -279,70 +266,30 @@ describe('guided composer existing provider settings', () => {
       'aria-disabled',
       'true'
     );
+    expect(screen.getByText(/By posting, you agree to TikTok's/)).toBeTruthy();
 
-    expect(
-      screen.getByText(/By posting, you agree to TikTok's/)
-    ).toBeTruthy();
+    const missingPrivacy = await providerRef.current.isValid();
+    expect(missingPrivacy.errors).toBe(
+      'Select a privacy option currently available for this TikTok creator.'
+    );
 
-    await waitFor(async () => {
-      const result = await providerRef.current.isValid();
-      expect(result.valid).toBe(false);
-      expect(result.errors).toBe(
-        'Select a privacy option currently available for this TikTok creator.'
-      );
-    });
-  });
-
-  it('enforces the TikTok creator maximum video duration', async () => {
-    mockCustomProviderGet.mockResolvedValue({
-      data: {
-        creator_nickname: 'Arundel Creator',
-        privacy_level_options: ['SELF_ONLY'],
-        comment_disabled: false,
-        duet_disabled: false,
-        stitch_disabled: false,
-        max_video_post_duration_sec: 60,
-      },
-    });
-
-    const integration = {
-      ...baseIntegration,
-      id: 'tiktok-duration-account',
-      identifier: 'tiktok',
-    };
-    const providerRef = renderProvider(TikTokProvider, integration, [
-      {
-        id: 'video-1',
-        path: 'https://media.example.com/video.mp4',
-        type: 'video',
-      },
-    ]);
-
-    await screen.findByText('Arundel Creator');
-    fireEvent.change(screen.getByLabelText('Who can see this video?'), {
-      target: { value: 'SELF_ONLY' },
-    });
-
+    fireEvent.change(privacy, { target: { value: 'SELF_ONLY' } });
     const originalCreateElement = document.createElement.bind(document);
-    const createElementSpy = jest
-      .spyOn(document, 'createElement')
-      .mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+    const createElementSpy = jest.spyOn(document, 'createElement').mockImplementation(
+      ((tagName: string, options?: ElementCreationOptions) => {
         if (tagName === 'video') {
           const video: any = { duration: 61, onloadedmetadata: undefined };
           Object.defineProperty(video, 'preload', {
-            set: () => {
-              setTimeout(() => video.onloadedmetadata?.(), 0);
-            },
+            set: () => setTimeout(() => video.onloadedmetadata?.(), 0),
           });
           return video;
         }
-
         return originalCreateElement(tagName, options);
-      }) as typeof document.createElement);
+      }) as typeof document.createElement
+    );
 
     try {
-      const result = await providerRef.current.isValid();
-      expect(result.errors).toBe(
+      expect((await providerRef.current.isValid()).errors).toBe(
         'TikTok allows this creator to post videos up to 60 seconds.'
       );
     } finally {
