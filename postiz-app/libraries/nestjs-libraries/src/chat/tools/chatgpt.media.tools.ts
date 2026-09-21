@@ -10,10 +10,7 @@ import { z } from 'zod';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { fromBuffer } = require('file-type');
 
-const CHATGPT_FILE_HOSTS = new Set([
-  'files.oaiusercontent.com',
-  'files.openai.com',
-]);
+const CHATGPT_FILE_HOST_SUFFIXES = ['.openai.com', '.oaiusercontent.com'];
 const ALLOWED_MIME = new Set([
   'image/jpeg',
   'image/png',
@@ -75,17 +72,42 @@ export class ChatGptMediaUploadTool implements AgentToolInterface {
           (context?.requestContext as any)?.get('organization') as string
         ).id;
 
-        const url = new URL(inputData.file.download_url);
-        if (
-          url.protocol !== 'https:' ||
-          !CHATGPT_FILE_HOSTS.has(url.hostname.toLowerCase())
-        ) {
-          throw new Error('Only ChatGPT temporary file URLs are accepted.');
+        let url = new URL(inputData.file.download_url);
+        let response: Response | undefined;
+        for (let redirects = 0; redirects <= 3; redirects++) {
+          const hostname = url.hostname.toLowerCase();
+          const trustedHost = CHATGPT_FILE_HOST_SUFFIXES.some(
+            (suffix) =>
+              hostname === suffix.slice(1) || hostname.endsWith(suffix)
+          );
+          if (url.protocol !== 'https:' || !trustedHost) {
+            throw new Error('Only ChatGPT temporary file URLs are accepted.');
+          }
+
+          response = await fetch(url, { redirect: 'manual' });
+          if (response.status < 300 || response.status >= 400) {
+            break;
+          }
+
+          const location = response.headers.get('location');
+          if (!location) {
+            throw new Error('ChatGPT file redirect is missing a location.');
+          }
+          url = new URL(location, url);
         }
 
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`Unable to download ChatGPT file: HTTP ${response.status}`);
+        if (!response?.ok) {
+          throw new Error(
+            `Unable to download ChatGPT file: HTTP ${response?.status || 'unknown'}`
+          );
+        }
+
+        const advertisedLength = Number(response.headers.get('content-length'));
+        if (
+          Number.isFinite(advertisedLength) &&
+          advertisedLength > MAX_VIDEO_BYTES
+        ) {
+          throw new Error(`File exceeds the ${MAX_VIDEO_BYTES}-byte upload limit.`);
         }
 
         const buffer = Buffer.from(await response.arrayBuffer());
@@ -127,7 +149,7 @@ export class ChatGptMediaUploadTool implements AgentToolInterface {
             id: saved.id,
             path: saved.path,
             name: saved.name,
-            originalName: saved.originalName,
+            originalName: saved.originalName || null,
             type: saved.type,
             mimeType: detected.mime,
           },
