@@ -63,6 +63,10 @@ export class TikTokDto {
   @IsOptional()
   __tiktok_max_video_duration_sec?: number;
 
+  @IsString()
+  @IsOptional()
+  __tiktok_privacy_level_options_json?: string;
+
   @IsIn(['DIRECT_POST', 'UPLOAD'])
   @IsString()
   content_posting_method: 'DIRECT_POST' | 'UPLOAD';
