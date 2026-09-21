@@ -1,5 +1,12 @@
 import {
-  IsBoolean, ValidateIf, IsIn, IsString, MaxLength, IsOptional
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class TikTokDto {
@@ -7,6 +14,7 @@ export class TikTokDto {
   @MaxLength(90)
   title: string;
 
+  @ValidateIf((p) => p.content_posting_method === 'DIRECT_POST')
   @IsIn([
     'PUBLIC_TO_EVERYONE',
     'MUTUAL_FOLLOW_FRIENDS',
@@ -14,7 +22,7 @@ export class TikTokDto {
     'SELF_ONLY',
   ])
   @IsString()
-  privacy_level:
+  privacy_level?:
     | 'PUBLIC_TO_EVERYONE'
     | 'MUTUAL_FOLLOW_FRIENDS'
     | 'FOLLOWER_OF_CREATOR'
@@ -41,6 +49,19 @@ export class TikTokDto {
 
   @IsBoolean()
   brand_organic_toggle: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  __tiktok_creator_info_loaded?: boolean;
+
+  @IsString()
+  @IsOptional()
+  __tiktok_creator_info_error?: string;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  __tiktok_max_video_duration_sec?: number;
 
   @IsIn(['DIRECT_POST', 'UPLOAD'])
   @IsString()
