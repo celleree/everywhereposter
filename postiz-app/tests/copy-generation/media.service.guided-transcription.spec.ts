@@ -39,7 +39,8 @@ describe('MediaService guided transcription upload', () => {
 
     expect(transcriptionService.ensureTranscriptionStarted).toHaveBeenCalledWith(
       'org-1',
-      'video-1'
+      'video-1',
+      true
     );
   });
 

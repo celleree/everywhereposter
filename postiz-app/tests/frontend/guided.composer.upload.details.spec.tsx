@@ -299,7 +299,10 @@ const createFragment = (
     )
   );
 
-const createFragmentedMp4 = (includeAudioFragment: boolean) => {
+const createFragmentedMp4 = (
+  includeAudioFragment: boolean,
+  audioTrackId = 2
+) => {
   const ftyp = createBox(
     'ftyp',
     encodeAscii('isom'),
@@ -309,14 +312,14 @@ const createFragmentedMp4 = (includeAudioFragment: boolean) => {
   const moov = createBox(
     'moov',
     createFragmentTrack(1, 'vide'),
-    createFragmentTrack(2, 'soun')
+    createFragmentTrack(audioTrackId, 'soun')
   );
   const createMoof = (videoOffset: number, audioOffset: number) =>
     createBox(
       'moof',
       createFragment(1, videoOffset, VIDEO_SAMPLE_BYTES.length),
       ...(includeAudioFragment
-        ? [createFragment(2, audioOffset, AUDIO_SAMPLE_BYTES.length)]
+        ? [createFragment(audioTrackId, audioOffset, AUDIO_SAMPLE_BYTES.length)]
         : [])
     );
   const placeholderMoof = createMoof(0, 0);
@@ -546,6 +549,18 @@ describe('guided composer video picker', () => {
   it('rejects fragmented video with only a nominal audio track', async () => {
     await expect(
       validateGuidedVideoFile(createFragmentedMp4(false))
+    ).resolves.toBe('audio-required');
+  });
+
+  it('rejects fragmented media with duplicate video and audio track IDs', async () => {
+    await expect(
+      validateGuidedVideoFile(createFragmentedMp4(false, 1))
+    ).resolves.toBe('invalid');
+  });
+
+  it('does not accept a zero-ID audio fragment as real audio', async () => {
+    await expect(
+      validateGuidedVideoFile(createFragmentedMp4(true, 0))
     ).resolves.toBe('audio-required');
   });
 

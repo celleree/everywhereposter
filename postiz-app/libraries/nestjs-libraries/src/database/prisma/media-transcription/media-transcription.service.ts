@@ -38,10 +38,13 @@ export const GUIDED_VIDEO_AUDIO_REQUIRED_CODE =
 export const GUIDED_VIDEO_AUDIO_REQUIRED_MESSAGE =
   'An audio track with media is required for guided video creation.';
 const execFileAsync = promisify(execFile);
+const MAX_AUDIO_VALIDATION_CACHE_ENTRIES = 1000;
 
 @Injectable()
 export class MediaTranscriptionService {
   private readonly logger = new Logger(MediaTranscriptionService.name);
+  private readonly validatedAudioMedia = new Set<string>();
+  private readonly audioValidationInFlight = new Map<string, Promise<void>>();
 
   constructor(
     private readonly _repository: MediaTranscriptionRepository,
@@ -49,8 +52,14 @@ export class MediaTranscriptionService {
     private readonly _copyGenerationModelService: CopyGenerationModelService
   ) {}
 
-  async ensureTranscriptionStarted(organizationId: string, mediaId: string) {
-    await this.assertVideoHasAudioSamples(organizationId, mediaId);
+  async ensureTranscriptionStarted(
+    organizationId: string,
+    mediaId: string,
+    requireAudioSamples = false
+  ) {
+    if (requireAudioSamples) {
+      await this.assertVideoHasAudioSamples(organizationId, mediaId);
+    }
     const transcription =
       await this._repository.ensurePendingForActiveMedia(
         organizationId,
@@ -68,14 +77,22 @@ export class MediaTranscriptionService {
     return this.toPublicStatus(transcription);
   }
 
-  async getStatus(organizationId: string, mediaId: string) {
+  async getStatus(
+    organizationId: string,
+    mediaId: string,
+    requireAudioSamples = false
+  ) {
     const transcription = await this._repository.getCurrentForActiveMedia(
       organizationId,
       mediaId
     );
 
     if (!transcription) {
-      return this.ensureTranscriptionStarted(organizationId, mediaId);
+      return this.ensureTranscriptionStarted(
+        organizationId,
+        mediaId,
+        requireAudioSamples
+      );
     }
 
     if (transcription.status === MediaTranscriptionStatus.PENDING) {
@@ -85,8 +102,14 @@ export class MediaTranscriptionService {
     return this.toPublicStatus(transcription);
   }
 
-  async retry(organizationId: string, mediaId: string) {
-    await this.assertVideoHasAudioSamples(organizationId, mediaId);
+  async retry(
+    organizationId: string,
+    mediaId: string,
+    requireAudioSamples = false
+  ) {
+    if (requireAudioSamples) {
+      await this.assertVideoHasAudioSamples(organizationId, mediaId);
+    }
     const transcription =
       await this._repository.retryFailedForActiveMedia(organizationId, mediaId);
 
@@ -245,6 +268,40 @@ export class MediaTranscriptionService {
       throw new NotFoundException('Media not found');
     }
 
+    const cacheKey = `${organizationId}:${media.id}`;
+    if (this.validatedAudioMedia.has(cacheKey)) {
+      return;
+    }
+
+    const existingValidation = this.audioValidationInFlight.get(cacheKey);
+    if (existingValidation) {
+      return existingValidation;
+    }
+
+    const validation = this.validatePreparedVideoAudio(media);
+    this.audioValidationInFlight.set(cacheKey, validation);
+
+    try {
+      await validation;
+      if (
+        this.validatedAudioMedia.size >= MAX_AUDIO_VALIDATION_CACHE_ENTRIES
+      ) {
+        const oldestKey = this.validatedAudioMedia.values().next().value;
+        if (oldestKey) {
+          this.validatedAudioMedia.delete(oldestKey);
+        }
+      }
+      this.validatedAudioMedia.add(cacheKey);
+    } finally {
+      this.audioValidationInFlight.delete(cacheKey);
+    }
+  }
+
+  private async validatePreparedVideoAudio(media: {
+    path: string;
+    name: string;
+    originalName: string | null;
+  }) {
     const preparedVideo = await prepareVideoMediaFile(
       media.path,
       media.originalName || media.name

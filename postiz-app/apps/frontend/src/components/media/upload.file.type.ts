@@ -952,6 +952,20 @@ export const inspectSupportedMp4MovStructure = async (
     return 'invalid';
   }
 
+  const trackIdCounts = new Map<number, number>();
+  tracks.forEach((track) => {
+    if (track.trackId !== undefined) {
+      trackIdCounts.set(
+        track.trackId,
+        (trackIdCounts.get(track.trackId) || 0) + 1
+      );
+    }
+  });
+  const hasUsableFragmentTrackId = (track: TrackEvidence) =>
+    track.trackId !== undefined &&
+    track.trackId > 0 &&
+    trackIdCounts.get(track.trackId) === 1;
+
   const hasValidVideo = tracks.some((track) => {
     if (track.handlerType !== 'vide' || !track.hasVideoSampleEntry) {
       return false;
@@ -964,7 +978,7 @@ export const inspectSupportedMp4MovStructure = async (
       return true;
     }
 
-    if (track.trackId === undefined) {
+    if (!hasUsableFragmentTrackId(track)) {
       return false;
     }
 
@@ -992,7 +1006,7 @@ export const inspectSupportedMp4MovStructure = async (
     }
 
     return (
-      track.trackId !== undefined &&
+      hasUsableFragmentTrackId(track) &&
       fragmentSamples.some(
         (fragment) =>
           fragment.trackId === track.trackId &&

@@ -88,10 +88,10 @@ describe('MediaTranscriptionService', () => {
       .mockRejectedValueOnce(new Error('Workflow already started'));
 
     await expect(
-      service.ensureTranscriptionStarted('org-1', 'media-1')
+      service.ensureTranscriptionStarted('org-1', 'media-1', true)
     ).resolves.toMatchObject({ status: 'PENDING', generation: 1 });
     await expect(
-      service.ensureTranscriptionStarted('org-1', 'media-1')
+      service.ensureTranscriptionStarted('org-1', 'media-1', true)
     ).resolves.toMatchObject({ status: 'PENDING', generation: 1 });
 
     const workflowIds = start.mock.calls.map((call) => call[1].workflowId);
@@ -103,6 +103,17 @@ describe('MediaTranscriptionService', () => {
       taskQueue: 'main',
       workflowIdReusePolicy: 'ALLOW_DUPLICATE_FAILED_ONLY',
     });
+    expect(prepareVideoMediaFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not apply the guided audio gate to ordinary transcription callers', async () => {
+    const { service, runMediaCommand } = createService();
+
+    await expect(
+      service.ensureTranscriptionStarted('org-1', 'media-1')
+    ).resolves.toMatchObject({ status: 'PENDING' });
+    expect(runMediaCommand).not.toHaveBeenCalled();
+    expect(prepareVideoMediaFile).not.toHaveBeenCalled();
   });
 
   it('rejects cross-organization or deleted media access', async () => {
@@ -110,7 +121,7 @@ describe('MediaTranscriptionService', () => {
     repository.getActiveMediaForTranscription.mockResolvedValueOnce(null);
 
     await expect(
-      service.ensureTranscriptionStarted('other-org', 'media-1')
+      service.ensureTranscriptionStarted('other-org', 'media-1', true)
     ).rejects.toThrow('Media not found');
     expect(start).not.toHaveBeenCalled();
   });
@@ -120,7 +131,7 @@ describe('MediaTranscriptionService', () => {
     runMediaCommand.mockResolvedValueOnce({ stdout: '' });
 
     await expect(
-      service.ensureTranscriptionStarted('org-1', 'media-1')
+      service.ensureTranscriptionStarted('org-1', 'media-1', true)
     ).rejects.toMatchObject({
       response: expect.objectContaining({
         code: 'GUIDED_VIDEO_AUDIO_REQUIRED',
@@ -146,7 +157,7 @@ describe('MediaTranscriptionService', () => {
     runMediaCommand.mockRejectedValueOnce(new Error('ffprobe failed'));
 
     await expect(
-      service.ensureTranscriptionStarted('org-1', 'media-1')
+      service.ensureTranscriptionStarted('org-1', 'media-1', true)
     ).rejects.toThrow('ffprobe failed');
     expect(repository.ensurePendingForActiveMedia).not.toHaveBeenCalled();
   });
