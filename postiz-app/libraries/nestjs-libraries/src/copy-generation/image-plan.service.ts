@@ -17,6 +17,10 @@ import {
   ReferenceImageContext,
   ReferenceImageService,
 } from '@gitroom/nestjs-libraries/database/prisma/reference-images/reference-image.service';
+import {
+  getOpenAiReasoningEffort,
+  OPENAI_MODELS,
+} from '@gitroom/nestjs-libraries/openai/openai.models';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
@@ -166,7 +170,8 @@ Create the smallest useful platform-specific image plan.`;
     }
 
     const response = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      model: OPENAI_MODELS.copy,
+      reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.copy),
       messages: [
         {
           role: 'system',

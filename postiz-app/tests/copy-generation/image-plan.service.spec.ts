@@ -141,6 +141,12 @@ describe('ImagePlanService', () => {
       'instagram',
     ]);
 
+    expect(getParseMock()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gpt-6-astra',
+        reasoning_effort: 'low',
+      })
+    );
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({
       type: 'video_frame',
