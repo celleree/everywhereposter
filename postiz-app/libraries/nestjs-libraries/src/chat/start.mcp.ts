@@ -5,8 +5,10 @@ import { MCPServer } from '@mastra/mcp';
 import { randomUUID } from 'crypto';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { ACCOUNTS_READ_SCOPE, getMcpResource, OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
+import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { runWithContext } from './async.storage';
 import { createOAuthMiddleware } from './oauth-middleware';
+import { createListConnectedAccountsTool } from './tools/list.connected.accounts.tool';
 const fixAcceptHeader = (req: Request) => {
   const value = 'application/json, text/event-stream';
   req.headers.accept = value;
@@ -22,6 +24,7 @@ export const startMcp = async (app: INestApplication) => {
   const mastraService = app.get(MastraService, { strict: false });
   const organizationService = app.get(OrganizationService, { strict: false });
   const oauthService = app.get(OAuthService, { strict: false });
+  const integrationService = app.get(IntegrationService, { strict: false });
 
   const resolveAuth = async (token: string) => {
     if (token.startsWith('pos_')) return null;
@@ -41,7 +44,13 @@ export const startMcp = async (app: INestApplication) => {
 
   const server = new MCPServer(serverConfig);
   // Read grants must never inherit the agent or its publishing/generation tools.
-  const readServer = new MCPServer({ name: 'EverywherePoster Accounts', version: '1.0.0', tools: {} });
+  const readServer = new MCPServer({
+    name: 'EverywherePoster Accounts',
+    version: '1.0.0',
+    tools: {
+      list_connected_accounts: createListConnectedAccountsTool(integrationService),
+    },
+  });
   const resource = getMcpResource();
 
   const oauthMiddleware = createOAuthMiddleware({
