@@ -368,6 +368,31 @@ describe('ManageModal guided publishing bridge', () => {
     });
   });
 
+  it('removes a guided video from media intent while preserving images', () => {
+    const image = {
+      id: 'image-1',
+      path: 'https://media.example.com/image.png',
+      type: 'image',
+    } as any;
+    useLaunchStore.getState().setGlobalValueMedia(0, [...media, image]);
+
+    const guidedView = renderGuidedManageModal();
+
+    const removeVideo = screen.getByRole('button', { name: 'Remove video' });
+    expect(removeVideo.getAttribute('type')).toBe('button');
+    expect(removeVideo.className).toContain('h-[36px]');
+    expect(removeVideo.className).toContain('w-[36px]');
+
+    fireEvent.click(removeVideo);
+
+    expect(useLaunchStore.getState().global[0].media).toEqual([image]);
+
+    guidedView.unmount();
+    useLaunchStore.getState().setGlobalValueMedia(0, [...media, image]);
+    render(<ManageModal {...manageModalProps} />);
+    expect(screen.queryByRole('button', { name: 'Remove video' })).toBeNull();
+  });
+
   it('submits enabled destinations with independent Review captions and preserved provider data', async () => {
     renderGuidedManageModal();
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));

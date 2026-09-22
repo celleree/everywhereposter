@@ -65,6 +65,7 @@ import {
   useRegisterGuidedComposerPublish,
 } from '@gitroom/frontend/components/new-launch/guided.composer.publish';
 import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
+import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
@@ -176,6 +177,7 @@ export const ManageModal: FC<
     setHide,
     global,
     appendGlobalValueMedia,
+    setGlobalValueMedia,
   } = useLaunchStore(
     useShallow((state) => ({
       hide: state.hide,
@@ -196,6 +198,7 @@ export const ManageModal: FC<
       activateExitButton: state.activateExitButton,
       global: state.global,
       appendGlobalValueMedia: state.appendGlobalValueMedia,
+      setGlobalValueMedia: state.setGlobalValueMedia,
     }))
   );
 
@@ -842,6 +845,16 @@ export const ManageModal: FC<
     [appendGlobalValueMedia, generateCopyForPreset, queuedAiPreset]
   );
 
+  const removeGuidedVideo = useCallback(
+    (mediaId: string) => {
+      setGlobalValueMedia(
+        0,
+        globalMedia.filter((media: any) => media.id !== mediaId)
+      );
+    },
+    [globalMedia, setGlobalValueMedia]
+  );
+
   const executePostSubmission = useCallback(
     async (
       type: 'draft' | 'now' | 'schedule' | 'update',
@@ -1377,6 +1390,11 @@ export const ManageModal: FC<
                         media={globalMedia}
                         onUpload={handleUpload}
                         guidedTranscription={props.guidedComposerActive === true}
+                        onRemoveVideo={
+                          props.guidedComposerActive === true
+                            ? removeGuidedVideo
+                            : undefined
+                        }
                       />
                     </ComposerSection>
 
@@ -1847,7 +1865,14 @@ const ComposerUploadCard: FC<{
   media: any[];
   onUpload: (media: any[]) => void;
   guidedTranscription?: boolean;
-}> = ({ disabled, media, onUpload, guidedTranscription = false }) => {
+  onRemoveVideo?: (mediaId: string) => void;
+}> = ({
+  disabled,
+  media,
+  onUpload,
+  guidedTranscription = false,
+  onRemoveVideo,
+}) => {
   const t = useT();
   const toaster = useToaster();
   const modals = useModals();
@@ -2029,8 +2054,21 @@ const ComposerUploadCard: FC<{
               {media.slice(0, 8).map((item: any) => (
                 <div
                   key={item.id}
-                  className="min-w-0 overflow-hidden rounded-[14px] border border-newBorder bg-black/20"
+                  className="relative min-w-0 overflow-hidden rounded-[14px] border border-newBorder bg-black/20"
                 >
+                  {guidedTranscription &&
+                    isGuidedMp4MovMedia(item) &&
+                    onRemoveVideo && (
+                      <button
+                        type="button"
+                        aria-label="Remove video"
+                        disabled={disabled}
+                        onClick={() => onRemoveVideo(item.id)}
+                        className="absolute right-[8px] top-[8px] z-10 flex h-[36px] w-[36px] items-center justify-center rounded-full bg-black/70 text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:bg-black"
+                      >
+                        <CloseIcon size={18} aria-hidden="true" />
+                      </button>
+                    )}
                   <div className="aspect-[1/1]">
                     <VideoOrImage
                       autoplay={true}
