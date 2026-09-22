@@ -102,10 +102,7 @@ export class MediaTranscriptionService {
       );
     }
 
-    if (
-      transcription.status === MediaTranscriptionStatus.FAILED ||
-      !transcription.text?.trim()
-    ) {
+    if (transcription.status === MediaTranscriptionStatus.FAILED) {
       throw new TranscriptionLifecycleError(
         'TRANSCRIPTION_FAILED',
         transcription.error?.message ||
@@ -113,7 +110,7 @@ export class MediaTranscriptionService {
       );
     }
 
-    return transcription.text.trim();
+    return transcription.text?.trim() || undefined;
   }
 
   async deleteMedia(organizationId: string, mediaId: string) {
@@ -181,13 +178,12 @@ export class MediaTranscriptionService {
     }
 
     if (!text) {
-      const stored = await this._repository.failIfActive(
+      const stored = await this._repository.completeIfActive(
         transcriptionId,
         generation,
-        'EMPTY_TRANSCRIPT',
-        'No spoken transcript was found in this video.'
+        null
       );
-      return { discarded: !stored, status: 'FAILED' as const };
+      return { discarded: !stored, status: 'READY' as const };
     }
 
     const stored = await this._repository.completeIfActive(

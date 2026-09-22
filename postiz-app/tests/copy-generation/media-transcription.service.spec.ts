@@ -140,6 +140,55 @@ describe('MediaTranscriptionService', () => {
     );
   });
 
+  it('stores detected speech in the normal READY path', async () => {
+    const { service, repository, model } = createService();
+    repository.getActiveWorkerInput.mockResolvedValue({
+      ...pending,
+      status: MediaTranscriptionStatus.PROCESSING,
+      media: {
+        path: 'https://media.example.com/video.mp4',
+        originalName: 'video.mp4',
+        name: 'video.mp4',
+      },
+    });
+    repository.completeIfActive.mockResolvedValue(true);
+    model.transcribeVideo.mockResolvedValue({ text: '  Spoken words.  ' });
+
+    await expect(
+      service.processTranscription('transcription-1', 1)
+    ).resolves.toEqual({ discarded: false, status: 'READY' });
+    expect(repository.completeIfActive).toHaveBeenCalledWith(
+      'transcription-1',
+      1,
+      'Spoken words.'
+    );
+  });
+
+  it('stores no detected speech as READY without fake transcript text', async () => {
+    const { service, repository, model } = createService();
+    repository.getActiveWorkerInput.mockResolvedValue({
+      ...pending,
+      status: MediaTranscriptionStatus.PROCESSING,
+      media: {
+        path: 'https://media.example.com/video.mp4',
+        originalName: 'video.mp4',
+        name: 'video.mp4',
+      },
+    });
+    repository.completeIfActive.mockResolvedValue(true);
+    model.transcribeVideo.mockResolvedValue({ text: '   ' });
+
+    await expect(
+      service.processTranscription('transcription-1', 1)
+    ).resolves.toEqual({ discarded: false, status: 'READY' });
+    expect(repository.completeIfActive).toHaveBeenCalledWith(
+      'transcription-1',
+      1,
+      null
+    );
+    expect(repository.failIfActive).not.toHaveBeenCalled();
+  });
+
   it('deletes READY transcript text and best-effort cancels its workflow', async () => {
     const { service, repository, temporal } = createService();
     repository.deleteMediaLifecycle.mockResolvedValue({
@@ -198,6 +247,20 @@ describe('MediaTranscriptionService', () => {
       code: 'TRANSCRIPTION_FAILED',
       message: 'The video could not be transcribed. Please retry.',
     });
+  });
+
+  it('resolves a READY transcription without speech as absent text', async () => {
+    const { service, repository } = createService();
+    repository.ensurePendingForActiveMedia.mockResolvedValue({
+      ...pending,
+      status: MediaTranscriptionStatus.READY,
+      text: null,
+      completedAt: new Date('2026-08-09T00:05:00Z'),
+    });
+
+    await expect(
+      service.resolveForGeneration('org-1', 'media-1')
+    ).resolves.toBeUndefined();
   });
 
   it('lets model failures escape so Temporal can retry the activity', async () => {

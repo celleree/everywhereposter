@@ -159,7 +159,7 @@ export class MediaTranscriptionRepository {
   async completeIfActive(
     transcriptionId: string,
     generation: number,
-    text: string
+    text: string | null
   ) {
     const result = await this._prisma.mediaTranscription.updateMany({
       where: {

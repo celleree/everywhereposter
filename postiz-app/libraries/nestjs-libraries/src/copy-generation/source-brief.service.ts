@@ -184,14 +184,18 @@ export class SourceBriefService {
             media.id
           );
         } else {
-          transcript = {
-            text: await this._mediaTranscriptionService.resolveForGeneration(
+          const generatedTranscript =
+            await this._mediaTranscriptionService.resolveForGeneration(
               orgId,
               media.id
-            ),
-            source: 'generated',
-            confidence: 0.68,
-          };
+            );
+          transcript = generatedTranscript
+            ? {
+                text: generatedTranscript,
+                source: 'generated',
+                confidence: 0.68,
+              }
+            : undefined;
         }
       }
 
@@ -292,8 +296,8 @@ export class SourceBriefService {
         warnings.push({
           code: 'NO_TRANSCRIPT',
           message: hasUsableVisualEvidence
-            ? 'No transcript is available, so generation will rely only on the representative video frames and may miss spoken context.'
-            : 'No transcript or usable frame analysis is available for this video, so grounded copy generation is blocked.',
+            ? 'No spoken dialogue was detected, so generation will rely on the representative video frames and other source details.'
+            : 'No spoken dialogue or usable frame analysis is available for this video, so grounded copy generation is blocked.',
         });
       }
 

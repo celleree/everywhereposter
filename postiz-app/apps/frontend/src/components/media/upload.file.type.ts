@@ -111,10 +111,10 @@ type SampleTableEvidence = {
 };
 
 type MediaBoxEvidence = SampleTableEvidence & {
-  hasVideoHandler: boolean;
+  handlerType?: string;
 };
 
-type VideoTrackEvidence = MediaBoxEvidence & {
+type TrackEvidence = MediaBoxEvidence & {
   trackId?: number;
 };
 
@@ -582,7 +582,7 @@ const mediaBoxEvidence = async (
   end: number
 ): Promise<MediaBoxEvidence> => {
   let offset = start;
-  let hasVideoHandler = false;
+  let handlerType: string | undefined;
   let hasVideoSampleEntry = false;
   let classicSample: SampleLocation | undefined;
 
@@ -591,15 +591,17 @@ const mediaBoxEvidence = async (
 
     if (!box) {
       return {
-        hasVideoHandler: false,
+        handlerType: undefined,
         hasVideoSampleEntry: false,
       };
     }
 
     if (box.type === 'hdlr') {
       const handlerBytes = await readBlobRange(blob, box.payloadStart, 12);
-      hasVideoHandler =
-        handlerBytes.length >= 12 && readAscii(handlerBytes, 8, 4) === 'vide';
+      handlerType =
+        handlerBytes.length >= 12
+          ? readAscii(handlerBytes, 8, 4)
+          : undefined;
     } else if (box.type === 'minf') {
       const evidence = await mediaInformationEvidence(
         blob,
@@ -613,7 +615,7 @@ const mediaBoxEvidence = async (
     offset = box.end;
   }
 
-  return { hasVideoHandler, hasVideoSampleEntry, classicSample };
+  return { handlerType, hasVideoSampleEntry, classicSample };
 };
 
 const readTrackId = async (blob: Blob, box: BmffBox) => {
@@ -636,10 +638,10 @@ const trackBoxEvidence = async (
   blob: Blob,
   start: number,
   end: number
-): Promise<VideoTrackEvidence> => {
+): Promise<TrackEvidence> => {
   let offset = start;
   let trackId: number | undefined;
-  let hasVideoHandler = false;
+  let handlerType: string | undefined;
   let hasVideoSampleEntry = false;
   let classicSample: SampleLocation | undefined;
 
@@ -647,7 +649,7 @@ const trackBoxEvidence = async (
     const box = await readBoxHeader(blob, offset, end);
 
     if (!box) {
-      return { hasVideoHandler: false, hasVideoSampleEntry: false };
+      return { handlerType: undefined, hasVideoSampleEntry: false };
     }
 
     if (box.type === 'tkhd') {
@@ -658,7 +660,7 @@ const trackBoxEvidence = async (
         box.payloadStart,
         box.end
       );
-      hasVideoHandler = evidence.hasVideoHandler;
+      handlerType = evidence.handlerType;
       hasVideoSampleEntry = evidence.hasVideoSampleEntry;
       classicSample = evidence.classicSample;
     }
@@ -668,18 +670,18 @@ const trackBoxEvidence = async (
 
   return {
     trackId,
-    hasVideoHandler,
+    handlerType,
     hasVideoSampleEntry,
     classicSample,
   };
 };
 
-const moovBoxVideoTracks = async (
+const moovBoxTracks = async (
   blob: Blob,
   start: number,
   end: number
 ) => {
-  const tracks: VideoTrackEvidence[] = [];
+  const tracks: TrackEvidence[] = [];
   let offset = start;
 
   while (offset < end) {
@@ -696,9 +698,7 @@ const moovBoxVideoTracks = async (
         box.end
       );
 
-      if (evidence.hasVideoHandler) {
-        tracks.push(evidence);
-      }
+      tracks.push(evidence);
     }
 
     offset = box.end;
@@ -913,13 +913,18 @@ const sampleFallsInsideMediaData = (
       sample.offset + sample.size <= range.end
   );
 
-export const hasSupportedMp4MovSignature = async (
+export type SupportedMp4MovStructure =
+  | 'invalid'
+  | 'video-only'
+  | 'video-with-audio';
+
+export const inspectSupportedMp4MovStructure = async (
   blob: Blob,
   expectedType: string
-) => {
+): Promise<SupportedMp4MovStructure> => {
   let offset = 0;
   let brands: string[] = [];
-  const videoTracks: VideoTrackEvidence[] = [];
+  const tracks: TrackEvidence[] = [];
   const fragmentSamples: FragmentSampleEvidence[] = [];
   const mediaDataRanges: ByteRange[] = [];
 
@@ -927,15 +932,13 @@ export const hasSupportedMp4MovSignature = async (
     const box = await readBoxHeader(blob, offset, blob.size);
 
     if (!box) {
-      return false;
+      return 'invalid';
     }
 
     if (box.type === 'ftyp') {
       brands = await readFtypBrands(blob, box);
     } else if (box.type === 'moov') {
-      videoTracks.push(
-        ...(await moovBoxVideoTracks(blob, box.payloadStart, box.end))
-      );
+      tracks.push(...(await moovBoxTracks(blob, box.payloadStart, box.end)));
     } else if (box.type === 'moof') {
       fragmentSamples.push(...(await moofSampleEvidence(blob, box)));
     } else if (box.type === 'mdat' && box.end > box.payloadStart) {
@@ -946,11 +949,11 @@ export const hasSupportedMp4MovSignature = async (
   }
 
   if (!hasExpectedBrand(brands, expectedType) || !mediaDataRanges.length) {
-    return false;
+    return 'invalid';
   }
 
-  return videoTracks.some((track) => {
-    if (!track.hasVideoSampleEntry) {
+  const hasValidVideo = tracks.some((track) => {
+    if (track.handlerType !== 'vide' || !track.hasVideoSampleEntry) {
       return false;
     }
 
@@ -971,7 +974,21 @@ export const hasSupportedMp4MovSignature = async (
         sampleFallsInsideMediaData(fragment.sample, mediaDataRanges)
     );
   });
+
+  if (!hasValidVideo) {
+    return 'invalid';
+  }
+
+  return tracks.some((track) => track.handlerType === 'soun')
+    ? 'video-with-audio'
+    : 'video-only';
 };
+
+export const hasSupportedMp4MovSignature = async (
+  blob: Blob,
+  expectedType: string
+) =>
+  (await inspectSupportedMp4MovStructure(blob, expectedType)) !== 'invalid';
 
 export const canBrowserDecodeVideo = async (
   blob: Blob,

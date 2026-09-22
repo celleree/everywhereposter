@@ -29,6 +29,7 @@ import {
   isGuidedVideoFile,
   normalizeGuidedVideoFile,
   selectGuidedSourceVideo,
+  validateGuidedVideoFile,
 } from '../../apps/frontend/src/components/new-launch/guided.composer.upload.details';
 import {
   canBrowserDecodeVideo,
@@ -168,7 +169,8 @@ const createIsoBmffBytes = (
   compatibleBrand = brand,
   handlerType = 'vide',
   includeVideoSamples = true,
-  includeCodecConfig = true
+  includeCodecConfig = true,
+  includeAudioTrack = handlerType === 'vide'
 ) => {
   const ftyp = createBox(
     'ftyp',
@@ -189,7 +191,20 @@ const createIsoBmffBytes = (
     : undefined;
   const minf = sampleTable ? createBox('minf', sampleTable) : undefined;
   const mdia = createBox('mdia', hdlr, ...(minf ? [minf] : []));
-  const moov = createBox('moov', createBox('trak', mdia));
+  const audioTrack = includeAudioTrack
+    ? createBox(
+        'trak',
+        createBox(
+          'mdia',
+          createBox('hdlr', new Uint8Array(8), encodeAscii('soun'))
+        )
+      )
+    : undefined;
+  const moov = createBox(
+    'moov',
+    createBox('trak', mdia),
+    ...(audioTrack ? [audioTrack] : [])
+  );
 
   return concatBytes(ftyp, ...(mdat ? [mdat] : []), moov);
 };
@@ -197,8 +212,14 @@ const createIsoBmffBytes = (
 const createMp4File = (
   name = 'demo.mp4',
   type = 'video/mp4',
-  brand = 'isom'
-) => new File([createIsoBmffBytes(brand, 'mp42')], name, { type });
+  brand = 'isom',
+  includeAudioTrack = true
+) =>
+  new File(
+    [createIsoBmffBytes(brand, 'mp42', 'vide', true, true, includeAudioTrack)],
+    name,
+    { type }
+  );
 
 const createMovFile = (name = 'demo.mov', type = 'video/quicktime') =>
   new File([createIsoBmffBytes('qt  ')], name, { type });
@@ -349,6 +370,21 @@ describe('guided composer video picker', () => {
     await expect(resolveUploadFileType(audioOnly)).resolves.toBe(
       'application/octet-stream'
     );
+  });
+
+  it('requires an audio track separately from valid video structure', async () => {
+    const videoOnly = createMp4File(
+      'video-only.mp4',
+      'application/octet-stream',
+      'isom',
+      false
+    );
+
+    await expect(validateGuidedVideoFile(videoOnly)).resolves.toBe(
+      'audio-required'
+    );
+    await expect(isGuidedVideoFile(videoOnly)).resolves.toBe(false);
+    await expect(resolveUploadFileType(videoOnly)).resolves.toBe('video/mp4');
   });
 
   it('rejects explicit non-video MIME types and invalid video bytes', async () => {
@@ -550,6 +586,52 @@ describe('guided composer video picker', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert').textContent).toContain(
         'Only valid MP4 and MOV video files can be uploaded here.'
+      )
+    );
+    expect(input.value).toBe('');
+    expect(forwarded).not.toHaveBeenCalled();
+    unmount();
+    host.remove();
+  });
+
+  it('shows the audio-required error for a video-only guided upload', async () => {
+    const host = document.createElement('div');
+    host.innerHTML = `
+      <div class="guided-upload-existing-composer">
+        <div id="social-content">
+          <section data-guided-composer-section="media">
+            <div></div>
+            <div><input type="file" multiple /></div>
+          </section>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(host);
+    const input = host.querySelector('input') as HTMLInputElement;
+    const videoOnly = createMp4File(
+      'video-only.mp4',
+      'video/mp4',
+      'isom',
+      false
+    );
+    const forwarded = jest.fn();
+    input.addEventListener('change', forwarded);
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [videoOnly],
+    });
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      writable: true,
+      value: 'video-only.mp4',
+    });
+
+    const { unmount } = render(<GuidedComposerUploadDetails />);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain(
+        'An audio track is required for guided video creation.'
       )
     );
     expect(input.value).toBe('');
