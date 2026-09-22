@@ -259,7 +259,8 @@ export class MediaController {
   ) {
     return this._mediaTranscriptionService.ensureTranscriptionStarted(
       org.id,
-      id
+      id,
+      true
     );
   }
 
@@ -268,7 +269,7 @@ export class MediaController {
     @GetOrgFromRequest() org: Organization,
     @Param('id') id: string
   ) {
-    return this._mediaTranscriptionService.retry(org.id, id);
+    return this._mediaTranscriptionService.retry(org.id, id, true);
   }
 
   @Get('/:id/transcription')
@@ -276,7 +277,7 @@ export class MediaController {
     @GetOrgFromRequest() org: Organization,
     @Param('id') id: string
   ) {
-    return this._mediaTranscriptionService.getStatus(org.id, id);
+    return this._mediaTranscriptionService.getStatus(org.id, id, true);
   }
 
   @Get('/:id')

@@ -297,15 +297,34 @@ export const MediaBox: FC<{
     }
 
     if (guidedTranscription) {
-      await Promise.all(
-        selected
-          .filter(isGuidedMp4MovMedia)
-          .map((media: any) =>
-            fetch(`/media/${media.id}/transcription/ensure`, {
-              method: 'POST',
-            }).catch(() => undefined)
-          )
-      );
+      try {
+        const responses = await Promise.all(
+          selected
+            .filter(isGuidedMp4MovMedia)
+            .map((media: any) =>
+              fetch(`/media/${media.id}/transcription/ensure`, {
+                method: 'POST',
+              })
+            )
+        );
+        const failedResponse = responses.find((response) => !response.ok);
+
+        if (failedResponse) {
+          const body = await failedResponse.json().catch(() => undefined);
+          throw new Error(
+            body?.message ||
+              'The selected video could not be validated for guided creation.'
+          );
+        }
+      } catch (error) {
+        toaster.show(
+          error instanceof Error
+            ? error.message
+            : 'The selected video could not be validated for guided creation.',
+          'warning'
+        );
+        return;
+      }
     }
 
     // @ts-ignore
@@ -315,7 +334,7 @@ export const MediaBox: FC<{
         : selected
     );
     modals.closeCurrent();
-  }, [fetch, guidedTranscription, modals, selected, setMedia]);
+  }, [fetch, guidedTranscription, modals, selected, setMedia, toaster]);
 
   const addToUpload = useCallback(
     async (e: ChangeEvent<HTMLInputElement>) => {

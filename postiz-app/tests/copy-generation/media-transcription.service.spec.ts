@@ -28,6 +28,13 @@ const pending = {
 const createService = () => {
   const start = jest.fn().mockResolvedValue(undefined);
   const repository = {
+    getActiveMediaForTranscription: jest.fn().mockResolvedValue({
+      id: 'media-1',
+      path: 'https://media.example.com/video.mp4',
+      name: 'video.mp4',
+      originalName: 'video.mp4',
+    }),
+    getCurrentForActiveMedia: jest.fn(),
     ensurePendingForActiveMedia: jest.fn().mockResolvedValue(pending),
     retryFailedForActiveMedia: jest.fn(),
     claimForProcessing: jest.fn(),
@@ -46,17 +53,22 @@ const createService = () => {
   const model = {
     transcribeVideo: jest.fn(),
   };
+  const service = new MediaTranscriptionService(
+    repository as any,
+    temporal as any,
+    model as any
+  );
+  const runMediaCommand = jest
+    .spyOn(service as any, 'runMediaCommand')
+    .mockResolvedValue({ stdout: '4096\n' });
 
   return {
-    service: new MediaTranscriptionService(
-      repository as any,
-      temporal as any,
-      model as any
-    ),
+    service,
     repository,
     temporal,
     model,
     start,
+    runMediaCommand,
   };
 };
 
@@ -76,10 +88,10 @@ describe('MediaTranscriptionService', () => {
       .mockRejectedValueOnce(new Error('Workflow already started'));
 
     await expect(
-      service.ensureTranscriptionStarted('org-1', 'media-1')
+      service.ensureTranscriptionStarted('org-1', 'media-1', true)
     ).resolves.toMatchObject({ status: 'PENDING', generation: 1 });
     await expect(
-      service.ensureTranscriptionStarted('org-1', 'media-1')
+      service.ensureTranscriptionStarted('org-1', 'media-1', true)
     ).resolves.toMatchObject({ status: 'PENDING', generation: 1 });
 
     const workflowIds = start.mock.calls.map((call) => call[1].workflowId);
@@ -91,16 +103,63 @@ describe('MediaTranscriptionService', () => {
       taskQueue: 'main',
       workflowIdReusePolicy: 'ALLOW_DUPLICATE_FAILED_ONLY',
     });
+    expect(prepareVideoMediaFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not apply the guided audio gate to ordinary transcription callers', async () => {
+    const { service, runMediaCommand } = createService();
+
+    await expect(
+      service.ensureTranscriptionStarted('org-1', 'media-1')
+    ).resolves.toMatchObject({ status: 'PENDING' });
+    expect(runMediaCommand).not.toHaveBeenCalled();
+    expect(prepareVideoMediaFile).not.toHaveBeenCalled();
   });
 
   it('rejects cross-organization or deleted media access', async () => {
     const { service, repository, start } = createService();
-    repository.ensurePendingForActiveMedia.mockResolvedValueOnce(null);
+    repository.getActiveMediaForTranscription.mockResolvedValueOnce(null);
 
     await expect(
-      service.ensureTranscriptionStarted('other-org', 'media-1')
+      service.ensureTranscriptionStarted('other-org', 'media-1', true)
     ).rejects.toThrow('Media not found');
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it('rejects guided transcription before lifecycle creation when audio is absent', async () => {
+    const { service, repository, runMediaCommand, start } = createService();
+    runMediaCommand.mockResolvedValueOnce({ stdout: '' });
+
+    await expect(
+      service.ensureTranscriptionStarted('org-1', 'media-1', true)
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'GUIDED_VIDEO_AUDIO_REQUIRED',
+        message: expect.stringContaining('audio track with media is required'),
+      }),
+    });
+    expect(repository.ensurePendingForActiveMedia).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(runMediaCommand).toHaveBeenCalledWith(
+      'ffprobe',
+      expect.arrayContaining([
+        '-select_streams',
+        'a',
+        '-show_entries',
+        'packet=size',
+      ]),
+      expect.objectContaining({ timeout: 30_000 })
+    );
+  });
+
+  it('does not misclassify ffprobe failures as missing audio', async () => {
+    const { service, repository, runMediaCommand } = createService();
+    runMediaCommand.mockRejectedValueOnce(new Error('ffprobe failed'));
+
+    await expect(
+      service.ensureTranscriptionStarted('org-1', 'media-1', true)
+    ).rejects.toThrow('ffprobe failed');
+    expect(repository.ensurePendingForActiveMedia).not.toHaveBeenCalled();
   });
 
   it('discards work when media was deleted before worker claim', async () => {
@@ -138,6 +197,55 @@ describe('MediaTranscriptionService', () => {
       1,
       'Late transcript text.'
     );
+  });
+
+  it('stores detected speech in the normal READY path', async () => {
+    const { service, repository, model } = createService();
+    repository.getActiveWorkerInput.mockResolvedValue({
+      ...pending,
+      status: MediaTranscriptionStatus.PROCESSING,
+      media: {
+        path: 'https://media.example.com/video.mp4',
+        originalName: 'video.mp4',
+        name: 'video.mp4',
+      },
+    });
+    repository.completeIfActive.mockResolvedValue(true);
+    model.transcribeVideo.mockResolvedValue({ text: '  Spoken words.  ' });
+
+    await expect(
+      service.processTranscription('transcription-1', 1)
+    ).resolves.toEqual({ discarded: false, status: 'READY' });
+    expect(repository.completeIfActive).toHaveBeenCalledWith(
+      'transcription-1',
+      1,
+      'Spoken words.'
+    );
+  });
+
+  it('stores no detected speech as READY without fake transcript text', async () => {
+    const { service, repository, model } = createService();
+    repository.getActiveWorkerInput.mockResolvedValue({
+      ...pending,
+      status: MediaTranscriptionStatus.PROCESSING,
+      media: {
+        path: 'https://media.example.com/video.mp4',
+        originalName: 'video.mp4',
+        name: 'video.mp4',
+      },
+    });
+    repository.completeIfActive.mockResolvedValue(true);
+    model.transcribeVideo.mockResolvedValue({ text: '   ' });
+
+    await expect(
+      service.processTranscription('transcription-1', 1)
+    ).resolves.toEqual({ discarded: false, status: 'READY' });
+    expect(repository.completeIfActive).toHaveBeenCalledWith(
+      'transcription-1',
+      1,
+      null
+    );
+    expect(repository.failIfActive).not.toHaveBeenCalled();
   });
 
   it('deletes READY transcript text and best-effort cancels its workflow', async () => {
@@ -198,6 +306,20 @@ describe('MediaTranscriptionService', () => {
       code: 'TRANSCRIPTION_FAILED',
       message: 'The video could not be transcribed. Please retry.',
     });
+  });
+
+  it('resolves a READY transcription without speech as absent text', async () => {
+    const { service, repository } = createService();
+    repository.ensurePendingForActiveMedia.mockResolvedValue({
+      ...pending,
+      status: MediaTranscriptionStatus.READY,
+      text: null,
+      completedAt: new Date('2026-08-09T00:05:00Z'),
+    });
+
+    await expect(
+      service.resolveForGeneration('org-1', 'media-1')
+    ).resolves.toBeUndefined();
   });
 
   it('lets model failures escape so Temporal can retry the activity', async () => {

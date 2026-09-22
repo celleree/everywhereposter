@@ -1,6 +1,7 @@
 import {
   hasSupportedMp4MovSignature,
   inferUploadFileType,
+  inspectSupportedMp4MovStructure,
   resolveUploadFileType,
 } from '@gitroom/frontend/components/media/upload.file.type';
 
@@ -79,4 +80,28 @@ export const resolveStructurallyValidatedUploadFileType = async (
   return (await hasSupportedMp4MovSignature(blob, expectedType))
     ? expectedType
     : 'application/octet-stream';
+};
+
+export type GuidedVideoFileValidation =
+  | 'valid'
+  | 'audio-required'
+  | 'invalid';
+
+export const validateStructurallySupportedVideoFile = async (
+  file: UploadFileLike | (Blob & { name?: string | null; type?: string | null })
+): Promise<GuidedVideoFileValidation> => {
+  const expectedType = getExpectedVideoType(file);
+  const blob = getUploadBlob(file);
+
+  if (!expectedType || !blob) {
+    return 'invalid';
+  }
+
+  const structure = await inspectSupportedMp4MovStructure(blob, expectedType);
+
+  if (structure === 'video-with-audio') {
+    return 'valid';
+  }
+
+  return structure === 'video-only' ? 'audio-required' : 'invalid';
 };
