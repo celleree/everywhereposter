@@ -1,7 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { MediaTranscriptionStatus } from '@prisma/client';
+import { execFile } from 'child_process';
 import { lookup } from 'mime-types';
 import { TemporalService } from 'nestjs-temporal-core';
+import { promisify } from 'util';
 import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.model.service';
 import { prepareVideoMediaFile } from '@gitroom/nestjs-libraries/copy-generation/video-media-file';
 import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
@@ -26,6 +33,12 @@ export const getMediaTranscriptionWorkflowId = (
   generation: number
 ) => `media-transcription-${transcriptionId}-${generation}`;
 
+export const GUIDED_VIDEO_AUDIO_REQUIRED_CODE =
+  'GUIDED_VIDEO_AUDIO_REQUIRED';
+export const GUIDED_VIDEO_AUDIO_REQUIRED_MESSAGE =
+  'An audio track with media is required for guided video creation.';
+const execFileAsync = promisify(execFile);
+
 @Injectable()
 export class MediaTranscriptionService {
   private readonly logger = new Logger(MediaTranscriptionService.name);
@@ -37,6 +50,7 @@ export class MediaTranscriptionService {
   ) {}
 
   async ensureTranscriptionStarted(organizationId: string, mediaId: string) {
+    await this.assertVideoHasAudioSamples(organizationId, mediaId);
     const transcription =
       await this._repository.ensurePendingForActiveMedia(
         organizationId,
@@ -54,11 +68,25 @@ export class MediaTranscriptionService {
     return this.toPublicStatus(transcription);
   }
 
-  getStatus(organizationId: string, mediaId: string) {
-    return this.ensureTranscriptionStarted(organizationId, mediaId);
+  async getStatus(organizationId: string, mediaId: string) {
+    const transcription = await this._repository.getCurrentForActiveMedia(
+      organizationId,
+      mediaId
+    );
+
+    if (!transcription) {
+      return this.ensureTranscriptionStarted(organizationId, mediaId);
+    }
+
+    if (transcription.status === MediaTranscriptionStatus.PENDING) {
+      await this.startPendingWorkflow(transcription);
+    }
+
+    return this.toPublicStatus(transcription);
   }
 
   async retry(organizationId: string, mediaId: string) {
+    await this.assertVideoHasAudioSamples(organizationId, mediaId);
     const transcription =
       await this._repository.retryFailedForActiveMedia(organizationId, mediaId);
 
@@ -202,6 +230,68 @@ export class MediaTranscriptionService {
       'The video could not be transcribed. Please retry.'
     );
     return { discarded: !stored, status: 'FAILED' as const };
+  }
+
+  private async assertVideoHasAudioSamples(
+    organizationId: string,
+    mediaId: string
+  ) {
+    const media = await this._repository.getActiveMediaForTranscription(
+      organizationId,
+      mediaId
+    );
+
+    if (!media) {
+      throw new NotFoundException('Media not found');
+    }
+
+    const preparedVideo = await prepareVideoMediaFile(
+      media.path,
+      media.originalName || media.name
+    );
+
+    try {
+      if (!(await this.videoHasAudioSamples(preparedVideo.inputPath))) {
+        throw new BadRequestException({
+          code: GUIDED_VIDEO_AUDIO_REQUIRED_CODE,
+          message: GUIDED_VIDEO_AUDIO_REQUIRED_MESSAGE,
+        });
+      }
+    } finally {
+      await preparedVideo.cleanup();
+    }
+  }
+
+  private async videoHasAudioSamples(inputPath: string) {
+    const { stdout } = await this.runMediaCommand(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        'a',
+        '-read_intervals',
+        '%+#1',
+        '-show_entries',
+        'packet=size',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        inputPath,
+      ],
+      { maxBuffer: 1024 * 1024, timeout: 30_000 }
+    );
+
+    return `${stdout}`
+      .split(/\r?\n/)
+      .some((value) => Number.parseInt(value.trim(), 10) > 0);
+  }
+
+  protected runMediaCommand(
+    command: string,
+    args: string[],
+    options: { maxBuffer: number; timeout: number }
+  ) {
+    return execFileAsync(command, args, options);
   }
 
   private async startPendingWorkflow(transcription: {

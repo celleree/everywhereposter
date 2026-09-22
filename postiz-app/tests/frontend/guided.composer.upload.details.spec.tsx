@@ -78,6 +78,7 @@ const createBox = (type: string, ...payloadChunks: Uint8Array[]) => {
 };
 
 const VIDEO_SAMPLE_BYTES = new Uint8Array([0, 0, 0, 1, 0x65]);
+const AUDIO_SAMPLE_BYTES = new Uint8Array([0x21, 0x10, 0x56, 0xe5]);
 
 const createVisualSampleEntry = (
   type = 'avc1',
@@ -122,15 +123,30 @@ const createVisualSampleEntry = (
   return entry;
 };
 
+const createAudioSampleEntry = () => {
+  const entry = new Uint8Array(36);
+
+  entry.set(encodeUint32(entry.length), 0);
+  entry.set(encodeAscii('mp4a'), 4);
+  entry.set(encodeUint16(1), 14);
+  entry.set(encodeUint16(2), 24);
+  entry.set(encodeUint16(16), 26);
+  entry.set(encodeUint32(48_000 << 16), 32);
+
+  return entry;
+};
+
 const createSampleTable = (
   chunkOffset: number,
-  includeCodecConfig = true
+  includeCodecConfig = true,
+  sampleSize = VIDEO_SAMPLE_BYTES.length,
+  sampleEntry = createVisualSampleEntry('avc1', includeCodecConfig)
 ) => {
   const stsd = createBox(
     'stsd',
     new Uint8Array(4),
     encodeUint32(1),
-    createVisualSampleEntry('avc1', includeCodecConfig)
+    sampleEntry
   );
   const stts = createBox(
     'stts',
@@ -152,7 +168,7 @@ const createSampleTable = (
     new Uint8Array(4),
     encodeUint32(0),
     encodeUint32(1),
-    encodeUint32(VIDEO_SAMPLE_BYTES.length)
+    encodeUint32(sampleSize)
   );
   const stco = createBox(
     'stco',
@@ -170,7 +186,8 @@ const createIsoBmffBytes = (
   handlerType = 'vide',
   includeVideoSamples = true,
   includeCodecConfig = true,
-  includeAudioTrack = handlerType === 'vide'
+  includeAudioTrack = handlerType === 'vide',
+  includeAudioSamples = includeAudioTrack
 ) => {
   const ftyp = createBox(
     'ftyp',
@@ -179,7 +196,13 @@ const createIsoBmffBytes = (
     encodeAscii(compatibleBrand)
   );
   const mdat = includeVideoSamples
-    ? createBox('mdat', VIDEO_SAMPLE_BYTES)
+    ? createBox(
+        'mdat',
+        VIDEO_SAMPLE_BYTES,
+        ...(includeAudioTrack && includeAudioSamples
+          ? [AUDIO_SAMPLE_BYTES]
+          : [])
+      )
     : undefined;
   const hdlr = createBox(
     'hdlr',
@@ -191,12 +214,24 @@ const createIsoBmffBytes = (
     : undefined;
   const minf = sampleTable ? createBox('minf', sampleTable) : undefined;
   const mdia = createBox('mdia', hdlr, ...(minf ? [minf] : []));
+  const audioSampleTable =
+    includeAudioTrack && includeAudioSamples
+      ? createSampleTable(
+          ftyp.length + 8 + VIDEO_SAMPLE_BYTES.length,
+          true,
+          AUDIO_SAMPLE_BYTES.length,
+          createAudioSampleEntry()
+        )
+      : undefined;
   const audioTrack = includeAudioTrack
     ? createBox(
         'trak',
         createBox(
           'mdia',
-          createBox('hdlr', new Uint8Array(8), encodeAscii('soun'))
+          createBox('hdlr', new Uint8Array(8), encodeAscii('soun')),
+          ...(audioSampleTable
+            ? [createBox('minf', audioSampleTable)]
+            : [])
         )
       )
     : undefined;
@@ -207,6 +242,99 @@ const createIsoBmffBytes = (
   );
 
   return concatBytes(ftyp, ...(mdat ? [mdat] : []), moov);
+};
+
+const createTrackHeader = (trackId: number) => {
+  const payload = new Uint8Array(16);
+  payload.set(encodeUint32(trackId), 12);
+  return createBox('tkhd', payload);
+};
+
+const createFragmentTrack = (
+  trackId: number,
+  handlerType: 'vide' | 'soun'
+) => {
+  const mediaChildren = [
+    createBox('hdlr', new Uint8Array(8), encodeAscii(handlerType)),
+  ];
+
+  if (handlerType === 'vide') {
+    mediaChildren.push(
+      createBox(
+        'minf',
+        createBox(
+          'stbl',
+          createBox(
+            'stsd',
+            new Uint8Array(4),
+            encodeUint32(1),
+            createVisualSampleEntry()
+          )
+        )
+      )
+    );
+  }
+
+  return createBox(
+    'trak',
+    createTrackHeader(trackId),
+    createBox('mdia', ...mediaChildren)
+  );
+};
+
+const createFragment = (
+  trackId: number,
+  dataOffset: number,
+  sampleSize: number
+) =>
+  createBox(
+    'traf',
+    createBox('tfhd', new Uint8Array(4), encodeUint32(trackId)),
+    createBox(
+      'trun',
+      new Uint8Array([0, 0, 2, 1]),
+      encodeUint32(1),
+      encodeUint32(dataOffset),
+      encodeUint32(sampleSize)
+    )
+  );
+
+const createFragmentedMp4 = (includeAudioFragment: boolean) => {
+  const ftyp = createBox(
+    'ftyp',
+    encodeAscii('isom'),
+    new Uint8Array(4),
+    encodeAscii('mp42')
+  );
+  const moov = createBox(
+    'moov',
+    createFragmentTrack(1, 'vide'),
+    createFragmentTrack(2, 'soun')
+  );
+  const createMoof = (videoOffset: number, audioOffset: number) =>
+    createBox(
+      'moof',
+      createFragment(1, videoOffset, VIDEO_SAMPLE_BYTES.length),
+      ...(includeAudioFragment
+        ? [createFragment(2, audioOffset, AUDIO_SAMPLE_BYTES.length)]
+        : [])
+    );
+  const placeholderMoof = createMoof(0, 0);
+  const moofStart = ftyp.length + moov.length;
+  const mediaDataStart = moofStart + placeholderMoof.length + 8;
+  const moof = createMoof(
+    mediaDataStart - moofStart,
+    mediaDataStart - moofStart + VIDEO_SAMPLE_BYTES.length
+  );
+  const mdat = createBox(
+    'mdat',
+    VIDEO_SAMPLE_BYTES,
+    ...(includeAudioFragment ? [AUDIO_SAMPLE_BYTES] : [])
+  );
+
+  return new File([concatBytes(ftyp, moov, moof, mdat)], 'fragmented.mp4', {
+    type: 'video/mp4',
+  });
 };
 
 const createMp4File = (
@@ -385,6 +513,40 @@ describe('guided composer video picker', () => {
     );
     await expect(isGuidedVideoFile(videoOnly)).resolves.toBe(false);
     await expect(resolveUploadFileType(videoOnly)).resolves.toBe('video/mp4');
+  });
+
+  it('rejects a handler-only audio track as audio-required', async () => {
+    const handlerOnlyAudio = new File(
+      [
+        createIsoBmffBytes(
+          'isom',
+          'mp42',
+          'vide',
+          true,
+          true,
+          true,
+          false
+        ),
+      ],
+      'handler-only-audio.mp4',
+      { type: 'video/mp4' }
+    );
+
+    await expect(validateGuidedVideoFile(handlerOnlyAudio)).resolves.toBe(
+      'audio-required'
+    );
+  });
+
+  it('accepts fragmented video with a nonzero audio fragment sample', async () => {
+    await expect(
+      validateGuidedVideoFile(createFragmentedMp4(true))
+    ).resolves.toBe('valid');
+  });
+
+  it('rejects fragmented video with only a nominal audio track', async () => {
+    await expect(
+      validateGuidedVideoFile(createFragmentedMp4(false))
+    ).resolves.toBe('audio-required');
   });
 
   it('rejects explicit non-video MIME types and invalid video bytes', async () => {

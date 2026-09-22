@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 const mockFetch = jest.fn();
 const mockCloseCurrent = jest.fn();
 const mockMutate = jest.fn();
+const mockToastShow = jest.fn();
 let mockLibraryMedia = [
   {
     id: 'library-video-1',
@@ -42,7 +43,7 @@ jest.mock('@gitroom/react/helpers/use.media.directory', () => ({
 }));
 
 jest.mock('@gitroom/react/toaster/toaster', () => ({
-  useToaster: () => ({ show: jest.fn() }),
+  useToaster: () => ({ show: mockToastShow }),
 }));
 
 jest.mock('@gitroom/frontend/components/media/new.uploader', () => ({
@@ -100,6 +101,7 @@ describe('MediaBox guided transcription', () => {
     mockFetch.mockResolvedValue({ ok: true });
     mockCloseCurrent.mockReset();
     mockMutate.mockReset();
+    mockToastShow.mockReset();
   });
 
   it('ensures an existing guided MP4 before returning it to the composer', async () => {
@@ -125,6 +127,39 @@ describe('MediaBox guided transcription', () => {
     expect(setMedia).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'library-video-1' }),
     ]);
+    expect(mockCloseCurrent).toHaveBeenCalled();
+  });
+
+  it('does not attach or close when an existing guided video has no audio', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({
+        code: 'GUIDED_VIDEO_AUDIO_REQUIRED',
+        message:
+          'An audio track with media is required for guided video creation.',
+      }),
+    });
+    const setMedia = jest.fn();
+
+    render(
+      <MediaBox
+        setMedia={setMedia}
+        closeModal={jest.fn()}
+        guidedTranscription
+      />
+    );
+
+    fireEvent.click(screen.getByText('library-video-1.mp4'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add selected media' }));
+
+    await waitFor(() =>
+      expect(mockToastShow).toHaveBeenCalledWith(
+        'An audio track with media is required for guided video creation.',
+        'warning'
+      )
+    );
+    expect(setMedia).not.toHaveBeenCalled();
+    expect(mockCloseCurrent).not.toHaveBeenCalled();
   });
 
   it('ensures an existing guided MOV before returning it to the composer', async () => {

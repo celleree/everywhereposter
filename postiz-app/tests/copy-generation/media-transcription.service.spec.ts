@@ -28,6 +28,13 @@ const pending = {
 const createService = () => {
   const start = jest.fn().mockResolvedValue(undefined);
   const repository = {
+    getActiveMediaForTranscription: jest.fn().mockResolvedValue({
+      id: 'media-1',
+      path: 'https://media.example.com/video.mp4',
+      name: 'video.mp4',
+      originalName: 'video.mp4',
+    }),
+    getCurrentForActiveMedia: jest.fn(),
     ensurePendingForActiveMedia: jest.fn().mockResolvedValue(pending),
     retryFailedForActiveMedia: jest.fn(),
     claimForProcessing: jest.fn(),
@@ -46,17 +53,22 @@ const createService = () => {
   const model = {
     transcribeVideo: jest.fn(),
   };
+  const service = new MediaTranscriptionService(
+    repository as any,
+    temporal as any,
+    model as any
+  );
+  const runMediaCommand = jest
+    .spyOn(service as any, 'runMediaCommand')
+    .mockResolvedValue({ stdout: '4096\n' });
 
   return {
-    service: new MediaTranscriptionService(
-      repository as any,
-      temporal as any,
-      model as any
-    ),
+    service,
     repository,
     temporal,
     model,
     start,
+    runMediaCommand,
   };
 };
 
@@ -95,12 +107,48 @@ describe('MediaTranscriptionService', () => {
 
   it('rejects cross-organization or deleted media access', async () => {
     const { service, repository, start } = createService();
-    repository.ensurePendingForActiveMedia.mockResolvedValueOnce(null);
+    repository.getActiveMediaForTranscription.mockResolvedValueOnce(null);
 
     await expect(
       service.ensureTranscriptionStarted('other-org', 'media-1')
     ).rejects.toThrow('Media not found');
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it('rejects guided transcription before lifecycle creation when audio is absent', async () => {
+    const { service, repository, runMediaCommand, start } = createService();
+    runMediaCommand.mockResolvedValueOnce({ stdout: '' });
+
+    await expect(
+      service.ensureTranscriptionStarted('org-1', 'media-1')
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'GUIDED_VIDEO_AUDIO_REQUIRED',
+        message: expect.stringContaining('audio track with media is required'),
+      }),
+    });
+    expect(repository.ensurePendingForActiveMedia).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(runMediaCommand).toHaveBeenCalledWith(
+      'ffprobe',
+      expect.arrayContaining([
+        '-select_streams',
+        'a',
+        '-show_entries',
+        'packet=size',
+      ]),
+      expect.objectContaining({ timeout: 30_000 })
+    );
+  });
+
+  it('does not misclassify ffprobe failures as missing audio', async () => {
+    const { service, repository, runMediaCommand } = createService();
+    runMediaCommand.mockRejectedValueOnce(new Error('ffprobe failed'));
+
+    await expect(
+      service.ensureTranscriptionStarted('org-1', 'media-1')
+    ).rejects.toThrow('ffprobe failed');
+    expect(repository.ensurePendingForActiveMedia).not.toHaveBeenCalled();
   });
 
   it('discards work when media was deleted before worker claim', async () => {

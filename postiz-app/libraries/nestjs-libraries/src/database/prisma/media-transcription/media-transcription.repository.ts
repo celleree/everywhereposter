@@ -8,6 +8,31 @@ export const TRANSCRIPTION_PROCESSING_LEASE_MS = 2 * 60 * 60 * 1000;
 export class MediaTranscriptionRepository {
   constructor(private readonly _prisma: PrismaService) {}
 
+  getActiveMediaForTranscription(organizationId: string, mediaId: string) {
+    return this._prisma.media.findFirst({
+      where: {
+        id: mediaId,
+        organizationId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        path: true,
+        name: true,
+        originalName: true,
+      },
+    });
+  }
+
+  getCurrentForActiveMedia(organizationId: string, mediaId: string) {
+    return this._prisma.mediaTranscription.findFirst({
+      where: {
+        mediaId,
+        media: { organizationId, deletedAt: null },
+      },
+    });
+  }
+
   private async lockActiveMedia(
     transaction: Prisma.TransactionClient,
     organizationId: string,

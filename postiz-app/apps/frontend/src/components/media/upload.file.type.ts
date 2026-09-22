@@ -979,7 +979,29 @@ export const inspectSupportedMp4MovStructure = async (
     return 'invalid';
   }
 
-  return tracks.some((track) => track.handlerType === 'soun')
+  const hasValidAudio = tracks.some((track) => {
+    if (track.handlerType !== 'soun') {
+      return false;
+    }
+
+    if (
+      track.classicSample &&
+      sampleFallsInsideMediaData(track.classicSample, mediaDataRanges)
+    ) {
+      return true;
+    }
+
+    return (
+      track.trackId !== undefined &&
+      fragmentSamples.some(
+        (fragment) =>
+          fragment.trackId === track.trackId &&
+          sampleFallsInsideMediaData(fragment.sample, mediaDataRanges)
+      )
+    );
+  });
+
+  return hasValidAudio
     ? 'video-with-audio'
     : 'video-only';
 };
