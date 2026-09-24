@@ -51,6 +51,35 @@ Future long-form-to-short-form or advanced AI video workflows must not be presen
 - Do not claim guaranteed virality, revenue, follower growth, reach, or engagement.
 - Do not change pricing, billing behavior, public product promises, or launch eligibility based only on stale docs or inference.
 
+## Billing contract
+
+Launch billing is deliberately simple:
+
+- One paid plan: $9/month or $90/year.
+- No permanent free plan.
+- 7-day free trial with a card required.
+- Trial converts automatically to the selected paid interval unless canceled beforehand.
+- No supported connected-account limit.
+- Unlimited ordinary publishing/scheduling where the underlying platform/API does not charge EverywherePoster per post.
+- Cancellation stops future renewal while preserving access through the already-paid period.
+- Failed subscription payment gets a 3-day grace period with automatic retries; unresolved failure pauses paid/publishing features while preserving the account and data.
+
+AI usage is separate from the subscription:
+
+- no fixed monthly AI allowance;
+- user may prepay an AI balance or supply an OpenAI API key;
+- OpenAI is the only BYOK provider at launch;
+- approved manual top-ups are $5, $10, $25, and $50;
+- AI balance does not expire while the account remains active;
+- auto-reload is optional and off by default;
+- insufficient AI balance stops AI generation only, not normal publishing/scheduling;
+- usage and remaining balance are visible in billing/settings;
+- permanently closing an account refunds unused prepaid AI balance, excluding consumed usage.
+
+The intended AI charge is pass-through cost with no intended markup. The exact auditable formula for directly attributable compute, server, storage, energy, and processing costs must be decided before implementation of AI cost metering.
+
+Detailed Stripe implementation sequencing and phase decision gates live in `docs/brain/STRIPE_PRODUCTION_ROADMAP.md`.
+
 ## Target users
 
 Primary users can include founders, creators, agencies, content teams, operators, local businesses, personal brands, streamers, and businesses that want more consistent multi-platform distribution without rebuilding every post manually.
