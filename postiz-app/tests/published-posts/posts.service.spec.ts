@@ -76,6 +76,7 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
   const provider = createProvider(providerOverrides);
 
   const postRepository = {
+    changeDate: jest.fn(),
     changeState: jest.fn(),
     createOrUpdatePost: jest.fn(),
     deletePost: jest.fn(),
@@ -383,6 +384,57 @@ describe('PostsService published post management', () => {
       [],
       undefined
     );
+  });
+
+  it('rejects a schedule that expires during account preflight', async () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    jest.setSystemTime(now);
+    const { service, postRepository, integrationService, getRawClient } =
+      createService();
+    integrationService.getIntegrationById.mockImplementation(async () => {
+      jest.setSystemTime(now + 2);
+      return {
+        id: 'integration-db-id',
+        name: 'X account',
+        deletedAt: null,
+        disabled: false,
+        inBetweenSteps: false,
+        refreshNeeded: false,
+      };
+    });
+
+    await expect(
+      service.createPost(
+        'org-1',
+        createPostBody({
+          type: 'schedule',
+          date: new Date(now + 1).toISOString(),
+        })
+      )
+    ).rejects.toThrow('Scheduled date must be in the future');
+
+    expect(postRepository.createOrUpdatePost).not.toHaveBeenCalled();
+    expect(getRawClient).not.toHaveBeenCalled();
+  });
+
+  it('rejects past and equal timestamps when changing a date to schedule', async () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    jest.setSystemTime(now);
+    const { service, postRepository } = createService();
+
+    for (const date of [
+      new Date(now - 1).toISOString(),
+      new Date(now).toISOString(),
+    ]) {
+      await expect(
+        service.changeDate('org-1', 'post-1', date, 'schedule')
+      ).rejects.toThrow('Scheduled date must be in the future');
+    }
+
+    expect(postRepository.getPostById).not.toHaveBeenCalled();
+    expect(postRepository.changeDate).not.toHaveBeenCalled();
   });
 
   it('blocks Instagram media preparation when a local upload file is missing', async () => {
