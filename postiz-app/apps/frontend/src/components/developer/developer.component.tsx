@@ -219,8 +219,8 @@ export const DeveloperComponent: FC = () => {
       <div className="flex flex-col gap-[40px]">
         <div className="text-[14px] text-textColor leading-[1.7]">
           {t(
-            'oauth_accounts_read_foundation_note',
-            'Create an OAuth App for the accounts:read MCP authorization foundation. Connected-account tools are not available yet.'
+            'oauth_accounts_read_listing_note',
+            'Create an OAuth App to let ChatGPT list your connected social accounts with the accounts:read permission.'
           )}
           <br />
           {t(
@@ -272,8 +272,8 @@ export const DeveloperComponent: FC = () => {
       <div className="flex flex-col gap-[40px]">
         <div className="text-[14px] text-textColor leading-[1.7]">
           {t(
-            'oauth_accounts_read_foundation_note',
-            'Create an OAuth App for the accounts:read MCP authorization foundation. Connected-account tools are not available yet.'
+            'oauth_accounts_read_listing_note',
+            'Create an OAuth App to let ChatGPT list your connected social accounts with the accounts:read permission.'
           )}
           <br />
           {t(
@@ -381,8 +381,8 @@ export const DeveloperComponent: FC = () => {
     <div className="flex flex-col gap-[40px]">
       <div className="text-[14px] text-textColor leading-[1.7]">
         {t(
-          'oauth_accounts_read_foundation_note',
-          'Create an OAuth App for the accounts:read MCP authorization foundation. Connected-account tools are not available yet.'
+          'oauth_accounts_read_listing_note',
+          'Create an OAuth App to let ChatGPT list your connected social accounts with the accounts:read permission.'
         )}
         <br />
         {t(

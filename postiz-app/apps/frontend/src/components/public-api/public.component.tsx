@@ -498,13 +498,13 @@ const PublicApiContent = () => {
         )}
         <br />
         {t(
-          'api_oauth_accounts_read_foundation_note',
-          'OAuth Apps currently provide the accounts:read MCP authorization foundation.'
+          'api_oauth_accounts_read_listing_note',
+          'OAuth Apps provide read-only access to connected social accounts through the accounts:read MCP endpoint.'
         )}
         <br />
         {t(
-          'api_oauth_accounts_read_tools_pending_note',
-          'Connected-account MCP tools are not available yet; OAuth tokens cannot publish or schedule posts.'
+          'api_oauth_accounts_read_tools_available_note',
+          'The list_connected_accounts tool lists connected accounts. OAuth tokens cannot publish or schedule posts.'
         )}
         <br />
         {t(
