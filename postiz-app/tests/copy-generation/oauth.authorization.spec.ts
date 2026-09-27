@@ -117,7 +117,7 @@ describe('OAuth accounts:read boundary', () => {
       expect(await middleware({ headers, method: 'POST' } as any, response as any, new URL(getMcpResource())))
         .toMatchObject({ proceed: false });
       expect(response.writeHead).toHaveBeenCalledWith(401, expect.objectContaining({
-        'WWW-Authenticate': expect.stringContaining('https://server.test/api/.well-known/oauth-protected-resource'),
+        'WWW-Authenticate': expect.stringContaining('https://server.test/.well-known/oauth-protected-resource/api/mcp-oauth'),
       }));
     }
     expect(validateToken).toHaveBeenCalledTimes(1);
