@@ -39,8 +39,31 @@ describe('MediaService guided transcription upload', () => {
 
     expect(transcriptionService.ensureTranscriptionStarted).toHaveBeenCalledWith(
       'org-1',
-      'video-1'
+      'video-1',
+      true
     );
+  });
+
+  it('does not complete a guided media-library upload when audio validation fails', async () => {
+    mediaRepository.saveFile.mockResolvedValue({
+      id: 'video-1',
+      type: 'video',
+      path: 'https://media.example.com/video.mp4',
+    });
+    transcriptionService.ensureTranscriptionStarted.mockRejectedValueOnce(
+      new Error('An audio track with media is required for guided video creation.')
+    );
+
+    await expect(
+      service.saveFile(
+        'org-1',
+        'video.mp4',
+        'https://media.example.com/video.mp4',
+        'video.mp4',
+        'video/mp4',
+        true
+      )
+    ).rejects.toThrow('audio track with media is required');
   });
 
   it('does not start transcription for legacy uploads or guided images', async () => {

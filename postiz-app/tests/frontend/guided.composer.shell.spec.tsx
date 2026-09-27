@@ -885,6 +885,15 @@ describe('guided composer shell', () => {
   });
 
   it('invalidates and backend-deletes the guided source on attachment removal', async () => {
+    const unrelatedImage = {
+      id: 'image-1',
+      path: 'https://media.example.com/image.png',
+      type: 'image',
+    } as any;
+    useLaunchStore.getState().setGlobalValueMedia(0, [
+      ...(useLaunchStore.getState().global[0]?.media || []),
+      unrelatedImage,
+    ]);
     render(
       <GuidedComposerShell>
         <div>Existing composer content</div>
@@ -893,8 +902,25 @@ describe('guided composer shell', () => {
     await waitFor(() =>
       expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
     );
+    act(() => {
+      useGuidedComposerStore.getState().startGeneration('video-1-generation');
+      useGuidedComposerStore.getState().reconcileReviewDrafts([
+        {
+          destinationId: 'linkedin-1',
+          platform: 'linkedin',
+          sourceFingerprint: 'video-1-generation',
+          caption: 'Generated caption.',
+          baselineCaption: 'Generated caption.',
+          baselineSource: 'generated',
+          originalCaption: 'Original caption.',
+          warnings: [],
+        },
+      ]);
+    });
 
-    act(() => useLaunchStore.getState().setGlobalValueMedia(0, []));
+    act(() =>
+      useLaunchStore.getState().setGlobalValueMedia(0, [unrelatedImage])
+    );
 
     await waitFor(() =>
       expect(useGuidedComposerStore.getState().sourceMediaId).toBeNull()
@@ -905,7 +931,23 @@ describe('guided composer shell', () => {
     expect(useGuidedComposerStore.getState()).toMatchObject({
       transcriptionStatus: 'IDLE',
       generationStatus: 'idle',
+      reviewDrafts: {},
     });
+    expect(useLaunchStore.getState().global[0].media).toEqual([unrelatedImage]);
+
+    act(() =>
+      useLaunchStore.getState().setGlobalValueMedia(0, [
+        unrelatedImage,
+        {
+          id: 'video-2',
+          path: 'https://media.example.com/replacement.mov',
+          type: 'video',
+        } as any,
+      ])
+    );
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2')
+    );
   });
 
   it('restores the guided source when backend deletion is not confirmed', async () => {

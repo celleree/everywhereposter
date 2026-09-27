@@ -11,9 +11,9 @@ import {
 import {
   GUIDED_VIDEO_ACCEPT,
   isGuidedMp4MovMedia,
-  isGuidedVideoFile,
   normalizeGuidedVideoFile,
   selectGuidedSourceVideo,
+  validateGuidedVideoFile,
 } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 
@@ -23,6 +23,7 @@ export {
   isGuidedVideoFile,
   normalizeGuidedVideoFile,
   selectGuidedSourceVideo,
+  validateGuidedVideoFile,
 } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
 export const GUIDED_MEDIA_ACCEPT = `image/*,${GUIDED_VIDEO_ACCEPT}`;
@@ -185,15 +186,17 @@ export const GuidedComposerUploadDetails: FC<{
             continue;
           }
 
-          const isValidVideo = await isGuidedVideoFile(file);
+          const validation = await validateGuidedVideoFile(file);
           if (!active || validationId !== validationSequence) {
             return;
           }
 
-          if (!isValidVideo) {
+          if (validation !== 'valid') {
             target.value = '';
             setUploadError(
-              'Only valid MP4 and MOV video files can be uploaded here.'
+              validation === 'audio-required'
+                ? 'An audio track is required for guided video creation.'
+                : 'Only valid MP4 and MOV video files can be uploaded here.'
             );
             return;
           }

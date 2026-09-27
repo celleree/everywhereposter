@@ -206,6 +206,32 @@ describe('SourceBriefService video grounding', () => {
     });
   });
 
+  it('uses grounded frame evidence when no spoken dialogue was detected', async () => {
+    const { service, modelService } = createService({}, {}, undefined, {
+      resolveForGeneration: jest.fn().mockResolvedValue(undefined),
+    });
+
+    const result = await service.build('org-1', {
+      ...request,
+      transcript: undefined,
+    } as any);
+
+    expect(result.transcript).toBeUndefined();
+    expect(result.blocked).toBe(false);
+    expect(modelService.analyzeVideoFrames).toHaveBeenCalledWith(
+      expect.objectContaining({ transcriptText: undefined })
+    );
+    expect(modelService.summarizeTranscript).not.toHaveBeenCalled();
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'NO_TRANSCRIPT',
+          message: expect.stringContaining('No spoken dialogue was detected'),
+        }),
+      ])
+    );
+  });
+
   it('returns pending without starting duplicate inline transcription', async () => {
     const pending = new TranscriptionLifecycleError(
       'TRANSCRIPTION_PENDING',

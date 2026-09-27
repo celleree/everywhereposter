@@ -15,6 +15,13 @@ import { TikTokDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settin
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { execFile } from 'child_process';
+import { existsSync, realpathSync, statSync } from 'fs';
+import { resolve, sep } from 'path';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
+const FFPROBE_TIMEOUT_MS = 15_000;
 
 @Rules(
   'TikTok can have one video or one picture or multiple pictures, it cannot be without an attachment'
@@ -375,11 +382,9 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async maxVideoLength(accessToken: string) {
-    const {
-      data: { max_video_post_duration_sec },
-    } = await (
-      await fetch(
+  async creatorInfo(accessToken: string) {
+    return (
+      await this.fetch(
         'https://open.tiktokapis.com/v2/post/publish/creator_info/query/',
         {
           method: 'POST',
@@ -390,9 +395,314 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         }
       )
     ).json();
+  }
+
+  async maxVideoLength(accessToken: string) {
+    const { data } = await this.creatorInfo(accessToken);
 
     return {
-      maxDurationSeconds: max_video_post_duration_sec,
+      maxDurationSeconds: data?.max_video_post_duration_sec,
+    };
+  }
+
+  private getUploadStaticDirectory() {
+    const directory =
+      process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY ||
+      process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY ||
+      '/uploads';
+    return `/${directory.replace(/^\/+|\/+$/g, '')}`;
+  }
+
+  private getLocalUploadPath(mediaPath: string) {
+    const uploadDirectory = process.env.UPLOAD_DIRECTORY;
+    if (!uploadDirectory || !mediaPath) {
+      return undefined;
+    }
+
+    const uploadRoot = resolve(uploadDirectory);
+    let pathname = mediaPath;
+    try {
+      const parsed = new URL(mediaPath);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return undefined;
+      }
+      pathname = parsed.pathname;
+    } catch {}
+
+    const uploadPrefix = this.getUploadStaticDirectory();
+    let diskPath: string;
+    if (pathname.startsWith(`${uploadPrefix}/`)) {
+      diskPath = resolve(uploadRoot, pathname.slice(uploadPrefix.length + 1));
+    } else {
+      diskPath = resolve(uploadRoot, pathname.replace(/^\/+/, ''));
+    }
+
+    if (
+      diskPath === uploadRoot ||
+      !diskPath.startsWith(`${uploadRoot}${sep}`) ||
+      !existsSync(diskPath) ||
+      !statSync(diskPath).isFile()
+    ) {
+      return undefined;
+    }
+
+    const realUploadRoot = realpathSync(uploadRoot);
+    const realDiskPath = realpathSync(diskPath);
+    if (!realDiskPath.startsWith(`${realUploadRoot}${sep}`)) {
+      return undefined;
+    }
+
+    return realDiskPath;
+  }
+
+  private getConfiguredCloudflareMediaUrl(mediaPath: string) {
+    const bucketUrl = process.env.CLOUDFLARE_BUCKET_URL;
+    if (!bucketUrl || /[\\\u0000-\u001F\u007F]/.test(mediaPath)) {
+      return undefined;
+    }
+
+    try {
+      const candidate = new URL(mediaPath);
+      const configured = new URL(bucketUrl);
+      const configuredPath = `${configured.pathname.replace(/\/+$/, '')}/`;
+      if (
+        !candidate.username &&
+        !candidate.password &&
+        candidate.protocol === 'https:' &&
+        candidate.origin === configured.origin &&
+        candidate.pathname.startsWith(configuredPath)
+      ) {
+        return candidate.href;
+      }
+    } catch {
+      return undefined;
+    }
+
+    return undefined;
+  }
+
+  private getTrustedVideoInput(mediaPath: string) {
+    const localPath = this.getLocalUploadPath(mediaPath);
+    if (localPath) {
+      return localPath;
+    }
+
+    const remoteUrl = this.getConfiguredCloudflareMediaUrl(mediaPath);
+    if (remoteUrl) {
+      return remoteUrl;
+    }
+
+    throw new Error('Selected video is not in configured application storage.');
+  }
+
+  protected runMediaCommand(
+    command: string,
+    args: string[],
+    options: { maxBuffer: number; timeout: number }
+  ) {
+    return execFileAsync(command, args, options);
+  }
+
+  protected async probeVideoDuration(mediaPath: string) {
+    const inputPath = this.getTrustedVideoInput(mediaPath);
+    const { stdout } = await this.runMediaCommand(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        inputPath,
+      ],
+      {
+        maxBuffer: 1024 * 1024,
+        timeout: FFPROBE_TIMEOUT_MS,
+      }
+    );
+    const duration = Number.parseFloat(`${stdout}`.trim());
+
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error('Video duration could not be determined.');
+    }
+
+    return duration;
+  }
+
+  private async validateDirectPost(
+    accessToken: string,
+    firstPost: PostDetails<TikTokDto>
+  ) {
+    let creatorInfo: any;
+    try {
+      creatorInfo = await this.creatorInfo(accessToken);
+    } catch {
+      throw new BadBody(
+        'tiktok_creator_info',
+        '{}',
+        '{}',
+        'Unable to load current TikTok creator settings before publishing.'
+      );
+    }
+
+    const data = creatorInfo?.data;
+    if (
+      (creatorInfo?.error?.code && creatorInfo.error.code !== 'ok') ||
+      !data ||
+      typeof data.creator_nickname !== 'string' ||
+      !data.creator_nickname.trim() ||
+      !Array.isArray(data.privacy_level_options) ||
+      !data.privacy_level_options.every(
+        (option: unknown) => typeof option === 'string'
+      ) ||
+      !Number.isFinite(data.max_video_post_duration_sec) ||
+      data.max_video_post_duration_sec < 1 ||
+      typeof data.comment_disabled !== 'boolean' ||
+      typeof data.duet_disabled !== 'boolean' ||
+      typeof data.stitch_disabled !== 'boolean'
+    ) {
+      throw new BadBody(
+        'tiktok_creator_info',
+        JSON.stringify(creatorInfo || {}),
+        '{}',
+        'Current TikTok creator settings are invalid or unavailable.'
+      );
+    }
+
+    const settings = firstPost.settings;
+    if (
+      !settings.privacy_level ||
+      !data.privacy_level_options.includes(settings.privacy_level)
+    ) {
+      throw new BadBody(
+        'tiktok_creator_info',
+        JSON.stringify(creatorInfo),
+        '{}',
+        'Select a privacy option currently available for this TikTok creator.'
+      );
+    }
+
+    if (
+      !settings.disclose &&
+      (settings.brand_organic_toggle || settings.brand_content_toggle)
+    ) {
+      throw new BadBody(
+        'tiktok_commercial_content',
+        JSON.stringify(settings),
+        '{}',
+        'Commercial content categories require disclosure to be enabled.'
+      );
+    }
+
+    if (
+      settings.disclose &&
+      !settings.brand_organic_toggle &&
+      !settings.brand_content_toggle
+    ) {
+      throw new BadBody(
+        'tiktok_commercial_content',
+        JSON.stringify(settings),
+        '{}',
+        'Select at least one commercial content category when disclosure is enabled.'
+      );
+    }
+
+    if (
+      settings.brand_content_toggle &&
+      settings.privacy_level === 'SELF_ONLY'
+    ) {
+      throw new BadBody(
+        'tiktok_commercial_content',
+        JSON.stringify(settings),
+        '{}',
+        'Branded content visibility cannot be set to private.'
+      );
+    }
+
+    const unavailableInteraction = [
+      {
+        requested: settings.comment,
+        disabled: data.comment_disabled,
+        name: 'comments',
+      },
+      {
+        requested: settings.duet,
+        disabled: data.duet_disabled,
+        name: 'duet',
+      },
+      {
+        requested: settings.stitch,
+        disabled: data.stitch_disabled,
+        name: 'stitch',
+      },
+    ].find(
+      ({ requested, disabled }) => requested === true && disabled === true
+    );
+
+    if (unavailableInteraction) {
+      throw new BadBody(
+        'tiktok_interaction_settings',
+        JSON.stringify(settings),
+        '{}',
+        `TikTok currently does not allow ${unavailableInteraction.name} for this creator.`
+      );
+    }
+
+    const selectedMedia = firstPost.media?.[0];
+    const isVideo =
+      selectedMedia?.type === 'video' ||
+      (selectedMedia?.path?.indexOf('mp4') ?? -1) > -1;
+    if (isVideo) {
+      let duration: number;
+      try {
+        duration = await this.probeVideoDuration(
+          firstPost.media?.[0]?.path || ''
+        );
+      } catch {
+        throw new BadBody(
+          'tiktok_video_duration',
+          '{}',
+          '{}',
+          'Unable to verify the selected video duration before publishing.'
+        );
+      }
+
+      if (!Number.isFinite(duration) || duration <= 0) {
+        throw new BadBody(
+          'tiktok_video_duration',
+          '{}',
+          '{}',
+          'Unable to verify the selected video duration before publishing.'
+        );
+      }
+
+      if (duration > data.max_video_post_duration_sec) {
+        throw new BadBody(
+          'tiktok_video_duration',
+          JSON.stringify({
+            duration,
+            maximum: data.max_video_post_duration_sec,
+          }),
+          '{}',
+          `TikTok allows this creator to post videos up to ${data.max_video_post_duration_sec} seconds.`
+        );
+      }
+    }
+
+    return {
+      ...firstPost,
+      settings: {
+        ...settings,
+        disclose: settings.disclose === true,
+        brand_content_toggle:
+          settings.disclose === true && settings.brand_content_toggle === true,
+        brand_organic_toggle:
+          settings.disclose === true && settings.brand_organic_toggle === true,
+        comment: settings.comment === true && !data.comment_disabled,
+        duet: settings.duet === true && !data.duet_disabled,
+        stitch: settings.stitch === true && !data.stitch_disabled,
+      },
     };
   }
 
@@ -484,8 +794,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
             ? { title: firstPost.message }
             : {}),
           ...(isPhoto ? { description: firstPost.message } : {}),
-          privacy_level:
-            firstPost.settings.privacy_level || 'PUBLIC_TO_EVERYONE',
+          privacy_level: firstPost.settings.privacy_level,
           ...(isPhoto
             ? {}
             : { disable_duet: !firstPost.settings.duet || false }),
@@ -559,11 +868,15 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     integration: Integration
   ): Promise<PostResponse[]> {
     const [firstPost] = postDetails;
-    const isPhoto = (firstPost?.media?.[0]?.path?.indexOf('mp4') || -1) === -1;
+    let effectivePost = firstPost;
+
+    if (firstPost.settings.content_posting_method === 'DIRECT_POST') {
+      effectivePost = await this.validateDirectPost(accessToken, firstPost);
+    }
 
     console.log({
-      ...this.buildTikokPostInfoBody(firstPost),
-      ...this.buildTikokSourceInfoBody(firstPost),
+      ...this.buildTikokPostInfoBody(effectivePost),
+      ...this.buildTikokSourceInfoBody(effectivePost),
     });
     const {
       data: { publish_id },
@@ -580,8 +893,8 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
             Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
-            ...this.buildTikokPostInfoBody(firstPost),
-            ...this.buildTikokSourceInfoBody(firstPost),
+            ...this.buildTikokPostInfoBody(effectivePost),
+            ...this.buildTikokSourceInfoBody(effectivePost),
           }),
         }
       )

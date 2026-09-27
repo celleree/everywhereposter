@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { createWriteStream } from 'fs';
-import { access, mkdtemp, rm } from 'fs/promises';
+import { access, mkdtemp, realpath, rm, stat } from 'fs/promises';
 import { tmpdir } from 'os';
-import { basename, join } from 'path';
+import { basename, join, resolve, sep } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 
@@ -55,6 +55,83 @@ const getRemoteFileName = (path: string, originalName?: string | null) => {
   }
 };
 
+const getLocalUploadStaticDirectory = () => {
+  const directory =
+    process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY ||
+    process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY ||
+    '/uploads';
+  return `/${directory.replace(/^\/+|\/+$/g, '')}`;
+};
+
+export const resolveLocalUploadVideoPath = async (
+  mediaPath: string
+): Promise<string | undefined> => {
+  const uploadDirectory = process.env.UPLOAD_DIRECTORY;
+  const frontendUrl = process.env.FRONTEND_URL;
+  if (
+    process.env.STORAGE_PROVIDER !== 'local' ||
+    !uploadDirectory ||
+    !frontendUrl
+  ) {
+    return undefined;
+  }
+
+  let mediaUrl: URL;
+  let appUrl: URL;
+  try {
+    mediaUrl = new URL(mediaPath);
+    appUrl = new URL(frontendUrl);
+  } catch {
+    return undefined;
+  }
+
+  if (mediaUrl.origin !== appUrl.origin) {
+    return undefined;
+  }
+
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(mediaUrl.pathname);
+  } catch {
+    return undefined;
+  }
+
+  const uploadPrefix = getLocalUploadStaticDirectory();
+  if (!pathname.startsWith(`${uploadPrefix}/`)) {
+    return undefined;
+  }
+
+  const relativePath = pathname.slice(uploadPrefix.length).replace(/^\/+/, '');
+  if (!relativePath || relativePath.includes('\0')) {
+    return undefined;
+  }
+
+  const uploadRoot = resolve(uploadDirectory);
+  const candidatePath = resolve(uploadRoot, relativePath);
+  if (
+    candidatePath === uploadRoot ||
+    !candidatePath.startsWith(`${uploadRoot}${sep}`)
+  ) {
+    return undefined;
+  }
+
+  try {
+    const realUploadRoot = await realpath(uploadRoot);
+    const realCandidatePath = await realpath(candidatePath);
+    if (
+      realCandidatePath === realUploadRoot ||
+      !realCandidatePath.startsWith(`${realUploadRoot}${sep}`) ||
+      !(await stat(realCandidatePath)).isFile()
+    ) {
+      return undefined;
+    }
+
+    return realCandidatePath;
+  } catch {
+    return undefined;
+  }
+};
+
 export const prepareVideoMediaFile = async (
   path: string,
   originalName?: string | null
@@ -63,6 +140,15 @@ export const prepareVideoMediaFile = async (
     await access(path);
     return {
       inputPath: path,
+      isTemporary: false,
+      cleanup: async () => undefined,
+    };
+  }
+
+  const localUploadPath = await resolveLocalUploadVideoPath(path);
+  if (localUploadPath) {
+    return {
+      inputPath: localUploadPath,
       isTemporary: false,
       cleanup: async () => undefined,
     };

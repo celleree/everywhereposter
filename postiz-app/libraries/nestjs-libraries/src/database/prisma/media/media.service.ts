@@ -105,7 +105,8 @@ export class MediaService {
     ) {
       await this._mediaTranscriptionService.ensureTranscriptionStarted(
         org,
-        media.id
+        media.id,
+        true
       );
     }
 

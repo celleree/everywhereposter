@@ -3,6 +3,7 @@ import {
   createRemoteMediaByteLimitStream,
   prepareVideoMediaFile,
   REMOTE_MEDIA_MAX_BYTES,
+  resolveLocalUploadVideoPath,
 } from '@gitroom/nestjs-libraries/copy-generation/video-media-file';
 
 jest.mock('axios', () => ({
@@ -17,7 +18,9 @@ jest.mock('fs', () => ({
 jest.mock('fs/promises', () => ({
   access: jest.fn(),
   mkdtemp: jest.fn(),
+  realpath: jest.fn(),
   rm: jest.fn(),
+  stat: jest.fn(),
 }));
 
 jest.mock('stream/promises', () => ({
@@ -28,10 +31,33 @@ const axios = (jest.requireMock('axios') as { default: jest.Mock }).default;
 const { createWriteStream } = jest.requireMock('fs') as {
   createWriteStream: jest.Mock;
 };
-const { access, mkdtemp, rm } = jest.requireMock('fs/promises') as {
+const { access, mkdtemp, realpath, rm, stat } = jest.requireMock(
+  'fs/promises'
+) as {
   access: jest.Mock;
   mkdtemp: jest.Mock;
+  realpath: jest.Mock;
   rm: jest.Mock;
+  stat: jest.Mock;
+};
+
+const environment = {
+  STORAGE_PROVIDER: process.env.STORAGE_PROVIDER,
+  UPLOAD_DIRECTORY: process.env.UPLOAD_DIRECTORY,
+  FRONTEND_URL: process.env.FRONTEND_URL,
+  NEXT_PUBLIC_UPLOAD_DIRECTORY: process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY,
+  NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY:
+    process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY,
+};
+
+const restoreEnvironment = () => {
+  for (const [key, value] of Object.entries(environment)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
 };
 const { pipeline } = jest.requireMock('stream/promises') as {
   pipeline: jest.Mock;
@@ -40,7 +66,14 @@ const { pipeline } = jest.requireMock('stream/promises') as {
 describe('prepareVideoMediaFile', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.STORAGE_PROVIDER = 'local';
+    process.env.UPLOAD_DIRECTORY = '/tmp/postiz-video-media-file-test';
+    process.env.FRONTEND_URL = 'http://localhost:4007';
+    process.env.NEXT_PUBLIC_UPLOAD_DIRECTORY = '/uploads';
+    delete process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY;
   });
+
+  afterAll(restoreEnvironment);
 
   it('reuses a local file without copying or deleting it', async () => {
     access.mockResolvedValue(undefined);
@@ -55,7 +88,55 @@ describe('prepareVideoMediaFile', () => {
     expect(rm).not.toHaveBeenCalled();
   });
 
+  it('resolves a same-origin local upload URL without downloading it', async () => {
+    const localFile = '/tmp/postiz-video-media-file-test/example.mp4';
+    realpath.mockImplementation(async (path: string) => path);
+    stat.mockResolvedValue({ isFile: () => true });
+
+    const result = await prepareVideoMediaFile(
+      'http://localhost:4007/uploads/example.mp4',
+      'example.mp4'
+    );
+
+    expect(realpath).toHaveBeenCalledWith(
+      '/tmp/postiz-video-media-file-test'
+    );
+    expect(realpath).toHaveBeenCalledWith(localFile);
+    expect(stat).toHaveBeenCalledWith(localFile);
+    expect(axios).not.toHaveBeenCalled();
+    expect(result.inputPath).toBe(localFile);
+    expect(result.isTemporary).toBe(false);
+  });
+
+  it('does not resolve traversal or encoded-path tricks outside the upload root', async () => {
+    await expect(
+      resolveLocalUploadVideoPath(
+        'http://localhost:4007/uploads/%2e%2e/private/video.mp4'
+      )
+    ).resolves.toBeUndefined();
+    await expect(
+      resolveLocalUploadVideoPath(
+        'http://localhost:4007/uploads/%2e%2e%2fprivate/video.mp4'
+      )
+    ).resolves.toBeUndefined();
+
+    expect(realpath).not.toHaveBeenCalled();
+    expect(stat).not.toHaveBeenCalled();
+  });
+
+  it('requires a local regular file before treating an upload URL as local', async () => {
+    realpath.mockImplementation(async (path: string) => path);
+    stat.mockResolvedValue({ isFile: () => false });
+
+    await expect(
+      resolveLocalUploadVideoPath(
+        'http://localhost:4007/uploads/missing.mp4'
+      )
+    ).resolves.toBeUndefined();
+  });
+
   it('streams remote media through a byte limiter to a unique temporary file', async () => {
+    process.env.STORAGE_PROVIDER = 'cloudflare';
     const responseStream = Readable.from(['large-video-chunk']);
     const destination = { destination: true };
     mkdtemp.mockResolvedValue('/tmp/postiz-video-source-abc');

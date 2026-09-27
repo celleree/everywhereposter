@@ -1,4 +1,7 @@
-import { resolveStructurallyValidatedUploadFileType } from '@gitroom/frontend/components/media/structural.upload.file.type';
+import {
+  resolveStructurallyValidatedUploadFileType,
+  validateStructurallySupportedVideoFile,
+} from '@gitroom/frontend/components/media/structural.upload.file.type';
 
 export const GUIDED_VIDEO_ACCEPT =
   'video/mp4,video/quicktime,video/mov,.mp4,.mov';
@@ -34,10 +37,11 @@ export const isGuidedMp4MovMedia = (media?: GuidedVideoMedia) => {
   return typeIsCompatible && hasSupportedVideoExtension(nameOrPath);
 };
 
+export const validateGuidedVideoFile = (file: File) =>
+  validateStructurallySupportedVideoFile(file);
+
 export const isGuidedVideoFile = async (file: File) =>
-  GUIDED_VIDEO_MIME_TYPES.has(
-    await resolveStructurallyValidatedUploadFileType(file)
-  );
+  (await validateGuidedVideoFile(file)) === 'valid';
 
 export const normalizeGuidedVideoFile = async (file: File) => {
   const currentType = file.type.toLowerCase();
