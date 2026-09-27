@@ -2,13 +2,15 @@ jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 jest.mock('@mastra/mcp', () => ({ MCPServer: jest.fn().mockImplementation(() => ({ startHTTP: jest.fn() })) }));
 jest.mock('@gitroom/nestjs-libraries/chat/mastra.service', () => ({ MastraService: class MastraService {} }));
 import express from 'express';
+import { Module, ValidationPipe } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
 import { AddressInfo } from 'net';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { createHash } from 'crypto';
 import { startMcp } from '@gitroom/nestjs-libraries/chat/start.mcp';
 import { OAuthService, getOAuthIssuer } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
-import { OAuthAuthorizedController } from '../../apps/backend/src/api/routes/oauth.controller';
+import { OAuthAuthorizedController, OAuthController } from '../../apps/backend/src/api/routes/oauth.controller';
 
 const origin = 'https://server.test';
 const issuer = `${origin}/api`;
@@ -86,6 +88,30 @@ describe('public OAuth discovery and issuer callbacks', () => {
       }
     }
   );
+  it('accepts form-encoded token requests and returns HTTP 200 without caching', async () => {
+    const token = { access_token: 'synthetic-token', token_type: 'bearer', scope: 'accounts:read' };
+    const exchangeCodeForToken = jest.fn().mockResolvedValue(token);
+    @Module({ controllers: [OAuthController], providers: [
+      { provide: OAuthService, useValue: { exchangeCodeForToken } },
+    ] })
+    class TokenTestModule {}
+    const app = await NestFactory.create(TokenTestModule, { logger: false });
+    app.useGlobalPipes(new ValidationPipe({ transform: true }));
+    try {
+      await app.listen(0, '127.0.0.1');
+      const body = { grant_type: 'authorization_code', code: 'synthetic-code',
+        client_id: 'client', client_secret: 'synthetic-secret',
+        redirect_uri: 'https://client.test/callback', resource, code_verifier: 'a'.repeat(43) };
+      const response = await fetch(`${await app.getUrl()}/oauth/token`, {
+        method: 'POST', body: new URLSearchParams(body),
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.get('pragma')).toBe('no-cache');
+      expect(await response.json()).toEqual(token);
+      expect(exchangeCodeForToken).toHaveBeenCalledWith(expect.objectContaining(body));
+    } finally { await app.close(); }
+  });
   it.each(['approve', 'deny'] as const)('identifies the issuer in the %s callback and preserves state', async (action) => {
     const redirect = 'https://client.test/callback';
     const repository = {

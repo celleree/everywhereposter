@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 import { OAuthService, getMcpResource } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { createOAuthMiddleware } from '@gitroom/nestjs-libraries/chat/oauth-middleware';
-import { HEADERS_METADATA, HTTP_CODE_METADATA } from '@nestjs/common/constants';
+import { HEADERS_METADATA } from '@nestjs/common/constants';
 import { OAuthController } from '../../apps/backend/src/api/routes/oauth.controller';
 import { PublicAuthMiddleware } from '../../apps/backend/src/services/auth/public.auth.middleware';
 
@@ -48,8 +48,7 @@ describe('OAuth accounts:read boundary', () => {
   const authenticate = (service: OAuthService) =>
     service.getOrgByOAuthToken('pos_token', getMcpResource(), 'accounts:read');
 
-  it('returns OAuth token success with HTTP 200 and no caching', () => {
-    expect(Reflect.getMetadata(HTTP_CODE_METADATA, OAuthController.prototype.token)).toBe(200);
+  it('marks token responses as non-cacheable', () => {
     expect(Reflect.getMetadata(HEADERS_METADATA, OAuthController.prototype.token)).toEqual(
       expect.arrayContaining([
         { name: 'Cache-Control', value: 'no-store' },
