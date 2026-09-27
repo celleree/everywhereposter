@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Header,
+  HttpCode,
   HttpException,
   HttpStatus,
   Post,
@@ -40,6 +41,7 @@ export class OAuthController {
   }
 
   @Post('/token')
+  @HttpCode(HttpStatus.OK)
   @Header('Cache-Control', 'no-store')
   @Header('Pragma', 'no-cache')
   async token(@Body() body: TokenExchangeDto) {
