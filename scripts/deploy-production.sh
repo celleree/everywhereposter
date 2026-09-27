@@ -151,8 +151,7 @@ if [ "$PUBLIC_WEB_RUNNING" != "true" ]; then
   fail "The public proxy container ${PUBLIC_WEB_CONTAINER} is not running."
 fi
 
-docker exec "$PUBLIC_WEB_CONTAINER" nginx -t
-docker exec "$PUBLIC_WEB_CONTAINER" nginx -s reload
+bash scripts/reload-public-proxy.sh "$PUBLIC_WEB_CONTAINER" public-web
 sleep 2
 printf 'Reloaded %s so Nginx resolves the recreated %s container.\n' \
   "$PUBLIC_WEB_CONTAINER" "$CONTAINER_NAME"
