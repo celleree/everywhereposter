@@ -12,7 +12,22 @@ Update this ledger after each verified deployment and after any rollback. Record
 - Verification result: `<result, including the runtime container and public check>`
 - Rollback reference: `<last known-good full SHA or retained rollback tag>`
 
-## Current Verified Production Deployment
+## Current Verified Production Deployment — restricted OAuth MCP
+
+- Deployment date: `2026-09-27 UTC`
+- Merged PRs: [#116](https://github.com/celleree/everywhereposter/pull/116) restricted account listing (`79368b279dc66a3b7e0b4a87f9abbc0daaa2ddd6`), [#124](https://github.com/celleree/everywhereposter/pull/124) OAuth discovery and issuer identification (`61b3e08090ada0c0270448b917ab28b33ab215aa`), and [#125](https://github.com/celleree/everywhereposter/pull/125) proxy configuration refresh (`910448da9ff01978a494258dc2a71fceb1c8760a`).
+- Full image commit SHA and server revision: `61b3e08090ada0c0270448b917ab28b33ab215aa`
+- GHCR image tag: `ghcr.io/celleree/publish-everywhere-postiz:61b3e08090ada0c0270448b917ab28b33ab215aa`
+- Deployed Docker image ID: `sha256:f00a0295c267d232919e3b14053951956b3e102de1a85a685260e82655bd86b7`
+- Build: [36354851764](https://github.com/celleree/everywhereposter/actions/runs/36354851764), successful for the exact image SHA. All three PRs passed CI and fresh independent review of their final HEADs. Final OAuth review: `c592c4654e3713befe7c562542bd96caaa271443`, no actionable findings; 45 focused tests passed, optional PostgreSQL redemption test skipped because no isolated test database was configured.
+- Deployment: [36355888990](https://github.com/celleree/everywhereposter/actions/runs/36355888990), successful through the existing workflow, with pruning disabled on this retry. Internal readiness took 47 seconds; the deployment script took 63 seconds. Exact image match, healthy application/dependencies, restart count zero, clean production checkout, and public readiness passed. The public proxy was syntax-validated and recreated because its single-file mount retained the old configuration; host and mounted configuration SHA-256 both equal `d61b603e6aabcfddfaa61b2862f86b12983f9044d20c2205600418826344f2cd`.
+- First attempt: [36355410383](https://github.com/celleree/everywhereposter/actions/runs/36355410383) performed explicitly approved guarded image pruning and applied `20260921000000_oauth_read_boundary`. It then stopped correctly when the first backend startup exceeded the existing 90-second startup timeout and the container restarted. The automatic retry became healthy; rerunning the same reviewed image completed with zero restarts and no pending migration. No startup/restart safeguard was weakened. Cold startup timing remains an operational limitation; this release does not establish a cold-start performance improvement.
+- Backup: `/home/arund/publish-everywhere-git/backups/postiz-20260927-215723.sql`, 1,040,896 bytes, nonempty with permissions `600`, created through the existing backup script after confirming the intended database host/name without exposing credentials. An untracked environment backup was preserved outside the checkout with explicit permission; contents were not displayed. No manual production data mutation occurred.
+- External verification: canonical protected-resource and authorization-server discovery plus legacy aliases returned HTTP 200 and consistent `accounts:read`, S256, `client_secret_post`, resource/issuer/endpoints, and RFC 9207 advertisement. GET/POST to the canonical MCP URL challenged missing/invalid bearer tokens with the canonical metadata URL and restricted scope. Authorization validation rejected plain PKCE and `mcp:write`; the public token endpoint rejected invalid client credentials and retained no-store headers. Broad MCP/public API endpoints rejected OAuth-shaped invalid tokens. A fresh anonymous browser rendered the login controls.
+- Evidence limit: actual SDK transport tests with synthetic organizations verified the single-tool registry, tenant isolation, secret omission, input rejection, and write-tool rejection. Authenticated production tool calls, valid production API-key calls, and the actual ChatGPT consent/callback flow were not exercised; they require human credentials/consent. See [manual connection steps](CHATGPT-OAUTH-MCP.md).
+- Rollback: `publish-everywhere/postiz-app:previous` retains `sha256:03709993a0ce1c5facf1e0b537facb0524f13507daecf0b7d24d68d72347ef9d` (previous image SHA `1c9c6cb783f5838b3b68e2c6327d8e77ce725c82`). No rollback was executed. Docker volume had 6.3 GB free after deployment; volumes were not pruned.
+
+## Previous Verified Production Deployment — 2026-09-15
 
 - Deployment date: `2026-09-15 UTC` (`2026-09-14` in America/Los_Angeles)
 - Merged PR: `#105`
