@@ -3,13 +3,14 @@ import {
   Controller,
   Get,
   Header,
+  HttpCode,
   HttpException,
   HttpStatus,
   Post,
   Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
+import { getOAuthIssuer, OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
 import { User, Organization } from '@prisma/client';
@@ -40,6 +41,7 @@ export class OAuthController {
   }
 
   @Post('/token')
+  @HttpCode(HttpStatus.OK)
   @Header('Cache-Control', 'no-store')
   @Header('Pragma', 'no-cache')
   async token(@Body() body: TokenExchangeDto) {
@@ -74,6 +76,7 @@ export class OAuthAuthorizedController {
     if (body.action === 'deny') {
       const redirectUrl = new URL(app.redirectUrl);
       redirectUrl.searchParams.set('error', 'access_denied');
+      redirectUrl.searchParams.set('iss', getOAuthIssuer());
       if (body.state) {
         redirectUrl.searchParams.set('state', body.state);
       }
@@ -89,6 +92,7 @@ export class OAuthAuthorizedController {
 
     const redirectUrl = new URL(app.redirectUrl);
     redirectUrl.searchParams.set('code', code);
+    redirectUrl.searchParams.set('iss', getOAuthIssuer());
     if (body.state) {
       redirectUrl.searchParams.set('state', body.state);
     }

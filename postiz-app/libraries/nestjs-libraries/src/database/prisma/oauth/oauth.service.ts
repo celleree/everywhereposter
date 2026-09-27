@@ -9,8 +9,9 @@ import { TokenExchangeDto } from '@gitroom/nestjs-libraries/dtos/oauth/token-exc
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 
 export const ACCOUNTS_READ_SCOPE = 'accounts:read';
-export const getMcpResource = () =>
-  `${process.env.NEXT_PUBLIC_BACKEND_URL!.replace(/\/$/, '')}/mcp-oauth`;
+export const getOAuthIssuer = () =>
+  process.env.NEXT_PUBLIC_BACKEND_URL!.replace(/\/$/, '');
+export const getMcpResource = () => `${getOAuthIssuer()}/mcp-oauth`;
 const TOKEN_LIFETIME_SECONDS = 3600;
 
 @Injectable()

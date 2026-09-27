@@ -4,7 +4,7 @@ import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
 import { MCPServer } from '@mastra/mcp';
 import { randomUUID } from 'crypto';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
-import { ACCOUNTS_READ_SCOPE, getMcpResource, OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
+import { ACCOUNTS_READ_SCOPE, getMcpResource, getOAuthIssuer, OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { runWithContext } from './async.storage';
 import { createOAuthMiddleware } from './oauth-middleware';
@@ -52,12 +52,15 @@ export const startMcp = async (app: INestApplication) => {
     },
   });
   const resource = getMcpResource();
+  const issuer = getOAuthIssuer();
+  const resourceMetadataPath = `/.well-known/oauth-protected-resource${new URL(resource).pathname}`;
+  const issuerMetadataPath = `/.well-known/oauth-authorization-server${new URL(issuer).pathname.replace(/\/$/, '')}`;
 
   const oauthMiddleware = createOAuthMiddleware({
     oauth: {
       resource,
       scopesSupported: [ACCOUNTS_READ_SCOPE],
-      authorizationServers: [process.env.NEXT_PUBLIC_BACKEND_URL!],
+      authorizationServers: [issuer],
       validateToken: async (token: string) => {
         const org = await oauthService.getOrgByOAuthToken(token, resource, ACCOUNTS_READ_SCOPE);
         if (!org) {
@@ -76,12 +79,14 @@ export const startMcp = async (app: INestApplication) => {
     });
   }
 
-  app.use('/.well-known/oauth-protected-resource', async (req: Request, res: Response) => {
-    const url = new URL('./.well-known/oauth-protected-resource', resource);
-    await oauthMiddleware(req, res, url);
-  });
+  // Keep the legacy metadata aliases while serving RFC 9728 path-based discovery.
+  for (const path of new Set([resourceMetadataPath, '/.well-known/oauth-protected-resource'])) {
+    app.use(path, async (req: Request, res: Response) => {
+      await oauthMiddleware(req, res, new URL(resourceMetadataPath, resource));
+    });
+  }
 
-  app.use('/.well-known/oauth-authorization-server', async (req: Request, res: Response) => {
+  const authorizationMetadata = async (req: Request, res: Response) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (req.method === 'OPTIONS') {
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -93,16 +98,20 @@ export const startMcp = async (app: INestApplication) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'max-age=3600');
     res.json({
-      issuer: process.env.NEXT_PUBLIC_BACKEND_URL,
+      issuer,
+      authorization_response_iss_parameter_supported: true,
       authorization_endpoint: `${process.env.FRONTEND_URL}/oauth/authorize`,
-      token_endpoint: `${process.env.NEXT_PUBLIC_OVERRIDE_BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL}/oauth/token`,
+      token_endpoint: `${issuer}/oauth/token`,
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code'],
       code_challenge_methods_supported: ['S256'],
       scopes_supported: [ACCOUNTS_READ_SCOPE],
       token_endpoint_auth_methods_supported: ['client_secret_post'],
     });
-  });
+  };
+  for (const path of new Set([issuerMetadataPath, '/.well-known/oauth-authorization-server'])) {
+    app.use(path, authorizationMetadata);
+  }
 
   app.use('/mcp-oauth', async (req: Request, res: Response, next: () => void) => {
     // Skip if this is the /mcp/:id route

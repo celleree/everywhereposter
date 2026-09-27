@@ -37,7 +37,11 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
   const { oauth, mcpPath = '/mcp', logger } = options;
 
   const protectedResourceMetadata = generateProtectedResourceMetadata(oauth);
-  const metadataUrl = new URL('./.well-known/oauth-protected-resource', oauth.resource);
+  const resourceUrl = new URL(oauth.resource);
+  const metadataUrl = new URL(
+    `/.well-known/oauth-protected-resource${resourceUrl.pathname.replace(/\/$/, '')}`,
+    resourceUrl.origin,
+  );
   const wellKnownPath = metadataUrl.pathname;
   const resourceMetadataUrl = metadataUrl.toString();
 
@@ -85,7 +89,10 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
       logger?.debug?.('OAuth middleware: No bearer token provided');
       res.writeHead(401, {
         'Content-Type': 'application/json',
-        'WWW-Authenticate': generateWWWAuthenticateHeader({ resourceMetadataUrl }),
+        'WWW-Authenticate': generateWWWAuthenticateHeader({
+          resourceMetadataUrl,
+          additionalParams: { scope: oauth.scopesSupported?.join(' ') || '' },
+        }),
       });
       res.end(
         JSON.stringify({
@@ -108,6 +115,7 @@ export function createOAuthMiddleware(options: OAuthMiddlewareOptions) {
           'WWW-Authenticate': generateWWWAuthenticateHeader({
             resourceMetadataUrl,
             additionalParams: {
+              scope: oauth.scopesSupported?.join(' ') || '',
               error: validationResult.error || 'invalid_token',
               ...(validationResult.errorDescription && {
                 error_description: validationResult.errorDescription,
