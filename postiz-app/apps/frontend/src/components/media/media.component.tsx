@@ -506,24 +506,11 @@ export const MediaBox: FC<{
         </div>
         <div
           className={clsx(
-            'flex',
+            'flex justify-end',
             postedMedia && 'hidden',
             !isLoading && !data?.results?.length && 'hidden'
           )}
         >
-          {!isLoading && !!data?.results?.length && (
-            <div className="flex-1 text-[14px] font-[600] whitespace-pre-line">
-              {t(
-                'select_or_upload_pictures_max_1gb',
-                'Select or upload pictures (maximum 1 GB per upload).'
-              )}
-              {'\n'}
-              {t(
-                'you_can_drag_drop_pictures',
-                'You can also drag & drop pictures.'
-              )}
-            </div>
-          )}
           <input
             type="file"
             ref={uploaderRef}
@@ -572,7 +559,9 @@ export const MediaBox: FC<{
               'absolute -left-[3px] -top-[3px] withp3 h-full overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner',
               !isLoading &&
                 !data?.results?.length &&
-                'flex justify-center items-center gap-[20px] flex-col'
+                'flex justify-center items-center gap-[20px] flex-col',
+              (isLoading || !!data?.results?.length) &&
+                'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6'
             )}
           >
             {!isLoading && !data?.results?.length && (
@@ -589,26 +578,14 @@ export const MediaBox: FC<{
                         "You don't have any media yet"
                       )}
                 </div>
-                <div className="whitespace-pre-line text-newTextColor/[0.6] text-center">
-                  {postedMedia
-                    ? t(
-                        'media_attached_to_previous_posts_will_appear_here',
-                        'Media attached to previous posts will appear here.'
-                      )
-                    : (
-                        <>
-                          {t(
-                            'select_or_upload_pictures_max_1gb',
-                            'Select or upload pictures (maximum 1 GB per upload).'
-                          )}{' '}
-                          {'\n'}
-                          {t(
-                            'you_can_drag_drop_pictures',
-                            'You can also drag & drop pictures.'
-                          )}
-                        </>
-                      )}
-                </div>
+                {postedMedia && (
+                  <div className="whitespace-pre-line text-newTextColor/[0.6] text-center">
+                    {t(
+                      'media_attached_to_previous_posts_will_appear_here',
+                      'Media attached to previous posts will appear here.'
+                    )}
+                  </div>
+                )}
                 {!postedMedia && (
                   <div className="forceChange flex gap-[8px]">
                     {btn}
@@ -622,7 +599,7 @@ export const MediaBox: FC<{
                 {[...new Array(16)].map((_, i) => (
                   <div
                     className={clsx(
-                      'px-[3px] py-[3px] float-left rounded-[6px] cursor-pointer w8-max aspect-square'
+                      'w-full px-[3px] py-[3px] rounded-[6px] cursor-pointer aspect-square'
                     )}
                     key={i}
                   >
@@ -649,7 +626,7 @@ export const MediaBox: FC<{
               .map((media: any) => (
                 <div
                   className={clsx(
-                    'group px-[3px] py-[3px] float-left rounded-[6px] w8-max aspect-square',
+                    'group w-full px-[3px] py-[3px] rounded-[6px] aspect-square',
                     !standalone && 'cursor-pointer'
                   )}
                   key={media.id}
@@ -673,7 +650,12 @@ export const MediaBox: FC<{
                         onClick={deleteImage(media)}
                       />
                     ) : null}
-                    <div className="absolute bottom-[10px] end-[10px] z-[100]">{media.originalName}</div>
+                    <div
+                      className="absolute bottom-[10px] start-[10px] end-[10px] z-[100] min-w-0 truncate text-right"
+                      title={media.originalName || undefined}
+                    >
+                      {media.originalName}
+                    </div>
                     <div className="w-full h-full rounded-[6px] overflow-hidden relative">
                       <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
                         <div
