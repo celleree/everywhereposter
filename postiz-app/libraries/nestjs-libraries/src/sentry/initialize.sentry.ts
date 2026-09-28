@@ -1,5 +1,4 @@
 import * as Sentry from '@sentry/nestjs';
-import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { capitalize } from 'lodash';
 
 export const initializeSentry = (appName: string, allowLogs = false) => {
@@ -8,6 +7,8 @@ export const initializeSentry = (appName: string, allowLogs = false) => {
   }
 
   try {
+    const { nodeProfilingIntegration } = require('@sentry/profiling-node');
+
     Sentry.init({
       initialScope: {
         tags: {
