@@ -150,6 +150,12 @@ export const startMcp = async (app: INestApplication) => {
       return;
     }
 
+    // Only dispatch parsed, individual messages. The SDK also accepts batches
+    // and some nonstandard content types, which could bypass file prevalidation.
+    if (req.method === 'POST' && (!req.body || typeof req.body !== 'object' || Array.isArray(req.body))) {
+      res.status(400).json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Expected one JSON-RPC object' } });
+      return;
+    }
     // Mastra echoes supplied arguments on schema errors. Intercept file input
     // errors so temporary signed download URLs cannot appear in its response.
     if (req.body?.method === 'tools/call' && req.body.params?.name === 'ingest_chatgpt_file' &&

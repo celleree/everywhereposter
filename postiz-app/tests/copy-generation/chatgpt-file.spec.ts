@@ -74,7 +74,7 @@ describe('bounded public HTTPS download', () => {
   it.each(['http://public.test/a', 'https://localhost/a', 'https://127.0.0.1/a', 'https://[::1]/a', 'https://2130706433/a', 'https://0x7f000001/a', 'https://public.test:8443/a', 'https://u:p@public.test/a'])('rejects unsafe URL %s', (value) => {
     expect(() => validateDownloadUrl(value)).toThrow();
   });
-  it.each(['0.0.0.1', '10.0.0.1', '127.0.0.1', '169.254.169.254', '172.31.0.1', '192.168.1.1', '100.100.100.200', '192.0.0.8', '198.18.0.1', '224.0.0.1', '255.255.255.255', '::1', '::ffff:127.0.0.1', 'fc00::1', 'fe80::1', '2002:7f00:1::', '2001:db8::1', '64:ff9b::7f00:1'])('rejects nonpublic address %s', (address) => expect(isPublicAddress(address)).toBe(false));
+  it.each(['0.0.0.1', '10.0.0.1', '127.0.0.1', '168.63.129.16', '169.254.169.254', '172.31.0.1', '192.168.1.1', '100.100.100.200', '192.0.0.8', '198.18.0.1', '224.0.0.1', '255.255.255.255', '::1', '::ffff:127.0.0.1', 'fc00::1', 'fe80::1', '2002:7f00:1::', '2001:db8::1', '64:ff9b::7f00:1'])('rejects nonpublic address %s', (address) => expect(isPublicAddress(address)).toBe(false));
   it.each(['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2001:4860:4860::8888'])('allows global address %s', (address) => expect(isPublicAddress(address)).toBe(true));
   it('rejects mixed public/private DNS and pins checked public answers to the socket', async () => {
     const callback = jest.fn();

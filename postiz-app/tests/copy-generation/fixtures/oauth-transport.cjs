@@ -58,6 +58,15 @@ const tokens = { pos_read: 'accounts:read', pos_write: 'posts:write', pos_both: 
         assert.doesNotMatch(JSON.stringify(result.data), /secret|signature|download_url/);
       }
     }
+    const badCall = { jsonrpc: '2.0', id: 5, method: 'tools/call', params: {
+      name: 'ingest_chatgpt_file', arguments: { file: { download_url: 'https://file.test/a?secret=signature' } },
+    } };
+    for (const [contentType, body] of [['application/json', [badCall]], ['application/jsonfoo', badCall]]) {
+      const response = await fetch(`${base}/mcp-oauth`, { method: 'POST',
+        headers: { Authorization: 'Bearer pos_write', 'Content-Type': contentType }, body: JSON.stringify(body) });
+      assert.equal(response.status, 400);
+      assert.doesNotMatch(await response.text(), /secret|signature|download_url/);
+    }
     console.log('OAuth MCP wire assertions passed');
   } finally { await new Promise((done) => server.close(done)); }
 })().then(() => process.exit(0), (error) => { console.error(error); process.exit(1); });
