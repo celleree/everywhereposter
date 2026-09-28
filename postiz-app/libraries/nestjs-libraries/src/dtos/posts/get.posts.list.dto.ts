@@ -4,10 +4,15 @@ import {
   IsNumber,
   Min,
   Max,
+  IsIn,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class GetPostsListDto {
+  @IsOptional()
+  @IsIn(['scheduled-once'])
+  mode?: 'scheduled-once';
+
   @IsOptional()
   @IsNumber()
   @Min(0)
