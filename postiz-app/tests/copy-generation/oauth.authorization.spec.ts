@@ -150,7 +150,7 @@ describe('OAuth accounts:read boundary', () => {
     expect(Object.keys(factory.mock.calls[1][0].tools)).toEqual(['list_connected_accounts']);
     expect(factory.mock.calls[1][0].tools.publish).toBeUndefined();
     const response = { status: jest.fn().mockReturnThis(), send: jest.fn(), setHeader: jest.fn() };
-    const req = { path: '/', headers: { authorization: 'Bearer pos_token' }, rawHeaders: [], method: 'POST' };
+    const req = { path: '/', headers: { authorization: 'Bearer pos_token' }, rawHeaders: [], method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'initialize' } };
     await handlers.get('/mcp')!(req, response, jest.fn());
     expect(response.status).toHaveBeenCalledWith(401);
     expect(apiKeys.getOrgByApiKey).not.toHaveBeenCalled();
