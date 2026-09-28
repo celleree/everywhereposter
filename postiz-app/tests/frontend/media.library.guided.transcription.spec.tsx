@@ -282,4 +282,57 @@ describe('MediaBox guided transcription', () => {
     );
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  it('uses a responsive grid and constrains visible filenames to their card', () => {
+    const filename =
+      'this-is-an-intentionally-long-media-library-filename-that-must-not-overflow.mp4';
+    mockLibraryMedia = [
+      {
+        id: 'library-long-name',
+        path: 'https://media.example.com/library-long-name.mp4',
+        originalName: filename,
+        type: 'video',
+      },
+    ];
+
+    render(<MediaBox setMedia={jest.fn()} closeModal={jest.fn()} />);
+
+    const filenameOverlay = screen.getByText(filename);
+    expect(filenameOverlay).toHaveClass(
+      'start-[10px]',
+      'end-[10px]',
+      'truncate'
+    );
+    expect(filenameOverlay).toHaveAttribute('title', filename);
+    expect(filenameOverlay.closest('.grid')).toHaveClass(
+      'grid-cols-2',
+      'sm:grid-cols-3',
+      'lg:grid-cols-4',
+      'xl:grid-cols-6'
+    );
+  });
+
+  it('removes upload helper copy while keeping Upload available in populated and empty libraries', () => {
+    const helperCopy = 'Select or upload pictures (maximum 1 GB per upload).';
+
+    const { unmount } = render(
+      <MediaBox setMedia={jest.fn()} closeModal={jest.fn()} />
+    );
+
+    expect(screen.queryByText(helperCopy)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('You can also drag & drop pictures.')
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
+
+    unmount();
+    mockLibraryMedia = [];
+    render(<MediaBox setMedia={jest.fn()} closeModal={jest.fn()} />);
+
+    expect(screen.queryByText(helperCopy)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('You can also drag & drop pictures.')
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
+  });
 });
