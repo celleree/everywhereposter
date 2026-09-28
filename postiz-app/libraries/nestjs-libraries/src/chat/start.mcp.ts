@@ -13,6 +13,7 @@ import { MediaService } from '../database/prisma/media/media.service';
 import { PostsService } from '../database/prisma/posts/posts.service';
 import { ioRedis } from '../redis/redis.service';
 import { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
+import { chatgptFileInput, createChatGPTFileTool } from './chatgpt-file';
 const fixAcceptHeader = (req: Request) => {
   const value = 'application/json, text/event-stream';
   req.headers.accept = value;
@@ -63,7 +64,8 @@ export const startMcp = async (app: INestApplication) => {
     oauthServers.set(scopes.join(' '), new MCPServer({
       name: 'EverywherePoster OAuth', version: '1.0.0',
       tools: { ...(scopes.includes('accounts:read') ? readTools : {}),
-        ...(scopes.includes('posts:write') ? writeTools : {}) },
+        ...(scopes.includes('posts:write') ? { ...writeTools,
+          ingest_chatgpt_file: createChatGPTFileTool(app.get(MediaService, { strict: false })) } : {}) },
     }));
   }
   const resource = getMcpResource();
@@ -148,6 +150,14 @@ export const startMcp = async (app: INestApplication) => {
       return;
     }
 
+    // Mastra echoes supplied arguments on schema errors. Intercept file input
+    // errors so temporary signed download URLs cannot appear in its response.
+    if (req.body?.method === 'tools/call' && req.body.params?.name === 'ingest_chatgpt_file' &&
+      !chatgptFileInput.safeParse(req.body.params.arguments).success) {
+      res.status(200).json({ jsonrpc: '2.0', id: req.body.id ?? null,
+        result: { isError: true, content: [{ type: 'text', text: 'Invalid ChatGPT file input' }] } });
+      return;
+    }
     fixAcceptHeader(req);
     const scopes = parseOAuthScopes(authorization.scope).sort();
     const oauthServer = oauthServers.get(scopes.join(' '));
