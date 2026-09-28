@@ -342,6 +342,7 @@ export const useMenuItem = () => {
 };
 
 export const TopMenu: FC<{ mobileNav?: boolean }> = ({ mobileNav }) => {
+  const t = useT();
   const user = useUser();
   const { firstMenu, secondMenu } = useMenuItem();
   const { isGeneral, billingEnabled } = useVariables();
@@ -396,7 +397,7 @@ export const TopMenu: FC<{ mobileNav?: boolean }> = ({ mobileNav }) => {
           <MenuItem
             mobileNav={true}
             path={item.path}
-            label={item.name}
+            label={item.path === '/launches' ? t('scheduled', 'Scheduled') : item.name}
             icon={item.icon}
             key={item.name}
             onClick={item.onClick}

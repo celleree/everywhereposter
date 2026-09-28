@@ -40,7 +40,55 @@ function getDateRange(
   }
 }
 
-export const Filters = () => {
+const MobileFilters = () => {
+  const calendar = useCalendar();
+  const t = useT();
+  const isScheduled = calendar.mobileTab === 'scheduled';
+
+  return (
+    <div className="flex min-w-0 flex-col gap-[12px] text-textColor">
+      <div className="flex rounded-[8px] border border-newTableBorder p-[4px]">
+        {(['scheduled', 'all'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            aria-pressed={calendar.mobileTab === tab}
+            onClick={() => calendar.setMobileTab(tab)}
+            className={clsx(
+              'min-h-[44px] flex-1 rounded-[6px] px-[12px] text-[14px] font-[600]',
+              calendar.mobileTab === tab && 'bg-boxFocused text-textItemFocused'
+            )}
+          >
+            {tab === 'scheduled' ? t('scheduled', 'Scheduled') : t('all_posts', 'All posts')}
+          </button>
+        ))}
+      </div>
+      {isScheduled ? (
+        <div className="text-[13px] text-textColor/70">{t('one_time_scheduled_posts', 'One-time scheduled posts.')}</div>
+      ) : (
+        <div className="flex min-w-0 items-center justify-between gap-[8px]">
+          <button type="button" aria-label="Previous month" onClick={() => calendar.moveMobileMonth(-1)} className="min-h-[44px] min-w-[44px] rounded-[8px] border border-newTableBorder">‹</button>
+          <div className="min-w-0 text-center text-[14px] font-[500]">{newDayjs(calendar.mobileMonth).format('MMMM YYYY')}</div>
+          <button type="button" aria-label="Next month" onClick={() => calendar.moveMobileMonth(1)} className="min-h-[44px] min-w-[44px] rounded-[8px] border border-newTableBorder">›</button>
+        </div>
+      )}
+      <SelectCustomer
+        customer={calendar.customer as string}
+        onChange={calendar.setMobileCustomer}
+        integrations={calendar.integrations}
+      />
+      {isScheduled && calendar.mobileTotalPages > 1 && (
+        <div className="flex items-center justify-between gap-[8px] text-[14px]">
+          <button type="button" aria-label="Previous page" disabled={calendar.mobilePage === 0} onClick={() => calendar.setMobilePage(calendar.mobilePage - 1)} className="min-h-[44px] rounded-[8px] border border-newTableBorder px-[12px] disabled:opacity-50">{t('previous', 'Previous')}</button>
+          <span>{t('page', 'Page')} {calendar.mobilePage + 1} {t('of', 'of')} {calendar.mobileTotalPages}</span>
+          <button type="button" aria-label="Next page" disabled={calendar.mobilePage >= calendar.mobileTotalPages - 1} onClick={() => calendar.setMobilePage(calendar.mobilePage + 1)} className="min-h-[44px] rounded-[8px] border border-newTableBorder px-[12px] disabled:opacity-50">{t('next', 'Next')}</button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DesktopFilters = () => {
   const calendar = useCalendar();
   const t = useT();
 
@@ -484,4 +532,10 @@ export const Filters = () => {
       </div>
     </div>
   );
+};
+
+export const Filters = () => {
+  const { isMobile } = useCalendar();
+  if (isMobile === null) return null;
+  return isMobile ? <MobileFilters /> : <DesktopFilters />;
 };
