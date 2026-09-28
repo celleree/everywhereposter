@@ -9,6 +9,14 @@ import { TokenExchangeDto } from '@gitroom/nestjs-libraries/dtos/oauth/token-exc
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 
 export const ACCOUNTS_READ_SCOPE = 'accounts:read';
+export const POSTS_WRITE_SCOPE = 'posts:write';
+export const OAUTH_SCOPES = [ACCOUNTS_READ_SCOPE, POSTS_WRITE_SCOPE];
+export const parseOAuthScopes = (scope: unknown): string[] => {
+  if (typeof scope !== 'string') return [];
+  const scopes = scope.split(' ');
+  return scopes.length > 0 && scopes.every((s) => OAUTH_SCOPES.includes(s)) &&
+    new Set(scopes).size === scopes.length ? scopes : [];
+};
 export const getOAuthIssuer = () =>
   process.env.NEXT_PUBLIC_BACKEND_URL!.replace(/\/$/, '');
 export const getMcpResource = () => `${getOAuthIssuer()}/mcp-oauth`;
@@ -89,7 +97,7 @@ export class OAuthService {
     if (
       request.response_type !== 'code' ||
       request.redirect_uri !== app.redirectUrl ||
-      request.scope !== ACCOUNTS_READ_SCOPE ||
+      !parseOAuthScopes(request.scope).length ||
       request.resource !== getMcpResource() ||
       request.code_challenge_method !== 'S256' ||
       !/^[A-Za-z0-9_-]{43}$/.test(request.code_challenge || '')
@@ -147,7 +155,7 @@ export class OAuthService {
       auth.revokedAt ||
       !auth.codeExpiresAt ||
       auth.codeExpiresAt <= new Date() ||
-      auth.scope !== ACCOUNTS_READ_SCOPE ||
+      !parseOAuthScopes(auth.scope).length ||
       auth.resource !== getMcpResource() ||
       request.resource !== auth.resource ||
       request.redirect_uri !== auth.redirectUri ||
@@ -182,11 +190,11 @@ export class OAuthService {
     };
   }
 
-  async getOrgByOAuthToken(token: string, resource: string, scope: string) {
+  async getOrgByOAuthToken(token: string, resource: string, scope?: string) {
     if (
       !token.startsWith('pos_') ||
       resource !== getMcpResource() ||
-      scope !== ACCOUNTS_READ_SCOPE
+      (scope !== undefined && !OAUTH_SCOPES.includes(scope))
     )
       return null;
     const auth = await this._oauthRepository.findByAccessToken(
@@ -199,7 +207,8 @@ export class OAuthService {
       !auth.tokenExpiresAt ||
       auth.tokenExpiresAt <= new Date() ||
       auth.resource !== resource ||
-      auth.scope !== scope ||
+      !parseOAuthScopes(auth.scope).length ||
+      (scope !== undefined && !parseOAuthScopes(auth.scope).includes(scope)) ||
       !auth.user.activated ||
       !auth.user.organizations.some(
         (membership) =>

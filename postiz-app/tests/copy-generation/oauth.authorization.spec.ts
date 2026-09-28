@@ -78,7 +78,16 @@ describe('OAuth accounts:read boundary', () => {
   it('requires explicit supported resource and scope at the call site', async () => {
     await expect(service.getOrgByOAuthToken('pos_token', 'https://server.test/api/public/v1', 'accounts:read')).resolves.toBeNull();
     await expect(service.getOrgByOAuthToken('pos_token', getMcpResource(), 'posts:write')).resolves.toBeNull();
-    expect(repository.findByAccessToken).not.toHaveBeenCalled();
+    expect(repository.findByAccessToken).toHaveBeenCalledTimes(1);
+  });
+  it.each(['posts:write', 'accounts:read posts:write', 'posts:write accounts:read'])('preserves explicitly granted scopes %s', async (scope) => {
+    await service.validateAuthorizationRequest({ ...request(), scope });
+    repository.findByCode.mockResolvedValue({ ...grant(), scope });
+    await expect(service.exchangeCodeForToken(exchange())).resolves.toMatchObject({ scope });
+    repository.findByAccessToken.mockResolvedValue({ ...grant(), scope });
+    await expect(service.getOrgByOAuthToken('pos_token', getMcpResource(), 'posts:write')).resolves.toMatchObject({ scope });
+    if (scope === 'posts:write') await expect(authenticate(service)).resolves.toBeNull();
+    await expect(service.getOrgByOAuthToken('pos_token', getMcpResource(), 'admin:write')).resolves.toBeNull();
   });
   it('validates authorization and persists the consent/PKCE binding', async () => {
     await service.validateAuthorizationRequest(request());
@@ -88,7 +97,7 @@ describe('OAuth accounts:read boundary', () => {
     }));
   });
   it.each([
-    { scope: 'accounts:read posts:write' }, { resource: 'https://other.test' },
+    { scope: 'accounts:read admin:write' }, { scope: 'accounts:read accounts:read' }, { resource: 'https://other.test' },
     { redirect_uri: 'https://attacker.test' }, { code_challenge_method: 'plain' },
     { code_challenge: '' }, { response_type: 'token' },
   ])('rejects unsafe consent parameters %p', async (change) => {
@@ -129,7 +138,7 @@ describe('OAuth accounts:read boundary', () => {
     const handlers = new Map<string, Function>();
     const agent = { listTools: jest.fn().mockResolvedValue({ publish: {} }) };
     const apiKeys = { getOrgByApiKey: jest.fn().mockResolvedValue({ id: 'api-org' }) };
-    const oauth = { getOrgByOAuthToken: jest.fn().mockResolvedValue({ organization: { id: 'org' } }) };
+    const oauth = { getOrgByOAuthToken: jest.fn().mockResolvedValue({ id: 'grant', scope: 'accounts:read', organization: { id: 'org' } }) };
     await startMcp({
       get: (provider: any) => provider.name === 'MastraService'
         ? { mastra: async () => ({ getAgent: () => agent }) }
@@ -146,7 +155,7 @@ describe('OAuth accounts:read boundary', () => {
     expect(response.status).toHaveBeenCalledWith(401);
     expect(apiKeys.getOrgByApiKey).not.toHaveBeenCalled();
     await handlers.get('/mcp-oauth')!(req, response, jest.fn());
-    expect(oauth.getOrgByOAuthToken).toHaveBeenCalledWith('pos_token', getMcpResource(), 'accounts:read');
+    expect(oauth.getOrgByOAuthToken).toHaveBeenCalledWith('pos_token', getMcpResource());
     expect(factory.mock.results[1].value.startHTTP).toHaveBeenCalledTimes(1);
     expect(factory.mock.results[0].value.startHTTP).not.toHaveBeenCalled();
   });
