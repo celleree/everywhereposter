@@ -298,18 +298,16 @@ describe('MediaBox guided transcription', () => {
     render(<MediaBox setMedia={jest.fn()} closeModal={jest.fn()} />);
 
     const filenameOverlay = screen.getByText(filename);
-    expect(filenameOverlay).toHaveClass(
-      'start-[10px]',
-      'end-[10px]',
-      'truncate'
-    );
-    expect(filenameOverlay).toHaveAttribute('title', filename);
-    expect(filenameOverlay.closest('.grid')).toHaveClass(
-      'grid-cols-2',
-      'sm:grid-cols-3',
-      'lg:grid-cols-4',
-      'xl:grid-cols-6'
-    );
+    expect(filenameOverlay.className).toContain('start-[10px]');
+    expect(filenameOverlay.className).toContain('end-[10px]');
+    expect(filenameOverlay.className).toContain('truncate');
+    expect(filenameOverlay.getAttribute('title')).toBe(filename);
+    const grid = filenameOverlay.closest('.grid');
+    expect(grid).not.toBeNull();
+    expect(grid?.getAttribute('class')).toContain('grid-cols-2');
+    expect(grid?.getAttribute('class')).toContain('sm:grid-cols-3');
+    expect(grid?.getAttribute('class')).toContain('lg:grid-cols-4');
+    expect(grid?.getAttribute('class')).toContain('xl:grid-cols-6');
   });
 
   it('removes upload helper copy while keeping Upload available in populated and empty libraries', () => {
@@ -319,20 +317,20 @@ describe('MediaBox guided transcription', () => {
       <MediaBox setMedia={jest.fn()} closeModal={jest.fn()} />
     );
 
-    expect(screen.queryByText(helperCopy)).not.toBeInTheDocument();
+    expect(screen.queryByText(helperCopy)).toBeNull();
     expect(
       screen.queryByText('You can also drag & drop pictures.')
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
+    ).toBeNull();
+    expect(screen.getByRole('button', { name: 'Upload' })).not.toBeNull();
 
     unmount();
     mockLibraryMedia = [];
     render(<MediaBox setMedia={jest.fn()} closeModal={jest.fn()} />);
 
-    expect(screen.queryByText(helperCopy)).not.toBeInTheDocument();
+    expect(screen.queryByText(helperCopy)).toBeNull();
     expect(
       screen.queryByText('You can also drag & drop pictures.')
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
+    ).toBeNull();
+    expect(screen.getByRole('button', { name: 'Upload' })).not.toBeNull();
   });
 });
