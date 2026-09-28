@@ -16,6 +16,7 @@ import {
   type CalendarPost,
   useCalendar,
 } from '@gitroom/frontend/components/launches/calendar.context';
+import { MobilePostList } from './mobile-posts';
 import dayjs from 'dayjs';
 import 'dayjs/locale/en';
 import 'dayjs/locale/he';
@@ -781,8 +782,27 @@ export const ListView = () => {
   );
 };
 
+const MobileCalendar = () => {
+  const calendar = useCalendar();
+  const { editPost, deletePost, openPostDetails } = usePostActions();
+  return (
+    <MobilePostList
+      posts={calendar.mobilePosts}
+      scheduled={calendar.mobileTab === 'scheduled'}
+      loading={calendar.mobileLoading}
+      error={calendar.mobileError}
+      retry={calendar.retryMobile}
+      onDetails={(post) => openPostDetails(post)()}
+      onEdit={(post) => editPost(post, false)()}
+      onDelete={(post) => deletePost(post)()}
+    />
+  );
+};
+
 export const Calendar = () => {
-  const { display } = useCalendar();
+  const { display, isMobile } = useCalendar();
+  if (isMobile === null) return null;
+  if (isMobile) return <MobileCalendar />;
   return (
     <>
       {display === 'list' ? (

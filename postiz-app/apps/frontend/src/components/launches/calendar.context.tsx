@@ -39,6 +39,7 @@ export type CalendarPost = Post & {
   source?: 'historical';
   isHistoricalImport?: boolean;
   readOnly?: boolean;
+  actualDate?: string;
   platformPostId?: string | null;
   platformPermalink?: string | null;
   postType?: string | null;
@@ -86,6 +87,19 @@ export const CalendarContext = createContext({
   listPosts: [] as CalendarPost[],
   listPage: 0,
   listTotalPages: 0,
+  isMobile: null as boolean | null,
+  mobileTab: 'scheduled' as 'scheduled' | 'all',
+  setMobileTab: (_tab: 'scheduled' | 'all') => {},
+  mobileMonth: newDayjs().startOf('month').format('YYYY-MM-DD'),
+  moveMobileMonth: (_months: number) => {},
+  setMobileCustomer: (_customer: string | null) => {},
+  mobilePosts: [] as CalendarPost[],
+  mobilePage: 0,
+  mobileTotalPages: 0,
+  setMobilePage: (_page: number) => {},
+  mobileLoading: true,
+  mobileError: null as Error | null,
+  retryMobile: () => {},
   setListPage: (page: number) => {
     /** empty **/
   },
@@ -160,6 +174,20 @@ export const CalendarWeekProvider: FC<{
   const searchParams = useSearchParams();
   const [displaySaved, setDisplaySaved] = useCookie('calendar-display', 'week');
   const display = searchParams.get('display') || displaySaved;
+  const [isMobile, setIsMobile] = useState<boolean | null>(null);
+  const [mobileTab, setMobileTab] = useState<'scheduled' | 'all'>('scheduled');
+  const [mobileMonth, setMobileMonth] = useState(() =>
+    newDayjs().startOf('month').format('YYYY-MM-DD')
+  );
+  const [mobilePage, setMobilePage] = useState(0);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 1025px)');
+    const sync = () => setIsMobile(query.matches);
+    sync();
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, []);
   const [showImportedPostsInCalendar, setShowImportedPostsInCalendarState] =
     useState(getShowImportedPostsInCalendar);
 
@@ -219,13 +247,45 @@ export const CalendarWeekProvider: FC<{
     return expandPostsList(await response.json());
   }, [listParams]);
 
+  const mobileAllParams = useMemo(() => {
+    const month = newDayjs(mobileMonth);
+    return new URLSearchParams({
+      customer: filters.customer || '',
+      startDate: month.startOf('month').startOf('day').utc().format(),
+      endDate: month.endOf('month').endOf('day').utc().format(),
+    }).toString();
+  }, [mobileMonth, filters.customer]);
+
+  const scheduledParams = useMemo(
+    () =>
+      new URLSearchParams({
+        mode: 'scheduled-once',
+        page: mobilePage.toString(),
+        limit: '100',
+        customer: filters.customer || '',
+      }).toString(),
+    [mobilePage, filters.customer]
+  );
+
+  const loadMobileAll = useCallback(async () => {
+    const response = await fetch(`/posts?${mobileAllParams}`);
+    if (!response.ok) throw new Error('Unable to load posts');
+    return expandPosts(await response.json());
+  }, [fetch, mobileAllParams]);
+
+  const loadScheduled = useCallback(async () => {
+    const response = await fetch(`/posts/list?${scheduledParams}`);
+    if (!response.ok) throw new Error('Unable to load scheduled posts');
+    return expandPostsList(await response.json());
+  }, [fetch, scheduledParams]);
+
   // SWR for calendar view
   const {
     data: calendarData,
     isLoading: calendarIsLoading,
     mutate: mutateCalendar,
   } = useSWR(
-    filters.display !== 'list' ? `/posts-${params}` : null,
+    isMobile === false && filters.display !== 'list' ? `/posts-${params}` : null,
     loadData,
     {
       refreshInterval: 3600000,
@@ -241,7 +301,7 @@ export const CalendarWeekProvider: FC<{
     isLoading: listIsLoading,
     mutate: mutateList,
   } = useSWR(
-    filters.display === 'list' ? `/posts-list-${listParams}` : null,
+    isMobile === false && filters.display === 'list' ? `/posts-list-${listParams}` : null,
     loadListData,
     {
       refreshInterval: 3600000,
@@ -249,6 +309,29 @@ export const CalendarWeekProvider: FC<{
       refreshWhenHidden: false,
       revalidateOnFocus: false,
     }
+  );
+
+  const {
+    data: mobileAllData,
+    isLoading: mobileAllLoading,
+    error: mobileAllError,
+    mutate: mutateMobileAll,
+  } = useSWR(
+    isMobile && mobileTab === 'all' ? `mobile-all-${mobileAllParams}` : null,
+    loadMobileAll,
+    { revalidateOnFocus: false }
+  );
+  const {
+    data: scheduledData,
+    isLoading: scheduledLoading,
+    error: scheduledError,
+    mutate: mutateScheduled,
+  } = useSWR(
+    isMobile && mobileTab === 'scheduled'
+      ? `mobile-scheduled-${scheduledParams}`
+      : null,
+    loadScheduled,
+    { revalidateOnFocus: false }
   );
 
   const defaultSign = useCallback(async () => {
@@ -303,6 +386,21 @@ export const CalendarWeekProvider: FC<{
     []
   );
 
+  const setMobileCustomer = useCallback((customer: string | null) => {
+    setFilters((current) => ({ ...current, customer: customer || null }));
+    setMobilePage(0);
+    const url = new URL(window.location.href);
+    if (customer) url.searchParams.set('customer', customer);
+    else url.searchParams.delete('customer');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  const moveMobileMonth = useCallback((months: number) => {
+    setMobileMonth((current) =>
+      newDayjs(current).add(months, 'month').startOf('month').format('YYYY-MM-DD')
+    );
+  }, []);
+
   useEffect(() => {
     const syncPreference = (event?: Event) => {
       const showImportedPosts = (event as CustomEvent<{
@@ -343,6 +441,28 @@ export const CalendarWeekProvider: FC<{
 
     return allPosts.filter((post: CalendarPost) => !isHistoricalCalendarPost(post));
   }, [calendarData?.posts, showImportedPostsInCalendar]);
+  const mobileAllPosts = useMemo(() => {
+    const allPosts = mobileAllData?.posts || [];
+    return showImportedPostsInCalendar
+      ? allPosts
+      : allPosts.filter((post: CalendarPost) => !isHistoricalCalendarPost(post));
+  }, [mobileAllData?.posts, showImportedPostsInCalendar]);
+  const mobilePosts = mobileTab === 'scheduled'
+    ? scheduledData?.posts || []
+    : mobileAllPosts;
+  const mobileTotalPages = Math.ceil((scheduledData?.total || 0) / 100);
+
+  useEffect(() => {
+    if (scheduledData && mobilePage > 0 && mobilePage >= mobileTotalPages) {
+      setMobilePage(Math.max(0, mobileTotalPages - 1));
+    }
+  }, [scheduledData, mobilePage, mobileTotalPages]);
+
+  const retryMobile = useCallback(() => {
+    if (mobileTab === 'scheduled') void mutateScheduled();
+    else void mutateMobileAll();
+  }, [mobileTab, mutateScheduled, mutateMobileAll]);
+
   const comments = useMemo(() => calendarData?.comments || [], [calendarData?.comments]);
 
   // List view data
@@ -375,9 +495,11 @@ export const CalendarWeekProvider: FC<{
 
   // Combined reload function that handles both calendar and list views
   const reloadCalendarView = useCallback(() => {
-    mutateCalendar();
-    mutateList();
-  }, [mutateCalendar, mutateList]);
+    void mutateCalendar();
+    void mutateList();
+    void mutateMobileAll();
+    void mutateScheduled();
+  }, [mutateCalendar, mutateList, mutateMobileAll, mutateScheduled]);
 
   // Determine loading state based on current view
   const loading = filters.display === 'list' ? listIsLoading : calendarIsLoading;
@@ -401,6 +523,20 @@ export const CalendarWeekProvider: FC<{
         listPage,
         listTotalPages,
         setListPage,
+        isMobile,
+        mobileTab,
+        setMobileTab,
+        mobileMonth,
+        moveMobileMonth,
+        setMobileCustomer,
+        mobilePosts,
+        mobilePage,
+        mobileTotalPages,
+        setMobilePage,
+        mobileLoading: isMobile === null ||
+          (mobileTab === 'scheduled' ? scheduledLoading : mobileAllLoading),
+        mobileError: (mobileTab === 'scheduled' ? scheduledError : mobileAllError) || null,
+        retryMobile,
       }}
     >
       {children}
