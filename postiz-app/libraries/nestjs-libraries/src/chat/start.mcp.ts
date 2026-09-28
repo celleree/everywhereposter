@@ -4,11 +4,15 @@ import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
 import { MCPServer } from '@mastra/mcp';
 import { randomUUID } from 'crypto';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
-import { ACCOUNTS_READ_SCOPE, getMcpResource, getOAuthIssuer, OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
+import { OAUTH_SCOPES, parseOAuthScopes, getMcpResource, getOAuthIssuer, OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { runWithContext } from './async.storage';
 import { createOAuthMiddleware } from './oauth-middleware';
-import { createListConnectedAccountsTool } from './tools/list.connected.accounts.tool';
+import { createOAuthPublishingTools } from './oauth-publishing.tools';
+import { MediaService } from '../database/prisma/media/media.service';
+import { PostsService } from '../database/prisma/posts/posts.service';
+import { ioRedis } from '../redis/redis.service';
+import { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
 const fixAcceptHeader = (req: Request) => {
   const value = 'application/json, text/event-stream';
   req.headers.accept = value;
@@ -43,14 +47,25 @@ export const startMcp = async (app: INestApplication) => {
   };
 
   const server = new MCPServer(serverConfig);
-  // Read grants must never inherit the agent or its publishing/generation tools.
-  const readServer = new MCPServer({
-    name: 'EverywherePoster Accounts',
-    version: '1.0.0',
-    tools: {
-      list_connected_accounts: createListConnectedAccountsTool(integrationService),
-    },
+  // Explicit registries: OAuth never inherits legacy agents or their tools.
+  const { readTools, writeTools } = createOAuthPublishingTools({
+    integrations: integrationService,
+    media: app.get(MediaService, { strict: false }),
+    posts: app.get(PostsService, { strict: false }),
+    permissions: app.get(PermissionsService, { strict: false }),
+    redis: process.env.REDIS_URL ? ioRedis : {
+      get: async () => { throw new Error('OAuth publishing requires Redis'); },
+      set: async () => { throw new Error('OAuth publishing requires Redis'); },
+    } as Pick<typeof ioRedis, 'get' | 'set'>,
   });
+  const oauthServers = new Map<string, MCPServer>();
+  for (const scopes of [['accounts:read'], ['posts:write'], ['accounts:read', 'posts:write']]) {
+    oauthServers.set(scopes.join(' '), new MCPServer({
+      name: 'EverywherePoster OAuth', version: '1.0.0',
+      tools: { ...(scopes.includes('accounts:read') ? readTools : {}),
+        ...(scopes.includes('posts:write') ? writeTools : {}) },
+    }));
+  }
   const resource = getMcpResource();
   const issuer = getOAuthIssuer();
   const resourceMetadataPath = `/.well-known/oauth-protected-resource${new URL(resource).pathname}`;
@@ -59,10 +74,10 @@ export const startMcp = async (app: INestApplication) => {
   const oauthMiddleware = createOAuthMiddleware({
     oauth: {
       resource,
-      scopesSupported: [ACCOUNTS_READ_SCOPE],
+      scopesSupported: OAUTH_SCOPES,
       authorizationServers: [issuer],
       validateToken: async (token: string) => {
-        const org = await oauthService.getOrgByOAuthToken(token, resource, ACCOUNTS_READ_SCOPE);
+        const org = await oauthService.getOrgByOAuthToken(token, resource);
         if (!org) {
           return { valid: false, error: 'invalid_token', errorDescription: 'Invalid OAuth token' };
         }
@@ -105,7 +120,7 @@ export const startMcp = async (app: INestApplication) => {
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code'],
       code_challenge_methods_supported: ['S256'],
-      scopes_supported: [ACCOUNTS_READ_SCOPE],
+      scopes_supported: OAUTH_SCOPES,
       token_endpoint_auth_methods_supported: ['client_secret_post'],
     });
   };
@@ -126,7 +141,7 @@ export const startMcp = async (app: INestApplication) => {
     if (!result.proceed) return;
 
     const token = result.tokenValidation?.subject;
-    const authorization = await oauthService.getOrgByOAuthToken(token!, resource, ACCOUNTS_READ_SCOPE);
+    const authorization = await oauthService.getOrgByOAuthToken(token!, resource);
     const auth = authorization?.organization;
     if (!auth) {
       res.status(401).json({ error: 'invalid_token', error_description: 'Could not resolve organization' });
@@ -134,8 +149,11 @@ export const startMcp = async (app: INestApplication) => {
     }
 
     fixAcceptHeader(req);
-    await runWithContext({ requestId: token!, auth }, async () => {
-      await readServer.startHTTP({
+    const scopes = parseOAuthScopes(authorization.scope).sort();
+    const oauthServer = oauthServers.get(scopes.join(' '));
+    if (!oauthServer) { res.status(403).json({ error: 'insufficient_scope' }); return; }
+    await runWithContext({ requestId: token!, auth, oauth: { id: authorization.id, scopes } }, async () => {
+      await oauthServer.startHTTP({
         url: url,
         httpPath: url.pathname,
         options: {

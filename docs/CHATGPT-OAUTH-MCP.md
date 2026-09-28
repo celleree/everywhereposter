@@ -34,3 +34,16 @@ Tokens expire after one hour; no refresh tokens are issued. Subsequent reconnect
 ## Verification boundary
 
 Public discovery, challenges, invalid client authentication, S256/scope rejection, deployed image, proxy configuration, health, and anonymous browser rendering were verified. Automated/synthetic tests cover valid grants and isolated tool execution. Actual production OAuth consent, authenticated account listing, and a positive production API-key call remain human verification steps. See the [release ledger](RELEASE-LEDGER.md) for CI, review, migration, deployment retry, and backup evidence.
+
+
+## Publishing extension (requires deployment of the new release)
+
+The restricted OAuth surface now supports separate `accounts:read` and `posts:write` grants. Request both for the complete workflow. Existing `accounts:read` grants remain read-only; reconnect and approve the write scope to enable publishing. A `posts:write`-only grant cannot list accounts.
+
+The registry is limited to `list_connected_accounts` (accounts:read) and `integrationSchema`, `triggerTool`, `prepare_post`, `publish_post` (posts:write). No legacy agent, generation, analytics, administrative, or arbitrary API tools are inherited. Organization identity comes from the validated grant on each HTTP request; every tool additionally checks its scope. Platform options are restricted to reviewed provider methods, with projected responses.
+
+Use the account schema and option lookups, then prepare content with organization-owned media IDs, destination accounts, settings and a UTC/offset time. Preparation validates the existing platform DTOs and post DTO, checks account/media ownership and character limits, and returns a 15-minute preview. Show the entire preview, including resolved attachments and accounts, before requesting explicit confirmation. `publish_post` requires that exact preview, its confirmation ID, and `confirmed: true`; the host must enforce user confirmation. Its annotations are `readOnlyHint: false`, `destructiveHint: true`, `openWorldHint: true` because public publication can have difficult-to-reverse consequences ([OpenAI tool guidance](https://developers.openai.com/plugins/plan/tools)). An annotation or model-supplied boolean alone does not prove human consent.
+
+Publishing rechecks account/media availability and uses the existing post service and Temporal scheduling path. It requires configured Redis for preview expiry and atomic replay protection. One confirmation creates posts at most once within its lifetime; repeated calls return a receipt. A crash or partial multi-account failure returns `pending_or_uncertain`: inspect EverywherePoster before preparing another post. `queued` means accepted for immediate processing, not verified delivery to a social platform. Provider-side final validation and errors remain authoritative; schedules use EverywherePoster, not native platform schedules.
+
+This slice supports media already stored in EverywherePoster. ChatGPT attachment ingestion is the subsequent slice. No production publishing or authenticated ChatGPT confirmation behavior has been verified by these offline tests.

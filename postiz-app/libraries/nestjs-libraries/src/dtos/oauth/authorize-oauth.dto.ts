@@ -20,7 +20,7 @@ export class AuthorizeOAuthQueryDto {
   @IsDefined()
   redirect_uri: string;
 
-  @IsIn(['accounts:read'])
+  @Matches(/^(accounts:read|posts:write|accounts:read posts:write|posts:write accounts:read)$/)
   scope: string;
 
   @IsString()

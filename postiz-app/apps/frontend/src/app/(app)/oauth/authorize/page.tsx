@@ -180,7 +180,12 @@ export default function OAuthAuthorizePage() {
               account. It will be able to:
             </div>
             <ul className="text-[14px] list-disc list-inside space-y-[4px]">
-              <li>Read your connected social accounts</li>
+              {authorization.scope?.split(' ').includes('accounts:read') && (
+                <li>Read your connected social accounts</li>
+              )}
+              {authorization.scope?.split(' ').includes('posts:write') && (
+                <li>Upload media and publish or schedule posts to your connected accounts after confirmation</li>
+              )}
             </ul>
           </div>
 

@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 type Ctx = {
   requestId: string;
+  oauth?: { id: string; scopes: string[] };
   auth: any; // replace with your org type if you have it, e.g. Organization
 };
 

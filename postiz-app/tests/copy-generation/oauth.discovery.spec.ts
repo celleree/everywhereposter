@@ -49,7 +49,7 @@ describe('public OAuth discovery and issuer callbacks', () => {
       const response = await fetch(base + path);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
-        resource, authorization_servers: [issuer], scopes_supported: ['accounts:read'],
+        resource, authorization_servers: [issuer], scopes_supported: ['accounts:read', 'posts:write'],
         bearer_methods_supported: ['header'],
       });
     }
@@ -62,7 +62,7 @@ describe('public OAuth discovery and issuer callbacks', () => {
         issuer, authorization_response_iss_parameter_supported: true,
         authorization_endpoint: `${origin}/oauth/authorize`, token_endpoint: `${issuer}/oauth/token`,
         response_types_supported: ['code'], grant_types_supported: ['authorization_code'],
-        code_challenge_methods_supported: ['S256'], scopes_supported: ['accounts:read'],
+        code_challenge_methods_supported: ['S256'], scopes_supported: ['accounts:read', 'posts:write'],
         token_endpoint_auth_methods_supported: ['client_secret_post'],
       });
     }
@@ -74,7 +74,7 @@ describe('public OAuth discovery and issuer callbacks', () => {
     expect(response.status).toBe(401);
     const challenge = response.headers.get('www-authenticate');
     expect(challenge).toContain(`resource_metadata="${origin}${metadataPath}"`);
-    expect(challenge).toContain('scope="accounts:read"');
+    expect(challenge).toContain('scope="accounts:read posts:write"');
     expect(await (await fetch(base + metadataPath)).json()).toHaveProperty('resource', resource);
   });
   it.each([metadataPath, issuerPath])('supports unauthenticated metadata preflight at %s', async (path) => {
