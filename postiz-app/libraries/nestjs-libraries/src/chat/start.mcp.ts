@@ -12,6 +12,7 @@ import { createOAuthPublishingTools } from './oauth-publishing.tools';
 import { MediaService } from '../database/prisma/media/media.service';
 import { PostsService } from '../database/prisma/posts/posts.service';
 import { ioRedis } from '../redis/redis.service';
+import { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
 const fixAcceptHeader = (req: Request) => {
   const value = 'application/json, text/event-stream';
   req.headers.accept = value;
@@ -51,10 +52,11 @@ export const startMcp = async (app: INestApplication) => {
     integrations: integrationService,
     media: app.get(MediaService, { strict: false }),
     posts: app.get(PostsService, { strict: false }),
+    permissions: app.get(PermissionsService, { strict: false }),
     redis: process.env.REDIS_URL ? ioRedis : {
       get: async () => { throw new Error('OAuth publishing requires Redis'); },
       set: async () => { throw new Error('OAuth publishing requires Redis'); },
-    } as typeof ioRedis,
+    } as Pick<typeof ioRedis, 'get' | 'set'>,
   });
   const oauthServers = new Map<string, MCPServer>();
   for (const scopes of [['accounts:read'], ['posts:write'], ['accounts:read', 'posts:write']]) {

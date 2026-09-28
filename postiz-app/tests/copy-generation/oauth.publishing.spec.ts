@@ -25,6 +25,7 @@ describe('restricted OAuth publishing', () => {
       media: { getMediaByOrganizationIdAndId: jest.fn(async (org, id) => org === 'org' && id === 'media' ?
         { id, path: 'https://app.test/uploads/test.png', type: 'image' } : null) },
       posts: { createPost: jest.fn().mockResolvedValue([{ postId: 'post', integration: 'account', secret: 'omit' }]) },
+      permissions: { check: jest.fn().mockResolvedValue({ can: () => true }) },
       redis: {
         get: jest.fn(async (key) => store.get(key)),
         set: jest.fn(async (key, value, _ex, _ttl, nx) => {
@@ -113,6 +114,28 @@ describe('restricted OAuth publishing', () => {
     expect(JSON.stringify(results)).not.toMatch(/secret|download_url/);
     await call('publish_post', args);
     expect(deps.posts.createPost).toHaveBeenCalledTimes(1);
+  });
+  it('rejects nested settings media without tenant ownership or an exact stored path', async () => {
+    deps.integrations.getIntegrationById.mockResolvedValue({ id: 'account', name: 'YouTube', providerIdentifier: 'youtube' });
+    const post = input();
+    post.posts[0].settings = { title: 'A video', type: 'public', thumbnail: { id: 'foreign', path: 'http://127.0.0.1/private.png' } };
+    await expect(call('prepare_post', post)).rejects.toThrow('Settings media unavailable');
+    (post.posts[0].settings as any).thumbnail.id = 'media';
+    await expect(call('prepare_post', post)).rejects.toThrow('Settings media unavailable');
+    (post.posts[0].settings as any).thumbnail.path = 'https://app.test/uploads/test.png';
+    const prepared: any = await call('prepare_post', post);
+    deps.media.getMediaByOrganizationIdAndId.mockResolvedValue(null);
+    await expect(call('publish_post', { confirmationId: prepared.confirmationId, confirmed: true, preview: post })).rejects.toThrow('Settings media unavailable');
+    expect(deps.posts.createPost).not.toHaveBeenCalled();
+  });
+  it('applies the existing monthly-post policy at preview and again before commit', async () => {
+    deps.permissions.check.mockResolvedValue({ can: () => false });
+    await expect(call('prepare_post', input())).rejects.toThrow('entitlement');
+    deps.permissions.check.mockResolvedValue({ can: () => true });
+    const prepared: any = await call('prepare_post', input());
+    deps.permissions.check.mockResolvedValue({ can: () => false });
+    await expect(call('publish_post', { confirmationId: prepared.confirmationId, confirmed: true, preview: input() })).rejects.toThrow('entitlement');
+    expect(deps.posts.createPost).not.toHaveBeenCalled();
   });
   it('rejects unlisted provider methods without executing them', async () => {
     await expect(call('triggerTool', { integrationId: 'account', methodName: 'post', data: {} })).rejects.toThrow('unavailable');

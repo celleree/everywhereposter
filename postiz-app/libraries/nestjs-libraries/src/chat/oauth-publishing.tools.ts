@@ -14,6 +14,8 @@ import type { IntegrationService } from '../database/prisma/integrations/integra
 import type { MediaService } from '../database/prisma/media/media.service';
 import type { PostsService } from '../database/prisma/posts/posts.service';
 import type { Redis } from 'ioredis';
+import type { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
+import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 // Reviewed publishing-option methods only; new legacy tools are never inherited.
 const optionMethods: Record<string, string[]> = {
@@ -47,6 +49,7 @@ type Dependencies = {
   media: Pick<MediaService, 'getMediaByOrganizationIdAndId'>;
   posts: Pick<PostsService, 'createPost'>;
   redis: Pick<Redis, 'get' | 'set'>;
+  permissions: Pick<PermissionsService, 'check'>;
 };
 export function requireOAuthScope(scope: string) {
   const context = getContext();
@@ -72,14 +75,29 @@ export function createOAuthPublishingTools(deps: Dependencies) {
     if (!provider) throw new Error('Unsupported platform');
     return { integration, provider };
   };
+  const validateSettingMedia = async (value: unknown, organizationId: string, depth = 0): Promise<void> => {
+    if (depth > 8) throw new Error('Platform settings are too deeply nested');
+    if (!value || typeof value !== 'object') return;
+    if ('path' in value) {
+      const item = value as Record<string, unknown>;
+      if (typeof item.id !== 'string' || Object.keys(item).some((k) => !['id', 'path', 'alt'].includes(k))) throw new Error('Invalid settings media reference');
+      const media = await deps.media.getMediaByOrganizationIdAndId(organizationId, item.id);
+      if (!media || media.deletedAt || media.type !== 'image' || media.path !== item.path) throw new Error('Settings media unavailable in this organization');
+    }
+    for (const child of Object.values(value)) await validateSettingMedia(child, organizationId, depth + 1);
+  };
   const buildPost = async (input: PublishInput) => {
     const { organizationId } = requireOAuthScope('posts:write');
+    const ability = await deps.permissions.check(organizationId, getContext()!.auth.createdAt, 'USER',
+      [[AuthorizationActions.Create, Sections.POSTS_PER_MONTH]]);
+    if (!ability.can(AuthorizationActions.Create, Sections.POSTS_PER_MONTH)) throw new Error('Publishing entitlement unavailable');
     if (input.type === 'schedule' && new Date(input.date).getTime() <= Date.now()) throw new Error('Scheduled date must be in the future');
     if (new Set(input.posts.map((p) => p.integrationId)).size !== input.posts.length) throw new Error('Select each destination only once');
     const destinations = [];
     const posts = [];
     for (const post of input.posts) {
       const { integration, provider } = await account(post.integrationId);
+      await validateSettingMedia(post.settings, organizationId);
       if (provider.dto) {
         const errors = await validate(plainToInstance(provider.dto, post.settings), { whitelist: true, forbidNonWhitelisted: true });
         if (errors.length) throw new Error(`Invalid ${provider.identifier} settings: ${errors.map((e) => e.property).join(', ')}`);
