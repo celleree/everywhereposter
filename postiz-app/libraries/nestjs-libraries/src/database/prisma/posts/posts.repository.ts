@@ -344,6 +344,8 @@ export class PostsRepository {
     const page = query.page || 0;
     const limit = query.limit || 20;
     const skip = page * limit;
+    const scheduledOnce = query.mode === 'scheduled-once';
+    const now = dayjs.utc().toDate();
 
     const where = {
       AND: [
@@ -356,19 +358,23 @@ export class PostsRepository {
         },
         {
           publishDate: {
-            gte: dayjs.utc().toDate(),
+            gte: now,
           },
         },
       ],
       deletedAt: null as Date | null,
       parentPostId: null as string | null,
       intervalInDays: null as number | null,
-      ...(query.customer
+      ...(scheduledOnce
         ? {
+            state: 'QUEUE' as const,
             integration: {
-              customerId: query.customer,
+              deletedAt: null as Date | null,
+              ...(query.customer ? { customerId: query.customer } : {}),
             },
           }
+        : query.customer
+        ? { integration: { customerId: query.customer } }
         : {}),
     };
 
@@ -377,9 +383,9 @@ export class PostsRepository {
         where,
         skip,
         take: limit,
-        orderBy: {
-          publishDate: 'asc',
-        },
+        orderBy: scheduledOnce
+          ? [{ publishDate: 'asc' as const }, { id: 'asc' as const }]
+          : { publishDate: 'asc' as const },
         select: {
           id: true,
           content: true,
