@@ -254,6 +254,7 @@ describe('guided composer existing provider settings', () => {
 
     expect(await screen.findByText('Arundel Creator')).toBeTruthy();
     expect(mockCustomProviderGet).toHaveBeenCalledWith('creatorInfo');
+    expect(mockCustomProviderGet).toHaveBeenCalledTimes(1);
 
     const privacy = screen.getByLabelText(
       'Who can see this video?'

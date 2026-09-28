@@ -19,7 +19,7 @@ export const useCustomProviderFunction = () => {
       }
       return load.json();
     },
-    [integration]
+    [fetch, integration?.id]
   );
   return {
     get,
