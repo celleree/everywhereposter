@@ -12,7 +12,22 @@ Update this ledger after each verified deployment and after any rollback. Record
 - Verification result: `<result, including the runtime container and public check>`
 - Rollback reference: `<last known-good full SHA or retained rollback tag>`
 
-## Current Verified Production Deployment — restricted OAuth MCP
+## Current Verified Production Deployment — OAuth publishing and ChatGPT files
+
+- Deployment date: `2026-09-28 UTC` (`2026-09-27` America/Los_Angeles).
+- Merged PRs: [#127](https://github.com/celleree/everywhereposter/pull/127) restricted publishing and [#128](https://github.com/celleree/everywhereposter/pull/128) file ingestion.
+- Full commit SHA and server revision: `c4d6e63096cc4b421aa36e3715dad15a4e0526cc`.
+- GHCR image tag: `ghcr.io/celleree/publish-everywhere-postiz:c4d6e63096cc4b421aa36e3715dad15a4e0526cc`.
+- Deployed Docker image ID: `sha256:f7cab0e624b395f5a1f2cdfef12fe4dcaa392385db8efbc7af97f6d4899a483b`.
+- Build: [36370021933](https://github.com/celleree/everywhereposter/actions/runs/36370021933), successful for the exact SHA. Both PRs passed required CI and independent final-HEAD review; 113 focused tests passed. Final reviewed PR #128 HEAD `b7b99e5ae1eb684e50168ec1c03032be47ecd539` has the same tree as the deployed merge commit.
+- Deployment: [36374529477](https://github.com/celleree/everywhereposter/actions/runs/36374529477), successful after explicit human approval of this exact SHA, `deployment_mode=release`, `prune_unused_images=false`. No pending migrations. Timings: pull 8s, migration check 6s, recreate 3s, readiness 52s, proxy reload 2s, total 71s. Runtime image and clean server revision matched; container healthy with zero restarts. No additional destructive cleanup or alternate SHA deployment occurred.
+- Backup: `/home/arund/publish-everywhere-git/backups/postiz-20260928-033832.sql`, 1,041,883 bytes, nonempty, mode `600`, produced by the existing backup script. Contents were not displayed or downloaded.
+- Public verification: all four canonical/alias OAuth discovery endpoints returned HTTP 200 with `accounts:read posts:write`; resource, issuer, S256 and issuer-identification advertisement matched. Invalid OAuth-shaped bearers were rejected by restricted MCP, both legacy MCP URL forms, and GET public integrations. Anonymous login rendered correctly; previously recorded React hydration error #418 remains.
+- Deployed-code verification: a separate process inside the running image exercised the real MCP transport with synthetic read/write/both grants and verified the exact six-tool registry, scope visibility, account response secret omission, file metadata/schema, invalid file input/batch redaction, and legacy API-key isolation. The actual downloader fetched an app-owned public PNG over HTTPS, validated it and wrote it through the existing local storage provider to a temporary directory. Media database persistence was mocked; no real OAuth grant, tenant media record, preview or post was created. The harness was corrected for the legacy path's API-key repository delegation before its final passing run.
+- Evidence limit: authenticated production ChatGPT consent, all six tools against a real organization, actual ChatGPT attachment URLs, database-backed ingestion, confirmation and live publish/schedule remain human verification steps. See [reconnect and test instructions](CHATGPT-OAUTH-MCP.md). The isolated runtime smoke does not establish an end-to-end ChatGPT publishing result.
+- Rollback reference: previous server SHA `61b3e08090ada0c0270448b917ab28b33ab215aa`, retained image `sha256:f00a0295c267d232919e3b14053951956b3e102de1a85a685260e82655bd86b7`. No rollback was performed.
+
+## Previous Verified Production Deployment — restricted OAuth MCP
 
 - Deployment date: `2026-09-27 UTC`
 - Merged PRs: [#116](https://github.com/celleree/everywhereposter/pull/116) restricted account listing (`79368b279dc66a3b7e0b4a87f9abbc0daaa2ddd6`), [#124](https://github.com/celleree/everywhereposter/pull/124) OAuth discovery and issuer identification (`61b3e08090ada0c0270448b917ab28b33ab215aa`), and [#125](https://github.com/celleree/everywhereposter/pull/125) proxy configuration refresh (`910448da9ff01978a494258dc2a71fceb1c8760a`).
