@@ -112,9 +112,10 @@ export class NotificationsRepository {
         },
       });
 
-    await this._user.model.user.update({
+    await this._user.model.user.updateMany({
       where: {
         id: userId,
+        lastReadNotifications: { lt: readThrough },
       },
       data: {
         lastReadNotifications: readThrough,

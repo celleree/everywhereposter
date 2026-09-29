@@ -94,3 +94,43 @@ it('shows loading while the notification request is pending', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Notifications' }));
   expect(await screen.findByRole('status')).toBeTruthy();
 });
+
+it.each([600, 768, 1024])(
+  'keeps the popup width contract inside the %ipx viewport',
+  async (width) => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: width,
+    });
+    try {
+      mockFetch.mockImplementation(async (path: string) =>
+        response(
+          path === '/notifications'
+            ? { total: 0 }
+            : { lastReadNotifications: '2026-09-20', notifications: [] }
+        )
+      );
+      renderBell();
+      const bell = await screen.findByRole('button', { name: 'Notifications' });
+      bell.getBoundingClientRect = jest.fn().mockReturnValue({
+        right: width - 16,
+        bottom: 72,
+      });
+      fireEvent.click(bell);
+      const panel = await screen.findByRole('dialog');
+      await waitFor(() => expect(panel.style.left).not.toBe(''));
+      expect(panel.className).toContain('w-[420px]');
+      expect(panel.className).toContain('max-w-[calc(100vw-32px)]');
+      expect(panel.className).not.toContain('mobile:w-');
+      expect(
+        Number.parseFloat(panel.style.left) + Math.min(420, width - 32)
+      ).toBeLessThanOrEqual(width - 16);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: originalWidth,
+      });
+    }
+  }
+);

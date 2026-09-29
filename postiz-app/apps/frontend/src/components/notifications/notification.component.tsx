@@ -87,7 +87,7 @@ export const NotificationOpenComponent: FC<{
         top: position.top,
         maxHeight: position.maxHeight,
       }}
-      className="fixed z-[600] flex w-[420px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-[16px] border border-tableBorder bg-third text-textColor shadow-menu mobile:w-[calc(100vw-32px)]"
+      className="fixed z-[600] flex w-[420px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-[16px] border border-tableBorder bg-third text-textColor shadow-menu"
     >
       <div className="flex items-center justify-between border-b border-tableBorder p-[16px] font-bold">
         {t('notifications', 'Notifications')}
