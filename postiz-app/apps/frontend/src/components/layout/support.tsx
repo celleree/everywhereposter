@@ -20,7 +20,7 @@ export const Support = () => {
   return (
     <div
       id="support-discord"
-      className="fixed end-[20px] bottom-[20px] z-[500] flex h-[58px] w-[194px] cursor-pointer items-center justify-center gap-[10px] rounded-[30px] !rounded-br-[0] bg-customColor39 text-[16px] text-customColor40 mobile:end-[12px] mobile:bottom-[88px] mobile:h-[56px] mobile:w-[56px] mobile:gap-0 mobile:!rounded-[999px]"
+      className="fixed end-[20px] bottom-[20px] z-[500] flex h-[58px] w-[194px] cursor-pointer items-center justify-center gap-[10px] rounded-[30px] !rounded-br-[0] bg-customColor39 text-[16px] text-customColor40 mobile:hidden"
       onClick={() => window.open(discordUrl)}
     >
       <div>
@@ -38,7 +38,9 @@ export const Support = () => {
           />
         </svg>
       </div>
-      <div className="mobile:hidden">{t('discord_support', 'Discord Support')}</div>
+      <div className="mobile:hidden">
+        {t('discord_support', 'Discord Support')}
+      </div>
     </div>
   );
 };
