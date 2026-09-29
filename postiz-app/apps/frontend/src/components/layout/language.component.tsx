@@ -23,7 +23,7 @@ countries.registerLocale(countriesEn);
 
 const getCountryCodeForFlag = (languageCode: string) => {
   // For multi-region languages, here are some common defaults
-  if (languageCode === 'en') return 'GB';
+  if (languageCode === 'en') return 'US';
   if (languageCode === 'es') return 'ES';
   if (languageCode === 'ar') return 'SA';
   if (languageCode === 'zh') return 'CN';
@@ -133,9 +133,11 @@ export const LanguageComponent = () => {
     });
   };
   return (
-    <div
+    <button
+      type="button"
+      aria-label={t('change_language', 'Change Language')}
       onClick={openModal}
-      className="rounded-full overflow-hidden h-[22px] w-[22px] relative cursor-pointer"
+      className="relative flex h-[22px] w-[22px] items-center justify-center overflow-hidden rounded-full cursor-pointer mobile:h-[44px] mobile:w-[44px] mobile:overflow-visible"
     >
       <ReactCountryFlag
         countryCode={getCountryCodeForFlag(currentLanguage)}
@@ -151,6 +153,6 @@ export const LanguageComponent = () => {
         }}
         title={currentLanguage}
       />
-    </div>
+    </button>
   );
 };

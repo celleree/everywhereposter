@@ -115,27 +115,33 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                       </div>
                     </div>
                     <div className="flex min-w-0 flex-1 flex-col gap-[1px] overflow-hidden rounded-[12px] bg-newBgLineColor blurMe">
-                      <div className="flex h-[80px] items-center bg-newBgColorInner px-[20px] mobile:h-auto mobile:flex-col mobile:items-start mobile:gap-[12px] mobile:px-[16px] mobile:py-[14px]">
-                        <div className="flex min-w-0 flex-1 items-center gap-[6px] mobile:w-full">
+                      <div className="flex h-[80px] items-center bg-newBgColorInner px-[20px] mobile:grid mobile:h-auto mobile:grid-cols-[minmax(0,1fr)_88px_44px] mobile:gap-x-[2px] mobile:gap-y-[4px] mobile:px-[8px] mobile:py-[8px]">
+                        <div className="flex min-w-0 flex-1 items-center gap-[6px] mobile:col-start-1 mobile:row-start-1 mobile:overflow-hidden">
                           <div className="hidden origin-left scale-[0.72] mobile:flex">
                             <Logo />
                           </div>
-                          <div className="min-w-0 text-[24px] font-[600] mobile:text-[20px]">
+                          <div className="min-w-0 flex-1 overflow-hidden text-[24px] font-[600] mobile:text-[18px]">
                             <Title />
                           </div>
                         </div>
-                        <div className="flex items-center gap-[20px] text-textItemBlur mobile:w-full mobile:gap-[14px] mobile:overflow-x-auto mobile:pb-[2px]">
+                        <div className="flex items-center gap-[20px] text-textItemBlur mobile:col-start-1 mobile:row-start-2 mobile:min-w-0 mobile:gap-[8px]">
                           <StreakComponent />
                           <div className="h-[20px] w-[1px] bg-blockSeparator mobile:hidden" />
                           <OrganizationSelector />
-                          <div className="hover:text-newTextColor">
+                        </div>
+                        <div className="flex items-center gap-[20px] text-textItemBlur mobile:col-start-2 mobile:row-start-1 mobile:gap-0">
+                          <div className="flex items-center justify-center hover:text-newTextColor mobile:h-[44px] mobile:w-[44px]">
                             <ModeComponent />
                           </div>
                           <div className="h-[20px] w-[1px] bg-blockSeparator mobile:hidden" />
                           <LanguageComponent />
+                        </div>
+                        <div className="flex items-center gap-[20px] text-textItemBlur mobile:col-span-2 mobile:col-start-2 mobile:row-start-2 mobile:justify-end mobile:gap-[8px]">
                           <ChromeExtensionComponent />
                           <div className="h-[20px] w-[1px] bg-blockSeparator mobile:hidden" />
                           <AttachToFeedbackIcon />
+                        </div>
+                        <div className="text-textItemBlur mobile:col-start-3 mobile:row-start-1">
                           <NotificationComponent />
                         </div>
                       </div>

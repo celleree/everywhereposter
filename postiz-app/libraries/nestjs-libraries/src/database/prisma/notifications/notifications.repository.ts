@@ -96,19 +96,9 @@ export class NotificationsRepository {
     const { lastReadNotifications } = (await this.getLastReadNotification(
       userId
     ))!;
-
-    await this._user.model.user.update({
-      where: {
-        id: userId,
-      },
-      data: {
-        lastReadNotifications: new Date(),
-      },
-    });
-
-    return {
-      lastReadNotifications,
-      notifications: await this._notifications.model.notifications.findMany({
+    const readThrough = new Date();
+    const notifications =
+      await this._notifications.model.notifications.findMany({
         orderBy: {
           createdAt: 'desc',
         },
@@ -120,7 +110,20 @@ export class NotificationsRepository {
           createdAt: true,
           content: true,
         },
-      }),
+      });
+
+    await this._user.model.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        lastReadNotifications: readThrough,
+      },
+    });
+
+    return {
+      lastReadNotifications,
+      notifications,
     };
   }
 }

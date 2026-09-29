@@ -19,7 +19,12 @@ const ModeComponent = () => {
     document.body.classList.add(mode);
   }, [mode]);
   return (
-    <div onClick={changeMode} className="select-none cursor-pointer">
+    <button
+      type="button"
+      aria-label="Toggle theme"
+      onClick={changeMode}
+      className="flex select-none cursor-pointer items-center justify-center mobile:h-[44px] mobile:w-[44px]"
+    >
       {mode === 'dark' ? (
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -53,7 +58,7 @@ const ModeComponent = () => {
           />
         </svg>
       )}
-    </div>
+    </button>
   );
 };
 export default ModeComponent;

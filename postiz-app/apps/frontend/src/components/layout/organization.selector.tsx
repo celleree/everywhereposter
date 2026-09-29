@@ -1,6 +1,13 @@
 'use client';
 
-import React, { FC, useCallback, useMemo } from 'react';
+import React, {
+  FC,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
@@ -10,6 +17,16 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
 }) => {
   const fetch = useFetch();
   const user = useUser();
+  const [open, setOpen] = useState(false);
+  const selectorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!selectorRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [open]);
   const load = useCallback(async () => {
     return await (await fetch('/user/organizations')).json();
   }, []);
@@ -44,14 +61,26 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
   return (
     <>
       <div className="hover:text-newTextColor">
-        <div className="group text-[12px] relative">
+        <div ref={selectorRef} className="group text-[12px] relative">
           {asOpenSelect && (
-            <div className="bg-btnPrimary !flex !relative max-w-[500px] mx-auto py-[12px] px-[12px]">Select Organization</div>
+            <div className="bg-btnPrimary !flex !relative max-w-[500px] mx-auto py-[12px] px-[12px]">
+              Select Organization
+            </div>
           )}
           {!asOpenSelect && (
-            <div className="flex items-center">
+            <button
+              type="button"
+              aria-label="Choose organization"
+              aria-expanded={open}
+              onClick={() => setOpen((current) => !current)}
+              className="flex h-[44px] w-[44px] items-center justify-center mobile:h-[36px] mobile:w-[36px]"
+            >
               <svg
-                className={user?.tier.current === 'FREE' ? 'animate-bounce drop-shadow-glow': ''}
+                className={
+                  user?.tier.current === 'FREE'
+                    ? 'animate-bounce drop-shadow-glow'
+                    : ''
+                }
                 width="24"
                 height="24"
                 viewBox="0 0 26 26"
@@ -63,13 +92,16 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
                   fill="currentColor"
                 />
               </svg>
-            </div>
+            </button>
           )}
           {data?.length > 1 && (
             <div
               className={clsx(
                 'hidden py-[12px] px-[12px] group-hover:flex absolute top-[100%] end-0 bg-third border-tableBorder border gap-[12px] cursor-pointer flex-col',
-                asOpenSelect ? '!flex !relative max-w-[500px] mx-auto mb-[10px]' : '',
+                asOpenSelect
+                  ? '!flex !relative max-w-[500px] mx-auto mb-[10px]'
+                  : '',
+                open && '!flex'
               )}
             >
               {data?.map((org: { name: string; id: string }) => (
