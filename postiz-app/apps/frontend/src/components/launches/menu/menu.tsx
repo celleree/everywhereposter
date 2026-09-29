@@ -45,6 +45,8 @@ export const Menu: FC<{
   id: string;
   mutate: () => void;
   onChange: (shouldReload: boolean) => void;
+  integrationsOverride?: Integrations[];
+  hideCreatePost?: boolean;
 }> = (props) => {
   const {
     canEnable,
@@ -55,13 +57,17 @@ export const Menu: FC<{
     canChangeProfilePicture,
     canChangeNickName,
     refreshChannel,
+    integrationsOverride,
+    hideCreatePost,
   } = props;
   const t = useT();
 
   const fetch = useFetch();
   const router = useRouter();
   const { extensionId } = useVariables();
-  const { integrations, reloadCalendarView } = useCalendar();
+  const calendar = useCalendar();
+  const integrations = integrationsOverride ?? calendar.integrations;
+  const reloadCalendarView = calendar.reloadCalendarView;
   const toast = useToaster();
   const modal = useModals();
   const [show, setShow] = useState<false | { x: number; y: number }>(false);
@@ -76,18 +82,22 @@ export const Menu: FC<{
     if (show && menuRef.current) {
       const menuRect = menuRef.current.getBoundingClientRect();
       const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
       const padding = 10;
+      const bottomClearance = window.matchMedia('(max-width: 1025px)').matches
+        ? 80
+        : padding;
 
-      // Check if menu overflows bottom of viewport
-      if (menuRect.bottom > viewportHeight - padding) {
-        const newY = Math.max(
-          padding,
-          viewportHeight - menuRect.height - padding
-        );
-        // Only update if position actually changed significantly to avoid infinite loop
-        if (Math.abs(show.y - newY) > 1) {
-          setShow((prev) => (prev ? { ...prev, y: newY } : false));
-        }
+      const newX = Math.max(
+        padding,
+        Math.min(show.x, viewportWidth - menuRect.width - padding)
+      );
+      const newY = Math.max(
+        padding,
+        Math.min(show.y, viewportHeight - menuRect.height - bottomClearance)
+      );
+      if (Math.abs(show.x - newX) > 1 || Math.abs(show.y - newY) > 1) {
+        setShow({ x: newX, y: newY });
       }
     }
   }, [show]);
@@ -110,7 +120,10 @@ export const Menu: FC<{
   const disableChannel = useCallback(async () => {
     if (
       !(await deleteDialog(
-        t('are_you_sure_disable_channel', 'Are you sure you want to disable this channel?'),
+        t(
+          'are_you_sure_disable_channel',
+          'Are you sure you want to disable this channel?'
+        ),
         t('disable_channel_title', 'Disable Channel')
       ))
     ) {
@@ -129,7 +142,10 @@ export const Menu: FC<{
   const deleteChannel = useCallback(async () => {
     if (
       !(await deleteDialog(
-        t('are_you_sure_delete_channel', 'Are you sure you want to delete this channel?'),
+        t(
+          'are_you_sure_delete_channel',
+          'Are you sure you want to delete this channel?'
+        ),
         t('delete_channel_title', 'Delete Channel')
       ))
     ) {
@@ -143,7 +159,10 @@ export const Menu: FC<{
     });
     if (deleteIntegration.status === 406) {
       toast.show(
-        t('delete_posts_before_channel', 'You have to delete all the posts associated with this channel before deleting it'),
+        t(
+          'delete_posts_before_channel',
+          'You have to delete all the posts associated with this channel before deleting it'
+        ),
         'warning'
       );
       return;
@@ -201,7 +220,10 @@ export const Menu: FC<{
       setShow(false);
       const channelId = integration.id;
       copy(channelId);
-      toast.show(t('channel_id_copied', 'Channel ID copied to clipboard'), 'success');
+      toast.show(
+        t('channel_id_copied', 'Channel ID copied to clipboard'),
+        'success'
+      );
     },
     [t]
   );
@@ -331,8 +353,18 @@ export const Menu: FC<{
 
   return (
     <div
-      className="cursor-pointer relative select-none flex"
+      className="cursor-pointer relative select-none flex mobile:h-[44px] mobile:w-[44px] mobile:items-center mobile:justify-center"
       onClick={changeShow}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.currentTarget.click();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={t('manage_channel', 'Manage channel')}
+      aria-expanded={!!show}
       ref={ref}
     >
       <svg
@@ -356,9 +388,9 @@ export const Menu: FC<{
           ref={menuRef}
           onClick={(e) => e.stopPropagation()}
           style={{ left: show.x, top: show.y }}
-          className={`fixed p-[12px] bg-newBgColorInner shadow-menu flex flex-col gap-[16px] z-[100] rounded-[8px] border border-tableBorder text-nowrap`}
+          className={`fixed mobile:max-w-[calc(100vw-20px)] mobile:max-h-[calc(100dvh-100px)] mobile:overflow-y-auto p-[12px] bg-newBgColorInner shadow-menu flex flex-col gap-[16px] z-[100] rounded-[8px] border border-tableBorder text-nowrap`}
         >
-          {canDisable && !findIntegration?.refreshNeeded && (
+          {canDisable && !hideCreatePost && !findIntegration?.refreshNeeded && (
             <div
               className="flex gap-[12px] items-center py-[8px] px-[10px]"
               onClick={createPost(findIntegration!)}
