@@ -64,8 +64,7 @@ const isVideoFileCandidate = (file: File) =>
 
 export const GuidedComposerUploadDetails: FC<{
   disabled?: boolean;
-  sourceMutationError?: string | null;
-}> = ({ disabled = false, sourceMutationError = null }) => {
+}> = ({ disabled = false }) => {
   const [showContextHelp, setShowContextHelp] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const fetch = useFetch();
@@ -278,14 +277,6 @@ export const GuidedComposerUploadDetails: FC<{
         <div className="mx-auto w-full max-w-[1600px] px-[40px] pt-[20px] mobile:px-[12px]">
           <p role="alert" className="text-[12px] text-red-300">
             {uploadError}
-          </p>
-        </div>
-      )}
-
-      {!!sourceMutationError && (
-        <div className="mx-auto w-full max-w-[1600px] px-[40px] pt-[20px] mobile:px-[12px]">
-          <p role="alert" className="text-[12px] text-red-300">
-            {sourceMutationError}
           </p>
         </div>
       )}

@@ -84,6 +84,7 @@ interface StoreState {
     media: { id: string; path: string }[]
   ) => void;
   removeGlobalValueMedia: (index: number, mediaIndex: number) => void;
+  detachGlobalValueMedia: (index: number, mediaId: string) => void;
   setInternalValueText: (
     integrationId: string,
     index: number,
@@ -443,6 +444,14 @@ export const useLaunchStore = create<StoreState>()((set) => ({
     set((state) => ({
       global: state.global.map((item, i) =>
         i === index ? { ...item, media: [...item.media, ...media] } : item
+      ),
+    })),
+  detachGlobalValueMedia: (index: number, mediaId: string) =>
+    set((state) => ({
+      global: state.global.map((item, i) =>
+        i === index
+          ? { ...item, media: item.media.filter((media) => media.id !== mediaId) }
+          : item
       ),
     })),
   removeGlobalValueMedia: (index: number, mediaIndex: number) =>

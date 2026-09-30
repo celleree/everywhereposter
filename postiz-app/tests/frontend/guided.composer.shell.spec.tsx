@@ -174,7 +174,7 @@ describe('guided composer shell', () => {
     view.unmount();
   });
 
-  it('replaces the explicit source, deletes the old media, and ignores late state', async () => {
+  it('replaces the source by detaching it without library deletion and ignores late state', async () => {
     render(
       <GuidedComposerShell>
         <div>Existing composer content</div>
@@ -184,7 +184,9 @@ describe('guided composer shell', () => {
       expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
     );
 
-    useGuidedComposerStore.getState().startGeneration('old-fingerprint');
+    act(() =>
+      useGuidedComposerStore.getState().startGeneration('old-fingerprint')
+    );
     act(() => {
       useLaunchStore.getState().setGlobalValueMedia(0, [
         ...(useLaunchStore.getState().global[0]?.media || []),
@@ -199,9 +201,9 @@ describe('guided composer shell', () => {
     await waitFor(() =>
       expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2')
     );
-    expect(mockFetch).toHaveBeenCalledWith('/media/video-1', {
-      method: 'DELETE',
-    });
+    expect(
+      mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
+    ).toBe(false);
     expect(mockFetch).toHaveBeenCalledWith(
       '/media/video-2/transcription/ensure',
       { method: 'POST' }
@@ -212,691 +214,78 @@ describe('guided composer shell', () => {
     expect(useGuidedComposerStore.getState().generationStatus).toBe('idle');
 
     act(() => {
-      useGuidedComposerStore
-        .getState()
-        .setTranscriptionState('video-1', 'READY');
+      useGuidedComposerStore.getState().setTranscriptionState('video-1', 'READY');
     });
     expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2');
   });
 
-  it('keeps a failed original source cleanup pending until retry succeeds', async () => {
-    let originalDeleteAttempts = 0;
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        originalDeleteAttempts += 1;
-        return Promise.resolve({ ok: originalDeleteAttempts > 1 });
-      }
-
-      const mediaId = url.match(/^\/media\/([^/]+)\/transcription/)?.[1];
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: `transcription-${mediaId}`,
-          mediaId,
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
-    const unrelatedImage = {
-      id: 'image-1',
-      path: 'https://media.example.com/image.png',
-      type: 'image',
-    } as any;
-    useLaunchStore.getState().setGlobalValueMedia(0, [
-      ...(useLaunchStore.getState().global[0]?.media || []),
-      unrelatedImage,
-    ]);
-
+  it('preserves unrelated attachments and their order when replacing the source', async () => {
+    const image = { id: 'image-1', path: '/image.png' };
+    const otherVideo = { id: 'video-other', path: '/other.mp4' };
+    useLaunchStore
+      .getState()
+      .setGlobalValueMedia(0, [
+        image,
+        ...useLaunchStore.getState().global[0].media,
+        otherVideo,
+      ]);
     render(
       <GuidedComposerShell>
-        <div>Existing composer content</div>
+        <div>Composer</div>
       </GuidedComposerShell>
     );
     await waitFor(() =>
       expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
     );
-
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-2',
-          path: 'https://media.example.com/replacement.mov',
-          type: 'video',
-        } as any,
-      ]);
-    });
-
-    expect(
-      await screen.findByText(
-        'The previous video could not be removed. Please try again.'
-      )
-    ).toBeTruthy();
-    expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1');
-    expect(useLaunchStore.getState().global[0].media).toEqual([
-      expect.objectContaining({ id: 'video-1' }),
-      unrelatedImage,
-      expect.objectContaining({ id: 'video-2' }),
-    ]);
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(true);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
-
-    await waitFor(() => {
-      expect(originalDeleteAttempts).toBe(2);
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2');
-      expect(useLaunchStore.getState().global[0].media).toEqual([
-        unrelatedImage,
-        expect.objectContaining({ id: 'video-2' }),
-      ]);
-    });
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(false);
-  });
-
-  it('keeps the latest replacement when another video is selected during deletion', async () => {
-    let resolveDeletion: ((response: { ok: boolean }) => void) | undefined;
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        return new Promise((resolve) => {
-          resolveDeletion = resolve;
-        });
-      }
-
-      const mediaId = url.match(/^\/media\/([^/]+)\/transcription/)?.[1];
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: `transcription-${mediaId}`,
-          mediaId,
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
-
-    render(
-      <GuidedComposerShell>
-        <div>Existing composer content</div>
-      </GuidedComposerShell>
-    );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
-    );
-
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-2',
-          path: 'https://media.example.com/replacement-1.mov',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await waitFor(() => expect(resolveDeletion).toBeDefined());
-
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-3',
-          path: 'https://media.example.com/replacement-2.mp4',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await act(async () => resolveDeletion?.({ ok: true }));
-
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-3')
-    );
-    expect(useGuidedComposerStore.getState().sourceMediaId).not.toBe('video-2');
-    await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('/media/video-2', {
-        method: 'DELETE',
-      });
-      expect(useLaunchStore.getState().global[0].media).toEqual([
-        expect.objectContaining({ id: 'video-3' }),
-      ]);
-    });
-  });
-
-  it('keeps failed obsolete cleanup pending until retry removes only the obsolete source', async () => {
-    let resolveOriginalDeletion:
-      | ((response: { ok: boolean }) => void)
-      | undefined;
-    let obsoleteDeleteAttempts = 0;
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        return new Promise((resolve) => {
-          resolveOriginalDeletion = resolve;
-        });
-      }
-      if (url === '/media/video-2' && options?.method === 'DELETE') {
-        obsoleteDeleteAttempts += 1;
-        return Promise.resolve({ ok: obsoleteDeleteAttempts > 1 });
-      }
-
-      const mediaId = url.match(/^\/media\/([^/]+)\/transcription/)?.[1];
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: `transcription-${mediaId}`,
-          mediaId,
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
-
-    render(
-      <GuidedComposerShell>
-        <div>Existing composer content</div>
-      </GuidedComposerShell>
-    );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
-    );
-
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-2',
-          path: 'https://media.example.com/replacement-1.mov',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await waitFor(() => expect(resolveOriginalDeletion).toBeDefined());
-
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-3',
-          path: 'https://media.example.com/replacement-2.mp4',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await act(async () => resolveOriginalDeletion?.({ ok: true }));
-
-    expect(
-      await screen.findByText(
-        'The previous video could not be removed. Please try again.'
-      )
-    ).toBeTruthy();
-    expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-3');
-    expect(useLaunchStore.getState().global[0].media).toEqual([
-      expect.objectContaining({ id: 'video-2' }),
-      expect.objectContaining({ id: 'video-3' }),
-    ]);
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(true);
-    expect(mockFetch).not.toHaveBeenCalledWith('/media/video-3', {
-      method: 'DELETE',
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
-
-    await waitFor(() => {
-      expect(obsoleteDeleteAttempts).toBe(2);
-      expect(useLaunchStore.getState().global[0].media).toEqual([
-        expect.objectContaining({ id: 'video-3' }),
-      ]);
-    });
-    expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-3');
-    expect(mockFetch).not.toHaveBeenCalledWith('/media/video-3', {
-      method: 'DELETE',
-    });
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(false);
-  });
-
-  it('serializes a newer source intent behind an in-flight cleanup retry', async () => {
-    let resolveOriginalDeletion:
-      | ((response: { ok: boolean }) => void)
-      | undefined;
-    let resolveObsoleteRetry:
-      | ((response: { ok: boolean }) => void)
-      | undefined;
-    let resolveCurrentSourceCleanup:
-      | ((response: { ok: boolean }) => void)
-      | undefined;
-    let obsoleteDeleteAttempts = 0;
-    let currentSourceDeleteAttempts = 0;
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        return new Promise((resolve) => {
-          resolveOriginalDeletion = resolve;
-        });
-      }
-      if (url === '/media/video-2' && options?.method === 'DELETE') {
-        obsoleteDeleteAttempts += 1;
-        if (obsoleteDeleteAttempts === 1) {
-          return Promise.resolve({ ok: false });
-        }
-        return new Promise((resolve) => {
-          resolveObsoleteRetry = resolve;
-        });
-      }
-      if (url === '/media/video-3' && options?.method === 'DELETE') {
-        currentSourceDeleteAttempts += 1;
-        return new Promise((resolve) => {
-          resolveCurrentSourceCleanup = resolve;
-        });
-      }
-
-      const mediaId = url.match(/^\/media\/([^/]+)\/transcription/)?.[1];
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: `transcription-${mediaId}`,
-          mediaId,
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
-
-    render(
-      <GuidedComposerShell>
-        <div>Existing composer content</div>
-      </GuidedComposerShell>
-    );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
-    );
-
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-2',
-          path: 'https://media.example.com/replacement-1.mov',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await waitFor(() => expect(resolveOriginalDeletion).toBeDefined());
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-3',
-          path: 'https://media.example.com/replacement-2.mp4',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await act(async () => resolveOriginalDeletion?.({ ok: true }));
-    await screen.findByText(
-      'The previous video could not be removed. Please try again.'
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
-    await waitFor(() => expect(resolveObsoleteRetry).toBeDefined());
-
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-4',
-          path: 'https://media.example.com/replacement-3.mp4',
-          type: 'video',
-        } as any,
-      ]);
-    });
-
-    expect(currentSourceDeleteAttempts).toBe(0);
-    expect(obsoleteDeleteAttempts).toBe(2);
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(true);
-
-    await act(async () => resolveObsoleteRetry?.({ ok: true }));
-    await waitFor(() => expect(resolveCurrentSourceCleanup).toBeDefined());
-    expect(currentSourceDeleteAttempts).toBe(1);
-    expect(obsoleteDeleteAttempts).toBe(2);
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(true);
-
-    await act(async () => resolveCurrentSourceCleanup?.({ ok: true }));
-
-    await waitFor(() => {
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-4');
-      expect(useLaunchStore.getState().global[0].media).toEqual([
-        expect.objectContaining({ id: 'video-4' }),
-      ]);
-    });
-    expect(obsoleteDeleteAttempts).toBe(2);
-    expect(currentSourceDeleteAttempts).toBe(1);
-    expect(mockFetch).not.toHaveBeenCalledWith('/media/video-4', {
-      method: 'DELETE',
-    });
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(false);
-  });
-
-  it('ignores repeated Retry clicks while one cleanup attempt is unresolved', async () => {
-    let resolveRetry: ((response: { ok: boolean }) => void) | undefined;
-    let deleteAttempts = 0;
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        deleteAttempts += 1;
-        if (deleteAttempts === 1) {
-          return Promise.resolve({ ok: false });
-        }
-        return new Promise((resolve) => {
-          resolveRetry = resolve;
-        });
-      }
-
-      const mediaId = url.match(/^\/media\/([^/]+)\/transcription/)?.[1];
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: `transcription-${mediaId}`,
-          mediaId,
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
-
-    render(
-      <GuidedComposerShell>
-        <div>Existing composer content</div>
-      </GuidedComposerShell>
-    );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
-    );
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-2',
-          path: 'https://media.example.com/replacement.mov',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await screen.findByText(
-      'The previous video could not be removed. Please try again.'
-    );
-
-    const retryButton = screen.getByRole('button', { name: 'Retry cleanup' });
-    act(() => {
-      fireEvent.click(retryButton);
-      fireEvent.click(retryButton);
-      fireEvent.click(retryButton);
-    });
-
-    await waitFor(() => expect(resolveRetry).toBeDefined());
-    expect(deleteAttempts).toBe(2);
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(true);
-
-    await act(async () => resolveRetry?.({ ok: true }));
+    const replacement = { id: 'video-2', path: '/replacement.mov' };
+    act(() => useLaunchStore.getState().appendGlobalValueMedia(0, [replacement]));
     await waitFor(() =>
       expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2')
     );
-    expect(deleteAttempts).toBe(2);
-  });
-
-  it('keeps cleanup retryable when the retry also fails', async () => {
-    let deleteAttempts = 0;
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        deleteAttempts += 1;
-        return Promise.resolve({ ok: deleteAttempts > 2 });
-      }
-
-      const mediaId = url.match(/^\/media\/([^/]+)\/transcription/)?.[1];
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: `transcription-${mediaId}`,
-          mediaId,
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
-
-    render(
-      <GuidedComposerShell>
-        <div>Existing composer content</div>
-      </GuidedComposerShell>
-    );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
-    );
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-2',
-          path: 'https://media.example.com/replacement.mov',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await screen.findByText(
-      'The previous video could not be removed. Please try again.'
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
-    await waitFor(() => expect(deleteAttempts).toBe(2));
-    await screen.findByRole('button', { name: 'Retry cleanup' });
-    expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1');
+    expect(useLaunchStore.getState().global[0].media).toEqual([
+      image,
+      otherVideo,
+      replacement,
+    ]);
     expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(true);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
-    await waitFor(() => {
-      expect(deleteAttempts).toBe(3);
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2');
-    });
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
+      mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
     ).toBe(false);
   });
 
-  it('retries an explicit source removal and preserves unrelated media', async () => {
-    let deleteAttempts = 0;
-    const unrelatedImage = {
-      id: 'image-1',
-      path: 'https://media.example.com/image.png',
-      type: 'image',
-    } as any;
-    useLaunchStore.getState().setGlobalValueMedia(0, [
-      ...(useLaunchStore.getState().global[0]?.media || []),
-      unrelatedImage,
-    ]);
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        deleteAttempts += 1;
-        return Promise.resolve({ ok: deleteAttempts > 1 });
-      }
+  it.each(['image-1', 'video-1', 'video-other'])(
+    'detaches %s without restoring it or changing unrelated attachments',
+    async (mediaId) => {
+      const attachments = [
+        { id: 'image-1', path: '/image.png' },
+        { id: 'video-1', path: '/video.mp4' },
+        { id: 'video-other', path: '/other.mov' },
+      ];
+      useLaunchStore.getState().setGlobalValueMedia(0, attachments);
+      render(
+        <GuidedComposerShell>
+          <div>Composer</div>
+        </GuidedComposerShell>
+      );
+      await waitFor(() =>
+        expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
+      );
+      act(() => useLaunchStore.getState().detachGlobalValueMedia(0, mediaId));
+      await waitFor(() =>
+        expect(useLaunchStore.getState().global[0].media).toEqual(
+          attachments.filter((item) => item.id !== mediaId)
+        )
+      );
+      expect(
+        mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
+      ).toBe(false);
+      expect(screen.queryByRole('button', { name: 'Retry cleanup' })).toBeNull();
+    }
+  );
 
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: 'transcription-1',
-          mediaId: 'video-1',
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
-
+  it('invalidates generated review state when the final source is detached', async () => {
     render(
       <GuidedComposerShell>
-        <div>Existing composer content</div>
-      </GuidedComposerShell>
-    );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
-    );
-
-    act(() => useLaunchStore.getState().setGlobalValueMedia(0, [unrelatedImage]));
-
-    await screen.findByText(
-      'The previous video could not be removed. Please try again.'
-    );
-    expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1');
-    expect(useLaunchStore.getState().global[0].media).toEqual([
-      unrelatedImage,
-      expect.objectContaining({ id: 'video-1' }),
-    ]);
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(true);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
-
-    await waitFor(() => {
-      expect(deleteAttempts).toBe(2);
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBeNull();
-      expect(useLaunchStore.getState().global[0].media).toEqual([
-        unrelatedImage,
-      ]);
-    });
-    expect(
-      screen
-        .getByRole('button', { name: 'Continue to Destinations' })
-        .hasAttribute('disabled')
-    ).toBe(false);
-  });
-
-  it('does not write stale reconciliation state after unmount during retry', async () => {
-    let resolveRetry: ((response: { ok: boolean }) => void) | undefined;
-    let deleteAttempts = 0;
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        deleteAttempts += 1;
-        if (deleteAttempts === 1) {
-          return Promise.resolve({ ok: false });
-        }
-        return new Promise((resolve) => {
-          resolveRetry = resolve;
-        });
-      }
-
-      const mediaId = url.match(/^\/media\/([^/]+)\/transcription/)?.[1];
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: `transcription-${mediaId}`,
-          mediaId,
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
-
-    const view = render(
-      <GuidedComposerShell>
-        <div>Existing composer content</div>
-      </GuidedComposerShell>
-    );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
-    );
-    act(() => {
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        ...(useLaunchStore.getState().global[0]?.media || []),
-        {
-          id: 'video-2',
-          path: 'https://media.example.com/replacement.mov',
-          type: 'video',
-        } as any,
-      ]);
-    });
-    await screen.findByText(
-      'The previous video could not be removed. Please try again.'
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
-    await waitFor(() => expect(resolveRetry).toBeDefined());
-
-    view.unmount();
-    await act(async () => resolveRetry?.({ ok: true }));
-
-    expect(deleteAttempts).toBe(2);
-    expect(useGuidedComposerStore.getState().sourceMediaId).toBeNull();
-    expect(useLaunchStore.getState().global[0].media).toEqual([
-      expect.objectContaining({ id: 'video-1' }),
-      expect.objectContaining({ id: 'video-2' }),
-    ]);
-    await act(async () => undefined);
-    expect(deleteAttempts).toBe(2);
-  });
-
-  it('invalidates and backend-deletes the guided source on attachment removal', async () => {
-    const unrelatedImage = {
-      id: 'image-1',
-      path: 'https://media.example.com/image.png',
-      type: 'image',
-    } as any;
-    useLaunchStore.getState().setGlobalValueMedia(0, [
-      ...(useLaunchStore.getState().global[0]?.media || []),
-      unrelatedImage,
-    ]);
-    render(
-      <GuidedComposerShell>
-        <div>Existing composer content</div>
+        <div>Composer</div>
       </GuidedComposerShell>
     );
     await waitFor(() =>
@@ -909,95 +298,87 @@ describe('guided composer shell', () => {
           destinationId: 'linkedin-1',
           platform: 'linkedin',
           sourceFingerprint: 'video-1-generation',
-          caption: 'Generated caption.',
-          baselineCaption: 'Generated caption.',
+          caption: 'Caption',
+          baselineCaption: 'Caption',
           baselineSource: 'generated',
-          originalCaption: 'Original caption.',
+          originalCaption: 'Caption',
           warnings: [],
         },
       ]);
+      useLaunchStore.getState().detachGlobalValueMedia(0, 'video-1');
     });
-
-    act(() =>
-      useLaunchStore.getState().setGlobalValueMedia(0, [unrelatedImage])
-    );
-
     await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBeNull()
+      expect(useGuidedComposerStore.getState()).toMatchObject({
+        sourceMediaId: null,
+        transcriptionStatus: 'IDLE',
+        generationStatus: 'idle',
+        reviewDrafts: {},
+      })
     );
-    expect(mockFetch).toHaveBeenCalledWith('/media/video-1', {
-      method: 'DELETE',
-    });
-    expect(useGuidedComposerStore.getState()).toMatchObject({
-      transcriptionStatus: 'IDLE',
-      generationStatus: 'idle',
-      reviewDrafts: {},
-    });
-    expect(useLaunchStore.getState().global[0].media).toEqual([unrelatedImage]);
-
-    act(() =>
-      useLaunchStore.getState().setGlobalValueMedia(0, [
-        unrelatedImage,
-        {
-          id: 'video-2',
-          path: 'https://media.example.com/replacement.mov',
-          type: 'video',
-        } as any,
-      ])
-    );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-2')
-    );
+    expect(useLaunchStore.getState().global[0].media).toEqual([]);
+    expect(
+      mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
+    ).toBe(false);
   });
 
-  it('restores the guided source when backend deletion is not confirmed', async () => {
-    let resolveDeletion: ((response: { ok: boolean }) => void) | undefined;
-    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
-      if (url === '/media/video-1' && options?.method === 'DELETE') {
-        return new Promise((resolve) => {
-          resolveDeletion = resolve;
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          id: 'transcription-1',
-          mediaId: 'video-1',
-          generation: 1,
-          status: 'READY',
-          text: 'Persisted transcript.',
-          error: null,
-        }),
-      });
-    });
+  it('does not restore a detached source when its pending transcription completes', async () => {
+    let finishTranscription: (response: any) => void = () => {};
+    mockFetch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishTranscription = resolve;
+        })
+    );
     render(
       <GuidedComposerShell>
-        <div>Existing composer content</div>
+        <div>Composer</div>
       </GuidedComposerShell>
     );
     await waitFor(() =>
-      expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1')
-    );
-
-    act(() => useLaunchStore.getState().setGlobalValueMedia(0, []));
-
-    await waitFor(() => expect(resolveDeletion).toBeDefined());
-    expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1');
-    expect(useLaunchStore.getState().global[0].media).toEqual([
-      expect.objectContaining({ id: 'video-1' }),
-    ]);
-
-    act(() => resolveDeletion?.({ ok: false }));
-
-    expect(
-      await screen.findByText(
-        'The previous video could not be removed. Please try again.'
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/media/video-1/transcription/ensure',
+        { method: 'POST' }
       )
-    ).toBeTruthy();
-    expect(useGuidedComposerStore.getState().sourceMediaId).toBe('video-1');
-    expect(useLaunchStore.getState().global[0].media).toEqual([
-      expect.objectContaining({ id: 'video-1' }),
-    ]);
+    );
+    act(() => useLaunchStore.getState().detachGlobalValueMedia(0, 'video-1'));
+    await act(async () =>
+      finishTranscription({
+        ok: true,
+        json: async () => ({ mediaId: 'video-1', status: 'READY', text: null }),
+      })
+    );
+    expect(useLaunchStore.getState().global[0].media).toEqual([]);
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      sourceMediaId: null,
+      transcriptionStatus: 'IDLE',
+    });
+    expect(
+      mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
+    ).toBe(false);
+  });
+
+  it('allows intentional re-addition of the same library source after detachment', async () => {
+    const video = useLaunchStore.getState().global[0].media[0];
+    render(
+      <GuidedComposerShell>
+        <div>Composer</div>
+      </GuidedComposerShell>
+    );
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().sourceMediaId).toBe(video.id)
+    );
+    act(() => useLaunchStore.getState().detachGlobalValueMedia(0, video.id));
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().sourceMediaId).toBeNull()
+    );
+    act(() => useLaunchStore.getState().appendGlobalValueMedia(0, [video]));
+    await waitFor(() =>
+      expect(useGuidedComposerStore.getState().sourceMediaId).toBe(video.id)
+    );
+    expect(useLaunchStore.getState().global[0].media).toEqual([video]);
+    expect(
+      mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
+    ).toBe(false);
   });
 
   it('renders the upload step around the existing composer content', () => {
