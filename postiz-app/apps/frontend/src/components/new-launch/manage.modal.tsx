@@ -177,7 +177,7 @@ export const ManageModal: FC<
     setHide,
     global,
     appendGlobalValueMedia,
-    setGlobalValueMedia,
+    detachGlobalValueMedia,
   } = useLaunchStore(
     useShallow((state) => ({
       hide: state.hide,
@@ -198,7 +198,7 @@ export const ManageModal: FC<
       activateExitButton: state.activateExitButton,
       global: state.global,
       appendGlobalValueMedia: state.appendGlobalValueMedia,
-      setGlobalValueMedia: state.setGlobalValueMedia,
+      detachGlobalValueMedia: state.detachGlobalValueMedia,
     }))
   );
 
@@ -845,14 +845,9 @@ export const ManageModal: FC<
     [appendGlobalValueMedia, generateCopyForPreset, queuedAiPreset]
   );
 
-  const removeGuidedVideo = useCallback(
-    (mediaId: string) => {
-      setGlobalValueMedia(
-        0,
-        globalMedia.filter((media: any) => media.id !== mediaId)
-      );
-    },
-    [globalMedia, setGlobalValueMedia]
+  const detachGuidedMedia = useCallback(
+    (mediaId: string) => detachGlobalValueMedia(0, mediaId),
+    [detachGlobalValueMedia]
   );
 
   const executePostSubmission = useCallback(
@@ -1390,9 +1385,9 @@ export const ManageModal: FC<
                         media={globalMedia}
                         onUpload={handleUpload}
                         guidedTranscription={props.guidedComposerActive === true}
-                        onRemoveVideo={
+                        onRemoveMedia={
                           props.guidedComposerActive === true
-                            ? removeGuidedVideo
+                            ? detachGuidedMedia
                             : undefined
                         }
                       />
@@ -1468,8 +1463,7 @@ export const ManageModal: FC<
                     </ComposerSection>
 
                     <ComposerSection
-                      step="4"
-                      title="Review and edit"
+                      title="Add Caption"
                       description="Edit the shared post or a platform version."
                       guidedComposerSection="editor"
                     >
@@ -1865,13 +1859,13 @@ const ComposerUploadCard: FC<{
   media: any[];
   onUpload: (media: any[]) => void;
   guidedTranscription?: boolean;
-  onRemoveVideo?: (mediaId: string) => void;
+  onRemoveMedia?: (mediaId: string) => void;
 }> = ({
   disabled,
   media,
   onUpload,
   guidedTranscription = false,
-  onRemoveVideo,
+  onRemoveMedia,
 }) => {
   const t = useT();
   const toaster = useToaster();
@@ -2056,14 +2050,14 @@ const ComposerUploadCard: FC<{
                   key={item.id}
                   className="relative min-w-0 overflow-hidden rounded-[14px] border border-newBorder bg-black/20"
                 >
-                  {guidedTranscription &&
-                    isGuidedMp4MovMedia(item) &&
-                    onRemoveVideo && (
+                  {guidedTranscription && onRemoveMedia && (
                       <button
                         type="button"
-                        aria-label="Remove video"
+                        aria-label={
+                          isGuidedMp4MovMedia(item) ? 'Remove video' : 'Remove image'
+                        }
                         disabled={disabled}
-                        onClick={() => onRemoveVideo(item.id)}
+                        onClick={() => onRemoveMedia(item.id)}
                         className="absolute right-[8px] top-[8px] z-10 flex h-[36px] w-[36px] items-center justify-center rounded-full bg-black/70 text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:bg-black"
                       >
                         <CloseIcon size={18} aria-hidden="true" />

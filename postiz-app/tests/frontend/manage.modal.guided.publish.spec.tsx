@@ -6,6 +6,8 @@ const mockCheckAllValid = jest.fn();
 const mockShow = jest.fn();
 const mockCloseAll = jest.fn();
 const mockMutate = jest.fn();
+const mockOpenFiles = jest.fn();
+const mockOpenModal = jest.fn();
 
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
   useFetch: () => mockFetch,
@@ -21,7 +23,7 @@ jest.mock('@gitroom/react/toaster/toaster', () => ({
 
 jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
   useModals: () => ({
-    openModal: jest.fn(),
+    openModal: mockOpenModal,
     closeAll: mockCloseAll,
     closeById: jest.fn(),
     closeCurrent: jest.fn(),
@@ -126,7 +128,7 @@ jest.mock('react-dropzone', () => ({
     getRootProps: () => ({}),
     getInputProps: () => ({}),
     isDragActive: false,
-    open: jest.fn(),
+    open: mockOpenFiles,
   }),
 }));
 jest.mock('@uppy/react', () => ({ Dashboard: () => null }));
@@ -155,6 +157,7 @@ jest.mock(
   () => ({ PostComment: { ALL: 'ALL' } })
 );
 
+import { GuidedComposerShell } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { ManageModal } from '../../apps/frontend/src/components/new-launch/manage.modal';
 import {
   GuidedComposerPublish,
@@ -341,6 +344,8 @@ describe('ManageModal guided publishing bridge', () => {
     mockShow.mockReset();
     mockCloseAll.mockReset();
     mockMutate.mockReset();
+    mockOpenFiles.mockReset();
+    mockOpenModal.mockReset();
     seedStores();
     mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
       if (url === '/posts/should-shortlink') {
@@ -391,6 +396,132 @@ describe('ManageModal guided publishing bridge', () => {
     useLaunchStore.getState().setGlobalValueMedia(0, [...media, image]);
     render(<ManageModal {...manageModalProps} />);
     expect(screen.queryByRole('button', { name: 'Remove video' })).toBeNull();
+  });
+
+  it.each([
+    ['photo', { id: 'image-1', path: '/image.png' }, 'Remove image'],
+    ['video', { id: 'video-1', path: '/video.mp4' }, 'Remove video'],
+  ])(
+    'detaches the final %s with the shell mounted and keeps add controls usable',
+    async (_kind, attachment, label) => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          mediaId: attachment.id,
+          status: 'READY',
+          text: null,
+        }),
+      });
+      useLaunchStore.getState().setGlobalValueMedia(0, [attachment]);
+      render(
+        <GuidedComposerShell>
+          <ManageModal {...manageModalProps} guidedComposerActive />
+        </GuidedComposerShell>
+      );
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      await waitFor(() =>
+        expect(useLaunchStore.getState().global[0].media).toEqual([])
+      );
+      const choose = screen.getByRole('button', { name: 'Choose files' });
+      const library = screen.getByRole('button', { name: 'Media Library' });
+      expect(getComputedStyle(choose).display).not.toBe('none');
+      expect((choose as HTMLButtonElement).disabled).toBe(false);
+      expect(getComputedStyle(library).display).not.toBe('none');
+      expect((library as HTMLButtonElement).disabled).toBe(false);
+      fireEvent.click(choose);
+      fireEvent.click(library);
+      expect(mockOpenFiles).toHaveBeenCalled();
+      expect(mockOpenModal).toHaveBeenCalled();
+      expect(
+        mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
+      ).toBe(false);
+    }
+  );
+
+  it('detaches a photo while preserving the shared video and platform-specific attachments', () => {
+    const image = { id: 'image-1', path: '/image.png' };
+    useLaunchStore.getState().setGlobalValueMedia(0, [image, ...media]);
+    useLaunchStore
+      .getState()
+      .addInternalValue(0, founderLinkedIn.id, [
+        {
+          id: 'platform-post',
+          content: 'Platform caption',
+          delay: 0,
+          media: [image],
+        },
+      ]);
+    const platformState = useLaunchStore.getState().internal;
+    renderGuidedManageModal();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove image' }));
+    expect(useLaunchStore.getState().global[0].media).toEqual(media);
+    expect(useLaunchStore.getState().internal).toEqual(platformState);
+    expect(
+      mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
+    ).toBe(false);
+  });
+
+  it('uses current attachment state when an older remove handler runs', () => {
+    renderGuidedManageModal();
+    const remove = screen.getByRole('button', { name: 'Remove video' });
+    const image = { id: 'image-later', path: '/later.png' };
+    act(() => {
+      useLaunchStore.getState().appendGlobalValueMedia(0, [image]);
+      fireEvent.click(remove);
+    });
+    expect(useLaunchStore.getState().global[0].media).toEqual([image]);
+  });
+
+  it('renders exactly Add Caption without a numeric badge in the editor section', () => {
+    const { container } = renderGuidedManageModal();
+    const section = container.querySelector(
+      '[data-guided-composer-section="editor"]'
+    )!;
+    expect(section.firstElementChild!.children).toHaveLength(1);
+    expect(screen.getByText('Add Caption', { exact: true })).toBeTruthy();
+    expect(screen.queryByText('Review and edit', { exact: true })).toBeNull();
+  });
+
+  it('removes four videos right to left without restoring attachments or hiding upload controls', async () => {
+    const attachments = Array.from({ length: 4 }, (_, index) => ({
+      id: `video-${index + 1}`,
+      path: `/video-${index + 1}.mp4`,
+    }));
+    mockFetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () => ({
+        mediaId: url.split('/')[2],
+        status: 'READY',
+        text: null,
+      }),
+    }));
+    useLaunchStore.getState().setGlobalValueMedia(0, attachments);
+    render(
+      <GuidedComposerShell>
+        <ManageModal {...manageModalProps} guidedComposerActive />
+      </GuidedComposerShell>
+    );
+    for (let count = 4; count > 0; count--) {
+      fireEvent.click(
+        screen.getAllByRole('button', { name: 'Remove video' })[count - 1]
+      );
+      await waitFor(() =>
+        expect(useLaunchStore.getState().global[0].media).toEqual(
+          attachments.slice(0, count - 1)
+        )
+      );
+      expect(
+        (
+          screen.getByRole('button', {
+            name: 'Choose files',
+          }) as HTMLButtonElement
+        ).disabled
+      ).toBe(false);
+    }
+    expect(screen.queryByRole('button', { name: 'Remove video' })).toBeNull();
+    expect(
+      mockFetch.mock.calls.some(([, options]) => options?.method === 'DELETE')
+    ).toBe(false);
   });
 
   it('submits enabled destinations with independent Review captions and preserved provider data', async () => {

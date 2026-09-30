@@ -77,22 +77,6 @@ const getGuidedComposerSourceType = (
   return media.length ? 'image' : 'text';
 };
 
-type SourceIntent = {
-  mediaId: string | null;
-  revision: number;
-};
-
-type PendingCleanup = {
-  id: string;
-  kind: 'source' | 'obsolete';
-};
-
-type ReconciliationOwner = {
-  active: boolean;
-  running: boolean;
-  pendingCleanup: PendingCleanup | null;
-};
-
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
   {
@@ -138,25 +122,7 @@ export const GuidedComposerShell: FC<{
   const generationRequestActiveRef = useRef(false);
   const generationAbortControllerRef = useRef<AbortController | null>(null);
   const composerMountedRef = useRef(true);
-  const previousVideoIdsRef = useRef<Set<string>>(new Set());
-  const latestSourceIntentRef = useRef<SourceIntent | null>(null);
-  const sourceMediaSnapshotRef = useRef<{
-    id: string;
-    path: string;
-    thumbnail?: string;
-  } | null>(null);
-  const obsoleteSourceIntentIdsRef = useRef<Set<string>>(new Set());
-  const sourceReconciliationOwnerRef = useRef<ReconciliationOwner>({
-    active: false,
-    running: false,
-    pendingCleanup: null,
-  });
-  const [sourceTransitionPending, setSourceTransitionPending] = useState(false);
-  const [sourceTransitionError, setSourceTransitionError] = useState<
-    string | null
-  >(null);
-  const [sourceReconciliationRunning, setSourceReconciliationRunning] =
-    useState(false);
+  const previousVideoIdsRef = useRef<Set<string> | null>(null);
   const [publishSubmitting, setPublishSubmitting] = useState(false);
   const fetch = useFetch();
   const {
@@ -164,14 +130,14 @@ export const GuidedComposerShell: FC<{
     integrations,
     selectedIntegrations,
     chars,
-    setGlobalValueMedia,
+    detachGlobalValueMedia,
   } = useLaunchStore(
     useShallow((state) => ({
       global: state.global,
       integrations: state.integrations,
       selectedIntegrations: state.selectedIntegrations,
       chars: state.chars,
-      setGlobalValueMedia: state.setGlobalValueMedia,
+      detachGlobalValueMedia: state.detachGlobalValueMedia,
     }))
   );
   const {
@@ -328,8 +294,6 @@ export const GuidedComposerShell: FC<{
   const navigationLocked =
     locked ||
     generationLoading ||
-    sourceTransitionPending ||
-    !!sourceTransitionError ||
     publishSubmitting;
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
@@ -367,311 +331,30 @@ export const GuidedComposerShell: FC<{
       ? 'Resolve blocking caption errors or disable those destinations.'
       : '';
 
-  const runSourceReconciliation = useCallback(async () => {
-    const owner = sourceReconciliationOwnerRef.current;
-    if (!composerMountedRef.current || !owner.active || owner.running) {
-      return;
-    }
-
-    owner.running = true;
-    setSourceReconciliationRunning(true);
-    setSourceTransitionError(null);
-
-    try {
-      while (composerMountedRef.current && owner.active) {
-        const intent = latestSourceIntentRef.current;
-        if (!intent) {
-          owner.active = false;
-          owner.pendingCleanup = null;
-          setSourceTransitionPending(false);
-          return;
-        }
-
-        const guidedState = useGuidedComposerStore.getState();
-        const media = useLaunchStore.getState().global[0]?.media || [];
-        const attachedVideoIds = new Set(
-          media
-            .filter((item) => isGuidedMp4MovMedia(item))
-            .map((item) => item.id)
-        );
-
-        for (const obsoleteId of Array.from(
-          obsoleteSourceIntentIdsRef.current
-        )) {
-          if (
-            !attachedVideoIds.has(obsoleteId) ||
-            obsoleteId === guidedState.sourceMediaId ||
-            obsoleteId === intent.mediaId
-          ) {
-            obsoleteSourceIntentIdsRef.current.delete(obsoleteId);
-          }
-        }
-
-        if (!owner.pendingCleanup) {
-          if (
-            guidedState.sourceMediaId &&
-            guidedState.sourceMediaId !== intent.mediaId
-          ) {
-            owner.pendingCleanup = {
-              id: guidedState.sourceMediaId,
-              kind: 'source',
-            };
-          } else {
-            const obsoleteId = Array.from(
-              obsoleteSourceIntentIdsRef.current
-            ).find((id) => attachedVideoIds.has(id));
-            if (obsoleteId) {
-              owner.pendingCleanup = { id: obsoleteId, kind: 'obsolete' };
-            }
-          }
-        }
-
-        if (!owner.pendingCleanup) {
-          if (guidedState.sourceMediaId !== intent.mediaId) {
-            const intendedSource = media.find(
-              (item) =>
-                item.id === intent.mediaId && isGuidedMp4MovMedia(item)
-            );
-            selectSourceMedia(intendedSource?.id || null);
-            continue;
-          }
-
-          if (latestSourceIntentRef.current?.revision !== intent.revision) {
-            continue;
-          }
-
-          owner.active = false;
-          setSourceTransitionPending(false);
-          setSourceTransitionError(null);
-          return;
-        }
-
-        const cleanup = owner.pendingCleanup;
-        const latestIntent = latestSourceIntentRef.current;
-        const latestGuidedState = useGuidedComposerStore.getState();
-        const latestMedia = useLaunchStore.getState().global[0]?.media || [];
-        const cleanupAttached = latestMedia.some(
-          (item) => item.id === cleanup.id
-        );
-
-        if (!cleanupAttached) {
-          obsoleteSourceIntentIdsRef.current.delete(cleanup.id);
-          owner.pendingCleanup = null;
-          if (
-            cleanup.kind === 'source' &&
-            latestGuidedState.sourceMediaId === cleanup.id
-          ) {
-            const intendedSource = latestMedia.find(
-              (item) =>
-                item.id === latestIntent?.mediaId &&
-                isGuidedMp4MovMedia(item)
-            );
-            selectSourceMedia(intendedSource?.id || null);
-          }
-          continue;
-        }
-
-        if (cleanup.kind === 'source') {
-          if (latestGuidedState.sourceMediaId !== cleanup.id) {
-            if (
-              cleanup.id !== latestIntent?.mediaId &&
-              cleanup.id !== latestGuidedState.sourceMediaId
-            ) {
-              obsoleteSourceIntentIdsRef.current.add(cleanup.id);
-            }
-            owner.pendingCleanup = null;
-            continue;
-          }
-
-          if (!latestIntent || latestIntent.mediaId === cleanup.id) {
-            owner.pendingCleanup = null;
-            continue;
-          }
-
-          if (
-            latestIntent.mediaId &&
-            !latestMedia.some(
-              (item) =>
-                item.id === latestIntent.mediaId &&
-                isGuidedMp4MovMedia(item)
-            )
-          ) {
-            throw new Error('The replacement video is no longer attached.');
-          }
-        } else if (
-          cleanup.id === latestGuidedState.sourceMediaId ||
-          cleanup.id === latestIntent?.mediaId
-        ) {
-          obsoleteSourceIntentIdsRef.current.delete(cleanup.id);
-          owner.pendingCleanup = null;
-          continue;
-        }
-
-        const response = await fetch(`/media/${cleanup.id}`, {
-          method: 'DELETE',
-        });
-        if (!response.ok) {
-          throw new Error('The previous video could not be deleted.');
-        }
-
-        if (!composerMountedRef.current) {
-          return;
-        }
-
-        const reconciledIntent = latestSourceIntentRef.current;
-        const reconciledGuidedState = useGuidedComposerStore.getState();
-        const reconciledMedia =
-          useLaunchStore.getState().global[0]?.media || [];
-
-        if (cleanup.kind === 'source') {
-          const remainingMedia = reconciledMedia.filter(
-            (item) => item.id !== cleanup.id
-          );
-          previousVideoIdsRef.current = new Set(
-            remainingMedia
-              .filter((item) => isGuidedMp4MovMedia(item))
-              .map((item) => item.id)
-          );
-          setGlobalValueMedia(0, remainingMedia);
-
-          const intendedSource = remainingMedia.find(
-            (item) =>
-              item.id === reconciledIntent?.mediaId &&
-              isGuidedMp4MovMedia(item)
-          );
-          selectSourceMedia(intendedSource?.id || null);
-        } else if (
-          cleanup.id !== reconciledGuidedState.sourceMediaId &&
-          cleanup.id !== reconciledIntent?.mediaId
-        ) {
-          const remainingMedia = reconciledMedia.filter(
-            (item) => item.id !== cleanup.id
-          );
-          previousVideoIdsRef.current = new Set(
-            remainingMedia
-              .filter((item) => isGuidedMp4MovMedia(item))
-              .map((item) => item.id)
-          );
-          setGlobalValueMedia(0, remainingMedia);
-        }
-
-        obsoleteSourceIntentIdsRef.current.delete(cleanup.id);
-        owner.pendingCleanup = null;
-      }
-    } catch {
-      if (composerMountedRef.current) {
-        setSourceTransitionError(
-          'The previous video could not be removed. Please try again.'
-        );
-      }
-    } finally {
-      owner.running = false;
-      if (composerMountedRef.current) {
-        setSourceReconciliationRunning(false);
-      }
-    }
-  }, [fetch, selectSourceMedia, setGlobalValueMedia]);
-
   useEffect(() => {
-    const videos = globalMedia.filter((media) => isGuidedMp4MovMedia(media));
-    const previousVideoIds = previousVideoIdsRef.current;
-    const newlyAttachedVideo = videos.find(
-      (media) => !previousVideoIds.has(media.id)
+    const videos = (useLaunchStore.getState().global[0]?.media || []).filter(
+      (media) => isGuidedMp4MovMedia(media)
     );
-    const currentSource = videos.find((media) => media.id === sourceMediaId);
+    const currentSourceId = useGuidedComposerStore.getState().sourceMediaId;
+    const previousVideoIds = previousVideoIdsRef.current;
+    const newlyAttachedVideo = previousVideoIds
+      ? videos.find((media) => !previousVideoIds.has(media.id))
+      : undefined;
+    const currentSource = videos.find((media) => media.id === currentSourceId);
     const selectedSource =
-      currentSource || selectGuidedSourceVideo(videos, sourceMediaId || undefined);
-
-    if (!latestSourceIntentRef.current) {
-      latestSourceIntentRef.current = {
-        mediaId: selectedSource?.id || null,
-        revision: 0,
-      };
-      previousVideoIdsRef.current = new Set(videos.map((media) => media.id));
-      if (currentSource) {
-        sourceMediaSnapshotRef.current = currentSource;
-      }
-      if (!sourceMediaId && selectedSource) {
-        selectSourceMedia(selectedSource.id);
-      }
-      return;
-    }
-
-    if (newlyAttachedVideo) {
-      const previousIntentId = latestSourceIntentRef.current.mediaId;
-      if (
-        previousIntentId &&
-        previousIntentId !== newlyAttachedVideo.id &&
-        previousIntentId !== sourceMediaId
-      ) {
-        obsoleteSourceIntentIdsRef.current.add(previousIntentId);
-      }
-      latestSourceIntentRef.current = {
-        mediaId: newlyAttachedVideo.id,
-        revision: latestSourceIntentRef.current.revision + 1,
-      };
-    } else if (
-      sourceMediaId &&
-      !currentSource &&
-      !sourceReconciliationOwnerRef.current.active
-    ) {
-      latestSourceIntentRef.current = {
-        mediaId: selectedSource?.id || null,
-        revision: latestSourceIntentRef.current.revision + 1,
-      };
-    }
+      newlyAttachedVideo ||
+      currentSource ||
+      selectGuidedSourceVideo(videos, currentSourceId || undefined);
 
     previousVideoIdsRef.current = new Set(videos.map((media) => media.id));
-
-    if (currentSource) {
-      sourceMediaSnapshotRef.current = currentSource;
+    if (newlyAttachedVideo && currentSource && currentSource.id !== selectedSource?.id) {
+      // Replacing the guided source only detaches it from this composition.
+      detachGlobalValueMedia(0, currentSource.id);
     }
-
-    const intent = latestSourceIntentRef.current;
-    const hasObsoleteCleanup = Array.from(
-      obsoleteSourceIntentIdsRef.current
-    ).some(
-      (id) =>
-        id !== sourceMediaId &&
-        id !== intent.mediaId &&
-        globalMedia.some((media) => media.id === id)
-    );
-    const needsSourceTransition = sourceMediaId !== intent.mediaId;
-
-    if (!needsSourceTransition && !hasObsoleteCleanup) {
-      return;
+    if (currentSourceId !== (selectedSource?.id || null)) {
+      selectSourceMedia(selectedSource?.id || null);
     }
-
-    if (
-      sourceMediaId &&
-      !currentSource &&
-      sourceMediaSnapshotRef.current?.id === sourceMediaId
-    ) {
-      const restoredMedia = [...globalMedia, sourceMediaSnapshotRef.current];
-      previousVideoIdsRef.current = new Set(
-        restoredMedia
-          .filter((media) => isGuidedMp4MovMedia(media))
-          .map((media) => media.id)
-      );
-      setGlobalValueMedia(0, restoredMedia);
-    }
-
-    const owner = sourceReconciliationOwnerRef.current;
-    if (owner.active) {
-      return;
-    }
-
-    owner.active = true;
-    owner.pendingCleanup = null;
-    setSourceTransitionPending(true);
-    void runSourceReconciliation();
-  }, [
-    globalMedia,
-    runSourceReconciliation,
-    selectSourceMedia,
-    setGlobalValueMedia,
-    sourceMediaId,
-  ]);
+  }, [globalMedia, sourceMediaId, selectSourceMedia, detachGlobalValueMedia]);
 
   useEffect(() => {
     if (
@@ -953,15 +636,6 @@ export const GuidedComposerShell: FC<{
     sourceType,
   ]);
 
-  const retrySourceCleanup = useCallback(() => {
-    const owner = sourceReconciliationOwnerRef.current;
-    if (!owner.active || !owner.pendingCleanup || owner.running) {
-      return;
-    }
-
-    void runSourceReconciliation();
-  }, [runSourceReconciliation]);
-
   useEffect(() => {
     headingRef.current?.focus();
   }, [composerStep]);
@@ -970,9 +644,6 @@ export const GuidedComposerShell: FC<{
     composerMountedRef.current = true;
     return () => {
       composerMountedRef.current = false;
-      sourceReconciliationOwnerRef.current.active = false;
-      sourceReconciliationOwnerRef.current.running = false;
-      sourceReconciliationOwnerRef.current.pendingCleanup = null;
       generationAbortControllerRef.current?.abort();
       generationAbortControllerRef.current = null;
       generationRequestActiveRef.current = false;
@@ -1095,23 +766,7 @@ export const GuidedComposerShell: FC<{
               `}
               </style>
             </div>
-            <GuidedComposerUploadDetails
-              disabled={navigationLocked}
-              sourceMutationError={sourceTransitionError}
-            />
-            {!!sourceTransitionError &&
-              !!sourceReconciliationOwnerRef.current.pendingCleanup && (
-                <div className="mx-auto flex w-full max-w-[1600px] justify-end px-[40px] pt-[10px] mobile:px-[12px]">
-                  <button
-                    type="button"
-                    onClick={retrySourceCleanup}
-                    disabled={sourceReconciliationRunning}
-                    className="flex h-[36px] items-center justify-center rounded-[8px] bg-btnSimple px-[14px] text-[13px] font-[700] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Retry cleanup
-                  </button>
-                </div>
-              )}
+            <GuidedComposerUploadDetails disabled={navigationLocked} />
           </div>
           {composerStep === 'destinations' && generationLoading && (
             <GuidedComposerGeneration progress={generationProgress} />
