@@ -6,7 +6,9 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
+  useState,
 } from 'react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { IsOptional } from 'class-validator';
@@ -229,6 +231,27 @@ export const withProvider = function <T extends object>(params: {
       }
     );
 
+    // Changing a portal destination remounts its children. Keep settings mounted
+    // while the composer creates/removes #social-settings (e.g. Global view).
+    const [settingsContainer] = useState(() => {
+      if (typeof document === 'undefined') return null;
+      const container = document.createElement('div');
+      container.style.display = 'contents';
+      return container;
+    });
+    useLayoutEffect(() => {
+      if (!settingsContainer) return;
+      const target = document.querySelector('#social-settings');
+      if (target) {
+        if (settingsContainer.parentNode !== target) {
+          target.appendChild(settingsContainer);
+        }
+      } else {
+        settingsContainer.remove();
+      }
+    });
+    useLayoutEffect(() => () => settingsContainer?.remove(), [settingsContainer]);
+
     const value = useMemo(() => {
       return resolveProviderValues(
         internal?.integrationValue,
@@ -376,7 +399,8 @@ export const withProvider = function <T extends object>(params: {
                   }
                 />
               ))}
-            {(SettingsComponent || !!data?.internalPlugs?.length) &&
+            {settingsContainer &&
+              (SettingsComponent || !!data?.internalPlugs?.length) &&
               createPortal(
                 <div
                   data-id={props.id}
@@ -417,15 +441,14 @@ export const withProvider = function <T extends object>(params: {
                     <InternalChannels plugs={data?.internalPlugs} />
                   )}
                 </div>,
-                document.querySelector('#social-settings') ||
-                  document.createElement('div')
+                settingsContainer
               )}
-            {current &&
+            {settingsContainer &&
+              current &&
               !SettingsComponent &&
               createPortal(
                 <style>{`#wrapper-settings {display: none !important;} #social-empty {display: block !important;}`}</style>,
-                document.querySelector('#social-settings') ||
-                  document.createElement('div')
+                settingsContainer
               )}
           </div>
         </FormProvider>
