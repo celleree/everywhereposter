@@ -10,6 +10,7 @@ Keep normal AI/Codex context small. Read only what the current task requires.
 - For long-running local Codex Desktop orchestration across bounded worker sessions: follow `docs/brain/ORCHESTRATOR_PROTOCOL.md`.
 - For locating the owning subsystem: read `docs/brain/REPOSITORY_ROUTING.md`.
 - For operational, deploy, Docker, database, environment, or production work: read `OPERATING-MANUAL.md` first.
+- For an authorized bounded release: follow the release-coordinator lifecycle in `docs/GITHUB-HOSTED-DEPLOYMENT.md` and model routing in `docs/brain/ORCHESTRATOR_PROTOCOL.md`.
 - For manual ChatGPT <-> Codex handoffs, review depth, PR reviewability, and parallel-work decisions: follow `docs/brain/CHATGPT_CODEX_HANDOFF.md`.
 - Load `docs/brain/CODEX_WORKFLOW.md` or `docs/brain/DEVELOPMENT_AGENT_SYSTEM.md` only when planning/review/multi-agent coordination actually needs them.
 
@@ -171,6 +172,14 @@ Explicit approval is required before:
 Reversible branch-local work inside an already approved bounded scope does not require repeated approval at every edit.
 
 For work bounded to `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`, the root orchestrator or assigned responsible agent may merge only under the five-condition authorization in `docs/brain/ORCHESTRATOR_PROTOCOL.md`. Production deployment remains an explicit human approval gate.
+
+## Bounded release continuation
+
+- Successful gates permit only the next already-authorized step; they do not grant merge, production, rollback, migration, destructive-operation, or scope-expansion approval.
+- Commit/push before required independent review of the exact live PR HEAD. Any later HEAD change invalidates that review.
+- Stop progression on a failed, cancelled, stale, mismatched, or ambiguous gate. Diagnostics do not authorize repair, production retry, rollback, or an alternate SHA/image.
+- Resume by revalidating live identities and evidence. Existing workflows/scripts enforce deployment mechanics; model choice is not a safety gate.
+- Preserve all human gates above and the narrow scope of the deployment-performance merge exception.
 
 ## Durable learning
 

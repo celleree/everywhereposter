@@ -116,13 +116,15 @@ For bounded implementation work coordinated manually between ChatGPT and Codex, 
 
 1. **Investigation / plan only.** Start from current `main`, inspect the smallest relevant file set, do not edit yet, confirm the contract, propose the smallest coherent implementation, estimate scope, list focused tests, and surface unresolved decisions.
 2. **ChatGPT review.** Return the plan to ChatGPT. Resolve scope, architecture, sequencing, PR-size, and product-contract questions before editing.
-3. **Implementation.** Continue the original implementation session and implement only the approved plan. Run focused verification before broader PR checks.
-4. **Independent review.** Use a fresh Codex session for the exact current PR/HEAD SHA when independent review is required. The reviewer should return findings, not silently repair the implementation.
+3. **Implementation.** Continue the original implementation session and implement only the approved plan. Run focused verification, commit/push the completed change, and create/update the PR before final exact-SHA independent review.
+4. **Independent review.** After matching PR CI passes, use a fresh Codex session for the exact current live PR HEAD SHA when independent review is required. Never claim final exact-SHA review of an uncommitted diff. The reviewer should return findings, not silently repair the implementation.
 5. **Repair.** Send verified findings back to the original implementation session. Keep fixes inside the approved scope unless a new decision is explicitly reviewed.
 6. **Re-verify.** Re-run the relevant checks. Any HEAD change after a required exact-SHA review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
 7. **Merge/deploy gate.** Merge or deployment still requires the repository's normal human approvals and operational rules.
 
 Simple low-risk mechanical work may combine investigation and implementation when there is no meaningful design decision, review boundary, or value from a separate checkpoint.
+
+For an explicitly authorized bounded release, follow the [release-coordinator lifecycle](../GITHUB-HOSTED-DEPLOYMENT.md#bounded-release-coordinator-lifecycle). Successful gates do not need repeated human handoffs for already-authorized continuation steps. Merge/deployment approvals and failure stops remain mandatory; this exception to manual checkpoint relaying does not authorize new work. Release reporting uses that lifecycle's concise result format rather than repeating the full implementation handoff at every gate.
 
 ## Review depth and edge cases
 
