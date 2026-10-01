@@ -98,10 +98,11 @@ jobs:
             -f branch=main \
             -f event=push \
             -f status=success \
+            -f head_sha="$TARGET_SHA" \
             -f per_page=100)"
 
           if ! jq -e --arg sha "$TARGET_SHA" \
-            '.[] | .workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")' \
+            '.[] | .workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .status == "completed" and .conclusion == "success")' \
             <<<"$RUNS_JSON" >/dev/null; then
             echo "ERROR: no successful Build EverywherePoster image run exists for $TARGET_SHA."
             exit 1
