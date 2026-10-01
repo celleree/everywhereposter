@@ -93,6 +93,8 @@ Rules:
 
 Use the manual GitHub-hosted production workflow described in `docs/GITHUB-HOSTED-DEPLOYMENT.md`. Normal deployments leave image pruning disabled and use `scripts/deploy-production.sh` for migration, recreation, bounded internal readiness polling, exact-image verification, and timing output. The workflow then applies bounded public readiness retry/backoff. Production deployment still requires explicit human approval.
 
+For authorized AI-assisted continuation, use the [bounded release-coordinator lifecycle](docs/GITHUB-HOSTED-DEPLOYMENT.md#bounded-release-coordinator-lifecycle). It coordinates evidence and approvals; this manual retains operational authority and existing workflows/scripts retain execution authority.
+
 ## What Counts As Deployed
 
 - GitHub Actions green for exact commit.

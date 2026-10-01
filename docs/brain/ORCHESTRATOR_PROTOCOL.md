@@ -47,6 +47,16 @@ Do not use the local worker as the final independent reviewer or for architectur
 
 The local worker is an optional lowest-cost tier, not a requirement. If Ollama or the local model is unavailable, route directly to the appropriate cloud worker instead of blocking the task.
 
+## Bounded release coordinator
+
+After bounded implementation, use the [release-coordinator lifecycle](../GITHUB-HOSTED-DEPLOYMENT.md#bounded-release-coordinator-lifecycle) to coordinate commit/push, PR, CI, exact-HEAD independent review, and subsequent release gates. It owns release transitions; this protocol retains implementation/review roles and existing human gates.
+
+- GPT-6 Luna: routine evidence checking, polling/waiting, deterministic release coordination, and concise reporting.
+- GPT-6.1 Sol: ambiguous failures or substantive diagnosis/repair; escalation itself does not authorize repair.
+- GPT-6 Astra: unusually complex/high-risk architecture or repeated-failure situations.
+
+Model names are routing guidance, not safety mechanisms. Repository gates and matching live evidence remain authoritative. The release coordinator cannot replace the independent reviewer, general merge approval, or production approval. The roadmap-specific merge exception below remains narrowly scoped.
+
 ## Canonical local environment
 
 The normal development checkout is the WSL-native ext4 repository:
