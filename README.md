@@ -151,7 +151,9 @@ Expected result:
 ChatGPT note:
 
 - Claude Code, Codex, Cursor, and similar MCP-capable tools can connect immediately through the generated config.
-- ChatGPT compatibility depends on OpenAI's current external connector/app flow, so treat the MCP exposure here as the server-side foundation rather than a guarantee that every ChatGPT surface will attach to it directly.
+- The MCP tool set includes the pieces needed for a ChatGPT posting flow: list channels, inspect platform requirements, import a ChatGPT-attached image/video, publish or schedule, and read back post status.
+- `uploadChatGptMedia` declares OpenAI's file-parameter metadata so ChatGPT can supply `download_url`, `file_id`, and optional MIME/name metadata for an attached file. EverywherePoster re-hosts the validated media in its configured storage before scheduling.
+- Current OpenAI plugin authentication uses the MCP OAuth 2.1 conventions (CIMD or dynamic client registration plus PKCE). Revalidate EverywherePoster's existing OAuth implementation against that contract before treating a ChatGPT developer-mode connection as production-ready; do not put a long-lived API key in a shared plugin URL.
 
 ---
 
