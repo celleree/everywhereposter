@@ -1,6 +1,6 @@
 # Current Work
 
-Updated: 2026-09-14
+Updated: 2026-09-17
 
 Use this file when the user asks to continue the project, continue a roadmap, decide what to do next, or coordinate work across multiple EverywherePoster workstreams. Do not load it for a narrow bug with an already-named issue or file unless the current priority matters.
 
@@ -34,7 +34,19 @@ Before calling the product launch-ready or recommending that paid acquisition be
 
 Do not turn launch-readiness work into broad cleanup. Fix only blockers that materially affect launch.
 
-### 3. CI / Docker / Hetzner deployment performance — ACTIVE
+### 3. Stripe production billing — ACTIVE
+
+Canonical roadmap: `docs/brain/STRIPE_PRODUCTION_ROADMAP.md`.
+
+Current checkpoint:
+
+- S0 billing contract — COMPLETE. Launch contract is one plan at $9/month or $90/year, no permanent free plan, 7-day card-required trial, unlimited supported connected accounts, unlimited ordinary publishing/scheduling where the underlying platform/API does not charge per post, and AI usage billed separately through prepaid balance or OpenAI BYOK.
+- S1 explicit billing activation boundary — BLOCKED - IMPLEMENTATION/CI. PR #111 remains open at `9f5780246681b7e8f991677d662170bddec2adf8`, based on `main` at `1c9c6cb783f5838b3b68e2c6327d8e77ce725c82`. CI [35312010309](https://github.com/celleree/everywhereposter/actions/runs/35312010309) and repository guard [35312010226](https://github.com/celleree/everywhereposter/actions/runs/35312010226) passed, but fresh independent review found HIGH lifetime-subscription overwrite/deletion risk and MEDIUM persisted-tier UI restrictions while billing is disabled. Orchestration source verification confirmed both. Repair these two findings and their regression coverage; detailed anchors and acceptance criteria are in the S1 roadmap checkpoint. S1 is not complete. Reverify live GitHub before using this checkpoint.
+- Subscription billing and prepaid AI balance are separate systems. Stripe handles payment/money movement; EverywherePoster owns the internal AI wallet ledger and usage accounting.
+- Every later Stripe phase has a decision gate: do not plan detailed implementation for the next phase until the prior phase is verified and any unresolved product, accounting, security, data-model, Stripe-dashboard, UX, or operational decisions for the next phase are explicitly settled.
+- Production billing activation and production secret/config changes remain explicit human gates.
+
+### 4. CI / Docker / Hetzner deployment performance — ACTIVE
 
 Canonical roadmap: `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`.
 
@@ -62,7 +74,7 @@ Remaining roadmap:
 
 Preserve the GitHub -> GHCR -> Hetzner architecture unless a separately approved architecture decision changes it.
 
-### 4. TRA-quality media intelligence and image generation — PLANNED
+### 5. TRA-quality media intelligence and image generation — PLANNED
 
 The desired direction is to bring the useful planning/intelligence patterns from `tra-ai-marketing` into EverywherePoster so source media can produce higher-quality image/post assets.
 
@@ -77,7 +89,7 @@ Before implementation:
 
 Create a bounded issue/plan before runtime implementation.
 
-### 5. Known guided-composer product gaps — BACKLOG / LAUNCH RELEVANCE VARIES
+### 6. Known guided-composer product gaps — BACKLOG / LAUNCH RELEVANCE VARIES
 
 - Issue #86: silent/no-transcript media handling and future visual-context generation.
 - Issue #87: YouTube guided-publish description mapping and AI title generation.
@@ -110,9 +122,11 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-Phase 2 PR #106 has a bounded non-destructive CI-storage repair underway after required CI failed, and Phase 3 waits for that image to settle. Phase 5 repository work is complete; the combined internal/public deployment path awaits separate production approval. Phase 6 has one docs-only observation, with the remaining representative matrix and final consolidation pending.
+Stripe S1: repair the two confirmed exact-HEAD findings on existing PR #111: protect lifetime subscription persistence/deletion and isolate billing-disabled effective UI capabilities from stored subscription tier. Reverify main/HEAD and overlap first; read the S1 roadmap checkpoint for source anchors and required tests. Exercise actual repository persistence methods rather than fully mocking away the defect. Preserve ordinary bookkeeping, signature validation, and disabled side-effect safety. Require green repaired-HEAD CI and a fresh independent review before the merge gate. PR #82's CI work and PR #83's media work remain separate; do not import either.
 
-The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
+S1 is not complete. After S1 is verified, stop and run the next-phase decision gate in `docs/brain/STRIPE_PRODUCTION_ROADMAP.md` before planning S2 in detail.
+
+Production deployment, production secrets, billing activation, and merges outside any documented exception remain explicit human gates.
 
 ## Update rule
 
