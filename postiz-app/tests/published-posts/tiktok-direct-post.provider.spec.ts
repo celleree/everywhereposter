@@ -1,7 +1,14 @@
 import { TiktokProvider } from '@gitroom/nestjs-libraries/integrations/social/tiktok.provider';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 const baseCreatorData = {
   creator_nickname: 'Arundel Creator',
@@ -33,10 +40,12 @@ const basePost = {
   ],
 };
 
-const configureLocalUpload = () => {
+const configureLocalUpload = (relativePath = 'video.mp4') => {
   const uploadDirectory = mkdtempSync(join(tmpdir(), 'tiktok-upload-'));
-  const mediaPath = join(uploadDirectory, 'video.mp4');
+  const mediaPath = join(uploadDirectory, relativePath);
+  mkdirSync(dirname(mediaPath), { recursive: true });
   writeFileSync(mediaPath, 'test video');
+  process.env.FRONTEND_URL = 'https://app.example.com';
   process.env.UPLOAD_DIRECTORY = uploadDirectory;
   process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY = '/uploads';
   return {
@@ -91,12 +100,14 @@ describe('TikTok Direct Post provider safety', () => {
   let previousBucketUrl: string | undefined;
   let previousUploadDirectory: string | undefined;
   let previousUploadStaticDirectory: string | undefined;
+  let previousFrontendUrl: string | undefined;
 
   beforeEach(() => {
     previousBucketUrl = process.env.CLOUDFLARE_BUCKET_URL;
     previousUploadDirectory = process.env.UPLOAD_DIRECTORY;
     previousUploadStaticDirectory =
       process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY;
+    previousFrontendUrl = process.env.FRONTEND_URL;
     consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
   });
 
@@ -104,6 +115,7 @@ describe('TikTok Direct Post provider safety', () => {
     for (const [name, value] of [
       ['CLOUDFLARE_BUCKET_URL', previousBucketUrl],
       ['UPLOAD_DIRECTORY', previousUploadDirectory],
+      ['FRONTEND_URL', previousFrontendUrl],
       [
         'NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY',
         previousUploadStaticDirectory,
@@ -368,14 +380,45 @@ describe('TikTok Direct Post provider safety', () => {
     }
   });
 
-  it('preserves trusted local-file probing', async () => {
-    const localUpload = configureLocalUpload();
+  it.each([
+    'https://app.example.com',
+    'http://app.example.com:4007',
+  ])('probes a LocalStorage-style URL as a local file: %s', async (frontendUrl) => {
+    const localUpload = configureLocalUpload('2026/09/30/video.mp4');
+    process.env.FRONTEND_URL = frontendUrl;
     const provider = new TiktokProvider() as any;
     provider.runMediaCommand = jest.fn().mockResolvedValue({ stdout: '30\n' });
 
     try {
       await expect(
-        provider.probeVideoDuration('/uploads/video.mp4')
+        provider.probeVideoDuration(
+          `${frontendUrl}/uploads/2026/09/30/video.mp4`
+        )
+      ).resolves.toBe(30);
+      expect(provider.runMediaCommand).toHaveBeenCalledWith(
+        'ffprobe',
+        expect.arrayContaining([localUpload.mediaPath]),
+        { timeout: 15_000, maxBuffer: 1024 * 1024 }
+      );
+      expect(provider.runMediaCommand.mock.calls[0][1].at(-1)).toBe(
+        localUpload.mediaPath
+      );
+    } finally {
+      localUpload.cleanup();
+    }
+  });
+
+  it('uses the configured upload prefix and decodes a same-origin filename', async () => {
+    const localUpload = configureLocalUpload('video name.mp4');
+    process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY = '/media/uploads/';
+    const provider = new TiktokProvider() as any;
+    provider.runMediaCommand = jest.fn().mockResolvedValue({ stdout: '30\n' });
+
+    try {
+      await expect(
+        provider.probeVideoDuration(
+          'https://app.example.com/media/uploads/video%20name.mp4'
+        )
       ).resolves.toBe(30);
       expect(provider.runMediaCommand.mock.calls[0][1].at(-1)).toBe(
         localUpload.mediaPath
@@ -384,6 +427,83 @@ describe('TikTok Direct Post provider safety', () => {
       localUpload.cleanup();
     }
   });
+
+  it.each([
+    'https://evil.example/uploads/video.mp4',
+    'http://app.example.com/uploads/video.mp4',
+    'https://app.example.com:444/uploads/video.mp4',
+    'https://user@app.example.com/uploads/video.mp4',
+    'https://:password@app.example.com/uploads/video.mp4',
+    'https://app.example.com\\@127.0.0.1/uploads/video.mp4',
+    'https://app.example.com/uploads/video\t.mp4',
+    'https:app.example.com/uploads/video.mp4',
+    'https:///app.example.com/uploads/video.mp4',
+    '//app.example.com/uploads/video.mp4',
+    'https://app.example.com/video.mp4',
+    'https://app.example.com/uploads-other/video.mp4',
+    'https://app.example.com/uploads/../video.mp4',
+    'https://app.example.com/uploads/%2e%2e/video.mp4',
+    'https://app.example.com/uploads/%2e%2e%2fvideo.mp4',
+    'https://app.example.com/uploads/video%00.mp4',
+    'https://app.example.com/uploads/video%5c.mp4',
+    'https://app.example.com/uploads/video%ZZ.mp4',
+    'https://app.example.com/uploads/missing.mp4',
+    'https://app.example.com/uploads/',
+  ])('rejects an untrusted local-upload URL before ffprobe: %s', async (mediaPath) => {
+    const localUpload = configureLocalUpload();
+    delete process.env.CLOUDFLARE_BUCKET_URL;
+    const provider = new TiktokProvider() as any;
+    provider.runMediaCommand = jest.fn();
+
+    try {
+      await expect(provider.probeVideoDuration(mediaPath)).rejects.toThrow(
+        'Selected video is not in configured application storage.'
+      );
+      expect(provider.runMediaCommand).not.toHaveBeenCalled();
+    } finally {
+      localUpload.cleanup();
+    }
+  });
+
+  it('rejects a same-origin upload symlink escaping the upload root', async () => {
+    const localUpload = configureLocalUpload();
+    const outsideDirectory = mkdtempSync(join(tmpdir(), 'tiktok-outside-'));
+    const outsidePath = join(outsideDirectory, 'outside.mp4');
+    writeFileSync(outsidePath, 'outside video');
+    symlinkSync(outsidePath, join(dirname(localUpload.mediaPath), 'link.mp4'));
+    const provider = new TiktokProvider() as any;
+    provider.runMediaCommand = jest.fn();
+
+    try {
+      await expect(
+        provider.probeVideoDuration('https://app.example.com/uploads/link.mp4')
+      ).rejects.toThrow(
+        'Selected video is not in configured application storage.'
+      );
+      expect(provider.runMediaCommand).not.toHaveBeenCalled();
+    } finally {
+      localUpload.cleanup();
+      rmSync(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['/uploads/video.mp4', 'video.mp4'])(
+    'preserves trusted local-file probing: %s',
+    async (mediaPath) => {
+      const localUpload = configureLocalUpload();
+      const provider = new TiktokProvider() as any;
+      provider.runMediaCommand = jest.fn().mockResolvedValue({ stdout: '30\n' });
+
+      try {
+        await expect(provider.probeVideoDuration(mediaPath)).resolves.toBe(30);
+        expect(provider.runMediaCommand.mock.calls[0][1].at(-1)).toBe(
+          localUpload.mediaPath
+        );
+      } finally {
+        localUpload.cleanup();
+      }
+    }
+  );
 
   it('does not invent a privacy level or send frontend validation metadata', () => {
     const provider = new TiktokProvider() as any;

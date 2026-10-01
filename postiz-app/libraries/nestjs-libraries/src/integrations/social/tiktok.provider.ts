@@ -415,21 +415,47 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
   private getLocalUploadPath(mediaPath: string) {
     const uploadDirectory = process.env.UPLOAD_DIRECTORY;
-    if (!uploadDirectory || !mediaPath) {
+    if (
+      !uploadDirectory ||
+      !mediaPath ||
+      /[\\\u0000-\u001F\u007F]/.test(mediaPath)
+    ) {
       return undefined;
     }
 
     const uploadRoot = resolve(uploadDirectory);
+    const uploadPrefix = this.getUploadStaticDirectory();
     let pathname = mediaPath;
+    let parsed: URL | undefined;
     try {
-      const parsed = new URL(mediaPath);
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-        return undefined;
-      }
-      pathname = parsed.pathname;
+      parsed = new URL(mediaPath);
     } catch {}
 
-    const uploadPrefix = this.getUploadStaticDirectory();
+    if (parsed) {
+      pathname = parsed.pathname;
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        try {
+          if (
+            !/^https?:\/\/[^/]/i.test(mediaPath) ||
+            parsed.username ||
+            parsed.password ||
+            parsed.origin !== new URL(process.env.FRONTEND_URL || '').origin
+          ) {
+            return undefined;
+          }
+          pathname = decodeURIComponent(parsed.pathname);
+          if (
+            !pathname.startsWith(`${uploadPrefix}/`) ||
+            /[\\\u0000-\u001F\u007F]/.test(pathname)
+          ) {
+            return undefined;
+          }
+        } catch {
+          return undefined;
+        }
+      }
+    }
+
     let diskPath: string;
     if (pathname.startsWith(`${uploadPrefix}/`)) {
       diskPath = resolve(uploadRoot, pathname.slice(uploadPrefix.length + 1));
