@@ -1,9 +1,16 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
 dayjs.extend(utc);
+
+jest.mock('@gitroom/frontend/components/launches/launches.component', () => ({
+  ChannelManagementList: () => <div>Channel cards</div>,
+}));
+jest.mock('@gitroom/frontend/components/launches/helpers/dnd.provider', () => ({
+  DNDProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
 
 const mockMutateIntegrations = jest.fn();
 let mockIntegrations: any[] = [];
@@ -24,12 +31,9 @@ jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
   useFetch: () => jest.fn(),
 }));
 
-jest.mock(
-  '@gitroom/react/translation/get.transation.service.client',
-  () => ({
-    useT: () => (_key: string, fallback: string) => fallback,
-  })
-);
+jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
+  useT: () => (_key: string, fallback: string) => fallback,
+}));
 
 jest.mock('@gitroom/frontend/components/layout/loading', () => {
   const ReactModule = require('react');
@@ -55,32 +59,29 @@ jest.mock(
   }
 );
 
-jest.mock(
-  '@gitroom/frontend/components/create/create.post.composer',
-  () => {
-    const ReactModule = require('react');
+jest.mock('@gitroom/frontend/components/create/create.post.composer', () => {
+  const ReactModule = require('react');
 
-    return {
-      isGuidedComposerShellEnabled: () =>
-        process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL === 'true',
-      CreatePostComposer: ({
-        allIntegrations,
-        standaloneCreate,
-        set,
-      }: {
-        allIntegrations?: unknown[];
-        standaloneCreate?: boolean;
-        set?: unknown;
-      }) =>
-        ReactModule.createElement('div', {
-          'data-testid': 'create-post-composer',
-          'data-integration-count': String(allIntegrations?.length || 0),
-          'data-standalone': standaloneCreate === true ? 'true' : 'false',
-          'data-has-set': set ? 'true' : 'false',
-        }),
-    };
-  }
-);
+  return {
+    isGuidedComposerShellEnabled: () =>
+      process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL === 'true',
+    CreatePostComposer: ({
+      allIntegrations,
+      standaloneCreate,
+      set,
+    }: {
+      allIntegrations?: unknown[];
+      standaloneCreate?: boolean;
+      set?: unknown;
+    }) =>
+      ReactModule.createElement('div', {
+        'data-testid': 'create-post-composer',
+        'data-integration-count': String(allIntegrations?.length || 0),
+        'data-standalone': standaloneCreate === true ? 'true' : 'false',
+        'data-has-set': set ? 'true' : 'false',
+      }),
+  };
+});
 
 jest.mock('swr', () => ({
   __esModule: true,
@@ -181,6 +182,28 @@ describe('standalone create zero-account entry point', () => {
         'Start blank or preload a saved Set without leaving the composer.'
       )
     ).toBeTruthy();
+  });
+
+  it('keeps Add Channel visible while mobile channel management expands and collapses', () => {
+    process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL = 'true';
+    mockIntegrations = [{ id: 'channel-1', name: 'Account', disabled: true }];
+
+    render(<CreateComponent />);
+
+    const manage = screen.getByRole('button', { name: 'Manage channels' });
+    expect(
+      screen.getByRole('button', { name: 'Connect account' })
+    ).toBeTruthy();
+    expect(manage.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('Channel cards')).toBeNull();
+
+    fireEvent.click(manage);
+    expect(manage.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText('Channel cards')).toBeTruthy();
+
+    fireEvent.click(manage);
+    expect(manage.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('Channel cards')).toBeNull();
   });
 
   it('preserves the existing connect-channel empty state when guided mode is off', () => {
