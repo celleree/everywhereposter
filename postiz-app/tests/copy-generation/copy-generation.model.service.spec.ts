@@ -266,6 +266,12 @@ describe('CopyGenerationModelService structured output schemas', () => {
     const result = await service.summarizeTranscript('A sample transcript.');
 
     expect(parse).toHaveBeenCalledTimes(1);
+    expect(parse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gpt-5.6-terra',
+        reasoning_effort: 'none',
+      })
+    );
     expect(result.voiceProfile).toBeNull();
   });
 
@@ -309,6 +315,12 @@ describe('CopyGenerationModelService structured output schemas', () => {
     );
 
     expect(parse).toHaveBeenCalledTimes(1);
+    expect(parse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gpt-6-astra',
+        reasoning_effort: 'low',
+      })
+    );
     expect(result).toEqual({
       draft: 'A grounded platform draft.',
       angle: '',
