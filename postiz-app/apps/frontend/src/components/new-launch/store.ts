@@ -17,7 +17,22 @@ interface Values {
 export interface Internal {
   integration: Integrations;
   integrationValue: Values[];
+  inheritRootMedia?: boolean;
 }
+
+// Comment-only platform versions keep root media in the shared post until edited.
+export const getInternalPostValues = (globalValues: Values[], internal?: Internal) =>
+  internal?.inheritRootMedia
+    ? internal.integrationValue.map((value, index) =>
+        index === 0 ? { ...value, media: globalValues[0]?.media || [] } : value
+      )
+    : internal?.integrationValue;
+
+// Sortable normalizes these UI flags on mount; that is not a media edit.
+const mediaIdentity = (media: { id: string; path: string }[]) =>
+  JSON.stringify(media.map((item) => Object.entries(item)
+    .filter(([key]) => key !== 'chosen' && key !== 'selected')
+    .sort(([a], [b]) => a.localeCompare(b))));
 
 export interface SelectedIntegrations {
   settings: any;
@@ -59,10 +74,10 @@ interface StoreState {
     value: Values[]
   ) => void;
   setGlobalValue: (value: Values[]) => void;
-  setInternalValue: (integrationId: string, value: Values[]) => void;
+  setInternalValue: (integrationId: string, value: Values[], replaceRootMedia?: boolean) => void;
   deleteGlobalValue: (index: number) => void;
   deleteInternalValue: (integrationId: string, index: number) => void;
-  addRemoveInternal: (integrationId: string) => void;
+  addRemoveInternal: (integrationId: string, inheritRootMedia?: boolean) => void;
   changeOrderGlobal: (index: number, direction: 'up' | 'down') => void;
   changeOrderInternal: (
     integrationId: string,
@@ -294,6 +309,7 @@ export const useLaunchStore = create<StoreState>()((set) => ({
 
             return {
               ...item,
+              ...(index === 0 && item.inheritRootMedia ? { inheritRootMedia: false } : {}),
               integrationValue: remainingData.map((data, i) => ({
                 id: ids[i],
                 ...data,
@@ -304,7 +320,7 @@ export const useLaunchStore = create<StoreState>()((set) => ({
         }),
       };
     }),
-  addRemoveInternal: (integrationId: string) =>
+  addRemoveInternal: (integrationId: string, inheritRootMedia = false) =>
     set((state) => {
       const integration = state.selectedIntegrations.find(
         (i) => i.integration.id === integrationId
@@ -326,7 +342,10 @@ export const useLaunchStore = create<StoreState>()((set) => ({
           ...state.internal,
           {
             integration: integration.integration,
-            integrationValue: state.global.slice(0).map((p) => p),
+            ...(inheritRootMedia ? { inheritRootMedia: true } : {}),
+            integrationValue: state.global.map((value, index) =>
+              inheritRootMedia && index === 0 ? { ...value, media: [] } : value
+            ),
           },
         ],
       };
@@ -379,12 +398,15 @@ export const useLaunchStore = create<StoreState>()((set) => ({
               return item;
             }
 
-            const currentValue = item.integrationValue[index];
-            const targetValue = item.integrationValue[targetIndex];
+            const movesRoot = index === 0 || targetIndex === 0;
+            const values = movesRoot ? getInternalPostValues(state.global, item)! : item.integrationValue;
+            const currentValue = values[index];
+            const targetValue = values[targetIndex];
 
             return {
               ...item,
-              integrationValue: item.integrationValue.map((v, i) => {
+              ...(movesRoot && item.inheritRootMedia ? { inheritRootMedia: false } : {}),
+              integrationValue: values.map((v, i) => {
                 if (i === index) {
                   return {
                     id: v.id,
@@ -422,16 +444,24 @@ export const useLaunchStore = create<StoreState>()((set) => ({
     media: { id: string; path: string }[]
   ) => {
     return set((state) => ({
-      internal: state.internal.map((item) =>
-        item.integration.id === integrationId
-          ? {
-              ...item,
-              integrationValue: item.integrationValue.map((v, i) =>
-                i === index ? { ...v, media } : v
-              ),
-            }
-          : item
-      ),
+      internal: state.internal.map((item) => {
+        if (item.integration.id !== integrationId) return item;
+        const values = index === 0
+          ? getInternalPostValues(state.global, item)!
+          : item.integrationValue;
+        if (index === 0 && item.inheritRootMedia &&
+            mediaIdentity(values[0]?.media || []) === mediaIdentity(media)) {
+          return item;
+        }
+        return {
+          ...item,
+          ...(index === 0 && item.inheritRootMedia
+            ? { inheritRootMedia: false } : {}),
+          integrationValue: values.map((value, i) =>
+            i === index ? { ...value, media } : value
+          ),
+        };
+      }),
     }));
   },
   setGlobalValueMedia: (index: number, media: { id: string; path: string }[]) =>
@@ -550,7 +580,8 @@ export const useLaunchStore = create<StoreState>()((set) => ({
         item.integration.id === integrationId
           ? {
               ...item,
-              integrationValue: item.integrationValue.map((v, i) =>
+              ...(index === 0 && item.inheritRootMedia ? { inheritRootMedia: false } : {}),
+              integrationValue: (index === 0 ? getInternalPostValues(state.global, item)! : item.integrationValue).map((v, i) =>
                 i === index ? { ...v, media: [...v.media, ...media] } : v
               ),
             }
@@ -567,7 +598,8 @@ export const useLaunchStore = create<StoreState>()((set) => ({
         item.integration.id === integrationId
           ? {
               ...item,
-              integrationValue: item.integrationValue.map((v, i) =>
+              ...(index === 0 && item.inheritRootMedia ? { inheritRootMedia: false } : {}),
+              integrationValue: (index === 0 ? getInternalPostValues(state.global, item)! : item.integrationValue).map((v, i) =>
                 i === index
                   ? {
                       ...v,
@@ -630,11 +662,11 @@ export const useLaunchStore = create<StoreState>()((set) => ({
     set((state) => ({
       global: value,
     })),
-  setInternalValue: (integrationId: string, value: Values[]) =>
+  setInternalValue: (integrationId: string, value: Values[], replaceRootMedia = false) =>
     set((state) => ({
       internal: state.internal.map((item) =>
         item.integration.id === integrationId
-          ? { ...item, integrationValue: value }
+          ? { ...item, ...(replaceRootMedia && item.inheritRootMedia ? { inheritRootMedia: false } : {}), integrationValue: value }
           : item
       ),
     })),
@@ -652,7 +684,8 @@ export const useLaunchStore = create<StoreState>()((set) => ({
         item.integration.id === integrationId
           ? {
               ...item,
-              integrationValue: item.integrationValue.map((v, i) =>
+              ...(index === 0 && item.inheritRootMedia ? { inheritRootMedia: false } : {}),
+              integrationValue: (index === 0 ? getInternalPostValues(state.global, item)! : item.integrationValue).map((v, i) =>
                 i === index
                   ? { ...v, media: [...(v?.media || []), ...media] }
                   : v

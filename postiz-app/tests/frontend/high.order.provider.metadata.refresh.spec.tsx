@@ -1,4 +1,5 @@
 import React, { createRef } from 'react';
+import { ReactSortable } from 'react-sortablejs';
 import { act, render, waitFor } from '@testing-library/react';
 
 jest.mock(
@@ -63,7 +64,7 @@ jest.mock('@gitroom/frontend/components/layout/set.timezone', () => ({
   newDayjs: () => require('dayjs')('2026-08-04T12:00:00Z'),
 }));
 
-import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
+import { getInternalPostValues, useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 import {
   PostComment,
   withProvider,
@@ -189,4 +190,115 @@ describe('provider metadata refresh', () => {
       providerRef
     );
   });
+
+  it.each(['append', 'add', 'remove', 'reorder'])('materializes inherited shared media for intentional root %s while comment media stays independent', async (action) => {
+    const a = { id: 'a', path: '/a.png' };
+    const b = { id: 'b', path: '/b.png' };
+    const custom = { id: 'custom', path: '/custom.png' };
+    const commentMedia = { id: 'comment-media', path: '/comment.png' };
+    const ref = createRef<any>();
+    act(() => {
+      useLaunchStore.getState().setAllIntegrations([initialIntegration]);
+      useLaunchStore.getState().setSelectedIntegrations([{ selectedIntegrations: initialIntegration, settings: {} }]);
+      useLaunchStore.getState().addGlobalValue(0, [{ id: 'root', content: 'Root', delay: 0, media: [a, b] }]);
+      useLaunchStore.getState().addRemoveInternal(initialIntegration.id, true);
+      useLaunchStore.getState().addInternalValue(0, initialIntegration.id, [{ id: 'comment', content: 'Comment', delay: 0, media: [] }]);
+      useLaunchStore.getState().setInternalValueMedia(initialIntegration.id, 1, [commentMedia]);
+    });
+    render(<TestProvider id={initialIntegration.id} ref={ref} />);
+    expect(useLaunchStore.getState().internal[0].inheritRootMedia).toBe(true);
+    expect(ref.current.getValues().values[0].media).toEqual([a, b]);
+    act(() => {
+      if (action === 'append') useLaunchStore.getState().appendInternalValueMedia(initialIntegration.id, 0, [custom]);
+      if (action === 'add') useLaunchStore.getState().addInternalValueMedia(initialIntegration.id, 0, [custom]);
+      if (action === 'remove') useLaunchStore.getState().removeInternalValueMedia(initialIntegration.id, 0, 0);
+      if (action === 'reorder') useLaunchStore.getState().setInternalValueMedia(initialIntegration.id, 0, [b, a]);
+      useLaunchStore.getState().setGlobalValueMedia(0, []);
+    });
+    expect(useLaunchStore.getState().internal[0].inheritRootMedia).toBe(false);
+    expect(ref.current.getValues().values[0].media).toEqual(action === 'remove' ? [b] : action === 'reorder' ? [b, a] : [a, b, custom]);
+    expect(ref.current.getValues().values[1].media).toEqual([commentMedia]);
+  });
+
+  it.each([false, true])('keeps media inherited through the actual sorter mount with empty source %s, then follows shared replacement', (empty) => {
+    const a = { id: 'a', path: '/a.png', alt: 'Source' };
+    const b = { id: 'b', path: '/b.png' };
+    const ref = createRef<any>();
+    act(() => {
+      useLaunchStore.getState().setAllIntegrations([initialIntegration]);
+      useLaunchStore.getState().setSelectedIntegrations([{ selectedIntegrations: initialIntegration, settings: {} }]);
+      useLaunchStore.getState().addGlobalValue(0, [{ id: 'root', content: 'Root', delay: 0, media: empty ? [] : [a] }]);
+      useLaunchStore.getState().addRemoveInternal(initialIntegration.id, true);
+      useLaunchStore.getState().addInternalValue(0, initialIntegration.id, [{ id: 'comment', content: 'Keep comment', delay: 0, media: [] }]);
+    });
+    const inherited = useLaunchStore.getState().internal[0];
+    const normalize = jest.fn((media) => useLaunchStore.getState().setInternalValueMedia(initialIntegration.id, 0, media));
+    render(<><ReactSortable list={empty ? [] : [a]} setList={normalize}><div data-id="a">A</div></ReactSortable><TestProvider id={initialIntegration.id} ref={ref} /></>);
+    expect(normalize.mock.calls[0][0]).toEqual(empty ? [] : [expect.objectContaining({ id: 'a', chosen: false, selected: false })]);
+    expect(useLaunchStore.getState().internal[0]).toBe(inherited);
+    act(() => useLaunchStore.getState().setGlobalValueMedia(0, [b]));
+    expect(ref.current.getValues().values[0].media).toEqual([b]);
+    expect(ref.current.getValues().values[1].content).toBe('Keep comment');
+    act(() => useLaunchStore.getState().setInternalValueMedia(initialIntegration.id, 0, [{ ...b, alt: 'Intentional platform alt' }] as any));
+    expect(useLaunchStore.getState().internal[0].inheritRootMedia).toBe(false);
+    act(() => useLaunchStore.getState().setGlobalValueMedia(0, []));
+    expect(ref.current.getValues().values[0].media).toEqual([{ ...b, alt: 'Intentional platform alt' }]);
+  });
+
+  it.each([true, false])('handles full replacement with explicit root-media intent %s', (replaceRootMedia) => {
+    const shared = { id: 'shared', path: '/shared.png' };
+    const replacement = { id: 'generated', path: '/generated.png' };
+    const newerShared = { id: 'newer-shared', path: '/newer-shared.png' };
+    const ref = createRef<any>();
+    act(() => {
+      useLaunchStore.getState().setAllIntegrations([initialIntegration]);
+      useLaunchStore.getState().setSelectedIntegrations([{ selectedIntegrations: initialIntegration, settings: {} }]);
+      useLaunchStore.getState().addGlobalValue(0, [{ id: 'root', content: 'Root', delay: 0, media: [shared] }]);
+      useLaunchStore.getState().addRemoveInternal(initialIntegration.id, true);
+      useLaunchStore.getState().addInternalValue(0, initialIntegration.id, [{ id: 'comment', content: 'Keep comment', delay: 0, media: [] }]);
+    });
+    render(<TestProvider id={initialIntegration.id} ref={ref} />);
+    act(() => {
+      const values = useLaunchStore.getState().internal[0].integrationValue;
+      useLaunchStore.getState().setInternalValue(initialIntegration.id, values.map((value, index) => index === 0 ? { ...value, content: 'Generated caption', media: replaceRootMedia ? [replacement] : value.media } : value), replaceRootMedia);
+      useLaunchStore.getState().setGlobalValueMedia(0, [newerShared]);
+    });
+    expect(useLaunchStore.getState().internal[0].inheritRootMedia).toBe(!replaceRootMedia);
+    expect(ref.current.getValues().values[0].media).toEqual(replaceRootMedia ? [replacement] : [newerShared]);
+    expect(ref.current.getValues().values[1].content).toBe('Keep comment');
+  });
+
+  it('preserves legacy internal media when no inheritance marker exists', () => {
+    const legacy = { id: 'legacy', path: '/legacy.png' };
+    const ref = createRef<any>();
+    act(() => useLaunchStore.setState({
+      integrations: [initialIntegration], selectedIntegrations: [{ integration: initialIntegration, settings: {} }],
+      global: [{ id: 'root', content: 'Current shared', delay: 0, media: [] }],
+      internal: [{ integration: initialIntegration, integrationValue: [{ id: 'saved', content: 'Saved platform', delay: 0, media: [legacy] }] }],
+    }));
+    render(<TestProvider id={initialIntegration.id} ref={ref} />);
+    expect(ref.current.getValues().values[0].media).toEqual([legacy]);
+    act(() => useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'new', path: '/new.png' }]));
+    expect(ref.current.getValues().values[0].media).toEqual([legacy]);
+  });
+
+  it('materializes inherited root media before a legacy row reorder', () => {
+    const shared = { id: 'shared', path: '/shared.png' };
+    const commentMedia = { id: 'comment', path: '/comment.png' };
+    const ref = createRef<any>();
+    act(() => {
+      useLaunchStore.getState().setAllIntegrations([initialIntegration]);
+      useLaunchStore.getState().setSelectedIntegrations([{ selectedIntegrations: initialIntegration, settings: {} }]);
+      useLaunchStore.getState().addGlobalValue(0, [{ id: 'root', content: 'Root', delay: 0, media: [shared] }]);
+      useLaunchStore.getState().addRemoveInternal(initialIntegration.id, true);
+      useLaunchStore.getState().addInternalValue(0, initialIntegration.id, [{ id: 'followup', content: 'Comment', delay: 0, media: [commentMedia] }]);
+    });
+    render(<TestProvider id={initialIntegration.id} ref={ref} />);
+    act(() => {
+      useLaunchStore.getState().changeOrderInternal(initialIntegration.id, 0, 'down');
+      useLaunchStore.getState().setGlobalValueMedia(0, []);
+    });
+    expect(ref.current.getValues().values.map((value: any) => value.media)).toEqual([[commentMedia], [shared]]);
+  });
+
 });

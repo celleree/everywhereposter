@@ -1,11 +1,18 @@
 'use client';
 
-import { FC, ReactNode, useCallback, useMemo } from 'react';
+import { FC, ReactNode, useCallback, useMemo, useState } from 'react';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { MenuItem } from '@gitroom/frontend/components/new-layout/menu-item';
+
+import { Drawer } from '@mantine/core';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
+import { AddProviderButton } from '@gitroom/frontend/components/launches/add.provider.component';
+import { OrganizationSelector } from '@gitroom/frontend/components/layout/organization.selector';
+import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 
 interface MenuItemInterface {
   name: string;
@@ -343,6 +350,9 @@ export const useMenuItem = () => {
 
 export const TopMenu: FC<{ mobileNav?: boolean }> = ({ mobileNav }) => {
   const t = useT();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const currentPath = usePathname();
+  const { mutate: refreshIntegrations } = useIntegrationList();
   const user = useUser();
   const { firstMenu, secondMenu } = useMenuItem();
   const { isGeneral, billingEnabled } = useVariables();
@@ -391,19 +401,64 @@ export const TopMenu: FC<{ mobileNav?: boolean }> = ({ mobileNav }) => {
   );
 
   if (mobileNav) {
+    const primaryPaths = ['/create', '/launches', '/media'];
+    const visibleItems = [...visibleFirstMenu, ...visibleSecondMenu];
+    const morePaths = ['/agents', '/analytics', '/plugs', '/third-party', '/settings'];
+    const moreItems = [
+      ...visibleItems.filter((item) => morePaths.includes(item.path)),
+      ...visibleItems.filter((item) => !primaryPaths.includes(item.path) && !morePaths.includes(item.path)),
+    ];
+    const moreActive = moreItems.some((item) => currentPath.startsWith(item.path));
+
     return (
-      <div className="flex gap-[8px] overflow-x-auto scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner">
-        {[...visibleFirstMenu, ...visibleSecondMenu].map((item) => (
-          <MenuItem
-            mobileNav={true}
-            path={item.path}
-            label={item.path === '/launches' ? t('scheduled', 'Scheduled') : item.name}
-            icon={item.icon}
-            key={item.name}
-            onClick={item.onClick}
-          />
-        ))}
-      </div>
+      <>
+        <nav aria-label="Mobile navigation" className="mobile-nav-grid">
+          {primaryPaths.map((path) => {
+            const item = visibleItems.find((item) => item.path === path);
+            return item ? (
+              <MenuItem mobileNav path={item.path}
+                label={path === '/launches' ? t('scheduled', 'Scheduled') : item.name}
+                icon={item.icon} key={path} onClick={item.onClick} />
+            ) : <span key={path} />;
+          })}
+          <button type="button" aria-haspopup="dialog" aria-expanded={moreOpen}
+            onClick={() => setMoreOpen(true)}
+            className={`mobile-nav-item ${moreActive ? 'mobile-nav-active' : 'text-textItemBlur'}`}>
+            <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="4" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="20" cy="12" r="2" />
+            </svg>
+            <span>{t('more', 'More')}</span>
+          </button>
+        </nav>
+        <Drawer opened={moreOpen} onClose={() => setMoreOpen(false)} position="bottom"
+          title={t('more', 'More')} closeButtonLabel="Close More" size="auto" className="mobile-more-drawer"
+          styles={{ drawer: { background: 'var(--new-bgColor)', color: 'var(--new-btn-text)',
+              maxHeight: 'calc(100dvh - env(safe-area-inset-top))', overflowY: 'auto', overflowX: 'hidden' },
+            header: { background: 'var(--new-bgColor)' } }}>
+          <nav aria-label="More navigation" className="mobile-more-links">
+            {moreItems.map((item) => item.onClick ? (
+              <button key={item.name} type="button" onClick={() => {
+                setMoreOpen(false);
+                item.onClick?.();
+              }}>{item.icon}<span>{item.name}</span></button>
+            ) : (
+              <Link key={item.path} href={item.path} prefetch={false} onClick={() => setMoreOpen(false)}
+                target={item.path.startsWith('http') ? '_blank' : undefined}
+                aria-current={currentPath.startsWith(item.path) ? 'page' : undefined}>
+                {item.icon}<span>{item.name}</span>
+              </Link>
+            ))}
+          </nav>
+          <div className="mobile-more-channels">
+            <OrganizationSelector asOpenSelect />
+            {visibleFirstMenu.some((item) => item.path === '/create') && (
+              <div onClick={() => setMoreOpen(false)}>
+                <AddProviderButton update={() => refreshIntegrations()} />
+              </div>
+            )}
+          </div>
+        </Drawer>
+      </>
     );
   }
 

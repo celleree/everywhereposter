@@ -914,23 +914,84 @@ describe('guided composer review', () => {
     );
   });
 
-  it('invalidates generation when another material input changes', async () => {
+  it.each(['success', 'failure'])('ignores pending context-A regeneration %s after Upload changes context to B', async (settlement) => {
+    seedGeneratedReview({ destinations: [linkedinPersonal] });
+    useGuidedComposerStore.getState().setAdditionalContext('Context A');
+    useGuidedComposerStore.getState().completeGeneration(generatedResponse() as any, [], buildGuidedGenerationFingerprint({
+      mediaId: 'video-1', destinations: [linkedinPersonal], captionMode: 'generate', sourceCaption: '', additionalContext: 'Context A',
+    }));
+    const oldRequest = deferred<Response>();
+    const newRequest = deferred<Response>();
+    mockFetch.mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise);
+    renderReview();
+    fireEvent.change(await screen.findByLabelText('Founder LinkedIn caption'), { target: { value: 'Manual caption to preserve' } });
+    const before = useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id];
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate Founder LinkedIn caption' }));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).additionalContext).toBe('Context A');
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Step 1 of 4' }));
+    fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: 'Context B' } });
+    expect(useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id]).toMatchObject({
+      caption: before.caption, baselineCaption: before.baselineCaption, source: before.source,
+      regenerationRequestToken: null, regenerationStatus: 'idle', regenerationError: null,
+    });
+    await act(async () => {
+      if (settlement === 'success') oldRequest.resolve(streamResponse(generatedResponse([generatedResult('linkedin', 'STALE context A')])));
+      else oldRequest.reject(new Error('STALE context A error'));
+    });
+    expect(useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id]).toMatchObject({
+      caption: before.caption, baselineCaption: before.baselineCaption, regenerationError: null,
+    });
+    // Remount real Review with retained baseline A; request B uses current inputs.
+    act(() => useGuidedComposerStore.getState().setComposerStep('review'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Regenerate Founder LinkedIn caption' }));
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body).additionalContext).toBe('Context B');
+    await act(async () => newRequest.resolve(streamResponse(generatedResponse([generatedResult('linkedin', 'Fresh context B')]))));
+    await waitFor(() => expect(useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id]).toMatchObject({
+      caption: 'Fresh context B', baselineCaption: 'Fresh context B', regenerationStatus: 'idle', regenerationError: null,
+    }));
+  });
+
+  it('keeps a newer B regeneration pending when A settles after user-driven generation with new context', async () => {
+    seedGeneratedReview({ destinations: [linkedinPersonal] });
+    const old = deferred<Response>();
+    const fresh = deferred<Response>();
+    mockFetch.mockReturnValueOnce(old.promise)
+      .mockResolvedValueOnce(streamResponse(generatedResponse([generatedResult('linkedin', 'Generated with context B')])))
+      .mockReturnValueOnce(fresh.promise);
+    renderReview();
+    fireEvent.change(await screen.findByLabelText('Founder LinkedIn caption'), { target: { value: 'Reviewed caption' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate Founder LinkedIn caption' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Step 1 of 4' }));
+    fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: 'Context B' } });
+    expect(useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id].caption).toBe('Reviewed caption');
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Destinations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Regenerate Founder LinkedIn caption' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate Founder LinkedIn caption' }));
+    const token = useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id].regenerationRequestToken;
+    await act(async () => old.resolve(streamResponse(generatedResponse([generatedResult('linkedin', 'Stale A')]))));
+    expect(useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id]).toMatchObject({
+      caption: 'Generated with context B', regenerationStatus: 'loading', regenerationRequestToken: token,
+    });
+    expect(JSON.parse(mockFetch.mock.calls[2][1].body).additionalContext).toBe('Context B');
+    await act(async () => fresh.resolve(streamResponse(generatedResponse([generatedResult('linkedin', 'Accepted destination B')]))));
+    expect(useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id].caption).toBe('Accepted destination B');
+  });
+
+  it('preserves reviewed captions on context edits but invalidates other material inputs', async () => {
     seedGeneratedReview({ destinations: [linkedinPersonal] });
     renderReview();
-
-    await screen.findByLabelText('Founder LinkedIn caption');
-    act(() =>
-      useGuidedComposerStore
-        .getState()
-        .setAdditionalContext('A materially different generation context')
-    );
-
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState()).toMatchObject({
-        generatedResponse: null,
-        generationInputFingerprint: null,
-      })
-    );
+    const caption = await screen.findByLabelText('Founder LinkedIn caption');
+    fireEvent.change(caption, { target: { value: 'Manually refined caption' } });
+    fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: 'Target founders and keep this concise' } });
+    expect((caption as HTMLTextAreaElement).value).toBe('Manually refined caption');
+    expect(useGuidedComposerStore.getState().generatedResponse).toEqual(generatedResponse());
+    expect(useLaunchStore.getState().global[0].content).toBe('');
+    expect(screen.getByRole('button', { name: 'Continue to Publish' })).toBeDisabled();
+    act(() => useGuidedComposerStore.getState().setSourceCaption('A different source caption'));
+    await waitFor(() => expect(useGuidedComposerStore.getState()).toMatchObject({
+      generatedResponse: null, generationInputFingerprint: null,
+    }));
   });
 
   it('waits for every selected destination before starting generation', async () => {

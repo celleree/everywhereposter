@@ -30,14 +30,15 @@ export const AddPostButton: FC<{
 
   return (
     <div className="flex max-w-full min-w-0">
-      <div
-        onClick={props.disabled ? undefined : onClick}
-        aria-disabled={props.disabled}
-        className={`select-none h-[34px] max-w-full min-w-0 rounded-[6px] flex bg-btnPrimary gap-[8px] justify-center items-center pl-[16px] pr-[20px] text-[13px] font-[600] mt-[12px] ${
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={props.disabled}
+        className={`select-none h-[34px] mobile:min-h-[44px] max-w-full min-w-0 rounded-[6px] flex bg-btnPrimary gap-[8px] justify-center items-center pl-[16px] pr-[20px] text-[13px] font-[600] mt-[12px] ${
           props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
         }`}
       >
-        <div className="shrink-0">
+        <span className="shrink-0">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"
@@ -53,11 +54,11 @@ export const AddPostButton: FC<{
               strokeLinejoin="round"
             />
           </svg>
-        </div>
-        <div className="min-w-0 truncate !text-white">
+        </span>
+        <span className="min-w-0 truncate !text-white">
           {label}
-        </div>
-      </div>
+        </span>
+      </button>
     </div>
   );
 };

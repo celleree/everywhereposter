@@ -13,7 +13,7 @@ import React, {
 import { useForm, FormProvider } from 'react-hook-form';
 import { IsOptional } from 'class-validator';
 import { classValidatorResolver } from '@hookform/resolvers/class-validator';
-import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
+import { getInternalPostValues, useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import { GeneralPreviewComponent } from '@gitroom/frontend/components/launches/general.preview.component';
 import { IntegrationContext } from '@gitroom/frontend/components/launches/helpers/use.integration';
@@ -254,12 +254,12 @@ export const withProvider = function <T extends object>(params: {
 
     const value = useMemo(() => {
       return resolveProviderValues(
-        internal?.integrationValue,
+        getInternalPostValues(global, internal),
         global,
         postComment,
         comments
       );
-    }, [internal?.integrationValue, global, postComment, comments]);
+    }, [internal, global, postComment, comments]);
     const hasPreviewContent = !!value?.[0]?.content?.length;
     const hasPreviewMedia = !!value?.[0]?.media?.length;
 

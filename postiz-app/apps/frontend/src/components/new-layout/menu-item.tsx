@@ -16,14 +16,21 @@ export const MenuItem: FC<{
 
   const className = clsx(
     mobileNav
-      ? 'min-w-[72px] max-w-[72px] py-[8px] px-[8px] gap-[6px] flex shrink-0 flex-col text-[10px] font-[600] items-center justify-center rounded-[12px] hover:text-textItemFocused hover:bg-boxFocused'
+      ? 'mobile-nav-item min-w-0 py-[8px] px-[8px] gap-[6px] flex shrink-0 flex-col text-[10px] font-[600] items-center justify-center rounded-[12px] hover:text-textItemFocused hover:bg-boxFocused'
       : 'w-full minCustom:h-[54px] custom:h-[30px] py-[8px] px-[6px] gap-[4px] flex flex-col custom:flex-row text-[10px] font-[600] items-center minCustom:justify-center rounded-[12px] hover:text-textItemFocused hover:bg-boxFocused',
     isActive ? 'text-textItemFocused bg-boxFocused' : 'text-textItemBlur'
   );
 
   const content = (
     <>
-      <div className={clsx(!mobileNav && 'custom:hidden')}>{icon}</div>
+      <div className={clsx(!mobileNav && 'custom:hidden')}>
+        {mobileNav && path === '/media' ? (
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="4" />
+            <circle cx="8.5" cy="8.5" r="1.5" /><path d="m3 17 5-5 4 4 4-6 5 7" />
+          </svg>
+        ) : icon}
+      </div>
       <div
         className={clsx(
           'text-[10px] leading-[1.1]',
@@ -45,7 +52,8 @@ export const MenuItem: FC<{
 
   return (
     <Link
-      prefetch={true}
+      aria-current={isActive ? 'page' : undefined}
+      prefetch={!mobileNav}
       href={path}
       {...path.indexOf('http') === 0 && { target: '_blank' }}
       className={className}

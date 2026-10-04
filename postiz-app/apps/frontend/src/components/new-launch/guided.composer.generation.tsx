@@ -2,7 +2,46 @@
 
 import React, { FC } from 'react';
 import type { CaptionMode } from '@gitroom/nestjs-libraries/copy-generation/caption-modes';
+import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 import type { CopyPlatform } from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
+
+type GuidedComposerSourceType = 'text' | 'image' | 'video';
+
+const GUIDED_VIDEO_PATH_PATTERN =
+  /\.(mp4|mov|webm|m4v|avi|mkv|mpeg|mpg|ogv|3gp)(?:$|[?#])/i;
+
+const isGuidedVideoMedia = (media: {
+  path?: string;
+  originalName?: string | null;
+  type?: string | null;
+}) => {
+  const mediaType = (media.type || '').toLowerCase();
+
+  return (
+    mediaType === 'video' ||
+    mediaType.startsWith('video/') ||
+    GUIDED_VIDEO_PATH_PATTERN.test(media.originalName || media.path || '')
+  );
+};
+
+export const getGuidedComposerSourceType = (
+  media: Array<{
+    path?: string;
+    originalName?: string | null;
+    type?: string | null;
+  }>
+): GuidedComposerSourceType => {
+  if (media.some(isGuidedVideoMedia)) {
+    return 'video';
+  }
+
+  return media.length ? 'image' : 'text';
+};
+
+export const selectGuidedGenerationMedia = <T extends { id: string; path: string; type?: string | null; originalName?: string | null }>(media: T[], sourceMediaId?: string | null): T | undefined =>
+  getGuidedComposerSourceType(media) === 'video'
+    ? media.find((item) => item.id === sourceMediaId && isGuidedMp4MovMedia(item)) || media.find(isGuidedMp4MovMedia)
+    : media[0];
 
 const PLATFORM_LABELS: Record<CopyPlatform, string> = {
   linkedin: 'LinkedIn',
@@ -38,12 +77,12 @@ export const buildGuidedGenerationFingerprint = ({
     additionalContext: additionalContext.trim(),
   });
 
-export const getGuidedGenerationProgress = (name: string, data?: any) => {
+export const getGuidedGenerationProgress = (name: string, data?: any, sourceType: 'image' | 'video' = 'video') => {
   const platform = data?.platform as CopyPlatform | undefined;
   const platformLabel = platform ? PLATFORM_LABELS[platform] : undefined;
 
   if (name === 'copy-generation-started') {
-    return 'Understanding the video';
+    return sourceType === 'image' ? 'Understanding the photo' : 'Understanding the video';
   }
   if (name === 'platform-started' && platformLabel) {
     return `Generating ${platformLabel}`;
@@ -60,7 +99,7 @@ export const getGuidedGenerationProgress = (name: string, data?: any) => {
     return 'Finishing captions';
   }
 
-  return 'Understanding the video';
+  return sourceType === 'image' ? 'Understanding the photo' : 'Understanding the video';
 };
 
 export const GuidedComposerGeneration: FC<{ progress: string }> = ({

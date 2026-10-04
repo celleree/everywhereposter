@@ -596,7 +596,7 @@ describe('guided composer shell', () => {
       name: 'Continue to Destinations',
     });
     expect(continueButton.hasAttribute('disabled')).toBe(false);
-    expect(screen.queryByLabelText('Additional context')).toBeNull();
+    expect(screen.getByLabelText('Additional context')).toBeTruthy();
 
     fireEvent.click(continueButton);
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
@@ -649,32 +649,32 @@ describe('guided composer shell', () => {
       target: { value: 'Use the founder audience and mention the beta.' },
     });
     fireEvent.click(
-      screen.getByRole('radio', {
+      screen.getAllByRole('radio', {
         name: /Use my caption on every platform/,
-      })
+      }).at(-1)!
     );
 
     expect(screen.getByText('Enter your caption to continue.')).toBeTruthy();
     expect(continueButton.hasAttribute('disabled')).toBe(true);
 
-    fireEvent.change(screen.getByLabelText('Your caption'), {
+    fireEvent.change(screen.getAllByLabelText('Your caption').at(-1)!, {
       target: { value: 'One caption for every platform.' },
     });
     expect(continueButton.hasAttribute('disabled')).toBe(false);
 
     fireEvent.click(
-      screen.getByRole('radio', {
+      screen.getAllByRole('radio', {
         name: /Adapt my caption for each platform/,
-      })
+      }).at(-1)!
     );
 
-    fireEvent.change(screen.getByLabelText('Your caption'), {
+    fireEvent.change(screen.getAllByLabelText('Your caption').at(-1)!, {
       target: { value: '' },
     });
     expect(screen.getByText('Enter your caption to continue.')).toBeTruthy();
     expect(continueButton.hasAttribute('disabled')).toBe(true);
 
-    fireEvent.change(screen.getByLabelText('Your caption'), {
+    fireEvent.change(screen.getAllByLabelText('Your caption').at(-1)!, {
       target: { value: 'One video should not die on one platform.' },
     });
 
@@ -686,7 +686,7 @@ describe('guided composer shell', () => {
       (screen.getByLabelText('Additional context') as HTMLTextAreaElement).value
     ).toBe('Use the founder audience and mention the beta.');
     expect(
-      (screen.getByLabelText('Your caption') as HTMLTextAreaElement).value
+      (screen.getAllByLabelText('Your caption').at(-1)! as HTMLTextAreaElement).value
     ).toBe('One video should not die on one platform.');
     expect(useGuidedComposerStore.getState()).toMatchObject({
       captionMode: 'adapt-by-platform',
@@ -720,9 +720,9 @@ describe('guided composer shell', () => {
     expect(screen.getByLabelText('Additional context')).toBeTruthy();
 
     fireEvent.click(
-      screen.getByRole('radio', {
+      screen.getAllByRole('radio', {
         name: /Adapt my caption for each platform/,
-      })
+      }).at(-1)!
     );
     const continueButton = screen.getByRole('button', {
       name: 'Continue to Destinations',
@@ -730,14 +730,14 @@ describe('guided composer shell', () => {
     expect(continueButton.hasAttribute('disabled')).toBe(true);
     expect(useLaunchStore.getState().global[0].media).toEqual(mixedMedia);
 
-    fireEvent.change(screen.getByLabelText('Your caption'), {
+    fireEvent.change(screen.getAllByLabelText('Your caption').at(-1)!, {
       target: { value: 'One video caption for every destination.' },
     });
     expect(continueButton.hasAttribute('disabled')).toBe(false);
     expect(useLaunchStore.getState().global[0].media).toEqual(mixedMedia);
   });
 
-  it('renders the Review step while hiding upload content', async () => {
+  it('renders Review with the existing editor available for mobile platform posts', async () => {
     const integration = {
       id: 'linkedin-account',
       name: 'Founder LinkedIn',
@@ -776,7 +776,7 @@ describe('guided composer shell', () => {
     expect(
       screen
         .getByTestId('guided-composer-upload-content')
-        .hasAttribute('hidden')
+        .classList.contains('guided-review-existing-editor')
     ).toBe(true);
   });
 
@@ -1047,5 +1047,21 @@ describe('guided composer shell', () => {
     expect(shouldUseGuidedComposerShell({ enabled: true, dummy: true })).toBe(
       false
     );
+  });
+});
+
+describe('compact composer progress', () => {
+  beforeEach(() => {
+    useLaunchStore.getState().reset();
+    useGuidedComposerStore.getState().resetGuidedComposer();
+  });
+
+  it.each(['upload', 'destinations', 'review', 'publish'] as const)('tracks the existing %s state with exactly four steps', (step) => {
+    useGuidedComposerStore.getState().setComposerStep(step);
+    render(<GuidedComposerShell><div>Existing composer</div></GuidedComposerShell>);
+    const nav = screen.getByRole('navigation', { name: 'Post creation progress' });
+    expect(nav.querySelectorAll('button')).toHaveLength(4);
+    expect(nav.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+    expect(nav.querySelector('[aria-current="step"]')?.getAttribute('aria-label')?.toLowerCase()).toContain(step);
   });
 });

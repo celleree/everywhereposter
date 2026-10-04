@@ -1,6 +1,9 @@
-import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React, { createRef } from 'react';
+import { resolve } from 'path';
+import { readFileSync } from 'fs';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
+let mockUseActualEditor = false;
 const mockFetch = jest.fn();
 const mockCheckAllValid = jest.fn();
 const mockShow = jest.fn();
@@ -22,6 +25,7 @@ jest.mock('@gitroom/react/toaster/toaster', () => ({
 }));
 
 jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
+  useDecisionModal: () => ({ open: jest.fn() }),
   useModals: () => ({
     openModal: mockOpenModal,
     closeAll: mockCloseAll,
@@ -73,10 +77,10 @@ jest.mock(
   })
 );
 jest.mock('@gitroom/frontend/components/new-launch/editor', () => ({
-  EditorWrapper: () => null,
+  EditorWrapper: (props: any) => mockUseActualEditor ? React.createElement(jest.requireActual('@gitroom/frontend/components/new-launch/editor').EditorWrapper, props) : null,
 }));
 jest.mock('@gitroom/frontend/components/new-launch/select.current', () => ({
-  SelectCurrent: () => null,
+  SelectCurrent: () => mockUseActualEditor ? React.createElement(jest.requireActual('@gitroom/frontend/components/new-launch/select.current').SelectCurrent) : null,
 }));
 jest.mock('@gitroom/frontend/components/launches/helpers/date.picker', () => ({
   DatePicker: ({ date }: any) => (
@@ -102,6 +106,7 @@ jest.mock(
 );
 jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
+  MultiMediaComponent: () => null,
 }));
 jest.mock('@gitroom/react/helpers/video.or.image', () => ({
   VideoOrImage: () => null,
@@ -132,7 +137,7 @@ jest.mock('react-dropzone', () => ({
   }),
 }));
 jest.mock('@uppy/react', () => ({ Dashboard: () => null }));
-jest.mock('@copilotkit/react-core', () => ({ useCopilotReadable: jest.fn() }));
+jest.mock('@copilotkit/react-core', () => ({ useCopilotReadable: jest.fn(), useCopilotAction: jest.fn() }));
 jest.mock('@copilotkit/react-ui', () => ({ CopilotPopup: () => null }));
 jest.mock('@gitroom/react/form/button', () => ({
   Button: ({ children, ...props }: any) => (
@@ -146,6 +151,12 @@ jest.mock('@gitroom/nestjs-libraries/services/make.is', () => ({
   makeId: () => 'guided-group',
 }));
 jest.mock('@gitroom/frontend/components/ui/icons', () => ({
+  ChevronUpIcon: () => null,
+  ResetIcon: () => null,
+  EmojiIcon: () => null,
+  ConnectionLineIcon: () => null,
+  LockIcon: () => null,
+  GlobalIcon: () => null,
   SettingsIcon: () => null,
   ChevronDownIcon: () => null,
   CloseIcon: () => null,
@@ -154,9 +165,24 @@ jest.mock('@gitroom/frontend/components/ui/icons', () => ({
 }));
 jest.mock(
   '@gitroom/frontend/components/new-launch/providers/high.order.provider',
-  () => ({ PostComment: { ALL: 'ALL' } })
+  () => ({ PostComment: { ALL: 0, POST: 1, COMMENT: 2 } })
 );
 
+jest.mock('@gitroom/frontend/components/launches/general.preview.component', () => ({ GeneralPreviewComponent: () => null }));
+jest.mock('@gitroom/frontend/components/launches/helpers/use.integration', () => ({ IntegrationContext: require('react').createContext({}) }));
+jest.mock('@gitroom/frontend/components/launches/internal.channels', () => ({ InternalChannels: () => null }));
+jest.mock('@gitroom/react/helpers/safe.image', () => ({ __esModule: true, default: () => null }));
+jest.mock('swr', () => ({ __esModule: true, default: () => ({ data: { internalPlugs: [] }, isLoading: false }) }));
+
+jest.mock('@gitroom/frontend/components/signature', () => ({ SignatureBox: () => null }));
+jest.mock('@gitroom/frontend/components/new-launch/delay.component', () => ({ DelayComponent: () => null }));
+jest.mock('@tiptap/react', () => ({
+  ...jest.requireActual('@tiptap/react'),
+  useEditor: (options: any) => ({ ...options, getHTML: () => options.content }),
+  EditorContent: ({ editor }: any) => <textarea aria-label="Platform comment or post" value={editor.content} onChange={(event) => editor.onUpdate({ editor: { getHTML: () => event.target.value } })} />,
+}));
+
+import { GuidedComposerReview } from '../../apps/frontend/src/components/new-launch/guided.composer.review';
 import { GuidedComposerShell } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { ManageModal } from '../../apps/frontend/src/components/new-launch/manage.modal';
 import {
@@ -165,6 +191,15 @@ import {
 } from '../../apps/frontend/src/components/new-launch/guided.composer.publish';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
+
+const actualProviderModule = jest.requireActual('../../apps/frontend/src/components/new-launch/providers/high.order.provider');
+const MediaPayloadProvider = actualProviderModule.withProvider({
+  postComment: actualProviderModule.PostComment.ALL,
+  comments: true,
+  minimumCharacters: [],
+  SettingsComponent: null,
+  maximumCharacters: 3000,
+});
 
 const founderLinkedIn = {
   id: 'linkedin-founder',
@@ -338,7 +373,10 @@ const postPayload = () => {
 };
 
 describe('ManageModal guided publishing bridge', () => {
+  afterEach(() => document.querySelectorAll('style[data-test-mobile-recovery]').forEach((style) => style.remove()));
   beforeEach(() => {
+    mockUseActualEditor = false;
+    HTMLElement.prototype.scrollTo = jest.fn();
     mockFetch.mockReset();
     mockCheckAllValid.mockReset();
     mockShow.mockReset();
@@ -524,6 +562,100 @@ describe('ManageModal guided publishing bridge', () => {
     ).toBe(false);
   });
 
+  it('keeps Guided Review captions authoritative while real comment rows are created, edited and submitted', async () => {
+    mockUseActualEditor = true;
+    useLaunchStore.getState().setSelectedIntegrations(
+      [founderLinkedIn, companyLinkedIn].map((integration) => ({ selectedIntegrations: integration, settings: {} }))
+    );
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+    useLaunchStore.getState().setEditor('none');
+    useGuidedComposerStore.getState().setComposerStep('review');
+    mockCheckAllValid.mockImplementation(async (ids: string[]) => ids.map((id) => {
+      const state = useLaunchStore.getState();
+      const integration = state.integrations.find((item) => item.id === id);
+      return { ...providerResult(integration, {}), values: state.internal.find((item) => item.integration.id === id)?.integrationValue || state.global };
+    }));
+    const { container } = render(
+      <GuidedComposerShell><ManageModal {...manageModalProps} guidedComposerActive /></GuidedComposerShell>
+    );
+    const root = screen.getByLabelText('Founder LinkedIn caption');
+    fireEvent.change(root, { target: { value: 'Manually refined founder caption' } });
+    const editorSection = container.querySelector('[data-guided-composer-section="editor"]') as HTMLElement;
+    // No legacy root field is mounted at all, including an offscreen one.
+    expect(within(editorSection).queryByRole('textbox')).toBeNull();
+    fireEvent.click(within(editorSection).getByText('Founder LinkedIn', { exact: true }));
+    const addComment = within(editorSection).getByRole('button', { name: 'Add platform comment or post' });
+    expect(addComment.className).not.toContain('absolute');
+    expect(addComment.className).toContain('min-h-[44px]');
+    fireEvent.click(addComment);
+    const comment = await within(editorSection).findByLabelText('Platform comment or post');
+    fireEvent.change(comment, { target: { value: 'First platform comment' } });
+    expect((root as HTMLTextAreaElement).value).toBe('Manually refined founder caption');
+    const draftBeforeContext = useGuidedComposerStore.getState().reviewDrafts[founderLinkedIn.id];
+    fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: 'Target founders and keep this concise' } });
+    expect(useGuidedComposerStore.getState().reviewDrafts[founderLinkedIn.id]).toBe(draftBeforeContext);
+    expect(useLaunchStore.getState().global[0].content).toBe('Global caption');
+    fireEvent.change(root, { target: { value: 'Final founder caption' } });
+    expect((comment as HTMLTextAreaElement).value).toBe('First platform comment');
+    fireEvent.change(comment, { target: { value: 'Final platform comment' } });
+    expect(useGuidedComposerStore.getState().reviewDrafts[founderLinkedIn.id].caption).toBe('Final founder caption');
+    expect(within(editorSection).getAllByRole('textbox')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Publish' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+    const posts = postPayload().posts;
+    expect(posts.find((post: any) => post.integration.id === founderLinkedIn.id).value.map((row: any) => row.content)).toEqual(['Final founder caption', 'Final platform comment']);
+    expect(posts.find((post: any) => post.integration.id === companyLinkedIn.id).value).toHaveLength(1);
+    expect(posts.find((post: any) => post.integration.id === companyLinkedIn.id).value[0].content).toBe('Global caption');
+    expect(JSON.stringify(posts)).not.toContain('Target founders and keep this concise');
+  });
+
+  it.each(['replace/reorder', 'remove', 'customize'])('resolves current shared media after a platform comment and preserves %s payload semantics', async (change) => {
+    mockUseActualEditor = true;
+    const photoA = { id: 'photo-a', path: '/photo-a.png' };
+    const photoB = { id: 'photo-b', path: '/photo-b.png' };
+    const photoC = { id: 'photo-c', path: '/photo-c.png' };
+    const custom = { id: 'platform-photo', path: '/platform.png' };
+    useLaunchStore.getState().setSelectedIntegrations([{ selectedIntegrations: founderLinkedIn, settings: {} }]);
+    useLaunchStore.getState().setGlobalValueMedia(0, [photoA]);
+    useGuidedComposerStore.getState().setComposerStep('review');
+    const providerRef = createRef<any>();
+    mockCheckAllValid.mockImplementation(async () => [await providerRef.current.isValid()]);
+    const { container } = render(<GuidedComposerPublishBridgeProvider>
+      <MediaPayloadProvider id={founderLinkedIn.id} ref={providerRef} />
+      <GuidedComposerReview />
+      <ManageModal {...manageModalProps} guidedComposerActive />
+      <GuidedComposerPublish />
+    </GuidedComposerPublishBridgeProvider>);
+    const editor = container.querySelector('[data-guided-composer-section="editor"]') as HTMLElement;
+    fireEvent.click(within(editor).getByText('Founder LinkedIn', { exact: true }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Add platform comment or post' }));
+    fireEvent.change(await within(editor).findByLabelText('Platform comment or post'), { target: { value: 'Comment survives media changes' } });
+    expect(useLaunchStore.getState().internal[0].inheritRootMedia).toBe(true);
+    expect(useLaunchStore.getState().internal[0].integrationValue[0].media).toEqual([]);
+    expect(providerRef.current.getValues().values[0].media).toEqual([photoA]);
+    act(() => {
+      useLaunchStore.getState().setGlobalValueMedia(0, [photoB, photoC]);
+      if (change === 'replace/reorder') useLaunchStore.getState().setGlobalValueMedia(0, [photoC, photoB]);
+      if (change === 'remove') useLaunchStore.getState().removeGlobalValueMedia(0, 0);
+      if (change === 'remove') useLaunchStore.getState().detachGlobalValueMedia(0, photoC.id);
+      if (change === 'customize') useLaunchStore.getState().setInternalValueMedia(founderLinkedIn.id, 0, [custom]);
+      if (change === 'customize') useLaunchStore.getState().setGlobalValueMedia(0, [photoC]);
+    });
+    const expected = change === 'remove' ? [] : change === 'customize' ? [custom] : [photoC, photoB];
+    expect(providerRef.current.getValues().values[0].media).toEqual(expected);
+    expect((await providerRef.current.isValid()).values[0].media).toEqual(expected);
+    const caption = 'Reviewed caption for the current media';
+    fireEvent.change(screen.getByLabelText('Founder LinkedIn caption'), { target: { value: caption } });
+    expect(useGuidedComposerStore.getState().reviewDrafts[founderLinkedIn.id].caption).toBe(caption);
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+    expect(postPayload().posts[0].value[0]).toMatchObject({ content: caption, image: expected });
+    expect(postPayload().posts[0].value[1].content).toBe('Comment survives media changes');
+    expect(JSON.stringify(postPayload())).not.toContain('photo-a');
+    expect(JSON.stringify(postPayload())).not.toContain('inheritRootMedia');
+  });
+
   it('submits enabled destinations with independent Review captions and preserved provider data', async () => {
     renderGuidedManageModal();
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
@@ -704,12 +836,14 @@ describe('ManageModal guided publishing bridge', () => {
     }
   });
 
-  it('routes guided provider validation failures to the existing settings form and retries with corrected values', async () => {
+  it.each(['settings form', 'media/settings checker'])('routes guided %s validation failures to visible mobile settings and retries with corrected values', async (failure) => {
     providerResults[0] = providerResult(
       founderLinkedIn,
       { __type: 'linkedin' },
-      false
+      failure !== 'settings form'
     );
+    if (failure === 'media/settings checker') providerResults[0].errors = 'Carousel can only be created with 2 or more images and no videos.';
+    providerResults[0].preview = jest.fn(() => useLaunchStore.getState().setCurrent(founderLinkedIn.id));
     providerResults[0].fix = jest.fn(() =>
       useLaunchStore.getState().setCurrent(founderLinkedIn.id)
     );
@@ -719,18 +853,32 @@ describe('ManageModal guided publishing bridge', () => {
         .setReviewDestinationEnabled(companyLinkedIn.id, false);
     });
     useGuidedComposerStore.getState().setComposerStep('publish');
-    renderGuidedManageModal();
+    // JSDOM has no viewport media engine: apply the real mobile rules directly.
+    const sass = require('sass');
+    const postcss = require('postcss');
+    const source = readFileSync(resolve(__dirname, '../../apps/frontend/src/app/mobile-ui.scss'), 'utf8');
+    const css = postcss.parse(sass.compileString(source + '\n@include styles;').css);
+    const mobileStyle = document.createElement('style');
+    mobileStyle.dataset.testMobileRecovery = 'true';
+    css.walkAtRules('media', (rule: any) => {
+      if (rule.params === '(max-width: 1025px)') rule.walkRules((node: any) => { if (node.selector.includes('data-guided-provider-recovery')) mobileStyle.textContent += node.toString(); });
+    });
+    document.head.appendChild(mobileStyle);
+    useLaunchStore.getState().setCurrent(founderLinkedIn.id);
+    const view = render(<div className="guided-composer-shell" data-composer-step="upload"><GuidedComposerPublishBridgeProvider><ManageModal {...manageModalProps} guidedComposerActive /><GuidedComposerPublish /></GuidedComposerPublishBridgeProvider></div>);
+    const settings = screen.getByText('Advanced settings').closest('section') as HTMLElement;
+    expect(getComputedStyle(settings).display).toBe('none');
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Please fix your settings'
+      failure === 'settings form' ? 'Please fix your settings' : 'Carousel can only be created'
     );
     expect(
       mockFetch.mock.calls.some(
         ([url, options]) => url === '/posts' && options?.method === 'POST'
       )
     ).toBe(false);
-    expect(providerResults[0].fix).toHaveBeenCalledTimes(1);
+    expect(failure === 'settings form' ? providerResults[0].fix : providerResults[0].preview).toHaveBeenCalledTimes(1);
     expect(useLaunchStore.getState().current).toBe(founderLinkedIn.id);
     expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
     expect(
@@ -739,6 +887,8 @@ describe('ManageModal guided publishing bridge', () => {
         .closest('section')
         ?.getAttribute('data-guided-composer-section')
     ).toBe('settings');
+    expect(settings.getAttribute('data-guided-provider-recovery')).toBe('true');
+    expect(getComputedStyle(settings).display).not.toBe('none');
     expect(
       document
         .querySelector('#social-settings')
@@ -751,6 +901,7 @@ describe('ManageModal guided publishing bridge', () => {
     providerResults[0] = {
       ...providerResults[0],
       valid: true,
+      errors: true,
       settings: {
         __type: 'linkedin',
         visibility: 'CONNECTIONS',
@@ -791,6 +942,7 @@ describe('ManageModal guided publishing bridge', () => {
         ([url, options]) => url === '/posts' && options?.method === 'POST'
       )
     ).toHaveLength(1);
+    mobileStyle.remove();
   });
 
   it.each<[

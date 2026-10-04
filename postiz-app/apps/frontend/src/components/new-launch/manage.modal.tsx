@@ -143,10 +143,13 @@ export const ManageModal: FC<
   const ref = useRef<any>(null);
   const submissionInFlightRef = useRef(false);
   const existingData = useExistingData();
+  const guidedReview = useGuidedComposerStore((state) => state.composerStep === 'review');
+  const guidedStep = useGuidedComposerStore((state) => state.composerStep);
   const [loading, setLoading] = useState(false);
   const toaster = useToaster();
   const modal = useModals();
   const [showSettings, setShowSettings] = useState(false);
+  const [providerSettingsRequired, setProviderSettingsRequired] = useState(false);
   const [activeAiPreset, setActiveAiPreset] = useState<string>(
     AI_PRESETS[0].id
   );
@@ -207,6 +210,10 @@ export const ManageModal: FC<
       setHide(false);
     }
   }, [hide, setHide]);
+
+  useEffect(() => {
+    if (guidedStep !== 'upload' || current === 'global') setProviderSettingsRequired(false);
+  }, [guidedStep, current]);
 
   useEffect(() => {
     if (current === 'global') {
@@ -973,6 +980,7 @@ export const ManageModal: FC<
             setLoading(false);
             setShowSettings(true);
             if (guidedRequest) {
+              setProviderSettingsRequired(true);
               useGuidedComposerStore.getState().setComposerStep('upload');
             }
             return {
@@ -990,7 +998,11 @@ export const ManageModal: FC<
             toaster.show(message, 'warning');
             item.preview();
             setLoading(false);
-            setShowSettings(false);
+            setShowSettings(Boolean(guidedRequest));
+            if (guidedRequest) {
+              setProviderSettingsRequired(true);
+              useGuidedComposerStore.getState().setComposerStep('upload');
+            }
             return {
               ok: false,
               kind: 'validation',
@@ -1349,7 +1361,7 @@ export const ManageModal: FC<
     <div className="relative flex h-full w-full flex-1 overflow-x-hidden overflow-y-auto p-[40px] mobile:h-auto mobile:min-h-full mobile:max-w-[100vw] mobile:min-w-0 mobile:overflow-y-visible mobile:p-0">
       <div className="flex h-fit min-h-full min-w-0 flex-1 flex-col rounded-[20px] bg-newBgColorInner mobile:w-full mobile:max-w-full mobile:overflow-x-hidden mobile:rounded-none">
         <div className="flex min-w-0 mobile:block mobile:w-full mobile:flex-none mobile:overflow-x-hidden">
-          <div className="flex min-w-0 flex-1 flex-col border-e border-newBorder mobile:block mobile:w-full mobile:border-e-0 mobile:border-b">
+          <div className="composer-content-column flex min-w-0 flex-1 flex-col border-e border-newBorder mobile:block mobile:w-full mobile:border-e-0 mobile:border-b">
             <div className="flex min-h-[65px] min-w-0 items-center bg-newBgColor px-[20px] text-[20px] font-[600] rounded-s-[20px] !rounded-b-[0] mobile:min-h-0 mobile:w-full mobile:items-start mobile:rounded-none mobile:px-[14px] mobile:py-[14px] mobile:text-[18px]">
               <div className="flex min-w-0 flex-1 flex-col">
                 <div>
@@ -1464,7 +1476,8 @@ export const ManageModal: FC<
 
                     <ComposerSection
                       title="Add Caption"
-                      description="Edit the shared post or a platform version."
+                      mobileTitle={props.guidedComposerActive ? "Platform comments / posts" : undefined}
+                      description={props.guidedComposerActive && guidedReview ? 'Add comments or follow-up posts to the shared version or a platform.' : 'Edit the shared post or a platform version.'}
                       guidedComposerSection="editor"
                     >
                       {!existingData.integration &&
@@ -1474,7 +1487,8 @@ export const ManageModal: FC<
                           </div>
                         )}
                       <div className="flex min-w-0 max-w-full flex-1 overflow-x-hidden mobile:block">
-                        {!hide && <EditorWrapper totalPosts={1} value="" />}
+                        {!hide && <EditorWrapper totalPosts={1} value=""
+                          commentsOnly={props.guidedComposerActive === true && guidedReview} />}
                       </div>
                       <div id="social-empty" className="pb-[4px]" />
                     </ComposerSection>
@@ -1500,6 +1514,7 @@ export const ManageModal: FC<
                         : 'Optional platform settings.'
                     }
                     guidedComposerSection="settings"
+                    providerRecovery={providerSettingsRequired}
                   >
                     <div
                       id="wrapper-settings"
@@ -1755,6 +1770,7 @@ export const ManageModal: FC<
 
       {!isPublishedManagementView && (
         <CopilotPopup
+          className="mobile:hidden"
           key={`composer-copilot-${copilotSeed}-${activeAiPreset}`}
           defaultOpen={copilotSeed > 0}
           hitEscapeToClose={false}
@@ -1826,12 +1842,15 @@ const ComposerSection: FC<{
   step?: string;
   title: string;
   description: string;
+  mobileTitle?: string;
   guidedComposerSection?: 'media' | 'editor' | 'settings';
+  providerRecovery?: boolean;
   children: ReactNode;
-}> = ({ step, title, description, guidedComposerSection, children }) => {
+}> = ({ step, title, description, guidedComposerSection, mobileTitle, providerRecovery, children }) => {
   return (
     <section
       data-guided-composer-section={guidedComposerSection}
+      data-guided-provider-recovery={providerRecovery || undefined}
       className="w-full min-w-0 max-w-full overflow-x-hidden border-b border-newBorder pb-[24px] last:border-b-0 last:pb-0 mobile:pb-[18px]"
     >
       <div className="mb-[14px] flex min-w-0 items-start gap-[12px] mobile:mb-[10px]">
@@ -1842,7 +1861,8 @@ const ComposerSection: FC<{
         )}
         <div className="min-w-0">
           <div className="break-words text-[18px] font-[700] text-white mobile:text-[16px]">
-            {title}
+            <span className={mobileTitle ? "mobile:hidden" : undefined}>{title}</span>
+            {mobileTitle && <span className="hidden mobile:inline">{mobileTitle}</span>}
           </div>
           <div className="mt-[4px] break-words text-[13px] leading-[1.5] text-textColor/65">
             {description}
@@ -1954,7 +1974,7 @@ const ComposerUploadCard: FC<{
     <div
       {...getRootProps()}
       className={clsx(
-        'w-full min-w-0 max-w-full overflow-x-hidden rounded-[14px] border border-dashed px-[16px] py-[16px] transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]',
+        'composer-upload-card w-full min-w-0 max-w-full overflow-x-hidden rounded-[14px] border border-dashed px-[16px] py-[16px] transition-all mobile:rounded-[12px] mobile:px-[12px] mobile:py-[14px]',
         isDragActive
           ? 'border-ai bg-newBgLineColor'
           : 'border-newBorder bg-newBgColor',
@@ -1962,8 +1982,20 @@ const ComposerUploadCard: FC<{
       )}
     >
       <input {...getInputProps()} />
+      {guidedTranscription && (
+        <div className="mobile-upload-intro hidden">
+          <div className="mobile-upload-icon" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="4" />
+              <circle cx="8.5" cy="8.5" r="1.5" /><path d="m3 17 5-5 4 4 4-6 5 7" />
+            </svg>
+          </div>
+          <h2>Choose photo or video</h2>
+          <p>Select files from your device to upload.</p>
+        </div>
+      )}
       <div className="flex min-w-0 flex-col items-center justify-center gap-[10px] text-center">
-        <div className="flex min-w-0 flex-wrap items-center justify-center gap-[10px] mobile:w-full mobile:flex-col">
+        <div className="composer-upload-controls flex min-w-0 flex-wrap items-center justify-center gap-[10px] mobile:w-full mobile:flex-col">
           <button
             type="button"
             disabled={disabled || loading}
@@ -1994,7 +2026,7 @@ const ComposerUploadCard: FC<{
             </button>
           )}
         </div>
-        <div className="break-words text-[13px] leading-[1.4] text-textColor/65">
+        <div className="upload-drop-hint break-words text-[13px] leading-[1.4] text-textColor/65">
           Drop files here or browse from your device.
         </div>
       </div>
@@ -2017,7 +2049,7 @@ const ComposerUploadCard: FC<{
 
       <div
         className={clsx(
-          'mt-[16px] min-w-0 max-w-full overflow-x-hidden rounded-[16px] border border-newBorder bg-newBgColorInner p-[14px]',
+          'composer-media-preview mt-[16px] min-w-0 max-w-full overflow-x-hidden rounded-[16px] border border-newBorder bg-newBgColorInner p-[14px]',
           !media.length &&
             'flex min-h-[150px] items-center justify-center mobile:min-h-[120px]'
         )}
@@ -2037,7 +2069,7 @@ const ComposerUploadCard: FC<{
         ) : (
           <div className="flex min-w-0 flex-col gap-[14px]">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-[12px]">
-              <div className="text-[14px] font-[700] text-white">
+              <div className="composer-media-label text-[14px] font-[700] text-white">
                 Shared media
               </div>
               <div className="text-[13px] text-textColor/65">

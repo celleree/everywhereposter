@@ -26,6 +26,8 @@ import {
   buildGuidedGenerationFingerprint,
   getGuidedGenerationProgress,
   GuidedComposerGeneration,
+  getGuidedComposerSourceType,
+  selectGuidedGenerationMedia,
 } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
 import {
   getGuidedReviewDestinationLimit,
@@ -44,39 +46,6 @@ import {
 } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 
-type GuidedComposerSourceType = 'text' | 'image' | 'video';
-
-const GUIDED_VIDEO_PATH_PATTERN =
-  /\.(mp4|mov|webm|m4v|avi|mkv|mpeg|mpg|ogv|3gp)(?:$|[?#])/i;
-
-const isGuidedVideoMedia = (media: {
-  path?: string;
-  originalName?: string | null;
-  type?: string | null;
-}) => {
-  const mediaType = (media.type || '').toLowerCase();
-
-  return (
-    mediaType === 'video' ||
-    mediaType.startsWith('video/') ||
-    GUIDED_VIDEO_PATH_PATTERN.test(media.originalName || media.path || '')
-  );
-};
-
-const getGuidedComposerSourceType = (
-  media: Array<{
-    path?: string;
-    originalName?: string | null;
-    type?: string | null;
-  }>
-): GuidedComposerSourceType => {
-  if (media.some(isGuidedVideoMedia)) {
-    return 'video';
-  }
-
-  return media.length ? 'image' : 'text';
-};
-
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
   {
@@ -86,7 +55,7 @@ export const GUIDED_COMPOSER_STEP_DETAILS: Record<
 > = {
   upload: {
     title: 'Upload',
-    description: 'Add your video and any context the captions should use.',
+    description: 'Add your photo or video and any context the captions should use.',
   },
   destinations: {
     title: 'Destinations',
@@ -162,6 +131,7 @@ export const GuidedComposerShell: FC<{
     completeGeneration,
     failGeneration,
     invalidateGeneration,
+    invalidateReviewRegeneration,
     pruneReviewDrafts,
     resetGuidedComposer,
   } = useGuidedComposerStore(
@@ -187,6 +157,7 @@ export const GuidedComposerShell: FC<{
       completeGeneration: state.completeGeneration,
       failGeneration: state.failGeneration,
       invalidateGeneration: state.invalidateGeneration,
+      invalidateReviewRegeneration: state.invalidateReviewRegeneration,
       pruneReviewDrafts: state.pruneReviewDrafts,
       resetGuidedComposer: state.resetGuidedComposer,
     }))
@@ -211,8 +182,8 @@ export const GuidedComposerShell: FC<{
   const needsSourceCaption = captionMode !== 'generate';
   const hasSourceCaption = sourceCaption.trim().length > 0;
   const uploadStepValid =
-    sourceType === 'video'
-      ? hasUploadedVideo && (!needsSourceCaption || hasSourceCaption)
+    sourceType !== 'text'
+      ? globalMedia.length > 0 && (sourceType !== 'video' || hasUploadedVideo) && (!needsSourceCaption || hasSourceCaption)
       : legacyDraftValid;
   const availableDestinationIds = useMemo(
     () =>
@@ -243,13 +214,11 @@ export const GuidedComposerShell: FC<{
     () => selectedIntegrations.map((selected) => selected.integration),
     [selectedIntegrations]
   );
-  const uploadedVideo = globalMedia.find(
-    (media) => media.id === sourceMediaId && isGuidedMp4MovMedia(media)
-  );
+  const generationMedia = selectGuidedGenerationMedia(globalMedia, sourceMediaId);
   const generationFingerprint = useMemo(
     () =>
       buildGuidedGenerationFingerprint({
-        mediaId: uploadedVideo?.id,
+        mediaId: generationMedia?.id,
         destinations: selectedGenerationDestinations,
         captionMode,
         sourceCaption,
@@ -260,9 +229,16 @@ export const GuidedComposerShell: FC<{
       captionMode,
       selectedGenerationDestinations,
       sourceCaption,
-      uploadedVideo?.id,
+      generationMedia?.id,
     ]
   );
+  const previousGenerationFingerprint = useRef(generationFingerprint);
+  useEffect(() => {
+    if (previousGenerationFingerprint.current !== generationFingerprint) {
+      previousGenerationFingerprint.current = generationFingerprint;
+      invalidateReviewRegeneration();
+    }
+  }, [generationFingerprint, invalidateReviewRegeneration]);
   const generationLoading = generationStatus === 'loading';
   const generationReady =
     generationInputFingerprint === generationFingerprint &&
@@ -298,20 +274,20 @@ export const GuidedComposerShell: FC<{
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
   const generationRequiredForCurrentStep =
-    sourceType === 'video' && currentStepIndex >= reviewStepIndex;
+    sourceType !== 'text' && currentStepIndex >= reviewStepIndex;
   const continueDisabled =
     navigationLocked ||
     (composerStep === 'upload' && !uploadStepValid) ||
     (destinationRequiredForCurrentStep && !destinationStepValid) ||
     (composerStep === 'destinations' &&
-      sourceType === 'video' &&
+      sourceType !== 'text' &&
       !allSelectedDestinationsAvailable) ||
     (generationRequiredForCurrentStep && !generationReady) ||
     (composerStep === 'review' && !reviewStepValid);
   const uploadValidationMessage =
     sourceType === 'video' && !hasUploadedVideo
       ? 'Upload an MP4 or MOV video to continue.'
-      : sourceType === 'video' && needsSourceCaption && !hasSourceCaption
+      : sourceType !== 'text' && needsSourceCaption && !hasSourceCaption
       ? 'Enter your caption to continue.'
       : !legacyDraftValid
       ? 'Enter post text or add media to continue.'
@@ -322,7 +298,7 @@ export const GuidedComposerShell: FC<{
       : destinationRequiredForCurrentStep && !destinationStepValid
       ? 'Select at least one destination to continue.'
       : composerStep === 'destinations' &&
-        sourceType === 'video' &&
+        sourceType !== 'text' &&
         !allSelectedDestinationsAvailable
       ? 'Wait for all selected destinations to load before generating captions.'
       : composerStep === 'review' && !enabledReviewDrafts.length
@@ -436,6 +412,17 @@ export const GuidedComposerShell: FC<{
       generationInputFingerprint !== generationFingerprint &&
       generationStatus !== 'loading'
     ) {
+      // Keep reviewed captions while guidance changes. The unequal fingerprint
+      // still requires generation on Continue; guidance alone must not reseed
+      // a manual edit from the legacy root caption.
+      try {
+        const previous = JSON.parse(generationInputFingerprint);
+        const current = JSON.parse(generationFingerprint);
+        if (JSON.stringify({ ...previous, additionalContext: '' }) ===
+            JSON.stringify({ ...current, additionalContext: '' })) return;
+      } catch {
+        // Old/invalid fingerprints retain the existing invalidation behavior.
+      }
       invalidateGeneration();
     }
   }, [
@@ -454,10 +441,10 @@ export const GuidedComposerShell: FC<{
       return;
     }
 
-    if (!uploadedVideo || !selectedDestinations.length) {
+    if (!generationMedia || !selectedDestinations.length) {
       failGeneration(
-        !uploadedVideo
-          ? 'Upload an MP4 or MOV video before generating captions.'
+        !generationMedia
+          ? 'Upload a photo or supported video before generating captions.'
           : 'Select at least one destination before generating captions.',
         { fingerprint: generationFingerprint }
       );
@@ -482,7 +469,7 @@ export const GuidedComposerShell: FC<{
         fetch,
         selectedDestinations,
         {
-          mediaId: uploadedVideo.id,
+          mediaId: generationMedia.id,
           captionMode,
           ...(captionMode !== 'generate' ? { sourceCaption } : {}),
           ...(additionalContext.trim()
@@ -496,7 +483,7 @@ export const GuidedComposerShell: FC<{
             useGuidedComposerStore.getState().generationInputFingerprint ===
               generationFingerprint
           ) {
-            setGenerationProgress(getGuidedGenerationProgress(name, data));
+            setGenerationProgress(getGuidedGenerationProgress(name, data, sourceType === 'image' ? 'image' : 'video'));
           }
         },
         abortController.signal
@@ -509,13 +496,9 @@ export const GuidedComposerShell: FC<{
       const currentLaunchState = useLaunchStore.getState();
       const currentGuidedState = useGuidedComposerStore.getState();
       const currentMedia = currentLaunchState.global[0]?.media || [];
-      const currentVideo = currentMedia.find(
-        (media) =>
-          media.id === currentGuidedState.sourceMediaId &&
-          isGuidedMp4MovMedia(media)
-      );
+      const currentGenerationMedia = selectGuidedGenerationMedia(currentMedia, currentGuidedState.sourceMediaId);
       const currentFingerprint = buildGuidedGenerationFingerprint({
-        mediaId: currentVideo?.id,
+        mediaId: currentGenerationMedia?.id,
         destinations: currentLaunchState.selectedIntegrations.map(
           (selected) => selected.integration
         ),
@@ -604,12 +587,13 @@ export const GuidedComposerShell: FC<{
     setGenerationProgress,
     sourceCaption,
     startGeneration,
-    uploadedVideo,
+    generationMedia,
+    sourceType,
   ]);
 
   const continueComposer = useCallback(() => {
     if (composerStep === 'destinations') {
-      if (sourceType !== 'video') {
+      if (sourceType === 'text') {
         if (
           generationStatus !== 'idle' ||
           generationInputFingerprint !== null
@@ -652,10 +636,10 @@ export const GuidedComposerShell: FC<{
   }, [resetGuidedComposer]);
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-newBgColor">
-      <header className="border-b border-newBorder bg-newBgColorInner px-[24px] py-[18px] mobile:px-[14px] mobile:py-[14px]">
+    <div data-composer-step={composerStep} className="guided-composer-shell flex h-full min-h-0 w-full flex-col overflow-hidden bg-newBgColor">
+      <header className="guided-composer-header border-b border-newBorder bg-newBgColorInner px-[24px] py-[18px] mobile:px-[14px] mobile:py-[14px]">
         <div className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-[16px]">
-          <div className="min-w-0">
+          <div className="mobile:hidden min-w-0">
             <div className="text-[13px] font-[700] uppercase tracking-[0.12em] text-textColor/55">
               Create post
             </div>
@@ -673,7 +657,7 @@ export const GuidedComposerShell: FC<{
 
           <nav
             aria-label="Post creation progress"
-            className="min-w-0 overflow-x-auto pb-[2px]"
+            className="guided-progress min-w-0 overflow-x-auto pb-[2px]"
           >
             <ol className="flex min-w-max items-center gap-[8px]">
               {GUIDED_COMPOSER_STEPS.map((step, index) => {
@@ -686,6 +670,7 @@ export const GuidedComposerShell: FC<{
                   <li key={step} className="flex items-center gap-[8px]">
                     <button
                       type="button"
+                      aria-label={`${details.title} Step ${index + 1} of ${GUIDED_COMPOSER_STEPS.length}`}
                       aria-current={isActive ? 'step' : undefined}
                       disabled={
                         isFuture || navigationLocked || (locked && !isActive)
@@ -739,10 +724,11 @@ export const GuidedComposerShell: FC<{
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         <GuidedComposerPublishBridgeProvider>
+          {composerStep === 'review' && <GuidedComposerReview />}
           <div
             data-testid="guided-composer-upload-content"
-            hidden={composerStep !== 'upload'}
-            className="min-h-full"
+            hidden={composerStep !== 'upload' && composerStep !== 'review'}
+            className={clsx("min-h-full", composerStep === 'review' && 'guided-review-existing-editor')}
           >
             <div className="guided-upload-existing-composer">
               {children}
@@ -774,7 +760,6 @@ export const GuidedComposerShell: FC<{
           {composerStep === 'destinations' && !generationLoading && (
             <GuidedComposerDestinations disabled={navigationLocked} />
           )}
-          {composerStep === 'review' && <GuidedComposerReview />}
           <GuidedComposerPublish
             active={composerStep === 'publish'}
             onSubmittingChange={setPublishSubmitting}
@@ -782,13 +767,13 @@ export const GuidedComposerShell: FC<{
         </GuidedComposerPublishBridgeProvider>
       </main>
 
-      <footer className="border-t border-newBorder bg-newBgColorInner px-[24px] py-[14px] mobile:px-[14px]">
+      <footer className="guided-composer-footer border-t border-newBorder bg-newBgColorInner px-[24px] py-[14px] mobile:px-[14px]">
         <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-[12px] mobile:flex-col-reverse mobile:items-stretch">
           <button
             type="button"
             disabled={currentStepIndex === 0 || navigationLocked}
             onClick={previousComposerStep}
-            className="flex h-[44px] min-w-[120px] items-center justify-center rounded-[8px] bg-btnSimple px-[18px] text-[14px] font-[700] disabled:cursor-not-allowed disabled:opacity-40 mobile:w-full"
+            className={clsx(composerStep === 'upload' && 'mobile:hidden', "flex h-[44px] min-w-[120px] items-center justify-center rounded-[8px] bg-btnSimple px-[18px] text-[14px] font-[700] disabled:cursor-not-allowed disabled:opacity-40 mobile:w-full")}
           >
             Back
           </button>
@@ -798,14 +783,14 @@ export const GuidedComposerShell: FC<{
               {!!continueValidationMessage && (
                 <div
                   role="status"
-                  className="text-end text-[12px] text-textColor/55 mobile:text-start"
+                  className={clsx(composerStep === 'upload' && !globalMedia.length && !global[0]?.content && 'mobile:hidden', "text-end text-[12px] text-textColor/55 mobile:text-start")}
                 >
                   {continueValidationMessage}
                 </div>
               )}
               {!!generationError &&
                 composerStep === 'destinations' &&
-                sourceType === 'video' && (
+                sourceType !== 'text' && (
                   <div
                     role="alert"
                     className="max-w-[460px] text-end text-[12px] text-red-400 mobile:text-start"
@@ -815,17 +800,20 @@ export const GuidedComposerShell: FC<{
                 )}
               <button
                 type="button"
+                aria-label={generationLoading ? 'Generating captions...' : sourceType !== 'text' && composerStep === 'destinations' && generationStatus === 'failed' ? 'Retry generation' : `Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}
                 disabled={continueDisabled}
                 onClick={continueComposer}
-                className="flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50 mobile:w-full"
+                className="mobile-primary-action flex h-[44px] min-w-[190px] items-center justify-center rounded-[8px] bg-btnPrimary px-[18px] text-[14px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-50 mobile:w-full"
               >
                 {generationLoading
                   ? 'Generating captions...'
-                  : sourceType === 'video' &&
+                  : sourceType !== 'text' &&
                     composerStep === 'destinations' &&
                     generationStatus === 'failed'
                   ? 'Retry generation'
-                  : `Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}
+                  : <><span className="mobile:hidden">{`Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}</span>
+                    <span className="hidden mobile:inline">Continue</span>
+                    <svg className="hidden mobile:block" aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></>}
               </button>
             </div>
           )}

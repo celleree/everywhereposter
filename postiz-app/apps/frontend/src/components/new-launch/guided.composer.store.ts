@@ -108,6 +108,7 @@ interface GuidedComposerStore extends GuidedComposerValues {
     }
   ) => void;
   invalidateGeneration: () => void;
+  invalidateReviewRegeneration: () => void;
   resetGeneration: () => void;
   reconcileReviewDrafts: (seeds: GuidedReviewDraftSeed[]) => void;
   pruneReviewDrafts: (destinationIds: string[]) => void;
@@ -230,6 +231,21 @@ export const useGuidedComposerStore = create<GuidedComposerStore>()((set) => ({
         options.fingerprint ?? state.generationInputFingerprint,
     })),
   invalidateGeneration: () => set(initialGenerationState),
+  invalidateReviewRegeneration: () =>
+    set((state) => {
+      const pending = Object.values(state.reviewDrafts).some(
+        (draft) => draft.regenerationRequestToken !== null
+      );
+      if (!pending) return state;
+      return {
+        reviewDrafts: Object.fromEntries(Object.entries(state.reviewDrafts).map(([id, draft]) => [
+          id,
+          draft.regenerationRequestToken === null ? draft : {
+            ...draft, regenerationStatus: 'idle', regenerationRequestToken: null, regenerationError: null,
+          },
+        ])),
+      };
+    }),
   resetGeneration: () => set(initialGenerationState),
   reconcileReviewDrafts: (seeds) =>
     set((state) => {
