@@ -454,7 +454,7 @@ export const MediaCarouselReviewModal: FC<{
         });
 
         if (existingInternal) {
-          setInternalValue(match.integration.id, nextValues);
+          setInternalValue(match.integration.id, nextValues, postIndex === 0);
         } else {
           addInternalValue(postIndex, match.integration.id, nextValues);
         }

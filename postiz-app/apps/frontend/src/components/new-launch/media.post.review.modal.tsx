@@ -473,7 +473,11 @@ export const MediaPostReviewModal: FC<{
         });
 
         if (existingInternal) {
-          setInternalValue(match.integration.id, nextValues);
+          setInternalValue(
+            match.integration.id,
+            nextValues,
+            postIndex === 0 && Boolean(replacementMedia)
+          );
         } else {
           addInternalValue(postIndex, match.integration.id, nextValues);
         }

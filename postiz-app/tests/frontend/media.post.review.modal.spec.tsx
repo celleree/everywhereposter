@@ -334,6 +334,7 @@ describe('MediaPostReviewModal workflow', () => {
       internal: [
         {
           integration: linkedinA,
+          inheritRootMedia: true,
           integrationValue: [
             {
               id: 'post-row-1',
@@ -392,7 +393,8 @@ describe('MediaPostReviewModal workflow', () => {
           content: 'Edited LinkedIn draft',
           media: [expect.objectContaining({ id: 'linkedin-image' })],
         }),
-      ])
+      ]),
+      true
     );
     expect(storeState.addInternalValue).toHaveBeenCalledWith(
       0,
@@ -506,9 +508,9 @@ describe('MediaPostReviewModal workflow', () => {
     );
   });
 
-  it('keeps the uploaded video attached for YouTube thumbnail recommendations', async () => {
+  it.each([false, true])('keeps the uploaded video attached for YouTube thumbnail recommendations with existing comment-only state %s', async (existingComment) => {
     const youtube = createIntegration('youtube-a', 'youtube', 'YouTube A');
-    setupStore({ selectedIntegrations: [selectIntegration(youtube)] });
+    setupStore({ selectedIntegrations: [selectIntegration(youtube)], internal: existingComment ? [{ integration: youtube, inheritRootMedia: true, integrationValue: [{ id: 'post-row-1', content: 'Old description', delay: 0, media: [] }] }] : [] });
 
     const plan = makePlan('youtube-plan', 'youtube', 'thumbnail');
     const generationPayload = {
@@ -535,15 +537,25 @@ describe('MediaPostReviewModal workflow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply post set' }));
 
-    expect(storeState.addInternalValue).toHaveBeenCalledWith(
-      0,
-      'youtube-a',
-      expect.arrayContaining([
-        expect.objectContaining({
-          content: 'YouTube description',
-          media: [expect.objectContaining({ id: 'source-video' })],
-        }),
-      ])
-    );
+    if (existingComment) {
+      expect(storeState.setInternalValue).toHaveBeenCalledWith(
+        'youtube-a',
+        expect.arrayContaining([
+          expect.objectContaining({ content: 'YouTube description', media: [] }),
+        ]),
+        false
+      );
+    } else {
+      expect(storeState.addInternalValue).toHaveBeenCalledWith(
+        0,
+        'youtube-a',
+        expect.arrayContaining([
+          expect.objectContaining({
+            content: 'YouTube description',
+            media: [expect.objectContaining({ id: 'source-video' })],
+          }),
+        ])
+      );
+    }
   });
 });

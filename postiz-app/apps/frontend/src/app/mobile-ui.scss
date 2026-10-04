@@ -1,0 +1,119 @@
+@mixin styles {
+// Shared mobile shell, navigation and form treatment for the approved Upload UI.
+.guided-review-existing-editor { display: none; }
+
+@media (max-width: 1025px) {
+  .mobile-app-shell { padding: 8px 0 calc(88px + env(safe-area-inset-bottom)); }
+  .mobile-app-panel { border-radius: 0; background: var(--new-bgColor); gap: 0; }
+  .mobile-app-header {
+    grid-template-columns: minmax(0, 1fr) 88px 44px;
+    padding: 8px 12px; min-height: 64px; background: var(--new-bgColor);
+  }
+  .mobile-header-secondary { display: none; }
+  .mobile-app-logo { width: 56px; transform: none; }
+  .mobile-app-logo > span { width: 44px; height: 44px; min-width: 44px; min-height: 44px; margin: 0; }
+  .mobile-app-title { font-size: 18px; font-weight: 700; }
+  .mobile-bottom-nav { inset-inline: 3px; bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .mobile-bottom-nav > div { padding: 6px 8px; border-radius: 16px; background: var(--new-bgColor); box-shadow: none; }
+  .mobile-nav-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .mobile-nav-item {
+    min-width: 0; max-width: none; min-height: 52px; padding: 7px 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 7px; border-radius: 11px; font-size: 11px; font-weight: 600;
+  }
+  .mobile-nav-item svg { width: 22px; height: 22px; }
+  .mobile-nav-item > div:last-child { font-size: 11px; }
+  .mobile-nav-active { color: var(--new-textItemFocused); background: var(--new-boxFocused); }
+  .mobile-more-links { display: flex; flex-direction: column; gap: 4px; }
+  .mobile-more-links a, .mobile-more-links button { display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 12px; border-radius: 10px; }
+  .mobile-more-links svg[fill]:not([fill="none"]) { fill: currentColor; }
+  .mobile-more-links a[aria-current] { background: var(--new-bgColorInner); }
+  .mobile-more-channels { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; padding-bottom: env(safe-area-inset-bottom); }
+  .mobile-more-drawer [role="dialog"] { border-radius: 18px 18px 0 0; }
+  .mobile-app-shell button:focus-visible, .mobile-app-shell a:focus-visible,
+  .mobile-more-drawer a:focus-visible, .mobile-more-drawer button:focus-visible { box-shadow: 0 0 0 2px var(--new-btn-text); }
+
+  .mobile-upload-page { background: var(--new-bgColor); }
+  .mobile-create-toolbar { display: none; }
+  .mobile-create-toolbar:has(select) { display: block; border: 0; background: transparent; padding: 8px 15px; }
+  .mobile-create-toolbar .mobile-create-title, .mobile-create-toolbar .mobile-create-channel { display: none; }
+  .guided-composer-shell { height: auto; overflow: visible; background: var(--new-bgColor); }
+  .guided-composer-header { border: 0; background: transparent; padding: 0 14px 10px; }
+  .guided-progress { overflow: visible; padding: 0; }
+  .guided-progress ol { min-width: 0; justify-content: center; gap: 0; }
+  .guided-progress li { gap: 0; }
+  .guided-progress li > div { display: none; }
+  .guided-progress button {
+    border: 0; border-radius: 0; background: transparent; opacity: 1;
+    min-width: 24px; width: 24px; min-height: 30px; padding: 10px 8px; gap: 0;
+  }
+  .guided-progress button > span { display: none; }
+  .guided-progress button::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--new-textItemBlur); opacity: .4; }
+  .guided-progress button[aria-current]::after { background: var(--new-btn-text); opacity: 1; }
+  .guided-composer-shell > main { overflow: visible; }
+  .guided-upload-existing-composer > div,
+  .guided-upload-existing-composer > div > div { background: transparent; }
+  .guided-upload-existing-composer #social-content { padding: 0 15px; gap: 0; }
+  .guided-upload-existing-composer #social-content > section { border: 0; padding: 0; }
+  .guided-upload-existing-composer #social-content > section[data-guided-composer-section="media"] > div:first-child { display: none; }
+  .guided-composer-shell[data-composer-step="upload"] section[data-guided-composer-section="editor"],
+  .guided-composer-shell[data-composer-step="upload"] section[data-guided-composer-section="settings"]:not([data-guided-provider-recovery="true"]) { display: none; }
+  .guided-upload-existing-composer .composer-content-column { border: 0; }
+  .composer-upload-card { padding: 28px 16px 16px; border-radius: 12px; background: var(--new-bgColorInner); border-color: color-mix(in srgb, var(--new-border), var(--new-textItemBlur) 25%); }
+  .mobile-upload-intro { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 14px; }
+  .mobile-upload-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 9px; background: var(--new-btn-simple); margin-bottom: 10px; }
+  .mobile-upload-intro h2 { font-size: 18px; font-weight: 700; line-height: 1.3; }
+  .mobile-upload-intro p { font-size: 13px; line-height: 1.5; color: var(--new-textItemBlur); margin-top: 6px; }
+  .composer-upload-card button { min-height: 42px; padding: 10px 12px; font-size: 14px; border-radius: 10px; }
+  .composer-upload-card:has(.composer-media-preview img, .composer-media-preview video) .mobile-upload-icon,
+  .composer-upload-card:has(.composer-media-preview img, .composer-media-preview video) .mobile-upload-intro p { display: none; }
+  .composer-upload-controls > button:not(:first-child) { color: var(--new-btn-text); background: transparent; }
+  .composer-media-label, .guided-video-details label, .guided-video-details textarea { color: var(--new-btn-text); }
+  .composer-upload-card .upload-drop-hint { display: none; }
+  .composer-media-preview { border: 0; padding: 0; background: transparent; }
+  .composer-media-preview .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .composer-media-preview button { min-height: 36px; padding: 0; }
+  .composer-media-preview:has(> .text-center) { min-height: 0; margin-top: 14px; }
+  .mobile-upload-context { display: block; padding: 22px 15px 0; }
+  .mobile-text-post { display: block; padding: 10px 15px 0; }
+  .mobile-text-post > button { min-height: 44px; font-size: 12px; color: var(--new-textItemBlur); }
+  .mobile-text-post label { display: block; margin: 8px 0; font-size: 14px; font-weight: 700; }
+  .mobile-text-post textarea { display: block; width: 100%; min-height: 110px; padding: 12px; border: 1px solid var(--new-border); border-radius: 12px; background: var(--new-bgColorInner); color: var(--new-btn-text); }
+  .mobile-upload-context label { font-size: 14px; font-weight: 700; }
+  .mobile-upload-context p { margin: 6px 0 10px; font-size: 12px; line-height: 1.5; color: var(--new-textItemBlur); }
+  .mobile-context-input { position: relative; }
+  .mobile-context-input textarea {
+    display: block; width: 100%; min-height: 84px; resize: vertical; padding: 12px 12px 26px;
+    font: inherit; font-size: 14px; line-height: 1.5; border: 1px solid var(--new-border);
+    border-radius: 12px; background: var(--new-bgColorInner); color: var(--new-btn-text);
+  }
+  .mobile-context-input textarea::placeholder { color: var(--new-textItemBlur); opacity: .65; }
+  .mobile-context-input textarea:focus { border-color: var(--new-textItemBlur); }
+  .mobile-context-count { position: absolute; bottom: 8px; right: 12px; font-size: 10px; color: var(--new-textItemBlur); pointer-events: none; }
+  .mobile-caption-options { display: block; padding: 10px 15px 0; font-size: 12px; color: var(--new-btn-text); }
+  .mobile-caption-options summary { cursor: pointer; color: var(--new-textItemBlur); }
+  .mobile-caption-options fieldset { padding-top: 10px; }
+  .mobile-caption-options label { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .mobile-caption-options input { accent-color: var(--new-btn-text); }
+  .mobile-caption-options textarea { width: 100%; min-height: 100px; padding: 12px; border: 1px solid var(--new-border); border-radius: 12px; background: var(--new-bgColorInner); }
+  .guided-video-details { padding-top: 12px; padding-bottom: 0; }
+  .guided-video-details:not(:has([role="status"])) { display: none; }
+  .guided-video-details > div { padding: 12px; }
+  .guided-video-details [role="status"] { margin-bottom: 0; }
+  .guided-composer-footer { border: 0; background: transparent; padding: 16px 15px 12px; }
+  .mobile-primary-action { min-height: 44px; gap: 10px; border-radius: 10px; background: var(--new-btn-text); color: var(--new-bgColor); font-size: 14px; }
+  .mobile-primary-action:disabled { opacity: .55; }
+  .guided-review-existing-editor { display: block; }
+  .guided-review-existing-editor section[data-guided-composer-section="media"],
+  .guided-review-existing-editor .mobile-upload-context,
+  .guided-review-existing-editor .mobile-text-post,
+  .guided-review-existing-editor .mobile-caption-options,
+  .guided-review-existing-editor .guided-video-details { display: none; }
+  .guided-review-existing-editor section[data-guided-composer-section="editor"] { margin-top: 16px; }
+  .guided-comments-only, .guided-comments-only .flex { min-width: 0; }
+  .guided-comments-only .guided-comment-actions { flex-direction: column; align-items: flex-start; }
+  .guided-comments-only .guided-comment-actions > div:last-child { flex-wrap: wrap; gap: 8px; }
+  .guided-composer-shell .copilotKitPopup { display: none; }
+}
+
+}

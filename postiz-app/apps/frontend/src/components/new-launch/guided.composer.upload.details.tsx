@@ -16,6 +16,9 @@ import {
   validateGuidedVideoFile,
 } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
+import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { selectGuidedGenerationMedia } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
 
 export {
   GUIDED_VIDEO_ACCEPT,
@@ -34,7 +37,7 @@ const GUIDED_UPLOAD_INPUT_SELECTOR = `${GUIDED_UPLOAD_SECTION_SELECTOR} input[ty
 const GUIDED_UPLOAD_PROGRESS_CLASS = 'guided-upload-progress-only';
 
 const ADDITIONAL_CONTEXT_HELP =
-  'Add details that may not be clear from the video, such as the target audience, key facts, names, offers, links, desired call to action, or anything the AI should avoid mentioning.';
+  'Add details that may not be clear from the photo or video, such as the target audience, key facts, names, offers, links, desired call to action, or anything the AI should avoid mentioning.';
 
 const CAPTION_OPTIONS: Array<{
   value: CaptionMode;
@@ -96,6 +99,12 @@ export const GuidedComposerUploadDetails: FC<{
   );
 
   const attachedMedia = global[0]?.media || [];
+  const generationMedia = selectGuidedGenerationMedia(attachedMedia, sourceMediaId);
+  const [textPostOpen, setTextPostOpen] = useState(false);
+  const textMode = !attachedMedia.length && textPostOpen;
+  const postText = stripHtmlValidation('normal', global[0]?.content || '', true);
+  const setGlobalValueText = useLaunchStore((state) => state.setGlobalValueText);
+  const addGlobalValue = useLaunchStore((state) => state.addGlobalValue);
   const sourceVideo = attachedMedia.find(
     (media) =>
       media.id === sourceMediaId && isGuidedMp4MovMedia(media)
@@ -263,11 +272,13 @@ export const GuidedComposerUploadDetails: FC<{
 
           ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) > input,
           ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) > div:first-of-type > div:last-child,
+          ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) .upload-drop-hint,
           ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) > div:last-of-type {
             display: none !important;
           }
 
-          ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) > div:first-of-type > div:first-child > button:nth-child(-n + 2) {
+          ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) > div:first-of-type > div:first-child > button:nth-child(-n + 2),
+          ${GUIDED_UPLOAD_SECTION_SELECTOR}.${GUIDED_UPLOAD_PROGRESS_CLASS} > div:nth-child(2) .composer-upload-controls > button:nth-child(-n + 2) {
             display: none !important;
           }
         `}
@@ -281,10 +292,59 @@ export const GuidedComposerUploadDetails: FC<{
         </div>
       )}
 
-      {!!sourceVideo && (
-        <div className="mx-auto w-full max-w-[1600px] px-[40px] pb-[40px] mobile:px-[12px] mobile:pb-[18px]">
+      {!attachedMedia.length && (
+        <section className="mobile-text-post hidden">
+          <button type="button" disabled={disabled} aria-expanded={textPostOpen}
+            aria-controls="mobile-post-text-fields" onClick={() => setTextPostOpen((open) => !open)}>
+            Write a text post
+          </button>
+          {textPostOpen && (
+            <div id="mobile-post-text-fields">
+              <label htmlFor="mobile-post-text">Post text</label>
+              <textarea id="mobile-post-text" value={postText} disabled={disabled}
+                placeholder="Write the post you want to publish..."
+                onChange={(event) => {
+                  const text = event.target.value;
+                  const encoded = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                  const content = text ? `<p>${encoded.replace(/\n/g, '</p><p>')}</p>` : '';
+                  if (global.length) setGlobalValueText(0, content);
+                  else addGlobalValue(0, [{ id: makeId(10), content, media: [], delay: 0 }]);
+                }} />
+            </div>
+          )}
+        </section>
+      )}
+
+      {!textMode && <MobileUploadContext disabled={disabled} />}
+
+      {!!generationMedia && (
+        <details className="mobile-caption-options hidden">
+          <summary>Caption options</summary>
+          <fieldset disabled={disabled}>
+            <legend className="sr-only">Caption options</legend>
+            {CAPTION_OPTIONS.map((option) => (
+              <label key={option.value}>
+                <input type="radio" name="mobile-guided-caption-mode" value={option.value}
+                  checked={captionMode === option.value} onChange={() => setCaptionMode(option.value)} />
+                <span>{option.value === 'generate' ? 'Generate captions with AI' : option.title}</span>
+              </label>
+            ))}
+            {captionRequired && (
+              <>
+                <label htmlFor="mobile-guided-source-caption">Your caption</label>
+                <textarea id="mobile-guided-source-caption" value={sourceCaption} required
+                  onChange={(event) => setSourceCaption(event.target.value)}
+                  placeholder="Paste or write your caption here..." />
+              </>
+            )}
+          </fieldset>
+        </details>
+      )}
+
+      {!!generationMedia && (
+        <div className="guided-video-details mx-auto w-full max-w-[1600px] px-[40px] pb-[40px] mobile:px-[12px] mobile:pb-[18px]">
           <div className="rounded-[20px] border border-newBorder bg-newBgColorInner p-[24px] mobile:rounded-[16px] mobile:p-[16px]">
-            <div
+            {!!sourceVideo && <div
               role="status"
               aria-live="polite"
               className="mb-[16px] flex flex-wrap items-center gap-[8px] text-[12px] text-textColor/65"
@@ -317,9 +377,9 @@ export const GuidedComposerUploadDetails: FC<{
                   </button>
                 </>
               )}
-            </div>
+            </div>}
             <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-2">
-              <section>
+              <section className="mobile:hidden">
                 <div className="flex items-center gap-[8px]">
                   <label
                     htmlFor="guided-composer-additional-context"
@@ -363,10 +423,10 @@ export const GuidedComposerUploadDetails: FC<{
               </section>
 
               <section>
-                <div className="text-[16px] font-[700] text-white">
+                <div className="mobile:hidden text-[16px] font-[700] text-white">
                   How should we handle the caption?
                 </div>
-                <div className="mt-[14px] flex flex-col gap-[10px]">
+                <div className="mobile:hidden mt-[14px] flex flex-col gap-[10px]">
                   {CAPTION_OPTIONS.map((option) => (
                     <label
                       key={option.value}
@@ -392,7 +452,7 @@ export const GuidedComposerUploadDetails: FC<{
                           {option.title}
                         </span>
                         <span className="mt-[3px] block text-[12px] text-textColor/60">
-                          {option.description}
+                          {option.value === 'generate' && !sourceVideo ? 'Generate platform-specific captions from the uploaded photo.' : option.description}
                         </span>
                       </span>
                     </label>
@@ -400,7 +460,7 @@ export const GuidedComposerUploadDetails: FC<{
                 </div>
 
                 {captionRequired && (
-                  <div className="mt-[14px]">
+                  <div className="mobile:hidden mt-[14px]">
                     <label
                       htmlFor="guided-composer-source-caption"
                       className="text-[14px] font-[700] text-white"
@@ -425,5 +485,26 @@ export const GuidedComposerUploadDetails: FC<{
         </div>
       )}
     </>
+  );
+};
+
+// Guidance belongs to the generation input, never to a publishable caption.
+const MobileUploadContext: FC<{ disabled: boolean }> = ({ disabled }) => {
+  const additionalContext = useGuidedComposerStore((state) => state.additionalContext);
+  const setAdditionalContext = useGuidedComposerStore((state) => state.setAdditionalContext);
+  const value = additionalContext;
+
+  return (
+    <section className="mobile-upload-context hidden">
+      <label htmlFor="mobile-upload-context">Optional context</label>
+      <p id="mobile-upload-context-help">Add any information the AI should know about your post.</p>
+      <div className="mobile-context-input">
+        <textarea id="mobile-upload-context" value={value} disabled={disabled} maxLength={500}
+          aria-describedby="mobile-upload-context-help"
+          placeholder="E.g. topic, audience, tone, or key points..."
+          onChange={(event) => setAdditionalContext(event.target.value)} />
+        <span className="mobile-context-count">{value.length}/500</span>
+      </div>
+    </section>
   );
 };

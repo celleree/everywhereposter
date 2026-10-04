@@ -256,29 +256,79 @@ describe('guided composer generation transition', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('moves an image draft directly to Review without generation', () => {
+  it('generates an editable photo caption with context without video transcription', async () => {
     seedImageDraft();
-    const originalMedia = useLaunchStore.getState().global[0].media;
-    useGuidedComposerStore.setState({
-      generationStatus: 'complete',
-      generatedResponse: response() as any,
-      generationInputFingerprint: 'stale-video-fingerprint',
-    });
+    mockFetch.mockResolvedValue(streamResponse(response()));
     renderGeneration();
+    fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: 'Photo facts for founders' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(useGuidedComposerStore.getState().composerStep).toBe('review'));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({ mediaId: 'image-1', additionalContext: 'Photo facts for founders', captionMode: 'generate', platforms: ['linkedin'] });
+    expect(mockFetch.mock.calls.every(([url]) => !url.includes('transcription'))).toBe(true);
+    expect(useGuidedComposerStore.getState().sourceMediaId).toBeNull();
+    const caption = screen.getByLabelText('Founder LinkedIn caption');
+    fireEvent.change(caption, { target: { value: 'Edited photo caption' } });
+    expect(useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id].caption).toBe('Edited photo caption');
+    fireEvent.click(screen.getByRole('button', { name: /Regenerate/ }));
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body).mediaId).toBe('image-1');
+  });
 
-    const continueButton = screen.getByRole('button', {
-      name: 'Continue to Review',
-    });
-    expect(continueButton.hasAttribute('disabled')).toBe(false);
-    fireEvent.click(continueButton);
+  it('allows a fresh empty text composition to enter actual post content and reach Review', () => {
+    useLaunchStore.getState().setAllIntegrations([linkedinPersonal]);
+    renderGeneration();
+    expect(useLaunchStore.getState().global).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Continue to Destinations' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Write a text post' }));
+    const text = 'Actual <post> & facts\nSecond line';
+    fireEvent.change(screen.getByLabelText('Post text'), { target: { value: text } });
+    expect(screen.getByLabelText('Post text')).toBeTruthy();
+    expect(screen.queryByLabelText('Optional context')).toBeNull();
+    expect(useGuidedComposerStore.getState().additionalContext).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Destinations' }));
+    fireEvent.click(screen.getByRole('button', { name: /Founder LinkedIn/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    expect((screen.getByLabelText('Founder LinkedIn caption') as HTMLTextAreaElement).value).toBe(text);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 
-    expect(useGuidedComposerStore.getState()).toMatchObject({
-      composerStep: 'review',
-      generationStatus: 'idle',
-      generatedResponse: null,
-      generationInputFingerprint: null,
-    });
-    expect(useLaunchStore.getState().global[0].media).toEqual(originalMedia);
+  it('discards a pending photo response when its source is replaced', async () => {
+    seedImageDraft();
+    expect(useLaunchStore.getState().global[0].content).toBe('');
+    const controlled = controlledStreamResponse(response());
+    mockFetch.mockResolvedValue(controlled.response);
+    renderGeneration();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(useGuidedComposerStore.getState().generationStatus).toBe('loading'));
+    act(() => useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'image-2', path: '/replacement.png', type: 'image' } as any]));
+    act(() => controlled.finish());
+    await waitFor(() => expect(useGuidedComposerStore.getState().generationStatus).toBe('idle'));
+    expect(useGuidedComposerStore.getState().generatedResponse).toBeNull();
+    expect(useGuidedComposerStore.getState().composerStep).toBe('destinations');
+  });
+
+  it('keeps photo manual mode explicit and preserves the caption for unsupported destinations', async () => {
+    seedImageDraft();
+    useGuidedComposerStore.setState({captionMode: 'use-everywhere', composerStep: 'upload'});
+    const { unmount } = renderGeneration();
+    expect(screen.getByRole('button', { name: 'Continue to Destinations' }).hasAttribute('disabled')).toBe(true);
+    act(() => useGuidedComposerStore.getState().setSourceCaption('Manual photo caption'));
+    mockFetch.mockResolvedValue(streamResponse({...response(), results: [{...result, draft: 'Manual photo caption'}]}));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Destinations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(useGuidedComposerStore.getState().composerStep).toBe('review'));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({ mediaId: 'image-1', captionMode: 'use-everywhere', sourceCaption: 'Manual photo caption' });
+    expect((screen.getByLabelText('Founder LinkedIn caption') as HTMLTextAreaElement).value).toBe('Manual photo caption');
+    unmount();
+    seedImageDraft();
+    useLaunchStore.getState().setAllIntegrations([unsupportedDestination]);
+    useLaunchStore.getState().setSelectedIntegrations([{ selectedIntegrations: unsupportedDestination, settings: {} }]);
+    useGuidedComposerStore.setState({ captionMode: 'use-everywhere', sourceCaption: 'Fallback photo caption', composerStep: 'destinations' });
+    mockFetch.mockClear();
+    renderGeneration();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(useGuidedComposerStore.getState().composerStep).toBe('review'));
+    expect((screen.getByLabelText('Mastodon caption') as HTMLTextAreaElement).value).toBe('Fallback photo caption');
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -287,10 +337,10 @@ describe('guided composer generation transition', () => {
     useGuidedComposerStore.setState({
       captionMode: 'adapt-by-platform',
       sourceCaption: 'One authoritative source caption.',
-      additionalContext: '  Keep it practical.  ',
     });
     mockFetch.mockResolvedValue(streamResponse(response()));
     renderGeneration();
+    fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: '  Keep it practical.  ' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
 
@@ -556,18 +606,14 @@ describe('guided composer generation transition', () => {
         .setAdditionalContext('Changed while reviewing')
     );
 
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().generationStatus).toBe('idle')
-    );
-
-    expect(useGuidedComposerStore.getState().generatedResponse).toBeNull();
+    expect(useGuidedComposerStore.getState().generatedResponse).toEqual(response());
     expect(publishButton.hasAttribute('disabled')).toBe(true);
 
     fireEvent.click(publishButton);
     expect(useGuidedComposerStore.getState().composerStep).toBe('review');
   });
 
-  it('does not regenerate unchanged inputs but invalidates results after an input change', async () => {
+  it('keeps reviewed edits when guidance changes and regenerates explicitly with the new context', async () => {
     seedDraft();
     mockFetch.mockImplementation(async () => streamResponse(response()));
     renderGeneration();
@@ -582,17 +628,18 @@ describe('guided composer generation transition', () => {
     expect(useGuidedComposerStore.getState().composerStep).toBe('review');
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
+    const caption = 'Reviewed wording to preserve.';
+    fireEvent.change(screen.getByLabelText('Founder LinkedIn caption'), { target: { value: caption } });
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     act(() =>
       useGuidedComposerStore.getState().setAdditionalContext('New context')
     );
-    await waitFor(() =>
-      expect(useGuidedComposerStore.getState().generationStatus).toBe('idle')
-    );
-    expect(useGuidedComposerStore.getState().generatedResponse).toBeNull();
+    expect(useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id].caption).toBe(caption);
+    expect(useGuidedComposerStore.getState().generatedResponse).toEqual(response());
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body).additionalContext).toBe('New context');
   });
 
   it('fingerprints every input and keeps generation cleared when a pending request finishes after close', async () => {

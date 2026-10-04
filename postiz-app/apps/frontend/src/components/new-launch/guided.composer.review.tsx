@@ -30,6 +30,7 @@ import {
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
+import { buildGuidedGenerationFingerprint, selectGuidedGenerationMedia } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
 import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
 const SOURCE_LABELS: Record<GuidedReviewCaptionSource, string> = {
@@ -235,14 +236,16 @@ export const GuidedComposerReview: FC = () => {
     [availableDestinationIds, selectedIntegrations]
   );
   const media = global[0]?.media || [];
-  const video = media.find((item) => isGuidedMp4MovMedia(item));
+  const sourceMediaId = useGuidedComposerStore((state) => state.sourceMediaId);
+  const generationMedia = selectGuidedGenerationMedia(media, sourceMediaId);
+  const video = generationMedia && isGuidedMp4MovMedia(generationMedia) ? generationMedia : undefined;
   const legacyCaption = stripHtmlValidation(
     'normal',
     global[0]?.content || '',
     true
   );
   const fallbackCaption =
-    captionMode !== 'generate' && sourceCaption.trim()
+    media.length > 0 && captionMode !== 'generate' && sourceCaption.trim()
       ? sourceCaption
       : legacyCaption;
   const unsupportedDestinationIds = useMemo(
@@ -356,12 +359,26 @@ export const GuidedComposerReview: FC = () => {
       !activeDestination ||
       !activeDraft ||
       !activeDraft.platform ||
-      !video ||
+      !generationMedia ||
       activeDraft.regenerationStatus === 'loading'
     ) {
       return;
     }
 
+    const requestFingerprint = buildGuidedGenerationFingerprint({
+      mediaId: generationMedia.id,
+      destinations: selectedIntegrations.map((selected) => selected.integration),
+      captionMode, sourceCaption, additionalContext,
+    });
+    const currentFingerprint = () => {
+      const launch = useLaunchStore.getState();
+      const guided = useGuidedComposerStore.getState();
+      return buildGuidedGenerationFingerprint({
+        mediaId: selectGuidedGenerationMedia(launch.global[0]?.media || [], guided.sourceMediaId)?.id,
+        destinations: launch.selectedIntegrations.map((selected) => selected.integration),
+        captionMode: guided.captionMode, sourceCaption: guided.sourceCaption, additionalContext: guided.additionalContext,
+      });
+    };
     const sourceFingerprint = activeDraft.sourceFingerprint;
     const regenerationRequestToken = startReviewRegeneration(
       activeDestination.id
@@ -373,7 +390,7 @@ export const GuidedComposerReview: FC = () => {
         fetch,
         [activeDestination],
         {
-          mediaId: video.id,
+          mediaId: generationMedia.id,
           captionMode,
           ...(captionMode !== 'generate' ? { sourceCaption } : {}),
           ...(additionalContext.trim()
@@ -382,6 +399,7 @@ export const GuidedComposerReview: FC = () => {
           goal: 'position',
         }
       );
+      if (requestFingerprint !== currentFingerprint()) return;
       const result = response.response?.results.find(
         (candidate) => candidate.platform === activeDraft.platform
       );
@@ -399,6 +417,7 @@ export const GuidedComposerReview: FC = () => {
         result
       );
     } catch (error: any) {
+      if (requestFingerprint !== currentFingerprint()) return;
       failReviewRegeneration(
         activeDestination.id,
         sourceFingerprint,
@@ -416,7 +435,8 @@ export const GuidedComposerReview: FC = () => {
     fetch,
     sourceCaption,
     startReviewRegeneration,
-    video,
+    generationMedia,
+    selectedIntegrations,
   ]);
 
   const generalWarnings = uniqueWarnings(generatedResponse?.warnings || []);
@@ -705,7 +725,7 @@ export const GuidedComposerReview: FC = () => {
                     disabled={
                       !activeDraft.enabled ||
                       !activeDraft.platform ||
-                      !video ||
+                      !generationMedia ||
                       activeDraft.regenerationStatus === 'loading'
                     }
                     onClick={() => void regenerateDestination()}

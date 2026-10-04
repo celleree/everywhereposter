@@ -132,9 +132,9 @@ export const CreateComponent = () => {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-newBgColorInner mobile:overflow-y-auto">
-      <div className="flex flex-wrap items-center justify-between gap-[12px] border-b border-newBorder bg-newBgColorInner px-[20px] py-[14px] mobile:px-[12px] mobile:py-[10px]">
-        <div className="flex min-w-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col bg-newBgColorInner mobile:overflow-y-auto mobile-upload-page">
+      <div className="flex flex-wrap items-center justify-between gap-[12px] border-b border-newBorder bg-newBgColorInner px-[20px] py-[14px] mobile:px-[12px] mobile:py-[10px] mobile-create-toolbar">
+        <div className="mobile-create-title flex min-w-0 flex-col">
           <div className="text-[16px] font-[700] text-white mobile:text-[15px]">
             {t('create_post', 'Create Post')}
           </div>
@@ -148,7 +148,7 @@ export const CreateComponent = () => {
           )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-[12px] mobile:w-full mobile:flex-col mobile:items-stretch">
-          <div className="w-[260px] mobile:w-full">
+          <div className="mobile-create-channel w-[260px] mobile:w-full">
             <AddProviderButton update={() => mutateIntegrations()} />
           </div>
           {hasActiveIntegrations && !!sets.length && (

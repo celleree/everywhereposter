@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
@@ -891,7 +891,7 @@ describe('guided composer video picker', () => {
     host.remove();
   });
 
-  it('shows video controls only for supported video drafts', () => {
+  it('offers photo caption options without video transcription controls', () => {
     useLaunchStore.getState().addGlobalValue(0, [
       {
         id: 'post-1',
@@ -914,17 +914,17 @@ describe('guided composer video picker', () => {
       screen.getByRole('radio', { name: /Create captions for me/ })
     ).toBeTruthy();
     expect(
-      screen.getByRole('radio', { name: /Use my caption on every platform/ })
+      screen.getAllByRole('radio', { name: /Use my caption on every platform/ }).at(-1)!
     ).toBeTruthy();
     expect(
-      screen.getByRole('radio', { name: /Adapt my caption for each platform/ })
+      screen.getAllByRole('radio', { name: /Adapt my caption for each platform/ }).at(-1)!
     ).toBeTruthy();
-    expect(screen.queryByLabelText('Your caption')).toBeNull();
+    expect(screen.queryAllByLabelText('Your caption')).toHaveLength(0);
 
     fireEvent.click(
-      screen.getByRole('radio', { name: /Use my caption on every platform/ })
+      screen.getAllByRole('radio', { name: /Use my caption on every platform/ }).at(-1)!
     );
-    expect(screen.getByLabelText('Your caption')).toBeTruthy();
+    expect(screen.getAllByLabelText('Your caption')).toHaveLength(2);
 
     useLaunchStore.getState().setGlobalValueMedia(0, [
       {
@@ -934,9 +934,10 @@ describe('guided composer video picker', () => {
       } as any,
     ]);
     rerender(<GuidedComposerUploadDetails />);
-    expect(screen.queryByLabelText('Additional context')).toBeNull();
-    expect(screen.queryByRole('radio', { name: /Create captions for me/ })).toBeNull();
-    expect(screen.queryByLabelText('Your caption')).toBeNull();
+    expect(screen.getByLabelText('Additional context')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Create captions for me/ })).toBeTruthy();
+    expect(screen.getAllByLabelText('Your caption')).toHaveLength(2);
+    expect(screen.queryByText('Transcript status')).toBeNull();
 
     useLaunchStore.getState().setGlobalValueMedia(0, []);
     rerender(<GuidedComposerUploadDetails />);
@@ -1022,5 +1023,60 @@ describe('guided composer video picker', () => {
     expect(input.multiple).toBe(true);
     expect(section.classList.contains('guided-upload-progress-only')).toBe(false);
     host.remove();
+  });
+});
+
+describe('mobile Upload context', () => {
+  beforeEach(() => {
+    useLaunchStore.getState().reset();
+    useLaunchStore.getState().addGlobalValue(0, [{ id: 'source', content: '', media: [], delay: 0 }]);
+    useGuidedComposerStore.getState().resetGuidedComposer();
+  });
+
+  it('stores literal multiline guidance without changing publishable text', () => {
+    useLaunchStore.getState().setGlobalValueText(0, '<p>Existing image caption</p>');
+    const launchBefore = useLaunchStore.getState();
+    render(<GuidedComposerUploadDetails />);
+    const context = screen.getByLabelText('Optional context') as HTMLTextAreaElement;
+    fireEvent.change(context, { target: { value: 'Founders <launch> & teams\nKeep it concise' } });
+    expect(context.value).toBe('Founders <launch> & teams\nKeep it concise');
+    expect(context.maxLength).toBe(500);
+    expect(useGuidedComposerStore.getState().additionalContext).toBe(context.value);
+    expect(useLaunchStore.getState().global).toBe(launchBefore.global);
+    expect(useLaunchStore.getState().internal).toBe(launchBefore.internal);
+    expect(useGuidedComposerStore.getState().reviewDrafts).toEqual({});
+  });
+
+  it('uses the existing additional context for video and preserves caption mode', () => {
+    useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'video-1', path: '/source.mp4' }]);
+    useGuidedComposerStore.getState().selectSourceMedia('video-1');
+    useGuidedComposerStore.getState().setAdditionalContext('For a founder audience');
+    useGuidedComposerStore.getState().setCaptionMode('use-everywhere');
+    useGuidedComposerStore.getState().setSourceCaption('Existing caption');
+    render(<GuidedComposerUploadDetails />);
+    expect((screen.getByLabelText('Optional context') as HTMLTextAreaElement).value).toBe('For a founder audience');
+    fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: 'New context' } });
+    expect(useGuidedComposerStore.getState().sourceCaption).toBe('Existing caption');
+    expect(useGuidedComposerStore.getState().captionMode).toBe('use-everywhere');
+  });
+
+  it('keeps video alternatives in a collapsed control backed by the existing modes', () => {
+    useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'video-1', path: '/source.mp4' }]);
+    useGuidedComposerStore.getState().selectSourceMedia('video-1');
+    render(<GuidedComposerUploadDetails />);
+    const details = screen.getByText('Caption options', { selector: 'summary' }).parentElement as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(useGuidedComposerStore.getState().captionMode).toBe('generate');
+    fireEvent.click(details.querySelector('summary')!);
+    expect(details.open).toBe(true);
+    const options = within(details);
+    expect((options.getByRole('radio', { name: 'Generate captions with AI' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(options.getByRole('radio', { name: 'Use my caption on every platform' }));
+    fireEvent.change(options.getByLabelText('Your caption'), { target: { value: 'Manual fallback caption' } });
+    expect(useGuidedComposerStore.getState()).toMatchObject({ captionMode: 'use-everywhere', sourceCaption: 'Manual fallback caption' });
+    fireEvent.click(options.getByRole('radio', { name: 'Adapt my caption for each platform' }));
+    expect(useGuidedComposerStore.getState()).toMatchObject({ captionMode: 'adapt-by-platform', sourceCaption: 'Manual fallback caption' });
+    fireEvent.click(options.getByRole('radio', { name: 'Generate captions with AI' }));
+    expect(options.queryByLabelText('Your caption')).toBeNull();
   });
 });

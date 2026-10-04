@@ -21,6 +21,7 @@ import { SignatureBox } from '@gitroom/frontend/components/signature';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import {
   SelectedIntegrations,
+  getInternalPostValues,
   useLaunchStore,
 } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
@@ -106,7 +107,8 @@ const InterceptUnderlineShortcut = Extension.create({
 export const EditorWrapper: FC<{
   totalPosts: number;
   value: string;
-}> = () => {
+  commentsOnly?: boolean;
+}> = ({ commentsOnly = false }) => {
   const t = useT();
   const {
     setGlobalValueText,
@@ -194,7 +196,7 @@ export const EditorWrapper: FC<{
 
   const items = useMemo(() => {
     if (internal) {
-      return internal.integrationValue;
+      return getInternalPostValues(global, internal)!;
     }
 
     return global;
@@ -276,6 +278,7 @@ export const EditorWrapper: FC<{
 
   const changeOrder = useCallback(
     (index: number) => (direction: 'up' | 'down') => {
+      if (commentsOnly && index === 1 && direction === 'up') return;
       if (internal) {
         changeOrderInternal(current, index, direction);
         return setLoaded(false);
@@ -284,7 +287,7 @@ export const EditorWrapper: FC<{
       changeOrderGlobal(index, direction);
       setLoaded(false);
     },
-    [changeOrderInternal, changeOrderGlobal, current, global, internal]
+    [changeOrderInternal, changeOrderGlobal, current, global, internal, commentsOnly]
   );
 
   const goBackToGlobal = useCallback(async () => {
@@ -384,6 +387,7 @@ export const EditorWrapper: FC<{
     <div
       className={clsx(
         'relative flex-col gap-[20px] flex-1',
+        commentsOnly && 'guided-comments-only',
         (items.length === 1 || !canEdit || !comments) && 'flex',
         ((!canEdit && !isCreateSet) || !comments) &&
           'bg-newSettings rounded-[12px]'
@@ -408,7 +412,7 @@ export const EditorWrapper: FC<{
           <div className="absolute w-full h-full left-0 top-0 bg-newBackdrop opacity-60 z-[100] rounded-[12px]" />
         </>
       )}
-      {!canEdit && !isCreateSet && (
+      {!canEdit && !isCreateSet && !commentsOnly && (
         <>
           <div
             onClick={() => {
@@ -438,7 +442,24 @@ export const EditorWrapper: FC<{
           <div className="absolute w-full h-full left-0 top-0 bg-newBackdrop opacity-60 z-[100] rounded-[12px]" />
         </>
       )}
-      {items.map((g, index) => (
+      {commentsOnly && !canEdit && !isCreateSet && comments && (
+        <button type="button" className="guided-comments-enable min-h-[44px] rounded-[8px] bg-btnPrimary px-[16px] py-[10px] text-white"
+          onClick={() => {
+            setLoaded(false);
+            addRemoveInternal(current, true);
+            if (items.length === 1) {
+              addInternalValue(0, current, [{ id: makeId(10), content: '', media: [], delay: 0 }]);
+            }
+          }}>
+          {items.length > 1 ? 'Edit platform comments / posts' : 'Add platform comment or post'}
+        </button>
+      )}
+      {items.map((g, index) => commentsOnly && index === 0 ? (
+        canEdit && comments && items.length === 1 ? (
+          <AddPostButton key={g.id} num={0} onClick={addValue(0)}
+            postComment={postComment} identifier={internalFromAll?.identifier} />
+        ) : null
+      ) : (
         <div
           key={g.id}
           className={clsx(
@@ -478,7 +499,7 @@ export const EditorWrapper: FC<{
                 childButton={
                   <>
                     {(canEdit && items.length - 1 === index) || !comments ? (
-                      <div className="flex items-center">
+                      <div className="guided-comment-actions flex items-center">
                         <div className="flex-1">
                           {comments && (
                             <AddPostButton
@@ -523,7 +544,7 @@ export const EditorWrapper: FC<{
             {comments && (
               <div className="flex flex-col items-center gap-[10px] pe-[12px]">
                 <UpDownArrow
-                  isUp={index !== 0}
+                  isUp={commentsOnly ? index > 1 : index !== 0}
                   isDown={index !== items.length - 1}
                   onChange={changeOrder(index)}
                 />
