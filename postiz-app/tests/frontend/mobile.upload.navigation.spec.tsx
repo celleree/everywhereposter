@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TopMenu } from '../../apps/frontend/src/components/layout/top.menu';
 
 let mockRole = 'ADMIN';
@@ -28,8 +28,9 @@ it('has four mobile destinations and exposes the existing routes through More', 
   expect(screen.getByRole('link', { name: 'Scheduled' }).getAttribute('href')).toBe('/launches');
   expect(screen.getByRole('link', { name: 'Media' }).getAttribute('href')).toBe('/media');
   fireEvent.click(screen.getByRole('button', { name: 'More' }));
-  expect(screen.getByRole('dialog')).toBeTruthy();
-  const dialog = getComputedStyle(screen.getByRole('dialog').querySelector('[tabindex="-1"]')!);
+  const moreDialog = screen.getByRole('dialog', { name: 'More menu' });
+  expect(within(moreDialog).queryByText('More')).toBeNull();
+  const dialog = getComputedStyle(moreDialog.querySelector('[tabindex="-1"]')!);
   expect(dialog.overflowY).toBe('auto');
   expect(dialog.overflowX).toBe('hidden');
   expect(dialog.maxHeight).toBe('calc(100dvh - env(safe-area-inset-top))');
@@ -42,6 +43,26 @@ it('has four mobile destinations and exposes the existing routes through More', 
   fireEvent.click(screen.getByRole('button', { name: 'More' }));
   fireEvent.click(screen.getByRole('link', { name: 'Integrations' }));
   expect(screen.getByRole('button', { name: 'More' }).getAttribute('aria-expanded')).toBe('false');
+});
+
+it('keeps the More dialog named and closes it with the accessible close control or Escape', async () => {
+  render(<TopMenu mobileNav />);
+  const moreButton = screen.getByRole('button', { name: 'More' });
+  fireEvent.click(moreButton);
+  expect(screen.getByRole('dialog', { name: 'More menu' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Close More' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More menu' })).toBeNull());
+  expect(moreButton.getAttribute('aria-expanded')).toBe('false');
+
+  moreButton.focus();
+  fireEvent.click(moreButton);
+  fireEvent.keyDown(
+    screen.getByRole('dialog', { name: 'More menu' }).querySelector('[tabindex="-1"]')!,
+    { key: 'Escape' }
+  );
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More menu' })).toBeNull());
+  expect(moreButton.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(moreButton);
 });
 
 it('retains the existing role filter for Settings', () => {

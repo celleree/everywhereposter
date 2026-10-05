@@ -431,7 +431,8 @@ export const TopMenu: FC<{ mobileNav?: boolean }> = ({ mobileNav }) => {
           </button>
         </nav>
         <Drawer opened={moreOpen} onClose={() => setMoreOpen(false)} position="bottom"
-          title={t('more', 'More')} closeButtonLabel="Close More" size="auto" className="mobile-more-drawer"
+          title={<span className="mobile-more-dialog-title">More menu</span>}
+          closeButtonLabel="Close More" size="auto" className="mobile-more-drawer"
           styles={{ drawer: { background: 'var(--new-bgColor)', color: 'var(--new-btn-text)',
               maxHeight: 'calc(100dvh - env(safe-area-inset-top))', overflowY: 'auto', overflowX: 'hidden' },
             header: { background: 'var(--new-bgColor)' } }}>
