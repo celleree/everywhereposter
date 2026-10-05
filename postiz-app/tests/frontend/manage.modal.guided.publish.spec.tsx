@@ -4,6 +4,8 @@ import { readFileSync } from 'fs';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 let mockUseActualEditor = false;
+let mockDraftUser: any;
+jest.mock('@gitroom/frontend/components/layout/user.context', () => ({ useUser: () => mockDraftUser }));
 const mockFetch = jest.fn();
 const mockCheckAllValid = jest.fn();
 const mockShow = jest.fn();
@@ -191,6 +193,7 @@ import {
 } from '../../apps/frontend/src/components/new-launch/guided.composer.publish';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
+import { ComposerDraftRecovery, composerDraftKey, snapshotComposerDraft } from '../../apps/frontend/src/components/new-launch/composer.draft.recovery';
 
 const actualProviderModule = jest.requireActual('../../apps/frontend/src/components/new-launch/providers/high.order.provider');
 const MediaPayloadProvider = actualProviderModule.withProvider({
@@ -376,6 +379,8 @@ describe('ManageModal guided publishing bridge', () => {
   afterEach(() => document.querySelectorAll('style[data-test-mobile-recovery]').forEach((style) => style.remove()));
   beforeEach(() => {
     mockUseActualEditor = false;
+    mockDraftUser = undefined;
+    localStorage.clear();
     HTMLElement.prototype.scrollTo = jest.fn();
     mockFetch.mockReset();
     mockCheckAllValid.mockReset();
@@ -1068,6 +1073,101 @@ describe('ManageModal guided publishing bridge', () => {
     expect(
       useGuidedComposerStore.getState().reviewDrafts[founderLinkedIn.id].caption
     ).toBe('Edited founder caption.');
+  });
+
+  it('clears scratch recovery only after a new Create draft saves successfully', async () => {
+    mockDraftUser = { id: 'draft-user', orgId: 'draft-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    localStorage.setItem(key, JSON.stringify(snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null)));
+    const previousFetch = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => url.startsWith('/media/') ? { ok: true, json: async () => ({ id: url.split('/').pop(), path: '/video.mp4', type: 'video' }) } : previousFetch(url, options));
+    const view = render(<ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}><ManageModal {...manageModalProps} /></ComposerDraftRecovery>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Save as Draft' }));
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+    await waitFor(() => expect(localStorage.getItem(key)).toBeNull());
+    view.unmount();
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  it('journals direct Create publishing before POST and prevents another request after recovery', async () => {
+    mockDraftUser = { id: 'journal-user', orgId: 'journal-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    localStorage.setItem(key, JSON.stringify(snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null)));
+    const previousFetch = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.startsWith('/media/')) return { ok: true, json: async () => ({ id: url.split('/').pop(), path: '/video.mp4', originalName: 'video.mp4', type: 'video' }) };
+      if (url === '/posts' && options?.method === 'POST') {
+        expect(JSON.parse(localStorage.getItem(key)!).journal.destinationIds).toEqual(expect.arrayContaining([founderLinkedIn.id, companyLinkedIn.id]));
+      }
+      return previousFetch(url, options);
+    });
+    const recover = () => <ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}><ManageModal {...manageModalProps} /></ComposerDraftRecovery>;
+    const first = render(recover());
+    fireEvent.click(await screen.findByRole('button', { name: 'Post Now' }));
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+    first.unmount();
+    const postCount = () => mockFetch.mock.calls.filter(([url, options]) => url === '/posts' && options?.method === 'POST').length;
+    expect(postCount()).toBe(1);
+    render(recover());
+    fireEvent.click(await screen.findByRole('button', { name: 'Post Now' }));
+    await waitFor(() => expect(screen.getByText(/A previous publishing request may already have been accepted/)).toBeTruthy());
+    expect(postCount()).toBe(1);
+  });
+
+  it('blocks a second direct POST in the same mounted composer after transport uncertainty', async () => {
+    mockDraftUser = { id: 'transport-user', orgId: 'transport-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    localStorage.setItem(key, JSON.stringify(snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null)));
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.startsWith('/media/')) return { ok: true, json: async () => ({ id: url.split('/').pop(), path: '/video.mp4', type: 'video' }) };
+      if (url === '/posts/should-shortlink') return { ok: true, json: async () => ({ ask: false }) };
+      if (url === '/posts' && options?.method === 'POST') throw new Error('Network result unknown');
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}><ManageModal {...manageModalProps} /></ComposerDraftRecovery>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Post Now' }));
+    await waitFor(() => expect(mockShow).toHaveBeenCalledWith('Network result unknown', 'warning'));
+    expect(JSON.parse(localStorage.getItem(key)!).journal).toBeTruthy();
+    const button = screen.getByRole('button', { name: 'Post Now' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(mockFetch.mock.calls.filter(([url, options]) => url === '/posts' && options?.method === 'POST')).toHaveLength(1);
+  });
+
+  it('allows one guided preparation handoff to the actual POST and locks its accepted request', async () => {
+    mockDraftUser = { id: 'guided-user', orgId: 'guided-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    localStorage.setItem(key, JSON.stringify(snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null)));
+    const previousFetch = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => url.startsWith('/media/') ? { ok: true, json: async () => ({ id: url.split('/').pop(), path: '/video.mp4', type: 'video' }) } : previousFetch(url, options));
+    render(<ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}><GuidedComposerPublishBridgeProvider><ManageModal {...manageModalProps} guidedComposerActive /><GuidedComposerPublish /></GuidedComposerPublishBridgeProvider></ComposerDraftRecovery>);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Publish now' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+    await screen.findByText('Publishing was confirmed for every enabled destination.');
+    expect(mockFetch.mock.calls.filter(([url, options]) => url === '/posts' && options?.method === 'POST')).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem(key)!).journal).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Publish now' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Post Now' })).toBeDisabled();
+  });
+
+  it('clears unsent guided preparation after safe validation failure and permits the corrected retry', async () => {
+    mockDraftUser = { id: 'validation-user', orgId: 'validation-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    localStorage.setItem(key, JSON.stringify(snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null)));
+    providerResults[0].valid = false;
+    const previousFetch = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => url.startsWith('/media/') ? { ok: true, json: async () => ({ id: url.split('/').pop(), path: '/video.mp4', type: 'video' }) } : previousFetch(url, options));
+    render(<ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}><GuidedComposerPublishBridgeProvider><ManageModal {...manageModalProps} guidedComposerActive /><GuidedComposerPublish /></GuidedComposerPublishBridgeProvider></ComposerDraftRecovery>);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Publish now' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+    const retry = await screen.findByRole('button', { name: 'Prepare retry' });
+    expect(mockFetch.mock.calls.some(([url, options]) => url === '/posts' && options?.method === 'POST')).toBe(false);
+    expect(JSON.parse(localStorage.getItem(key)!).journal).toBeNull();
+    providerResults[0].valid = true;
+    fireEvent.click(retry);
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+    await screen.findByText('Publishing was confirmed for every enabled destination.');
+    expect(mockFetch.mock.calls.filter(([url, options]) => url === '/posts' && options?.method === 'POST')).toHaveLength(1);
   });
 
   it('keeps normal composer publishing unscoped and unchanged', async () => {
