@@ -227,21 +227,49 @@ const isGuidedMediaLibraryMedia = (media?: {
 export const MediaBox: FC<{
   setMedia: (params: { id: string; path: string }[]) => void;
   standalone?: boolean;
+  source?: 'library' | 'posted';
+  onSourceChange?: (source: 'library' | 'posted') => void;
+  hideSourceTabs?: boolean;
   type?: 'image' | 'video';
   guidedTranscription?: boolean;
   closeModal: () => void;
-}> = ({ type, standalone, setMedia, guidedTranscription = false }) => {
+}> = ({
+  type,
+  standalone,
+  source: controlledSource,
+  onSourceChange,
+  hideSourceTabs = false,
+  setMedia,
+  guidedTranscription = false,
+}) => {
   const [page, setPage] = useState(0);
-  const [source, setSource] = useState<'library' | 'posted'>('library');
+  const [localSource, setLocalSource] = useState<'library' | 'posted'>(
+    'library'
+  );
+  const source = controlledSource ?? localSource;
   const fetch = useFetch();
   const modals = useModals();
   const toaster = useToaster();
   const postedMedia = source === 'posted';
   const loadMedia = useCallback(async () => {
     const endpoint = postedMedia ? '/media/post-attached' : '/media';
-    return (await fetch(`${endpoint}?page=${page + 1}`)).json();
+    const response = await fetch(`${endpoint}?page=${page + 1}`);
+    if (!response.ok) {
+      throw new Error(`Media request failed with status ${response.status}`);
+    }
+
+    const body = await response.json();
+    if (
+      !body ||
+      !Array.isArray(body.results) ||
+      typeof body.pages !== 'number'
+    ) {
+      throw new Error('Media request returned an invalid response');
+    }
+
+    return body;
   }, [page, postedMedia]);
-  const { data, mutate, isLoading } = useSWR(
+  const { data, error, mutate, isLoading } = useSWR(
     `get-media-${source}-${page}`,
     loadMedia
   );
@@ -250,10 +278,17 @@ export const MediaBox: FC<{
   const uploaderRef = useRef<any>(null);
   const mediaDirectory = useMediaDirectory();
   const [loading, setLoading] = useState(false);
-  const changeSource = useCallback((nextSource: 'library' | 'posted') => {
-    setPage(0);
-    setSource(nextSource);
-  }, []);
+  const changeSource = useCallback(
+    (nextSource: 'library' | 'posted') => {
+      setPage(0);
+      if (onSourceChange) {
+        onSourceChange(nextSource);
+        return;
+      }
+      setLocalSource(nextSource);
+    },
+    [onSourceChange]
+  );
 
   const uppy = useUppyUploader({
     allowedFileTypes:
@@ -480,35 +515,39 @@ export const MediaBox: FC<{
       onDrop={dragAndDrop}
     >
       <div className="flex flex-col flex-1">
-        <div className="flex gap-[8px] mb-[12px]">
-          <button
-            onClick={() => changeSource('library')}
-            className={clsx(
-              'cursor-pointer h-[34px] px-[14px] rounded-[8px] text-[13px] font-[600]',
-              source === 'library'
-                ? 'bg-btnSimple text-white'
-                : 'bg-newColColor text-textColor'
-            )}
-          >
-            {t('media_library', 'Media Library')}
-          </button>
-          <button
-            onClick={() => changeSource('posted')}
-            className={clsx(
-              'cursor-pointer h-[34px] px-[14px] rounded-[8px] text-[13px] font-[600]',
-              postedMedia
-                ? 'bg-btnSimple text-white'
-                : 'bg-newColColor text-textColor'
-            )}
-          >
-            {t('posted_media', 'Posted media')}
-          </button>
-        </div>
+        {!hideSourceTabs && (
+          <div className="flex gap-[8px] mb-[12px]">
+            <button
+              onClick={() => changeSource('library')}
+              className={clsx(
+                'cursor-pointer h-[34px] px-[14px] rounded-[8px] text-[13px] font-[600]',
+                source === 'library'
+                  ? 'bg-btnSimple text-white'
+                  : 'bg-newColColor text-textColor'
+              )}
+            >
+              {t('media_library', 'Media Library')}
+            </button>
+            <button
+              onClick={() => changeSource('posted')}
+              className={clsx(
+                'cursor-pointer h-[34px] px-[14px] rounded-[8px] text-[13px] font-[600]',
+                postedMedia
+                  ? 'bg-btnSimple text-white'
+                  : 'bg-newColColor text-textColor'
+              )}
+            >
+              {t('posted_media', 'Posted media')}
+            </button>
+          </div>
+        )}
         <div
           className={clsx(
             'flex justify-end',
             postedMedia && 'hidden',
-            !isLoading && !data?.results?.length && 'hidden'
+            (!isLoading && !data?.results?.length) || error
+              ? 'hidden'
+              : undefined
           )}
         >
           <input
@@ -549,7 +588,8 @@ export const MediaBox: FC<{
         <div
           className={clsx(
             'flex-1 relative',
-            !isLoading &&
+            !error &&
+              !isLoading &&
               !data?.results?.length &&
               'bg-newTextColor/[0.02] rounded-[12px]'
           )}
@@ -557,14 +597,32 @@ export const MediaBox: FC<{
           <div
             className={clsx(
               'absolute -left-[3px] -top-[3px] withp3 h-full overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner',
-              !isLoading &&
+              !error &&
+                !isLoading &&
                 !data?.results?.length &&
                 'flex justify-center items-center gap-[20px] flex-col',
-              (isLoading || !!data?.results?.length) &&
+              (isLoading || !!data?.results?.length || error) &&
                 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6'
             )}
           >
-            {!isLoading && !data?.results?.length && (
+            {error && !isLoading && (
+              <div
+                role="alert"
+                className="col-span-full flex min-h-[180px] mobile:min-h-[90px] flex-col items-center justify-center gap-[8px] rounded-[12px] bg-newTextColor/[0.02] px-[12px] text-center"
+              >
+                <div className="text-[16px] font-[600] text-textColor">
+                  {t('media_could_not_be_loaded', 'Media could not be loaded')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => mutate()}
+                  className="min-h-[44px] rounded-[8px] bg-btnSimple px-[18px] text-[14px] font-[600] text-textColor"
+                >
+                  {t('retry', 'Retry')}
+                </button>
+              </div>
+            )}
+            {!error && !isLoading && !data?.results?.length && (
               <>
                 <NoMediaIcon />
                 <div className="text-[20px] font-[600]">

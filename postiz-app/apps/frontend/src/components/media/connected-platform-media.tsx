@@ -3,7 +3,6 @@
 import { PlatformVideoGrid } from '@gitroom/frontend/components/platform-analytics/platform.video.grid';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import clsx from 'clsx';
 import { FC, useEffect, useMemo, useState } from 'react';
 
 type MediaIntegration = {
@@ -53,53 +52,25 @@ export const ConnectedPlatformMedia: FC = () => {
   }
 
   return (
-    <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader p-[20px] flex flex-col gap-[18px]">
-      <div className="flex flex-col gap-[4px]">
+    <div className="rounded-[12px] border border-newTableBorder bg-newTableHeader p-[20px] mobile:p-[12px] flex flex-col gap-[14px]">
+      <div className="flex flex-col gap-[10px]">
         <h2 className="text-[22px] font-[500] text-newTableText">
           {t('connected_platform_videos', 'Connected Platform Videos')}
         </h2>
-        <div className="text-[13px] text-newTableText/60">
-          {t(
-            'connected_platform_videos_description',
-            'Browse videos that were already published on your connected channels before they were linked here.'
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-[12px]">
-        {supportedIntegrations.map((integration) => (
-          <button
-            key={integration.id}
-            onClick={() => setSelectedId(integration.id)}
-            className={clsx(
-              'min-w-[180px] rounded-[12px] border p-[12px] flex items-center gap-[12px] text-left transition-all',
-              selectedId === integration.id
-                ? 'border-ai bg-newBgLineColor'
-                : 'border-newTableBorder bg-newBgColorInner hover:border-ai'
-            )}
+        <label className="flex max-w-[440px] flex-col gap-[6px] text-[12px] font-[500] text-newTableText/70">
+          {t('connected_account', 'Connected account')}
+          <select
+            value={selectedId}
+            onChange={(event) => setSelectedId(event.target.value)}
+            className="min-h-[44px] w-full rounded-[8px] border border-newTableBorder bg-newBgColorInner px-[12px] text-[14px] text-newTableText"
           >
-            <div className="relative shrink-0">
-              <img
-                src={integration.picture || '/no-picture.jpg'}
-                alt={integration.name}
-                className="w-[36px] h-[36px] rounded-[10px] object-cover"
-              />
-              <img
-                src={`/icons/platforms/${integration.identifier}.png`}
-                alt={integration.identifier}
-                className="w-[18px] h-[18px] rounded-[6px] absolute -bottom-[4px] -right-[4px] border border-newTableHeader bg-newTableHeader"
-              />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[14px] font-[500] text-newTableText truncate">
-                {integration.name}
-              </div>
-              <div className="text-[12px] text-newTableText/55 truncate">
-                {integration.identifier}
-              </div>
-            </div>
-          </button>
-        ))}
+            {supportedIntegrations.map((integration) => (
+              <option key={integration.id} value={integration.id}>
+                {integration.name} — {integration.identifier}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <PlatformVideoGrid integration={selectedIntegration} showHeader={false} />
