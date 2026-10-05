@@ -38,7 +38,10 @@ jest.mock('@gitroom/react/helpers/image.with.fallback', () => ({
 }));
 
 import { GuidedComposerShell } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
-import { buildGuidedGenerationFingerprint } from '../../apps/frontend/src/components/new-launch/guided.composer.generation';
+import {
+  buildGuidedGenerationFingerprint,
+  getGuidedGenerationProgress,
+} from '../../apps/frontend/src/components/new-launch/guided.composer.generation';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
 
@@ -223,6 +226,38 @@ const renderGeneration = () =>
       <div>Existing composer content</div>
     </GuidedComposerShell>
   );
+
+describe('guided generation failure-event progress', () => {
+  it.each(['image', 'video'] as const)(
+    'reports a real platform failure without returning to source analysis for %s',
+    (sourceType) => {
+      expect(
+        getGuidedGenerationProgress('platform-rewrite-started', { platform: 'linkedin' }, sourceType)
+      ).toBe('Refining LinkedIn');
+      expect(
+        getGuidedGenerationProgress('platform-failed', { platform: 'linkedin' }, sourceType)
+      ).toBe('LinkedIn caption generation failed');
+      expect(
+        getGuidedGenerationProgress('platform-started', { platform: 'instagram' }, sourceType)
+      ).toBe('Generating Instagram');
+    }
+  );
+
+  it('reports the real image-plan failure before completion', () => {
+    expect(getGuidedGenerationProgress('image-plan-failed', {})).toBe(
+      'Image planning failed; finishing captions'
+    );
+    expect(getGuidedGenerationProgress('completed', response('partial'))).toBe(
+      'Finishing captions'
+    );
+  });
+
+  it('keeps a failure truthful when the platform label is unavailable', () => {
+    expect(getGuidedGenerationProgress('platform-failed', {})).toBe(
+      'Caption generation failed for one platform'
+    );
+  });
+});
 
 describe('guided composer generation transition', () => {
   beforeEach(() => {
