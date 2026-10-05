@@ -2083,9 +2083,11 @@ const ComposerUploadCard: FC<{
               <div className="composer-media-label text-[14px] font-[700] text-white">
                 Shared media
               </div>
-              <div className="text-[13px] text-textColor/65">
-                {media.length} asset{media.length > 1 ? 's' : ''} attached
-              </div>
+              {!guidedTranscription && (
+                <div className="text-[13px] text-textColor/65">
+                  {media.length} asset{media.length > 1 ? 's' : ''} attached
+                </div>
+              )}
             </div>
             <div className="grid min-w-0 max-w-full grid-cols-2 gap-[10px] md:grid-cols-3 xl:grid-cols-4 mobile:gap-[8px]">
               {media.slice(0, 8).map((item: any) => (
@@ -2108,7 +2110,7 @@ const ComposerUploadCard: FC<{
                     )}
                   <div className="aspect-[1/1]">
                     <VideoOrImage
-                      autoplay={true}
+                      autoplay={!guidedTranscription}
                       src={mediaDirectory.set(item.path)}
                     />
                   </div>
