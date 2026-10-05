@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mockFetch = jest.fn();
 const mockMutate = jest.fn();
+const mockUploaderMount = jest.fn();
+const mockUploaderUnmount = jest.fn();
 const mockIntegrations = Array.from({ length: 24 }, (_, index) => ({
   id: `integration-${index + 1}`,
   name: `Channel ${index + 1}`,
@@ -55,7 +57,14 @@ jest.mock('@gitroom/react/toaster/toaster', () => ({
   useToaster: () => ({ show: jest.fn() }),
 }));
 jest.mock('@gitroom/frontend/components/media/new.uploader', () => ({
-  useUppyUploader: () => ({ addFiles: jest.fn(), addFile: jest.fn() }),
+  useUppyUploader: () => {
+    const React = require('react');
+    React.useEffect(() => {
+      mockUploaderMount();
+      return () => mockUploaderUnmount();
+    }, []);
+    return { addFiles: jest.fn(), addFile: jest.fn() };
+  },
 }));
 jest.mock('@gitroom/frontend/components/layout/drop.files', () => ({
   DropFiles: ({
@@ -137,6 +146,8 @@ describe('main Media page', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     mockMutate.mockReset();
+    mockUploaderMount.mockReset();
+    mockUploaderUnmount.mockReset();
   });
 
   it('shows library media and preserves the posted-media source contract', async () => {
@@ -176,6 +187,8 @@ describe('main Media page', () => {
 
     expect(await screen.findByText('Posted fixture.jpg')).not.toBeNull();
     expect(mockFetch).toHaveBeenCalledWith('/media/post-attached?page=1');
+    expect(mockUploaderMount).toHaveBeenCalledTimes(1);
+    expect(mockUploaderUnmount).not.toHaveBeenCalled();
     expect(screen.getByText('Connected Platform Videos')).not.toBeNull();
     expect(
       screen.getByRole('combobox', { name: 'Connected account' })
@@ -219,6 +232,26 @@ describe('main Media page', () => {
 
     expect(await screen.findByText('Recovered fixture.jpg')).not.toBeNull();
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps Upload reachable when the shared library picker fails to load', async () => {
+    mockFetch.mockResolvedValue(
+      response({ message: 'Unavailable' }, false, 503)
+    );
+
+    const { unmount } = render(
+      <MediaBox setMedia={jest.fn()} closeModal={jest.fn()} />
+    );
+
+    expect(await screen.findByRole('alert')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Upload' })).not.toBeNull();
+
+    unmount();
+    render(
+      <MediaBox source="posted" setMedia={jest.fn()} closeModal={jest.fn()} />
+    );
+    expect(await screen.findByRole('alert')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Upload' })).toBeNull();
   });
 
   it('keeps many connected accounts in one compact accessible selector', async () => {

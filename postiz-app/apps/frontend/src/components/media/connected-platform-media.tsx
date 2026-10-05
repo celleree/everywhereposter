@@ -62,7 +62,7 @@ export const ConnectedPlatformMedia: FC = () => {
           <select
             value={selectedId}
             onChange={(event) => setSelectedId(event.target.value)}
-            className="min-h-[44px] w-full rounded-[8px] border border-newTableBorder bg-newBgColorInner px-[12px] text-[14px] text-newTableText"
+            className="min-h-[44px] w-full rounded-[8px] border border-newTableBorder bg-newBgColorInner px-[12px] text-[14px] mobile:text-[16px] text-newTableText"
           >
             {supportedIntegrations.map((integration) => (
               <option key={integration.id} value={integration.id}>

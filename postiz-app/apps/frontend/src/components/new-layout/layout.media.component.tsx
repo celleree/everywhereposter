@@ -31,7 +31,6 @@ export const MediaLayoutComponent = () => {
         ))}
       </div>
       <MediaBox
-        key={source}
         setMedia={() => {}}
         closeModal={() => {}}
         standalone={true}

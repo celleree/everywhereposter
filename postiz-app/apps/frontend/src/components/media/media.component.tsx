@@ -242,11 +242,21 @@ export const MediaBox: FC<{
   setMedia,
   guidedTranscription = false,
 }) => {
-  const [page, setPage] = useState(0);
   const [localSource, setLocalSource] = useState<'library' | 'posted'>(
     'library'
   );
   const source = controlledSource ?? localSource;
+  const [pagination, setPagination] = useState({ source, page: 0 });
+  const page = pagination.source === source ? pagination.page : 0;
+  const setPage = useCallback(
+    (nextPage: number) => setPagination({ source, page: nextPage }),
+    [source]
+  );
+  useEffect(() => {
+    if (pagination.source !== source) {
+      setPagination({ source, page: 0 });
+    }
+  }, [pagination.source, source]);
   const fetch = useFetch();
   const modals = useModals();
   const toaster = useToaster();
@@ -287,7 +297,7 @@ export const MediaBox: FC<{
       }
       setLocalSource(nextSource);
     },
-    [onSourceChange]
+    [onSourceChange, setPage]
   );
 
   const uppy = useUppyUploader({
@@ -545,9 +555,7 @@ export const MediaBox: FC<{
           className={clsx(
             'flex justify-end',
             postedMedia && 'hidden',
-            (!isLoading && !data?.results?.length) || error
-              ? 'hidden'
-              : undefined
+            !error && !isLoading && !data?.results?.length && 'hidden'
           )}
         >
           <input
@@ -557,12 +565,16 @@ export const MediaBox: FC<{
             className="hidden"
             multiple={true}
           />
-          {!postedMedia && !isLoading && !!data?.results?.length && (
-            <div className="flex gap-[8px]">
-              {btn}
-              <ThirdPartyMediaLibrary onImported={() => mutate()} />
-            </div>
-          )}
+          {!postedMedia &&
+            !isLoading &&
+            (error || !!data?.results?.length) && (
+              <div className="flex gap-[8px]">
+                {btn}
+                {!error && (
+                  <ThirdPartyMediaLibrary onImported={() => mutate()} />
+                )}
+              </div>
+            )}
         </div>
         <div
           className={clsx(
@@ -608,7 +620,7 @@ export const MediaBox: FC<{
             {error && !isLoading && (
               <div
                 role="alert"
-                className="col-span-full flex min-h-[180px] mobile:min-h-[90px] flex-col items-center justify-center gap-[8px] rounded-[12px] bg-newTextColor/[0.02] px-[12px] text-center"
+                className="col-span-full flex min-h-[180px] mobile:min-h-[90px] [@media(max-height:500px)]:min-h-[44px] [@media(max-height:500px)]:flex-row flex-col items-center justify-center gap-[8px] rounded-[12px] bg-newTextColor/[0.02] px-[12px] text-center"
               >
                 <div className="text-[16px] font-[600] text-textColor">
                   {t('media_could_not_be_loaded', 'Media could not be loaded')}
