@@ -90,6 +90,14 @@ export const getGuidedGenerationProgress = (name: string, data?: any, sourceType
   if (name === 'platform-rewrite-started' && platformLabel) {
     return `Refining ${platformLabel}`;
   }
+  if (name === 'platform-failed') {
+    return platformLabel
+      ? `${platformLabel} caption generation failed`
+      : 'Caption generation failed for one platform';
+  }
+  if (name === 'image-plan-failed') {
+    return 'Image planning failed; finishing captions';
+  }
   if (
     name === 'platform-complete' ||
     name === 'image-plan-started' ||
