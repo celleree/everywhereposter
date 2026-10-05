@@ -115,7 +115,7 @@ export const GuidedComposerGeneration: FC<{ progress: string }> = ({
         aria-hidden="true"
         className="mx-auto h-[38px] w-[38px] animate-spin rounded-full border-[3px] border-newBorder border-t-ai"
       />
-      <h2 className="mt-[18px] text-[20px] font-[700] text-white">
+      <h2 className="mt-[18px] text-[20px] font-[700] text-textColor">
         {progress || 'Preparing your post set'}
       </h2>
       <p className="mx-auto mt-[8px] max-w-[420px] text-[13px] leading-[1.6] text-textColor/60">

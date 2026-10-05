@@ -445,7 +445,7 @@ describe('guided composer shell', () => {
       screen.getAllByText(
         'Choose the platforms and connected accounts for this post.'
       )
-    ).toHaveLength(2);
+    ).toHaveLength(1); // The shell-owned helper remains pending its coordinated removal.
     expect(
       screen
         .getByTestId('guided-composer-upload-content')
