@@ -103,6 +103,11 @@ export const Input = ({
           <button
             disabled={sendDisabled}
             onClick={isInProgress && !hideStopButton ? onStop : send}
+            aria-label={
+              isInProgress && !hideStopButton
+                ? context.labels.stopGenerating
+                : 'Send message'
+            }
             data-copilotkit-in-progress={inProgress}
             data-test-id={
               inProgress
