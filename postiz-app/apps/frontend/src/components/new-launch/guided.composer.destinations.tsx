@@ -184,17 +184,14 @@ export const GuidedComposerDestinations: FC<{
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] px-[40px] py-[40px] mobile:px-[12px] mobile:py-[18px]">
-      <section className="rounded-[20px] border border-newBorder bg-newBgColorInner p-[24px] mobile:rounded-[16px] mobile:p-[16px]">
-        <div className="flex items-start justify-between gap-[18px] mobile:flex-col">
+    <div className="mx-auto w-full max-w-[1600px] px-[32px] py-[24px] mobile:px-[10px] mobile:py-[12px]">
+      <section className="rounded-[16px] border border-newBorder bg-newBgColorInner p-[16px] mobile:rounded-[14px] mobile:p-[12px]">
+        <div className="flex items-start justify-between gap-[14px] mobile:flex-col mobile:gap-[12px]">
           <div>
-            <h2 className="text-[18px] font-[700] text-white">
+            <h2 className="text-[18px] font-[700] text-textColor">
               Choose accounts
             </h2>
-            <p className="mt-[6px] text-[13px] leading-[1.5] text-textColor/65">
-              Choose the platforms and connected accounts for this post.
-            </p>
-            <p className="mt-[6px] text-[12px] text-textColor/50">
+            <p className="mt-[3px] text-[12px] text-textColor/60">
               {selectedCount} of {availableIntegrations.length}{' '}
               {availableIntegrations.length === 1 ? 'account' : 'accounts'} selected
             </p>
@@ -209,7 +206,7 @@ export const GuidedComposerDestinations: FC<{
                 selectedCount === availableIntegrations.length
               }
               onClick={selectAll}
-              className="rounded-[9px] border border-newBorder bg-newBgColor px-[14px] py-[9px] text-[12px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-45 mobile:flex-1"
+              className="min-h-[44px] rounded-[9px] border border-newBorder bg-newBgColor px-[14px] py-[8px] text-[12px] font-[700] text-textColor disabled:cursor-not-allowed disabled:opacity-45 mobile:flex-1"
             >
               Select all
             </button>
@@ -217,7 +214,7 @@ export const GuidedComposerDestinations: FC<{
               type="button"
               disabled={disabled || selectedCount === 0}
               onClick={() => setSelectedIntegrations([])}
-              className="rounded-[9px] border border-newBorder bg-newBgColor px-[14px] py-[9px] text-[12px] font-[700] text-white disabled:cursor-not-allowed disabled:opacity-45 mobile:flex-1"
+              className="min-h-[44px] rounded-[9px] border border-newBorder bg-newBgColor px-[14px] py-[8px] text-[12px] font-[700] text-textColor disabled:cursor-not-allowed disabled:opacity-45 mobile:flex-1"
             >
               Deselect all
             </button>
@@ -225,8 +222,8 @@ export const GuidedComposerDestinations: FC<{
         </div>
 
         {availableIntegrations.length === 0 ? (
-          <div className="mt-[20px] rounded-[14px] border border-dashed border-newBorder bg-newBgColor px-[18px] py-[34px] text-center">
-            <div className="text-[14px] font-[700] text-white">
+          <div className="mt-[16px] rounded-[12px] border border-dashed border-newBorder bg-newBgColor px-[16px] py-[28px] text-center">
+            <div className="text-[14px] font-[700] text-textColor">
               No connected accounts available
             </div>
             <p className="mx-auto mt-[6px] max-w-[480px] text-[12px] leading-[1.5] text-textColor/55">
@@ -234,12 +231,12 @@ export const GuidedComposerDestinations: FC<{
             </p>
           </div>
         ) : (
-          <div className="mt-[24px] flex flex-col gap-[26px]">
+          <div className="mt-[16px] flex flex-col gap-[18px]">
             {groupedIntegrations.map(
               ({ identity, integrations: platformIntegrations }) => (
                 <section key={identity.key}>
-                  <div className="mb-[10px] flex items-center justify-between gap-[12px]">
-                    <h3 className="text-[14px] font-[700] text-white">
+                  <div className="mb-[6px] flex items-center justify-between gap-[10px]">
+                    <h3 className="text-[13px] font-[700] text-textColor">
                       {identity.label}
                     </h3>
                     <span className="text-[11px] text-textColor/50">
@@ -250,7 +247,7 @@ export const GuidedComposerDestinations: FC<{
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-[12px] md:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-[8px] md:grid-cols-2 xl:grid-cols-3">
                     {platformIntegrations.map((integration) => {
                       const selected = selectedIds.has(integration.id);
                       const existingSettings = selectedIntegrations.find(
@@ -259,6 +256,7 @@ export const GuidedComposerDestinations: FC<{
                       const platformName = getGuidedPlatformIdentity(
                         integration.identifier
                       ).label;
+                      const descriptionId = `guided-destination-description-${integration.id}`;
 
                       return (
                         <button
@@ -268,6 +266,7 @@ export const GuidedComposerDestinations: FC<{
                           aria-label={`${selected ? 'Deselect' : 'Select'} ${
                             integration.name
                           } on ${platformName}`}
+                          aria-describedby={descriptionId}
                           disabled={disabled}
                           onClick={() =>
                             addOrRemoveSelectedIntegration(
@@ -276,22 +275,22 @@ export const GuidedComposerDestinations: FC<{
                             )
                           }
                           className={clsx(
-                            'group flex min-h-[88px] w-full items-center gap-[14px] rounded-[16px] border bg-newBgColor px-[14px] py-[14px] text-start transition-all disabled:cursor-not-allowed disabled:opacity-55 xs:flex-col xs:items-start xs:gap-[10px]',
+                            'group flex min-h-[64px] w-full items-center gap-[10px] rounded-[12px] border bg-newBgColor px-[10px] py-[8px] text-start transition-all disabled:cursor-not-allowed disabled:opacity-55',
                             !disabled && 'hover:border-ai hover:bg-boxHover',
                             selected
                               ? 'border-ai bg-newBgLineColor'
                               : 'border-newBorder'
                           )}
                         >
-                          <div className="relative h-[52px] w-[52px] min-w-[52px]">
+                          <div className="relative h-[40px] w-[40px] min-w-[40px]">
                             <ImageWithFallback
                               fallbackSrc="/no-picture.jpg"
                               src={integration.picture || '/no-picture.jpg'}
                               alt={integration.name}
-                              width={52}
-                              height={52}
+                              width={40}
+                              height={40}
                               className={clsx(
-                                'h-[52px] w-[52px] rounded-full border object-cover',
+                                'h-[40px] w-[40px] rounded-full border object-cover',
                                 selected
                                   ? 'border-black'
                                   : 'border-transparent'
@@ -304,15 +303,24 @@ export const GuidedComposerDestinations: FC<{
                             />
                           </div>
 
-                          <div className="min-w-0 flex-1 xs:w-full">
-                            <div className="truncate text-[15px] font-[700] text-white">
+                          <div className="min-w-0 flex-1">
+                            <div
+                              className="truncate text-[14px] font-[700] text-textColor"
+                              title={integration.name}
+                            >
                               {integration.name}
                             </div>
-                            <div className="mt-[2px] text-[13px] text-textColor/70">
+                            <div
+                              className="mt-[1px] truncate text-[12px] text-textColor/70"
+                              title={integration.display || platformName}
+                            >
                               {integration.display || platformName}
                             </div>
                             {!!integration.customer?.name && (
-                              <div className="mt-[6px] inline-flex max-w-full rounded-full bg-newBgLineColor px-[10px] py-[4px] text-[11px] font-[600] uppercase tracking-[0.04em] text-textColor/70">
+                              <div
+                                className="mt-[3px] inline-block max-w-full truncate rounded-full bg-newBgLineColor px-[7px] py-[2px] text-[10px] font-[600] uppercase tracking-[0.03em] text-textColor/70"
+                                title={integration.customer.name}
+                              >
                                 {integration.customer.name}
                               </div>
                             )}
@@ -320,7 +328,7 @@ export const GuidedComposerDestinations: FC<{
 
                           <div
                             className={clsx(
-                              'flex h-[28px] min-w-[86px] items-center justify-center rounded-full border px-[12px] text-[12px] font-[700] uppercase tracking-[0.04em] xs:w-full',
+                              'flex h-[28px] min-w-[68px] items-center justify-center rounded-full border px-[8px] text-[10px] font-[700] uppercase tracking-[0.03em]',
                               selected
                                 ? 'border-ai bg-newBgLineColor text-textColor'
                                 : 'border-newBorder text-textColor/65'
@@ -328,6 +336,11 @@ export const GuidedComposerDestinations: FC<{
                           >
                             {selected ? 'Selected' : 'Select'}
                           </div>
+                          <span id={descriptionId} className="sr-only">
+                            Account details: {integration.display || platformName}
+                            {!!integration.customer?.name &&
+                              `, ${integration.customer.name}`}
+                          </span>
                         </button>
                       );
                     })}
