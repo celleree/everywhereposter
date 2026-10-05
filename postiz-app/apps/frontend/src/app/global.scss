@@ -697,6 +697,24 @@ html[dir='rtl'] [dir='ltr'] {
   .copilotKitInput {
     width: 100% !important;
   }
+
+  .copilotKitInput > textarea {
+    font-size: 16px;
+  }
+
+  .copilotKitInputControlButton {
+    align-items: center;
+    background: white;
+    border-radius: 9999px;
+    display: inline-flex;
+    height: 32px;
+    justify-content: center;
+    width: 32px;
+  }
+
+  .copilotKitAssistantMessage + div + .copilotKitUserMessage {
+    margin-top: 1.5rem;
+  }
 }
 .rm-bg .b2 {
   padding-top: 0 !important;
