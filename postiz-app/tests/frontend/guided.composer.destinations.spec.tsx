@@ -237,7 +237,18 @@ describe('guided composer destinations step', () => {
       name: 'Continue to Review',
     });
 
+    expect(
+      screen.getByRole('heading', { name: 'Choose accounts', level: 2 })
+    ).toBeTruthy();
     expect(screen.getByText('0 of 2 accounts selected')).toBeTruthy();
+    // The shared shell still owns this step description. This component no
+    // longer renders a duplicate; removing the remaining shell copy is a
+    // separately coordinated follow-up.
+    expect(
+      screen.getAllByText(
+        'Choose the platforms and connected accounts for this post.'
+      )
+    ).toHaveLength(1);
     expect(
       screen.getByText('Select at least one destination to continue.')
     ).toBeTruthy();
@@ -351,6 +362,14 @@ describe('guided composer destinations step', () => {
     expect(
       screen.getByRole('heading', { name: 'LinkedIn', level: 3 })
     ).toBeTruthy();
+    const instagramAccount = screen.getByRole('button', {
+      name: 'Select Founder Instagram on Instagram',
+    });
+    expect(
+      document.getElementById(
+        instagramAccount.getAttribute('aria-describedby') || ''
+      )?.textContent
+    ).toContain('Account details: @founder, Creator Team');
     expect(screen.getByText('Creator Team')).toBeTruthy();
     expect(screen.queryByText('Disabled account')).toBeNull();
     expect(screen.queryByText('Intermediary account')).toBeNull();
