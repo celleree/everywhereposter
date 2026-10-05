@@ -10,6 +10,7 @@ import React, {
   useState,
 } from 'react';
 import clsx from 'clsx';
+import { INTERRUPTED_GENERATION, useComposerDraftRecovery } from './composer.draft.recovery';
 import { useShallow } from 'zustand/react/shallow';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import {
@@ -87,6 +88,7 @@ export const GuidedComposerShell: FC<{
   children: ReactNode;
   locked?: boolean;
 }> = ({ children, locked = false }) => {
+  const recovery = useComposerDraftRecovery();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const generationRequestActiveRef = useRef(false);
   const generationAbortControllerRef = useRef<AbortController | null>(null);
@@ -384,7 +386,7 @@ export const GuidedComposerShell: FC<{
     };
 
     void syncStatus(
-      transcriptionStatus === 'PROCESSING' ? 'GET' : 'POST'
+      transcriptionStatus === 'PROCESSING' || recovery.restoredSourceId === sourceMediaId ? 'GET' : 'POST'
     );
 
     return () => {
@@ -398,6 +400,7 @@ export const GuidedComposerShell: FC<{
     setTranscriptionState,
     sourceMediaId,
     transcriptionStatus,
+    recovery.restoredSourceId,
   ]);
 
   useEffect(() => {
@@ -407,6 +410,7 @@ export const GuidedComposerShell: FC<{
   }, [pruneReviewDrafts, selectedIntegrations]);
 
   useEffect(() => {
+    if (recovery.restored && generationError === INTERRUPTED_GENERATION) return;
     if (
       generationInputFingerprint &&
       generationInputFingerprint !== generationFingerprint &&
@@ -430,6 +434,8 @@ export const GuidedComposerShell: FC<{
     generationInputFingerprint,
     generationStatus,
     invalidateGeneration,
+    recovery.restored,
+    generationError,
   ]);
 
   const generateForReview = useCallback(async () => {
@@ -631,9 +637,9 @@ export const GuidedComposerShell: FC<{
       generationAbortControllerRef.current?.abort();
       generationAbortControllerRef.current = null;
       generationRequestActiveRef.current = false;
-      resetGuidedComposer();
+      if (!recovery.active) resetGuidedComposer();
     };
-  }, [resetGuidedComposer]);
+  }, [resetGuidedComposer, recovery.active]);
 
   return (
     <div data-composer-step={composerStep} className="guided-composer-shell flex h-full min-h-0 w-full flex-col overflow-hidden bg-newBgColor">

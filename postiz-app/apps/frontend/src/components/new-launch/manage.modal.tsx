@@ -1,4 +1,5 @@
 'use client';
+import { useComposerDraftRecovery } from './composer.draft.recovery';
 
 import React, {
   FC,
@@ -159,6 +160,7 @@ export const ManageModal: FC<
   const [copyGenerationStatus, setCopyGenerationStatus] = useState('');
   const { data: shortlinkPreferenceData } = useShortlinkPreference();
 
+  const recovery = useComposerDraftRecovery();
   const { addEditSets, mutate, customClose, dummy, standaloneCreate } = props;
 
   const {
@@ -862,6 +864,7 @@ export const ManageModal: FC<
       type: 'draft' | 'now' | 'schedule' | 'update',
       guidedRequest?: GuidedPublishRequest
     ): Promise<GuidedPublishSubmitResult> => {
+      if (recovery.publishLocked) return { ok: false, kind: 'duplicate', ambiguous: true, message: 'Check Schedule and connected accounts for the previous publishing request before creating another post.' };
       const submissionDate =
         guidedRequest?.type === 'schedule'
           ? dayjs(guidedRequest.scheduledAt)
@@ -1171,6 +1174,10 @@ export const ManageModal: FC<
               };
             }
 
+            if (recovery.active && standaloneCreate && !existingData.integration && (type === 'now' || type === 'schedule') && !recovery.beginSubmission(data.posts.map((post: any) => post.integration.id))) {
+              setLoading(false);
+              return { ok: false, kind: 'preflight', ambiguous: false, message: 'The publishing attempt could not be saved safely. Keep this page open and restore browser storage before trying again.' };
+            }
             const response = await fetch('/posts', {
               method: 'POST',
               body: JSON.stringify(data),
@@ -1256,6 +1263,7 @@ export const ManageModal: FC<
           };
         }
 
+        if (recovery.active && standaloneCreate && type === 'draft' && !existingData.integration && !addEditSets && !dummy) recovery.savedDraftComplete();
         if (!addEditSets) {
           mutate();
           if (!guidedRequest) {
@@ -1282,6 +1290,8 @@ export const ManageModal: FC<
     [
       addEditSets,
       customClose,
+      recovery,
+      standaloneCreate,
       date,
       dummy,
       existingData.group,
@@ -1653,7 +1663,7 @@ export const ManageModal: FC<
               {!addEditSets && (
                 <button
                   disabled={
-                    selectedIntegrations.length === 0 || loading || locked
+                    selectedIntegrations.length === 0 || loading || locked || recovery.publishLocked
                   }
                   onClick={schedule('draft')}
                   className="relative flex h-[44px] cursor-pointer items-center justify-center rounded-[8px] bg-btnSimple px-[20px] text-[15px] font-[600] disabled:cursor-not-allowed mobile:w-full"
@@ -1672,7 +1682,7 @@ export const ManageModal: FC<
                 <button
                   className="btnSub flex h-[44px] min-w-[180px] items-center justify-center gap-[8px] rounded-[8px] bg-btnPrimary ps-[20px] pe-[16px] text-[15px] font-[600] text-white outline-none disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full mobile:min-w-0"
                   disabled={
-                    selectedIntegrations.length === 0 || loading || locked
+                    selectedIntegrations.length === 0 || loading || locked || recovery.publishLocked
                   }
                   onClick={schedule('draft')}
                 >
@@ -1682,7 +1692,7 @@ export const ManageModal: FC<
               {!addEditSets && standaloneCreate && !dummy && !isPublishedPost && (
                 <button
                   disabled={
-                    selectedIntegrations.length === 0 || loading || locked
+                    selectedIntegrations.length === 0 || loading || locked || recovery.publishLocked
                   }
                   onClick={schedule('now')}
                   className="relative flex h-[44px] cursor-pointer items-center justify-center rounded-[8px] bg-btnPrimary px-[20px] text-[15px] font-[600] text-white disabled:cursor-not-allowed disabled:opacity-80 mobile:w-full"
@@ -1704,6 +1714,7 @@ export const ManageModal: FC<
                       selectedIntegrations.length === 0 ||
                       loading ||
                       locked ||
+                      recovery.publishLocked ||
                       (isPublishedPost && !!updatePublishedDisabledReason)
                     }
                     onClick={schedule(
@@ -1747,7 +1758,7 @@ export const ManageModal: FC<
                     <button
                       onClick={schedule('now')}
                       disabled={
-                        selectedIntegrations.length === 0 || loading || locked
+                        selectedIntegrations.length === 0 || loading || locked || recovery.publishLocked
                       }
                       className="absolute bottom-[100%] -left-[12px] z-[300] hidden w-[206px] rounded-[8px] bg-newBgColorInner p-[12px] disabled:cursor-not-allowed disabled:opacity-80 [@media(hover:hover)]:group-hover:flex mobile:hidden"
                     >
