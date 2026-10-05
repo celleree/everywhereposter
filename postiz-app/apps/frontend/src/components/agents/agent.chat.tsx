@@ -1,13 +1,6 @@
 'use client';
 
-import React, {
-  FC,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import React, { FC, useCallback, useContext, useEffect, useMemo } from 'react';
 import { CopilotChat, CopilotKitCSSProperties } from '@copilotkit/react-ui';
 import {
   InputProps,
@@ -20,10 +13,7 @@ import {
   useCopilotAction,
   useCopilotMessagesContext,
 } from '@copilotkit/react-core';
-import {
-  MediaPortal,
-  PropertiesContext,
-} from '@gitroom/frontend/components/agents/agent';
+import { PropertiesContext } from '@gitroom/frontend/components/agents/agent';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useParams } from 'next/navigation';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -68,7 +58,9 @@ export const AgentChat: FC = () => {
             className="w-full h-full"
             labels={{
               title: t('your_assistant', 'Your Assistant'),
-              initial: t('agent_welcome_message', `Hello, I am your EverywherePoster agent 🙌🏻.
+              initial: t(
+                'agent_welcome_message',
+                `Hello, I am your EverywherePoster agent 🙌🏻.
               
 I can schedule a post or multiple posts to multiple channels and generate pictures and videos.
 
@@ -77,7 +69,8 @@ You can select the channels you want to use from the left menu.
 You can see your previous conversations from the right menu.
 
 You can also use me as an MCP Server, check Settings >> Public API
-`),
+`
+              ),
             }}
             UserMessage={Message}
             Input={NewInput}
@@ -198,83 +191,59 @@ const Message: FC<UserMessageProps> = (props) => {
       .replace(/\[\-\-Media\-\-\](.*)\[\-\-Media\-\-\]/g, (match, p1) => {
         return `<div class="flex justify-center mt-[20px]">${p1}</div>`;
       })
-      .replace(
-        /(\[--integrations--\][\s\S]*?\[--integrations--\])/g,
-        () => {
-          return ``;
-        }
-      );
+      .replace(/(\[--integrations--\][\s\S]*?\[--integrations--\])/g, () => {
+        return ``;
+      });
   }, [props.message?.content]);
   return (
     <div
-      className="copilotKitMessage copilotKitUserMessage min-w-[300px]"
+      className="copilotKitMessage copilotKitUserMessage"
       dangerouslySetInnerHTML={{ __html: convertContentToImagesAndVideo }}
     />
   );
 };
-const NewInput: FC<InputProps> = (props) => {
-  const [media, setMedia] = useState([] as { path: string; id: string }[]);
-  const [value, setValue] = useState('');
+export const NewInput: FC<InputProps> = (props) => {
   const { properties, allProperties } = useContext(PropertiesContext);
   return (
-    <>
-      <MediaPortal
-        value={value}
-        media={media}
-        setMedia={(e) => setMedia(e.target.value)}
-      />
-      <Input
-        {...props}
-        onChange={setValue}
-        onSend={(text) => {
-          const integrations = properties.length ? properties : allProperties;
-          const browserTimeZone =
-            Intl.DateTimeFormat().resolvedOptions().timeZone;
-          const browserCurrentDateTime = dayjs().format(
-            'YYYY-MM-DD HH:mm:ss Z'
-          );
-          const channels = integrations.map((p, index) => {
-            const platform = String(p.identifier || p.platform || '');
-            const platformLabel = (platform.split('-')[0] || 'Channel')
-              .split(/[\s_]+/)
-              .filter(Boolean)
-              .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-              .join(' ');
-            const accountName = p.name || p.display || '';
+    <Input
+      {...props}
+      onChange={() => {}}
+      onSend={(text) => {
+        const integrations = properties.length ? properties : allProperties;
+        const browserTimeZone =
+          Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const browserCurrentDateTime = dayjs().format('YYYY-MM-DD HH:mm:ss Z');
+        const channels = integrations.map((p, index) => {
+          const platform = String(p.identifier || p.platform || '');
+          const platformLabel = (platform.split('-')[0] || 'Channel')
+            .split(/[\s_]+/)
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(' ');
+          const accountName = p.name || p.display || '';
 
-            return {
-              number: index + 1,
-              id: p.id,
-              platform,
-              platformLabel,
-              channel: accountName || platform,
-              accountName,
-              profilePicture: p.picture,
-              additionalSettings: p.additionalSettings,
-            };
-          });
-          const channelList = channels
-            .map(
-              (channel) =>
-                `${channel.number}. ${channel.platformLabel}${
-                  channel.accountName ? `: ${channel.accountName}` : ''
-                }`
-            )
-            .join('\n');
-          const send = props.onSend(
-            text +
-              (media.length > 0
-                ? '\n[--Media--]' +
-                  media
-                    .map((m) =>
-                      m.path.indexOf('mp4') > -1
-                        ? `Video: ${m.path}`
-                        : `Image: ${m.path}`
-                    )
-                    .join('\n') +
-                  '\n[--Media--]'
-                : '') +
-              `
+          return {
+            number: index + 1,
+            id: p.id,
+            platform,
+            platformLabel,
+            channel: accountName || platform,
+            accountName,
+            profilePicture: p.picture,
+            additionalSettings: p.additionalSettings,
+          };
+        });
+        const channelList = channels
+          .map(
+            (channel) =>
+              `${channel.number}. ${channel.platformLabel}${
+                channel.accountName ? `: ${channel.accountName}` : ''
+              }`
+          )
+          .join('\n');
+        return props.onSend(
+          text +
+            `
 ${
   channels.length
     ? `[--integrations--]
@@ -291,13 +260,9 @@ Structured channel data: ${JSON.stringify(channels)}
 [--integrations--]`
     : ``
 }`
-          );
-          setValue('');
-          setMedia([]);
-          return send;
-        }}
-      />
-    </>
+        );
+      }}
+    />
   );
 };
 
