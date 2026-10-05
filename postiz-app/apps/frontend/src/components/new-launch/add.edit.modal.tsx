@@ -2,6 +2,7 @@
 import 'reflect-metadata';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import dayjs from 'dayjs';
+import { useComposerDraftRecovery } from './composer.draft.recovery';
 import { FC, useEffect } from 'react';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { ManageModal } from '@gitroom/frontend/components/new-launch/manage.modal';
@@ -56,6 +57,7 @@ export const canRenderEmptyGuidedComposer = (
   !props.set?.posts?.length;
 
 export const AddEditModal: FC<AddEditModalProps> = (props) => {
+  const recovery = useComposerDraftRecovery();
   const { setAllIntegrations, setDate, setIsCreateSet, setDummy } =
     useLaunchStore(
       useShallow((state) => ({
@@ -69,7 +71,7 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
   const integrations = useLaunchStore((state) => state.integrations);
   useEffect(() => {
     setDummy(!!props.dummy);
-    setDate(props.date || newDayjs());
+    if (!recovery.restored) setDate(props.date || newDayjs());
     setIsCreateSet(!!props.addEditSets);
   }, []);
 
@@ -181,6 +183,7 @@ export const AddEditModalInner: FC<AddEditModalProps> = (props) => {
 };
 
 export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
+  const recovery = useComposerDraftRecovery();
   const existingData = useExistingData();
   const {
     reset,
@@ -246,7 +249,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
       setCurrent(props.focusedChannel);
     }
 
-    addGlobalValue(
+    if (!recovery.restored && (!recovery.active || !useLaunchStore.getState().global.length)) addGlobalValue(
       0,
       props.onlyValues?.length
         ? props.onlyValues.map((p) => ({
@@ -283,7 +286,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
     );
 
     return () => {
-      reset();
+      if (!recovery.active) reset();
     };
   }, []);
 

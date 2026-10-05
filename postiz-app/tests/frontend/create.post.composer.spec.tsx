@@ -1,3 +1,4 @@
+jest.mock('@gitroom/frontend/components/new-launch/composer.draft.recovery', () => ({ ComposerDraftRecovery: ({ children }: any) => children }));
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import dayjs from 'dayjs';

@@ -8,9 +8,11 @@ import React, {
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { useForm, FormProvider } from 'react-hook-form';
+import { draftJson, useComposerDraftRecovery } from '../composer.draft.recovery';
 import { IsOptional } from 'class-validator';
 import { classValidatorResolver } from '@hookform/resolvers/class-validator';
 import { getInternalPostValues, useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
@@ -118,6 +120,7 @@ export const withProvider = function <T extends object>(params: {
   } = params;
 
   return forwardRef((props: { id: string; previewPostId?: string }, ref) => {
+    const recovery = useComposerDraftRecovery();
     const t = useT();
     const fetch = useFetch();
     const {
@@ -263,15 +266,31 @@ export const withProvider = function <T extends object>(params: {
     const hasPreviewContent = !!value?.[0]?.content?.length;
     const hasPreviewMedia = !!value?.[0]?.media?.length;
 
+    const initialSettings = useRef(selectedIntegration.settings);
+    const settingsValues = recovery.active ? initialSettings.current : selectedIntegration.settings;
     const form = useForm({
       resolver: classValidatorResolver(dto || Empty),
-      ...(Object.keys(selectedIntegration.settings).length > 0
-        ? { values: { ...selectedIntegration.settings } }
+      ...(Object.keys(settingsValues).length > 0
+        ? { values: { ...settingsValues } }
         : {}),
       mode: 'all',
       criteriaMode: 'all',
       reValidateMode: 'onChange',
     });
+
+    useEffect(() => {
+      if (!recovery.active) return;
+      const subscription = form.watch(() => {
+        // Values stay in the live form; mirroring does not reset it on each keystroke.
+        try {
+          const settings = draftJson(form.getValues());
+          useLaunchStore.setState((state) => ({ selectedIntegrations: state.selectedIntegrations.map((selected) =>
+            selected.integration.id === props.id ? { ...selected, settings } : selected
+          ) }));
+        } catch { recovery.settingsSaveFailed(); }
+      });
+      return () => subscription.unsubscribe();
+    }, [form, props.id, recovery.active]);
 
     useImperativeHandle(
       ref,

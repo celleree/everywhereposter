@@ -12,6 +12,7 @@ import React, {
   useState,
 } from 'react';
 import clsx from 'clsx';
+import { useComposerDraftRecovery } from './composer.draft.recovery';
 import type { Dayjs } from 'dayjs';
 import { useShallow } from 'zustand/react/shallow';
 import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
@@ -342,6 +343,7 @@ export const GuidedComposerPublish: FC<{
   active?: boolean;
   onSubmittingChange?: (submitting: boolean) => void;
 }> = ({ active = true, onSubmittingChange }) => {
+  const recovery = useComposerDraftRecovery();
   const fetch = useFetch();
   const { available, submit } = useContext(GuidedPublishBridgeContext);
   const { global, integrations, selectedIntegrations, chars, date, setDate } =
@@ -356,7 +358,7 @@ export const GuidedComposerPublish: FC<{
       }))
     );
   const reviewDrafts = useGuidedComposerStore((state) => state.reviewDrafts);
-  const [timing, setTiming] = useState<GuidedPublishTiming>('now');
+  const [timing, setTiming] = useState<GuidedPublishTiming>(recovery.timing);
   const [phase, setPhase] = useState<
     'idle' | 'submitting' | 'success' | 'failed'
   >('idle');
@@ -434,6 +436,7 @@ export const GuidedComposerPublish: FC<{
 
     if (
       submissionInFlightRef.current ||
+      recovery.publishLocked ||
       !available ||
       !submissionDestinations.length ||
       hasBlockingError
@@ -441,6 +444,10 @@ export const GuidedComposerPublish: FC<{
       return;
     }
 
+    if (!recovery.beginSubmission(submissionDestinations.map((destination) => destination.id))) {
+      setError('The publishing attempt could not be saved safely. Keep this page open and try again once draft storage is available.');
+      return;
+    }
     submissionInFlightRef.current = true;
     onSubmittingChange?.(true);
     setPhase('submitting');
@@ -486,6 +493,7 @@ export const GuidedComposerPublish: FC<{
         const safeToRetry =
           !submitted.ambiguous &&
           (submitted.kind === 'validation' || submitted.kind === 'preflight');
+        if (safeToRetry) recovery.safeSubmissionFailure();
         setResults((currentResults) => {
           const nextResults = { ...currentResults };
           submissionDestinations.forEach((destination) => {
@@ -594,6 +602,7 @@ export const GuidedComposerPublish: FC<{
     submit,
     submissionDestinations,
     timing,
+    recovery,
   ]);
 
   const retry = useCallback(() => {
@@ -748,6 +757,7 @@ export const GuidedComposerPublish: FC<{
                 checked={timing === 'now'}
                 onChange={() => {
                   setTiming('now');
+                  recovery.setTiming('now');
                   if (error === GUIDED_SCHEDULE_TIME_ERROR) {
                     setError('');
                   }
@@ -775,7 +785,7 @@ export const GuidedComposerPublish: FC<{
                 name="guided-publish-timing"
                 value="schedule"
                 checked={timing === 'schedule'}
-                onChange={() => setTiming('schedule')}
+                onChange={() => { setTiming('schedule'); recovery.setTiming('schedule'); }}
               />
               <span>
                 <span className="block text-[13px] font-[700] text-white">
@@ -860,6 +870,7 @@ export const GuidedComposerPublish: FC<{
             type="button"
             onClick={submitPublish}
             disabled={
+              recovery.publishLocked ||
               phase === 'submitting' ||
               phase === 'success' ||
               phase === 'failed' ||
