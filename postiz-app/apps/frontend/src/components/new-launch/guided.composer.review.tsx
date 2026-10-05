@@ -2,6 +2,7 @@
 
 import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
+import { INTERRUPTED_GENERATION, useComposerDraftRecovery } from './composer.draft.recovery';
 import { useShallow } from 'zustand/react/shallow';
 import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { VideoFrame } from '@gitroom/react/helpers/video.frame';
@@ -176,6 +177,8 @@ export const getGuidedReviewDraftValidation = (
 };
 
 export const GuidedComposerReview: FC = () => {
+  const recovery = useComposerDraftRecovery();
+  const generationError = useGuidedComposerStore((state) => state.generationError);
   const fetch = useFetch();
   const { global, integrations, selectedIntegrations, chars } = useLaunchStore(
     useShallow((state) => ({
@@ -277,8 +280,9 @@ export const GuidedComposerReview: FC = () => {
   );
 
   useEffect(() => {
+    if (recovery.restored && generationError === INTERRUPTED_GENERATION) return;
     reconcileReviewDrafts(seeds);
-  }, [reconcileReviewDrafts, seeds]);
+  }, [reconcileReviewDrafts, seeds, recovery.restored, generationError]);
 
   const visibleDrafts = useMemo(
     () =>
@@ -288,7 +292,7 @@ export const GuidedComposerReview: FC = () => {
     [destinations, reviewDrafts]
   );
   const [activeDestinationId, setActiveDestinationId] = useState<string | null>(
-    null
+    useLaunchStore.getState().current === 'global' ? null : useLaunchStore.getState().current
   );
   const [showOriginal, setShowOriginal] = useState(false);
 
@@ -305,7 +309,8 @@ export const GuidedComposerReview: FC = () => {
 
   useEffect(() => {
     setShowOriginal(false);
-  }, [activeDestinationId]);
+    if (recovery.active && activeDestinationId) useLaunchStore.getState().setCurrent(activeDestinationId);
+  }, [activeDestinationId, recovery.active]);
 
   const activeDestination = destinations.find(
     (destination) => destination.id === activeDestinationId
