@@ -2,6 +2,8 @@
 
 import React, { FC } from 'react';
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
+import { ComposerDraftRecovery } from '@gitroom/frontend/components/new-launch/composer.draft.recovery';
+import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import type { AddEditModalProps } from '@gitroom/frontend/components/new-launch/add.edit.modal';
 
 export const isGuidedComposerShellEnabled = (
@@ -11,10 +13,15 @@ export const isGuidedComposerShellEnabled = (
 export const CreatePostComposer: FC<
   Omit<AddEditModalProps, 'enableGuidedComposerShell'>
 > = (props) => {
-  return (
+  const user = useUser();
+  const enabled = isGuidedComposerShellEnabled();
+  const composer = (
     <AddEditModal
       {...props}
-      enableGuidedComposerShell={isGuidedComposerShellEnabled()}
+      enableGuidedComposerShell={enabled}
     />
   );
+  return props.standaloneCreate && !props.set && !props.dummy && !props.addEditSets && !props.onlyValues?.length
+    ? <ComposerDraftRecovery key={`${user?.id || ''}:${user?.orgId || ''}`} integrations={props.allIntegrations || []}>{composer}</ComposerDraftRecovery>
+    : composer;
 };
