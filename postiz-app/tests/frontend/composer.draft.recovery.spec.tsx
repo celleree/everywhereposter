@@ -591,3 +591,73 @@ it('conservatively blocks a legacy publishing journal without an attempt identit
   expect(screen.queryByTestId('manage-modal')).toBeNull();
   expect(localStorage.getItem(key())).toBe(raw);
 });
+
+it('locks an orphaned unsent preparation after reopening and consumes an actual request only once', async () => {
+  const attempts: boolean[] = [];
+  function Prepare() {
+    const recovery = useComposerDraftRecovery();
+    return (
+      <>
+        <button
+          disabled={recovery.publishLocked}
+          onClick={() => recovery.prepareSubmission(['channel-1'])}
+        >
+          Prepare fixture
+        </button>
+        <button
+          disabled={recovery.publishLocked}
+          onClick={() => {
+            attempts.push(
+              recovery.beginSubmission(['channel-1']),
+              recovery.beginSubmission(['channel-1'])
+            );
+            recovery.safeSubmissionFailure();
+          }}
+        >
+          Consume fixture
+        </button>
+      </>
+    );
+  }
+  const view = render(
+    <ComposerDraftRecovery integrations={[]}>
+      <Prepare />
+    </ComposerDraftRecovery>
+  );
+  await screen.findByRole('button', { name: 'Prepare fixture' });
+  act(() =>
+    useLaunchStore
+      .getState()
+      .setGlobalValue([{ id: 'post-1', content: 'Saved', delay: 0, media: [] }])
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare fixture' }));
+  expect(draft().journal).toBeTruthy();
+  expect(
+    screen.getByRole('button', { name: 'Consume fixture' })
+  ).not.toBeDisabled();
+  view.unmount();
+  const reopened = render(
+    <ComposerDraftRecovery integrations={[]}>
+      <Prepare />
+    </ComposerDraftRecovery>
+  );
+  expect(
+    await screen.findByRole('button', { name: 'Consume fixture' })
+  ).toBeDisabled();
+  reopened.unmount();
+  localStorage.clear();
+  render(
+    <ComposerDraftRecovery integrations={[]}>
+      <Prepare />
+    </ComposerDraftRecovery>
+  );
+  await screen.findByRole('button', { name: 'Prepare fixture' });
+  act(() =>
+    useLaunchStore
+      .getState()
+      .setGlobalValue([{ id: 'post-2', content: 'Saved', delay: 0, media: [] }])
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Consume fixture' }));
+  expect(attempts).toEqual([true, false]);
+  expect(draft().journal).toBeTruthy();
+});

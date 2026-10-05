@@ -444,7 +444,7 @@ export const GuidedComposerPublish: FC<{
       return;
     }
 
-    if (!recovery.beginSubmission(submissionDestinations.map((destination) => destination.id))) {
+    if (!recovery.prepareSubmission(submissionDestinations.map((destination) => destination.id))) {
       setError('The publishing attempt could not be saved safely. Keep this page open and try again once draft storage is available.');
       return;
     }

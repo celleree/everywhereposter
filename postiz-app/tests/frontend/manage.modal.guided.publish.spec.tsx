@@ -1114,6 +1114,62 @@ describe('ManageModal guided publishing bridge', () => {
     expect(postCount()).toBe(1);
   });
 
+  it('blocks a second direct POST in the same mounted composer after transport uncertainty', async () => {
+    mockDraftUser = { id: 'transport-user', orgId: 'transport-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    localStorage.setItem(key, JSON.stringify(snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null)));
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.startsWith('/media/')) return { ok: true, json: async () => ({ id: url.split('/').pop(), path: '/video.mp4', type: 'video' }) };
+      if (url === '/posts/should-shortlink') return { ok: true, json: async () => ({ ask: false }) };
+      if (url === '/posts' && options?.method === 'POST') throw new Error('Network result unknown');
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}><ManageModal {...manageModalProps} /></ComposerDraftRecovery>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Post Now' }));
+    await waitFor(() => expect(mockShow).toHaveBeenCalledWith('Network result unknown', 'warning'));
+    expect(JSON.parse(localStorage.getItem(key)!).journal).toBeTruthy();
+    const button = screen.getByRole('button', { name: 'Post Now' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(mockFetch.mock.calls.filter(([url, options]) => url === '/posts' && options?.method === 'POST')).toHaveLength(1);
+  });
+
+  it('allows one guided preparation handoff to the actual POST and locks its accepted request', async () => {
+    mockDraftUser = { id: 'guided-user', orgId: 'guided-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    localStorage.setItem(key, JSON.stringify(snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null)));
+    const previousFetch = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => url.startsWith('/media/') ? { ok: true, json: async () => ({ id: url.split('/').pop(), path: '/video.mp4', type: 'video' }) } : previousFetch(url, options));
+    render(<ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}><GuidedComposerPublishBridgeProvider><ManageModal {...manageModalProps} guidedComposerActive /><GuidedComposerPublish /></GuidedComposerPublishBridgeProvider></ComposerDraftRecovery>);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Publish now' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+    await screen.findByText('Publishing was confirmed for every enabled destination.');
+    expect(mockFetch.mock.calls.filter(([url, options]) => url === '/posts' && options?.method === 'POST')).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem(key)!).journal).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Publish now' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Post Now' })).toBeDisabled();
+  });
+
+  it('clears unsent guided preparation after safe validation failure and permits the corrected retry', async () => {
+    mockDraftUser = { id: 'validation-user', orgId: 'validation-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    localStorage.setItem(key, JSON.stringify(snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null)));
+    providerResults[0].valid = false;
+    const previousFetch = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => url.startsWith('/media/') ? { ok: true, json: async () => ({ id: url.split('/').pop(), path: '/video.mp4', type: 'video' }) } : previousFetch(url, options));
+    render(<ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}><GuidedComposerPublishBridgeProvider><ManageModal {...manageModalProps} guidedComposerActive /><GuidedComposerPublish /></GuidedComposerPublishBridgeProvider></ComposerDraftRecovery>);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Publish now' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+    const retry = await screen.findByRole('button', { name: 'Prepare retry' });
+    expect(mockFetch.mock.calls.some(([url, options]) => url === '/posts' && options?.method === 'POST')).toBe(false);
+    expect(JSON.parse(localStorage.getItem(key)!).journal).toBeNull();
+    providerResults[0].valid = true;
+    fireEvent.click(retry);
+    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }));
+    await screen.findByText('Publishing was confirmed for every enabled destination.');
+    expect(mockFetch.mock.calls.filter(([url, options]) => url === '/posts' && options?.method === 'POST')).toHaveLength(1);
+  });
+
   it('keeps normal composer publishing unscoped and unchanged', async () => {
     render(<ManageModal {...manageModalProps} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Post Now' }));

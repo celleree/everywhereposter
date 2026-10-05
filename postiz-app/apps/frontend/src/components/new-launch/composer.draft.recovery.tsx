@@ -486,6 +486,7 @@ type Recovery = {
   publishLocked: boolean;
   timing: ComposerDraft['timing'];
   setTiming: (timing: ComposerDraft['timing']) => void;
+  prepareSubmission: (destinationIds: string[]) => boolean;
   beginSubmission: (destinationIds: string[]) => boolean;
   safeSubmissionFailure: () => void;
   settingsSaveFailed: () => void;
@@ -498,6 +499,7 @@ const RecoveryContext = createContext<Recovery>({
   publishLocked: false,
   timing: 'now',
   setTiming: () => {},
+  prepareSubmission: () => true,
   beginSubmission: () => true,
   safeSubmissionFailure: () => {},
   settingsSaveFailed: () => {},
@@ -521,6 +523,8 @@ export function ComposerDraftRecovery({
   const [phase, setPhase] = useState<'loading' | 'ready' | 'blocked'>(
     'loading'
   );
+  const [ownPostStarted, setOwnPostStarted] = useState(false);
+  const ownPostStartedRef = useRef(false);
   const [foreignLock, setForeignLock] = useState(false);
   const foreignLockRef = useRef(false);
   const [message, setMessage] = useState('');
@@ -541,6 +545,8 @@ export function ComposerDraftRecovery({
     setRestored(null);
     completedRef.current = false;
     journalRef.current = null;
+    ownPostStartedRef.current = false;
+    setOwnPostStarted(false);
     foreignLockRef.current = false;
     setForeignLock(false);
     (async () => {
@@ -683,8 +689,9 @@ export function ComposerDraftRecovery({
     };
   }, [phase, scope]);
 
-  const beginSubmission = (destinationIds: string[]) => {
+  const prepareSubmission = (destinationIds: string[]) => {
     if (restored?.journal || !scope) return !restored?.journal;
+    if (ownPostStartedRef.current) return false;
     try {
       if (adoptJournal()) return false;
     } catch {
@@ -700,7 +707,16 @@ export function ComposerDraftRecovery({
     };
     return saveRef.current() && !foreignLockRef.current;
   };
+  const beginSubmission = (destinationIds: string[]) => {
+    // Preparation may pass through validation; only the actual POST consumes it.
+    // This ref also blocks a retry before React renders the visible lock.
+    if (!prepareSubmission(destinationIds)) return false;
+    ownPostStartedRef.current = true;
+    setOwnPostStarted(true);
+    return true;
+  };
   const safeSubmissionFailure = () => {
+    if (ownPostStartedRef.current) return;
     try {
       if (adoptJournal() || !scope) return;
       const identity = latest.current.user!;
@@ -770,13 +786,14 @@ export function ComposerDraftRecovery({
         active: !!scope,
         restored: !!restored,
         restoredSourceId: restored?.guided.sourceMediaId || null,
-        publishLocked: !!restored?.journal || foreignLock,
+        publishLocked: !!restored?.journal || foreignLock || ownPostStarted,
         timing,
         setTiming: (value) => {
           timingRef.current = value;
           setTiming(value);
           saveRef.current();
         },
+        prepareSubmission,
         beginSubmission,
         safeSubmissionFailure,
         savedDraftComplete,
@@ -787,7 +804,7 @@ export function ComposerDraftRecovery({
       }}
     >
       {!!message && <div role="alert">{message}</div>}
-      {(!!restored?.journal || foreignLock) && (
+      {(!!restored?.journal || foreignLock || ownPostStarted) && (
         <div role="alert">
           A previous publishing request may already have been accepted. Check
           Schedule and connected accounts before starting another post.{' '}
