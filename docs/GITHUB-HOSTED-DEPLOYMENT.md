@@ -49,6 +49,8 @@ Never substitute a short SHA, `latest`, remembered HEAD, unrelated green workflo
 
 ### Gates and permitted transitions
 
+For parallel PRs, waiting/working branches remain frozen as `main` advances. One named integrator owns merge order. Only the selected candidate enters the integration slot: fetch `main`, synchronize normally if needed, pass the INTEGRATE repository gate, push the resulting HEAD, wait for CI matching that PR/HEAD and merge-ref/base identity, then obtain fresh independent review of the exact pushed HEAD. Immediately before merge, recheck live HEAD, current main, matching CI, review, findings, and mergeability using the existing guarded merge. If main advances and strict GitHub protection blocks merge, repeat this sequence only for the selected candidate. A HEAD change invalidates review; uncommitted changes are never eligible for final exact-HEAD review. This lifecycle does not change deployment mechanics.
+
 Every row is a hard gate. Only matching successful evidence permits its next action. Pending evidence means the named waiting state; missing or unclear authorization means the approval state. Failed, cancelled, stale, mismatched, or ambiguous evidence follows the stop rule below for every row.
 
 | Gate | Required identity/evidence | Permitted next action / waiting or approval state |

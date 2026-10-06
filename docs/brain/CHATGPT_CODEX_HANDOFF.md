@@ -122,9 +122,13 @@ For bounded implementation work coordinated manually between ChatGPT and Codex, 
 6. **Re-verify.** Re-run the relevant checks. Any HEAD change after a required exact-SHA review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
 7. **Merge/deploy gate.** Merge or deployment still requires the repository's normal human approvals and operational rules.
 
+For parallel PRs, waiting/working branches remain frozen as `main` advances. One named integrator owns merge order; only the selected candidate is synchronized. Fetch `main`, synchronize normally if needed, pass the INTEGRATE gate, push the resulting HEAD, wait for matching CI, and obtain fresh independent review of that exact pushed HEAD. If main races before merge, repeat only for that candidate. Any HEAD change invalidates review; final exact-HEAD review cannot cover uncommitted work.
+
 Simple low-risk mechanical work may combine investigation and implementation when there is no meaningful design decision, review boundary, or value from a separate checkpoint.
 
 For an explicitly authorized bounded release, follow the [release-coordinator lifecycle](../GITHUB-HOSTED-DEPLOYMENT.md#bounded-release-coordinator-lifecycle). Successful gates do not need repeated human handoffs for already-authorized continuation steps. Merge/deployment approvals and failure stops remain mandatory; this exception to manual checkpoint relaying does not authorize new work. Release reporting uses that lifecycle's concise result format rather than repeating the full implementation handoff at every gate.
+
+The no-argument repository-state check remains strict/current-main for unattended callers. Explicit START, CONTINUE, and INTEGRATE modes govern worker lifecycle: CONTINUE requires valid branch-bound local start provenance but does not require worker HEAD to contain current `main`; INTEGRATE requires freshly fetched `origin/main` to be an ancestor of worker HEAD.
 
 ## Review depth and edge cases
 
