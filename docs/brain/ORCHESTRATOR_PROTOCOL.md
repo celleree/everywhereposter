@@ -94,7 +94,7 @@ At the start of a project-continuation cycle:
 
 1. Confirm the canonical checkout path is `/home/arund/dev/everywhereposter`.
 2. Confirm the canonical checkout is on `main` and clean.
-3. Confirm local `main` matches current `origin/main` before creating worker branches.
+3. Confirm local `main` matches freshly fetched `origin/main` before START; create each worker using `scripts/start-change.sh ... --worktree` so canonical `main` stays in place and provenance is recorded.
 4. Read `AGENTS.md`.
 5. Read `docs/brain/CURRENT_WORK.md`.
 6. Read only the active roadmap or subsystem documents needed for the current workstream.
@@ -109,18 +109,18 @@ For each task:
 
 1. Define a narrow task contract with objective, scope, explicit exclusions, verification, and return format.
 2. Choose the cheapest model/reasoning combination likely to complete it correctly.
-3. Create an isolated WSL-native branch/worktree from current `main`.
+3. Create an isolated WSL-native branch/worktree from current `main` with START provenance.
 4. Dispatch one implementation worker by default.
 5. Let the worker investigate and implement only the approved bounded scope.
 6. Require focused verification and an exact branch/base/HEAD handoff.
 7. Open a pull request when implementation is ready, unless the worker already opened it under the approved workflow.
-8. Inspect the exact PR HEAD, diff, verification evidence, and CI state.
+8. Inspect the PR diff and focused evidence. The named integrator selects one candidate, fetches/synchronizes main if needed, passes `--integrate`, pushes its final HEAD, and waits for matching CI before final review.
 9. When independent review is required, dispatch a fresh reviewer against the exact HEAD SHA. The implementer may not serve as the final independent reviewer.
 10. Send only concrete review findings or CI failures back to a repair worker/session.
 11. If HEAD changes after a required exact-SHA review, obtain fresh review of the new HEAD. A trivial repair may receive a narrowly scoped fresh review.
 12. Recheck CI and required gates.
 13. When review and CI are complete, apply the roadmap-specific merge authorization below; otherwise stop at the human merge gate.
-14. After any merge, verify live `main`, reconcile affected worktrees and dependencies, record any material durable checkpoint, and continue newly unblocked work.
+14. After any merge, verify live `main` and record material checkpoints. Leave waiting/working PRs frozen; do not routinely synchronize or revalidate them just because main advanced.
 15. Select the next bounded task and repeat; merge readiness alone does not end the orchestration loop.
 
 ## State machine
@@ -129,6 +129,8 @@ Use these task states when useful:
 
 - READY
 - IMPLEMENTING
+- WAITING FOR INTEGRATION
+- INTEGRATING
 - REVIEWING
 - REPAIRING
 - CI / VERIFICATION
@@ -150,7 +152,9 @@ The root orchestrator owns worktree lifecycle.
 - Remove stale local worktrees only after their branch/PR state is understood and no uncommitted work would be lost.
 - Never create orchestrated worktrees under `/mnt/c`.
 
-Do not run `scripts/start-change.sh` in the canonical checkout during orchestrated worktree mode; that script switches the active checkout. The root should create the worker branch/worktree directly from current `main` instead.
+Run `scripts/start-change.sh <branch> --worktree /home/arund/dev/<worker-name>` from the clean canonical checkout on current `main`. START fetches and verifies `origin/main`, creates the worker from that exact SHA, records branch-bound provenance, and leaves canonical `main` in place. Workers use `scripts/check-repository-state.sh --continue`; it requires clean state and valid provenance but allows `origin/main` to advance beyond worker HEAD. The no-argument check remains strict/current-main for existing unattended callers.
+
+Waiting and working PRs do not synchronize routinely. One named integrator owns merge order. For the single selected candidate, fetch `main`, synchronize once with a normal non-force operation if needed, pass `--integrate`, push final HEAD, wait for matching CI, then request fresh independent exact-HEAD review. Recheck live HEAD, main, CI, review, findings, and mergeability immediately before the existing guarded merge. If main advances and strict GitHub protection blocks merge, repeat integration only for this candidate; a changed HEAD invalidates review. Final exact-HEAD review covers committed, pushed work only.
 
 ## Parallelism
 
@@ -227,7 +231,7 @@ For a pull request bounded to `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`, th
 
 Immediately before merging, re-read the live PR HEAD, review result, required checks, mergeability, and unresolved findings. If any condition is false or unknown, repair, wait, or use the applicable human gate. This authorization covers merge only; it does not authorize a previously blocked implementation, broaden scope, access production, deploy, or alter any other approval gate.
 
-After an authorized merge, verify that live `main` contains the merged result, reconcile affected worktrees and dependency assumptions, and continue the next newly unblocked roadmap task.
+After an authorized merge, verify that live `main` contains the merged result and continue the next newly unblocked roadmap task. Waiting/working branches may continue implementation with `--continue`; synchronize only the next selected integration candidate.
 
 ## Production boundary
 
