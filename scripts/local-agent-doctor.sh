@@ -4,7 +4,6 @@ set -u
 # Noninteractive bash can still source BASH_ENV even with --noprofile/--norc.
 unset ENV BASH_ENV
 export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=Never
-export COREPACK_ENABLE_NETWORK=0 COREPACK_ENABLE_AUTO_PIN=0
 FAILED=0
 pass() { printf 'PASS [%s] %s\n' "$1" "$2"; }
 fail() { printf 'FAIL [%s] %s\n' "$1" "$2"; FAILED=1; }
@@ -28,6 +27,10 @@ for tool in timeout uname stat realpath git sh bash gh node pnpm codex; do
   case "$resolved" in
     /mnt/*|*.exe|'') fail "$category" "$tool is missing or resolves to mounted/Windows tooling."; continue ;;
   esac
+  if [ "$tool" = pnpm ] && { [ ! -f "$resolved" ] || [ ! -x "$resolved" ]; }; then
+    fail TOOLCHAIN 'pnpm must resolve to a native executable launcher file.'
+    continue
+  fi
   case "$location" in
     /*) case "$location" in
           /mnt/*|*.exe) fail "$category" "$tool resolves to Windows/mounted tooling; use a WSL-native executable." ;;
@@ -110,20 +113,22 @@ else
 fi
 
 NODE_VERSION=$(probe node --version 2>/dev/null) || NODE_VERSION=
-PNPM_VERSION=$(probe pnpm --version 2>/dev/null) || PNPM_VERSION=
-if probe node -e '
+PNPM_PIN=$(probe node -e '
   const p = require(process.argv[1]);
   const range = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)\.(\d+)\.(\d+)$/.exec(p.engines.node);
   const v = /^v(\d+)\.(\d+)\.(\d+)$/.exec(process.argv[2]);
   const compare = (a, b) => a.reduce((r, n, i) => r || n - b[i], 0);
   const valid = range && v && compare(v.slice(1).map(Number), range.slice(1,4).map(Number)) >= 0 &&
     compare(v.slice(1).map(Number), range.slice(4).map(Number)) < 0 &&
-    p.packageManager === "pnpm@" + process.argv[3];
-  process.exit(valid ? 0 : 1);
-' "$ROOT/postiz-app/package.json" "$NODE_VERSION" "$PNPM_VERSION" >/dev/null 2>&1; then
-  pass TOOLCHAIN "Node $NODE_VERSION / pnpm $PNPM_VERSION satisfy postiz-app/package.json."
+    typeof p.packageManager === "string" && /^pnpm@(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(p.packageManager);
+  if (!valid) process.exit(1);
+  process.stdout.write(p.packageManager);
+' "$ROOT/postiz-app/package.json" "$NODE_VERSION" 2>/dev/null) || PNPM_PIN=
+if [ -n "$PNPM_PIN" ]; then
+  pass TOOLCHAIN "Node $NODE_VERSION satisfies its engine; native pnpm launcher and expected pin $PNPM_PIN checked statically."
+  echo 'INFO [TOOLCHAIN] pnpm/Corepack are never executed; installed/resolved pnpm version is not verified.'
 else
-  fail TOOLCHAIN 'Node/pnpm probe failed or versions disagree with postiz-app/package.json; nothing installed.'
+  fail TOOLCHAIN 'Node runtime/engine check failed or packageManager is not an exact numeric pnpm version pin; nothing installed.'
 fi
 
 if probe codex --version >/dev/null 2>&1 && probe codex login status >/dev/null 2>&1; then

@@ -9,11 +9,17 @@ cp "$SOURCE/postiz-app/package.json" "$FIXTURE/repo/postiz-app/package.json"
 export REAL_NODE=$(command -v node) REAL_BASH=$(command -v bash)
 export REAL_SH=$(command -v sh) REAL_GIT=$(command -v git)
 export REAL_TIMEOUT=$(command -v timeout) FIXTURE
+# The repo-root declaration differs: only the app manifest supplies the expected pin.
+"$REAL_NODE" -e '
+  const fs = require("fs"), p = JSON.parse(fs.readFileSync(process.argv[1]));
+  p.packageManager = "pnpm@9.15.9";
+  fs.writeFileSync(process.argv[2], JSON.stringify(p));
+' "$FIXTURE/repo/postiz-app/package.json" "$FIXTURE/repo/package.json"
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$FIXTURE/gitconfig"
 export FIXTURE_KERNEL=6.6.0-microsoft-standard-WSL2 FIXTURE_FS=ext2/ext3
 export FIXTURE_COMMON=/home/arund/dev/everywhereposter/.git
 export FIXTURE_URL=https://github.com/celleree/everywhereposter.git
-export FIXTURE_PUSH=$FIXTURE_URL FIXTURE_NODE=v22.12.0 FIXTURE_PNPM=10.6.1
+export FIXTURE_PUSH=$FIXTURE_URL FIXTURE_NODE=v22.12.0 FIXTURE_COREPACK_DEFAULT=99.0.0
 export FIXTURE_HELPER='!/usr/bin/gh auth git-credential'
 export FIXTURE_OWNER=celleree/everywhereposter
 export FIXTURE_MAIN_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -72,9 +78,11 @@ case "$name" in
   node)
     [ "${FIXTURE_NODE_FAIL:-0}" = 0 ] || { echo TOKEN-DO-NOT-PRINT; exit 1; }
     if [ "$1" = --version ]; then echo "$FIXTURE_NODE"; else exec "$REAL_NODE" "$@"; fi ;;
-  pnpm)
-    [ "${FIXTURE_PNPM_FAIL:-0}" = 0 ] || { echo TOKEN-DO-NOT-PRINT >&2; exit 1; }
-    echo "$FIXTURE_PNPM" ;;
+  pnpm|corepack)
+    # A version request can still create cache files and use the global default.
+    mkdir -p "$FIXTURE/corepack-cache"
+    : > "$FIXTURE/corepack-cache/lastKnownGood.json"
+    echo "$FIXTURE_COREPACK_DEFAULT" ;;
   codex) [ "${FIXTURE_CODEX_FAIL:-0}" = 0 ] ;;
   bash)
     [ "${FIXTURE_SHELL_FAIL:-0}" = 0 ] || { echo TOKEN-DO-NOT-PRINT; exit 1; }
@@ -94,7 +102,7 @@ case "$name" in
 esac
 SH
 chmod +x "$FIXTURE/bin/mock"
-for tool in uname stat realpath git gh node pnpm codex bash sh timeout; do
+for tool in uname stat realpath git gh node pnpm corepack codex bash sh timeout; do
   ln -s mock "$FIXTURE/bin/$tool"
 done
 for tool in grep cat sha256sum; do
@@ -113,6 +121,12 @@ rm "$FIXTURE/startup-write"
 bash -lc : > "$FIXTURE/startup-output"
 grep -Fq PROFILE-OUTPUT-DO-NOT-PRINT "$FIXTURE/startup-output"
 rm "$FIXTURE/startup-write"
+for tool in pnpm corepack; do
+  "$tool" --version > "$FIXTURE/corepack-output"
+  grep -Fxq "$FIXTURE_COREPACK_DEFAULT" "$FIXTURE/corepack-output"
+  [ -f "$FIXTURE/corepack-cache/lastKnownGood.json" ]
+  rm -r "$FIXTURE/corepack-cache"
+done
 MANIFEST_BEFORE=$(sha256sum postiz-app/package.json)
 COUNT=0
 run_case() {
@@ -126,6 +140,7 @@ run_case() {
   if grep -Eq 'TOKEN-DO-NOT-PRINT|PROFILE-OUTPUT-DO-NOT-PRINT' "$FIXTURE/output"; then echo 'FAIL: leaked probe/startup output'; exit 1; fi
   [ ! -e "$FIXTURE/startup-write" ] || { echo 'FAIL: sourced startup file'; exit 1; }
   [ ! -e "$FIXTURE/credential-lifecycle" ] || { echo 'FAIL: invoked credential lifecycle'; exit 1; }
+  [ ! -e "$FIXTURE/corepack-cache" ] || { echo 'FAIL: created Corepack cache/files'; exit 1; }
   case "$label" in
     'FAIL [SHELL]'|'FAIL [TOOLCHAIN]')
       category=${label#FAIL }
@@ -133,7 +148,7 @@ run_case() {
   esac
   [ "$(sha256sum postiz-app/package.json)" = "$MANIFEST_BEFORE" ] || exit 1
   # No write/auth-repair/inference operations may be invoked.
-  if grep -E '^(git (fetch|push|ls-remote|credential|config --local)|gh auth (login|setup-git)|pnpm (install|add)|codex (doctor|exec|review))' "$FIXTURE/calls"; then exit 1; fi
+  if grep -E '^(git (fetch|push|ls-remote|credential|config --local)|gh auth (login|setup-git)|(pnpm|corepack)( |$)|codex (doctor|exec|review))' "$FIXTURE/calls"; then exit 1; fi
   COUNT=$((COUNT + 1))
 }
 run_case 0 'INFO [DESKTOP]'
@@ -158,18 +173,45 @@ FIXTURE_TIMEOUT=gh run_case 1 'FAIL [AUTH]'
 FIXTURE_TIMEOUT=bash run_case 1 'FAIL [SHELL]'
 FIXTURE_NODE=v22.11.0 run_case 1 'FAIL [TOOLCHAIN]'
 FIXTURE_NODE=v23.0.0 run_case 1 'FAIL [TOOLCHAIN]'
-FIXTURE_PNPM=10.7.0 run_case 1 'FAIL [TOOLCHAIN]'
 FIXTURE_NODE_FAIL=1 run_case 1 'FAIL [TOOLCHAIN]'
-FIXTURE_PNPM_FAIL=1 run_case 1 'FAIL [TOOLCHAIN]'
 FIXTURE_CODEX_FAIL=1 run_case 1 'FAIL [CODEX]'
 FIXTURE_TOOL_MOUNT=pnpm run_case 1 'FAIL [TOOLCHAIN]'
 run_case 0 'PASS [TOOLCHAIN]'
+grep -Fq 'expected pin pnpm@10.6.1 checked statically' "$FIXTURE/output"
+grep -Fq 'installed/resolved pnpm version is not verified' "$FIXTURE/output"
+FIXTURE_COREPACK_DEFAULT=9.15.9 run_case 0 'PASS [TOOLCHAIN]'
+# Invalid or floating declarations fail without consulting any global version.
+for pin in '' 'pnpm@latest' 'pnpm@^10.6.1' 'npm@10.6.1' 'pnpm@10.6' 'pnpm@010.6.1'; do
+  "$REAL_NODE" -e '
+    const fs = require("fs"), file = process.argv[1];
+    const p = JSON.parse(fs.readFileSync(file));
+    p.packageManager = process.argv[2];
+    fs.writeFileSync(file, JSON.stringify(p));
+  ' "$FIXTURE/repo/postiz-app/package.json" "$pin"
+  MANIFEST_BEFORE=$(sha256sum postiz-app/package.json)
+  run_case 1 'FAIL [TOOLCHAIN]'
+done
+cp "$SOURCE/postiz-app/package.json" "$FIXTURE/repo/postiz-app/package.json"
+MANIFEST_BEFORE=$(sha256sum postiz-app/package.json)
 # Missing each tool must fail its own category without a toolchain PASS.
 for tool in node pnpm; do
   rm "$FIXTURE/bin/$tool"
   PATH="$FIXTURE/bin" run_case 1 'FAIL [TOOLCHAIN]'
   ln -s mock "$FIXTURE/bin/$tool"
 done
+# A dangling, non-executable, or directory launcher is invalid even if native.
+rm "$FIXTURE/bin/pnpm"
+ln -s missing-launcher "$FIXTURE/bin/pnpm"
+PATH="$FIXTURE/bin" run_case 1 'FAIL [TOOLCHAIN]'
+rm "$FIXTURE/bin/pnpm"
+cp "$FIXTURE/bin/mock" "$FIXTURE/bin/pnpm"
+chmod -x "$FIXTURE/bin/pnpm"
+PATH="$FIXTURE/bin" run_case 1 'FAIL [TOOLCHAIN]'
+rm "$FIXTURE/bin/pnpm"
+mkdir "$FIXTURE/bin/pnpm"
+PATH="$FIXTURE/bin" run_case 1 'FAIL [TOOLCHAIN]'
+rmdir "$FIXTURE/bin/pnpm"
+ln -s mock "$FIXTURE/bin/pnpm"
 # Simulate a missing executable without inheriting a developer's installed CLI.
 rm "$FIXTURE/bin/codex"
 PATH="$FIXTURE/bin" run_case 1 'FAIL [CODEX]'
