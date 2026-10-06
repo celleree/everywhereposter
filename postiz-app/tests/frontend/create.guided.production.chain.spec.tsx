@@ -1,4 +1,10 @@
 import React from 'react';
+jest.mock('@gitroom/frontend/components/launches/launches.component', () => ({
+  ChannelManagementList: () => null,
+}));
+jest.mock('@gitroom/frontend/components/launches/helpers/dnd.provider', () => ({
+  DNDProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
 import {
   act,
   fireEvent,
@@ -44,12 +50,9 @@ jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
   useFetch: () => jest.fn(),
 }));
 
-jest.mock(
-  '@gitroom/react/translation/get.transation.service.client',
-  () => ({
-    useT: () => (_key: string, fallback: string) => fallback,
-  })
-);
+jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
+  useT: () => (_key: string, fallback: string) => fallback,
+}));
 
 jest.mock('@gitroom/frontend/components/layout/loading', () => {
   const ReactModule = require('react');
@@ -81,10 +84,7 @@ jest.mock(
 jest.mock('swr', () => ({
   __esModule: true,
   default: (key: string) => ({
-    data:
-      key === 'create-find-slot'
-        ? '2026-08-05T12:00:00.000Z'
-        : [],
+    data: key === 'create-find-slot' ? '2026-08-05T12:00:00.000Z' : [],
     isLoading: false,
   }),
 }));
@@ -247,15 +247,13 @@ describe('guided composer production component chain', () => {
     const initialDraft = useLaunchStore.getState().global[0];
 
     mockIntegrationSnapshot = [connectedInstagram];
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Connect account' })
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Connect account' }));
 
     await waitFor(() => {
       expect(
-        useLaunchStore.getState().integrations.map((integration) =>
-          integration.id
-        )
+        useLaunchStore
+          .getState()
+          .integrations.map((integration) => integration.id)
       ).toEqual(['instagram-account']);
     });
 
@@ -309,14 +307,11 @@ describe('guided composer production component chain', () => {
     });
 
     mockIntegrationSnapshot = [refreshedInstagram];
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Connect account' })
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Connect account' }));
 
     await waitFor(() => {
       expect(
-        useLaunchStore.getState().selectedIntegrations[0].integration
-          .identifier
+        useLaunchStore.getState().selectedIntegrations[0].integration.identifier
       ).toBe('instagram-standalone');
     });
 
@@ -347,9 +342,7 @@ describe('guided composer production component chain', () => {
     ).toBeTruthy();
     expect(screen.getByText('@founder-direct')).toBeTruthy();
     expect(
-      screen
-        .getByTestId('platform-icon-Instagram')
-        .getAttribute('src')
+      screen.getByTestId('platform-icon-Instagram').getAttribute('src')
     ).toBe('/icons/platforms/instagram-standalone.png');
   });
 });

@@ -9,6 +9,8 @@ import {
   isGuidedComposerShellEnabled,
 } from '@gitroom/frontend/components/create/create.post.composer';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
+import { ChannelManagementList } from '@gitroom/frontend/components/launches/launches.component';
+import { DNDProvider } from '@gitroom/frontend/components/launches/helpers/dnd.provider';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import clsx from 'clsx';
@@ -29,6 +31,55 @@ const swrOptions = {
   revalidateOnMount: true,
   refreshWhenHidden: false,
   refreshWhenOffline: false,
+};
+
+const MobileChannelManagement = ({
+  integrations,
+  mutate,
+}: {
+  integrations: any[];
+  mutate: ReturnType<typeof useIntegrationList>['mutate'];
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const t = useT();
+
+  return (
+    <div className="hidden min-w-0 mobile:block">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls="upload-channel-management"
+        onClick={() => setExpanded((current) => !current)}
+        className="flex min-h-[44px] w-full items-center justify-between rounded-[8px] border border-newBorder px-[14px] text-start text-[14px] text-textColor"
+      >
+        {t('manage_channels', 'Manage channels')}
+        <span aria-hidden="true">{expanded ? '−' : '+'}</span>
+      </button>
+      {expanded && (
+        <div
+          id="upload-channel-management"
+          className="mt-[8px] flex min-w-0 flex-col gap-[12px] rounded-[8px] border border-newBorder bg-newBgColorInner p-[12px]"
+        >
+          <DNDProvider>
+            {integrations.length ? (
+              <ChannelManagementList
+                integrations={integrations}
+                mutate={mutate}
+                update={() => {
+                  mutate();
+                }}
+                hideCreatePost
+              />
+            ) : (
+              <div className="text-[14px] text-textColor/65">
+                {t('no_channels', 'No channels yet')}
+              </div>
+            )}
+          </DNDProvider>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export const CreateComponent = () => {
@@ -84,7 +135,8 @@ export const CreateComponent = () => {
   const activeIntegrations = useMemo(
     () =>
       integrations.filter(
-        (integration: any) => !integration.disabled && !integration.inBetweenSteps
+        (integration: any) =>
+          !integration.disabled && !integration.inBetweenSteps
       ),
     [integrations]
   );
@@ -126,6 +178,14 @@ export const CreateComponent = () => {
           <div className="mt-[20px] w-full max-w-[260px]">
             <AddProviderButton update={() => mutateIntegrations()} />
           </div>
+          {!!integrations.length && (
+            <div className="mt-[8px] w-full max-w-[260px]">
+              <MobileChannelManagement
+                integrations={integrations}
+                mutate={mutateIntegrations}
+              />
+            </div>
+          )}
         </div>
       </div>
     );
@@ -151,6 +211,10 @@ export const CreateComponent = () => {
           <div className="mobile-create-channel w-[260px] mobile:w-full">
             <AddProviderButton update={() => mutateIntegrations()} />
           </div>
+          <MobileChannelManagement
+            integrations={integrations}
+            mutate={mutateIntegrations}
+          />
           {hasActiveIntegrations && !!sets.length && (
             <label className="flex items-center gap-[10px] text-[13px] text-textColor/70 mobile:w-full mobile:flex-col mobile:items-start">
               <span>{t('saved_set', 'Saved Set')}</span>
@@ -176,7 +240,9 @@ export const CreateComponent = () => {
       </div>
       <div className="flex min-h-0 flex-1 mobile:block mobile:flex-none">
         <CreatePostComposer
-          key={`${hasActiveIntegrations && selectedSetId ? selectedSetId : 'blank'}-${nextSlot}-${composerKey}`}
+          key={`${
+            hasActiveIntegrations && selectedSetId ? selectedSetId : 'blank'
+          }-${nextSlot}-${composerKey}`}
           allIntegrations={integrations.map((integration: any) => ({
             ...integration,
           }))}

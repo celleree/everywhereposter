@@ -84,6 +84,8 @@ interface MenuComponentInterface {
   totalNonDisabledChannels: number;
   mutate: (shouldReload?: boolean) => void;
   update: (shouldReload: boolean) => void;
+  integrations?: any[];
+  hideCreatePost?: boolean;
 }
 export const OpenClose: FC<{
   isOpen: boolean;
@@ -133,6 +135,8 @@ export const MenuGroupComponent: FC<
     refreshChannel,
     changeItemGroup,
     collapsed,
+    integrations,
+    hideCreatePost,
   } = props;
   const [isOpen, setIsOpen] = useState(
     !!+(localStorage.getItem(group.name + '_isOpen') || '1')
@@ -209,6 +213,8 @@ export const MenuGroupComponent: FC<
             update={update}
             refreshChannel={refreshChannel}
             totalNonDisabledChannels={totalNonDisabledChannels}
+            integrations={integrations}
+            hideCreatePost={hideCreatePost}
           />
         ))}
       </div>
@@ -233,6 +239,8 @@ export const MenuComponent: FC<
     update,
     integration,
     collapsed,
+    integrations,
+    hideCreatePost,
   } = props;
   const user = useUser();
   const t = useT();
@@ -346,15 +354,113 @@ export const MenuComponent: FC<
           integration.disabled
         }
         canDisable={!integration.disabled}
+        integrationsOverride={integrations}
+        hideCreatePost={hideCreatePost}
       />
     </div>
   );
 };
-export const LaunchesComponent = () => {
+export const ChannelManagementList: FC<{
+  integrations: any[];
+  mutate: ReturnType<typeof useIntegrationList>['mutate'];
+  update: (shouldReload: boolean) => void;
+  collapsed?: boolean;
+  hideCreatePost?: boolean;
+}> = ({ integrations, mutate, update, collapsed = false, hideCreatePost }) => {
   const fetch = useFetch();
+  const router = useRouter();
+  const sortedIntegrations = useMemo(
+    () =>
+      orderBy(
+        integrations,
+        ['type', 'disabled', 'identifier'],
+        ['desc', 'asc', 'asc']
+      ),
+    [integrations]
+  );
+  const menuIntegrations = useMemo(
+    () =>
+      orderBy(
+        Object.values(
+          groupBy(sortedIntegrations, (item) => item?.customer?.id || '')
+        ).map((items) => ({
+          name: (items[0].customer?.name || '') as string,
+          id: (items[0].customer?.id || '') as string,
+          isEmpty: items.length === 0,
+          values: orderBy(
+            items,
+            ['type', 'disabled', 'identifier'],
+            ['desc', 'asc', 'asc']
+          ),
+        })),
+        ['isEmpty', 'name'],
+        ['desc', 'asc']
+      ),
+    [sortedIntegrations]
+  );
+  const totalNonDisabledChannels = sortedIntegrations.filter(
+    (item) => !item.disabled
+  ).length;
+  const changeItemGroup = useCallback(
+    async (id: string, group: string) => {
+      mutate(
+        integrations.map((item) =>
+          item.id === id ? { ...item, customer: { id: group } } : item
+        ),
+        false
+      );
+      await fetch(`/integrations/${id}/group`, {
+        method: 'PUT',
+        body: JSON.stringify({ group }),
+      });
+      mutate();
+    },
+    [integrations, mutate, fetch]
+  );
+  const continueIntegration = useCallback(
+    (integration: any) => () => {
+      router.push(
+        `/launches?added=${integration.identifier}&continue=${integration.id}`
+      );
+    },
+    [router]
+  );
+  const refreshChannel = useCallback(
+    (integration: Integration & { identifier: string }) => async () => {
+      const { url } = await (
+        await fetch(
+          `/integrations/social/${integration.identifier}?refresh=${integration.internalId}`
+        )
+      ).json();
+      storeIntegrationReturnRoute();
+      window.location.href = url;
+    },
+    [fetch]
+  );
+
+  return (
+    <>
+      {menuIntegrations.map((menu) => (
+        <MenuGroupComponent
+          collapsed={collapsed}
+          changeItemGroup={changeItemGroup}
+          key={menu.id || 'ungrouped'}
+          group={menu}
+          mutate={mutate}
+          continueIntegration={continueIntegration}
+          update={update}
+          refreshChannel={refreshChannel}
+          totalNonDisabledChannels={totalNonDisabledChannels}
+          integrations={hideCreatePost ? sortedIntegrations : undefined}
+          hideCreatePost={hideCreatePost}
+        />
+      ))}
+    </>
+  );
+};
+export const LaunchesComponent = () => {
   const user = useUser();
   const { billingEnabled } = useVariables();
-  const router = useRouter();
   const search = useSearchParams();
   const toast = useToaster();
   const fireEvents = useFireEvents();
@@ -377,42 +483,9 @@ export const LaunchesComponent = () => {
     handleViewportChange();
     mediaQuery.addEventListener('change', handleViewportChange);
 
-    return () =>
-      mediaQuery.removeEventListener('change', handleViewportChange);
+    return () => mediaQuery.removeEventListener('change', handleViewportChange);
   }, []);
 
-  const totalNonDisabledChannels = useMemo(() => {
-    return (
-      integrations?.filter((integration: any) => !integration.disabled)
-        ?.length || 0
-    );
-  }, [integrations]);
-  const changeItemGroup = useCallback(
-    async (id: string, group: string) => {
-      mutate(
-        integrations.map((integration: any) => {
-          if (integration.id === id) {
-            return {
-              ...integration,
-              customer: {
-                id: group,
-              },
-            };
-          }
-          return integration;
-        }),
-        false
-      );
-      await fetch(`/integrations/${id}/group`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          group,
-        }),
-      });
-      mutate();
-    },
-    [integrations]
-  );
   const sortedIntegrations = useMemo(() => {
     return orderBy(
       integrations,
@@ -420,24 +493,6 @@ export const LaunchesComponent = () => {
       ['desc', 'asc', 'asc']
     );
   }, [integrations]);
-  const menuIntegrations = useMemo(() => {
-    return orderBy(
-      Object.values(
-        groupBy(sortedIntegrations, (o) => o?.customer?.id || '')
-      ).map((p) => ({
-        name: (p[0].customer?.name || '') as string,
-        id: (p[0].customer?.id || '') as string,
-        isEmpty: p.length === 0,
-        values: orderBy(
-          p,
-          ['type', 'disabled', 'identifier'],
-          ['desc', 'asc', 'asc']
-        ),
-      })),
-      ['isEmpty', 'name'],
-      ['desc', 'asc']
-    );
-  }, [sortedIntegrations]);
   const update = useCallback(async (shouldReload: boolean) => {
     if (shouldReload) {
       setReload(true);
@@ -447,34 +502,6 @@ export const LaunchesComponent = () => {
       setReload(false);
     }
   }, []);
-  const continueIntegration = useCallback(
-    (integration: any) => async () => {
-      router.push(
-        `/launches?added=${integration.identifier}&continue=${integration.id}`
-      );
-    },
-    []
-  );
-  const refreshChannel = useCallback(
-    (
-        integration: Integration & {
-          identifier: string;
-        }
-      ) =>
-      async () => {
-        const { url } = await (
-          await fetch(
-            `/integrations/social/${integration.identifier}?refresh=${integration.internalId}`,
-            {
-              method: 'GET',
-            }
-          )
-        ).json();
-        storeIntegrationReturnRoute();
-        window.location.href = url;
-      },
-    []
-  );
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -518,7 +545,7 @@ export const LaunchesComponent = () => {
       <CalendarWeekProvider integrations={sortedIntegrations}>
         <div
           className={clsx(
-            'relative flex flex-col mobile:w-full mobile:min-h-[340px]',
+            'relative flex flex-col mobile:hidden',
             isCollapsed ? 'group sidebar w-[100px]' : 'w-[260px]'
           )}
         >
@@ -585,19 +612,12 @@ export const LaunchesComponent = () => {
                   </div>
                 </div>
               )}
-              {menuIntegrations.map((menu) => (
-                <MenuGroupComponent
-                  collapsed={isCollapsed}
-                  changeItemGroup={changeItemGroup}
-                  key={menu.name}
-                  group={menu}
-                  mutate={mutate}
-                  continueIntegration={continueIntegration}
-                  update={update}
-                  refreshChannel={refreshChannel}
-                  totalNonDisabledChannels={totalNonDisabledChannels}
-                />
-              ))}
+              <ChannelManagementList
+                integrations={integrations}
+                mutate={mutate}
+                update={update}
+                collapsed={isCollapsed}
+              />
             </div>
             <div className="mt-[5px] text-center flex flex-col">
               {billingEnabled && user?.isLifetime && (
