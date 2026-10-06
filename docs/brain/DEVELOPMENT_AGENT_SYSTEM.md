@@ -54,7 +54,7 @@ Responsibilities:
 - Report findings without silently rewriting the implementation.
 - Identify the exact commit/SHA reviewed when the review is a merge gate.
 
-The reviewer should assume something may be wrong and provide file-specific evidence.
+The reviewer should remain neutral: verify the stated contract and realistic risks, and report file-specific evidence when a finding exists; do not assume a defect must be found. A session or agent that implemented the change, designed the fix, or guided its repair is not eligible to be the final independent reviewer.
 
 ### 4. Repair Agent
 
