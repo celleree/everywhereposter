@@ -142,7 +142,9 @@ When parallel work is used:
 - One named integrator owns merge sequencing.
 - Agents do not independently redesign the same shared contract.
 - If a workstream discovers a shared-contract dependency, stop that workstream and return the dependency instead of inventing a competing design.
-- After one branch merges, remaining branches sync with updated `main` when relevant and re-run verification.
+- After one branch merges, waiting/working branches remain frozen. One named integrator owns merge order and synchronizes only the selected integration candidate.
+
+Create orchestrated workers from clean, current canonical `main` with `scripts/start-change.sh <branch> --worktree /home/arund/dev/<worker-name>`. This START flow fetches `origin/main`, creates the worker from that exact commit, records full-SHA branch-bound local provenance, and leaves canonical `main` in place. Use `scripts/check-repository-state.sh --continue` during work: it validates provenance and ancestry in both worker and current main, while allowing main to advance beyond worker HEAD. For the selected PR, fetch main, synchronize normally if needed, pass `--integrate`, push final HEAD, wait for matching CI, and obtain fresh independent review of the exact pushed HEAD. A main race repeats integration only for that candidate. Any HEAD change invalidates review; uncommitted work cannot receive final exact-HEAD review. The no-argument check remains strict/current-main for unattended workflows.
 
 Do not use parallel agents for:
 

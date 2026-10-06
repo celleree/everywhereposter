@@ -54,8 +54,14 @@ git log -5 --oneline --decorate
 For a new issue, create the branch automatically from the latest remote `main`:
 
 ```bash
-sh scripts/start-change.sh fix/<short-name>
+sh scripts/start-change.sh fix/<short-name> --worktree /home/arund/dev/<worker-name>
 ```
+
+The no-argument repository check retains strict current-main behavior for unattended callers. Orchestrated workers use `sh scripts/start-change.sh fix/<short-name> --worktree /home/arund/dev/<worker-name>` from clean, current canonical `main`, then use `sh scripts/check-repository-state.sh --continue` during work. Run `--integrate` only for the selected PR after fetching `main` and synchronizing normally if required. Worktree start provenance is branch-bound local Git metadata; missing or invalid provenance fails closed and is not inferred from merge-base.
+
+The shared local Git config entry `branch.<name>.everywhereposterStart` stores `<full-start-sha> refs/heads/<name>`. It does not transfer through clones. Existing workers need verified original creation evidence before provenance can be adopted; they are not silently grandfathered in. The legacy one-argument helper remains available outside the canonical checkout on clean, current main.
+
+Waiting and working PRs remain frozen when another PR merges. One named integrator owns merge order. The selected candidate proceeds through fetch, optional normal synchronization, INTEGRATE gate, push of final HEAD, matching CI, fresh independent exact-HEAD review, and the existing immediate guarded merge checks. If `main` advances before merge, repeat integration only for that candidate. Any HEAD change invalidates exact-HEAD review; uncommitted work is not eligible for final review.
 
 Rules:
 
@@ -72,8 +78,8 @@ Rules:
 - `main` is the only canonical long-lived branch.
 - `scripts/install-git-guardrails.sh` installs the managed pre-push hook for each checkout.
 - The pre-push hook blocks direct pushes to `main`, pushes to the obsolete snapshot, and non-fast-forward pushes.
-- `scripts/start-change.sh` fetches `origin/main` and creates new work from that exact commit.
-- `scripts/check-repository-state.sh` stops work when guardrails are missing, the tree is dirty, the snapshot branch is active, or the branch is behind `origin/main`.
+- `scripts/start-change.sh` fetches `origin/main` and creates new work from that exact commit; `--worktree` preserves canonical `main` and records branch-bound start provenance.
+- `scripts/check-repository-state.sh --start`, `--continue`, and `--integrate` enforce distinct clean-tree/provenance/ancestry gates. The no-argument form remains strict/current-main; CONTINUE permits main to advance, while INTEGRATE requires freshly fetched `origin/main` to be an ancestor of worker HEAD.
 - The Repository guard GitHub workflow verifies canonical branch settings and flags forced or direct updates to `main`.
 - When enforced branch protection is available, it should also block force pushes and deletion, require pull requests, and require the `Canonical branch guard` status check.
 
