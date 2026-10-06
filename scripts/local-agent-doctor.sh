@@ -1,21 +1,20 @@
 #!/bin/sh
-# Read-only local preflight. No fetch, installs, config writes, or agent/model calls.
+# STATIC ONLY: trusted shell utilities and local Git reads; no application runtimes/network.
 set -u
-# Noninteractive bash can still source BASH_ENV even with --noprofile/--norc.
+# Do not propagate shell startup hooks to any child utility.
 unset ENV BASH_ENV
 export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=Never
 FAILED=0
-pass() { printf 'PASS [%s] %s\n' "$1" "$2"; }
-fail() { printf 'FAIL [%s] %s\n' "$1" "$2"; FAILED=1; }
-probe() { timeout -k 2s 15s "$@"; }
+pass() { printf 'PASS [STATIC/%s] %s\n' "$1" "$2"; }
+fail() { printf 'FAIL [STATIC/%s] %s\n' "$1" "$2"; FAILED=1; }
 
 [ "$#" -eq 0 ] || { echo 'Usage: sh scripts/local-agent-doctor.sh'; exit 2; }
-for tool in timeout uname stat realpath git sh bash gh node pnpm codex; do
+for tool in awk timeout uname stat realpath git sh bash gh node pnpm codex; do
   case "$tool" in
     uname) category=WSL ;;
     git|stat|realpath) category=REPO ;;
     sh|bash|timeout) category=SHELL ;;
-    gh) category=AUTH ;;
+    gh) category=CONFIG ;;
     codex) category=CODEX ;;
     *) category=TOOLCHAIN ;;
   esac
@@ -27,14 +26,14 @@ for tool in timeout uname stat realpath git sh bash gh node pnpm codex; do
   case "$resolved" in
     /mnt/*|*.exe|'') fail "$category" "$tool is missing or resolves to mounted/Windows tooling."; continue ;;
   esac
-  if [ "$tool" = pnpm ] && { [ ! -f "$resolved" ] || [ ! -x "$resolved" ]; }; then
-    fail TOOLCHAIN 'pnpm must resolve to a native executable launcher file.'
+  if [ ! -f "$resolved" ] || [ ! -x "$resolved" ]; then
+    fail "$category" "$tool must resolve to a native executable launcher file."
     continue
   fi
   case "$location" in
     /*) case "$location" in
           /mnt/*|*.exe) fail "$category" "$tool resolves to Windows/mounted tooling; use a WSL-native executable." ;;
-          *) printf 'INFO [%s] %s: %s\n' "$category" "$tool" "$location" ;;
+          *) printf 'INFO [STATIC/%s] %s: %s\n' "$category" "$tool" "$location" ;;
         esac ;;
     *) fail "$category" "$tool is missing from PATH." ;;
   esac
@@ -67,13 +66,6 @@ case "$ROOT" in
        fail REPO 'Expected a native ext4 worktree belonging to /home/arund/dev/everywhereposter.' ;;
 esac
 
-if probe sh -c 'test "$(pwd -P)" = "$1"' doctor "$ROOT" >/dev/null 2>&1 &&
-   probe bash --noprofile --norc -c 'test "$(pwd -P)" = "$1"' doctor "$ROOT" >/dev/null 2>&1; then
-  pass SHELL 'Non-login sh and bash spawn in the repository without startup files.'
-else
-  fail SHELL 'A shell spawn probe failed/timed out; inspect WSL shell/PATH in a terminal.'
-fi
-
 # Check effective URLs, including pushurl and insteadOf rewrites. Never print URLs/tokens.
 REMOTE_OK=1
 for mode in fetch push; do
@@ -91,55 +83,59 @@ if [ "$REMOTE_OK" -eq 1 ]; then
   pass REPO 'Effective origin fetch/push URLs match celleree/everywhereposter over HTTPS.'
   HELPER=$(git config --get-urlmatch credential.helper https://github.com 2>/dev/null) || HELPER=
   case "$HELPER" in
-    *'gh auth git-credential'*) pass AUTH 'GitHub CLI HTTPS credential helper configured.' ;;
-    *) fail AUTH 'Configure HTTPS Git credentials in a terminal with: gh auth setup-git' ;;
+    *'gh auth git-credential'*) pass CONFIG 'GitHub CLI HTTPS credential helper configured (static; authentication unverified).' ;;
+    *) fail CONFIG 'Configure HTTPS Git credentials in a terminal with: gh auth setup-git' ;;
   esac
-  if probe gh auth status --hostname github.com >/dev/null 2>&1 &&
-     [ "$(probe gh repo view celleree/everywhereposter --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" = celleree/everywhereposter ]; then
-    pass AUTH 'GitHub CLI authentication and repository access verified.'
-  else
-    fail AUTH 'GitHub auth/API probe failed or timed out; check gh auth status and network in a terminal.'
-  fi
-  # Use gh's existing auth directly; Git network commands may store/erase credentials.
-  MAIN_SHA=$(probe gh api --method GET repos/celleree/everywhereposter/git/ref/heads/main --jq .object.sha 2>/dev/null) || MAIN_SHA=
-  case "$MAIN_SHA" in *[!0-9a-f]*|'') MAIN_SHA= ;; esac
-  if [ "${#MAIN_SHA}" -eq 40 ]; then
-    pass AUTH 'Authenticated GitHub API/network access to main verified.'
-  else
-    fail AUTH 'GitHub API/network main probe failed or timed out; Git credential helpers were not invoked.'
-  fi
+
 else
-  fail REPO 'Origin fetch/push must use https://github.com/celleree/everywhereposter.git; auth probes skipped.'
+  fail REPO 'Origin fetch/push must use https://github.com/celleree/everywhereposter.git; no network access attempted.'
 fi
 
-NODE_VERSION=$(probe node --version 2>/dev/null) || NODE_VERSION=
-PNPM_PIN=$(probe node -e '
-  const p = require(process.argv[1]);
-  const range = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)\.(\d+)\.(\d+)$/.exec(p.engines.node);
-  const v = /^v(\d+)\.(\d+)\.(\d+)$/.exec(process.argv[2]);
-  const compare = (a, b) => a.reduce((r, n, i) => r || n - b[i], 0);
-  const valid = range && v && compare(v.slice(1).map(Number), range.slice(1,4).map(Number)) >= 0 &&
-    compare(v.slice(1).map(Number), range.slice(4).map(Number)) < 0 &&
-    typeof p.packageManager === "string" && /^pnpm@(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(p.packageManager);
-  if (!valid) process.exit(1);
-  process.stdout.write(p.packageManager);
-' "$ROOT/postiz-app/package.json" "$NODE_VERSION" 2>/dev/null) || PNPM_PIN=
-if [ -n "$PNPM_PIN" ]; then
-  pass TOOLCHAIN "Node $NODE_VERSION satisfies its engine; native pnpm launcher and expected pin $PNPM_PIN checked statically."
-  echo 'INFO [TOOLCHAIN] pnpm/Corepack are never executed; installed/resolved pnpm version is not verified.'
+# Inspect only committed declarations, with a narrow fail-closed extractor for the
+# repository's line-oriented JSON format. Never evaluate JSON with a runtime.
+MANIFEST=$(git show HEAD:postiz-app/package.json 2>/dev/null) || MANIFEST=
+DECLARATIONS=$(printf '%s\n' "$MANIFEST" | awk '
+  function value(line) {
+    sub(/^[^:]*:[[:space:]]*"/, "", line)
+    sub(/"[[:space:]]*,?[[:space:]]*$/, "", line)
+    return line
+  }
+  {
+    if (depth == 1 && $0 ~ /^[[:space:]]*"packageManager"[[:space:]]*:/) {
+      pins++; pin = value($0)
+      if ($0 !~ /^[[:space:]]*"packageManager"[[:space:]]*:[[:space:]]*"[^"\\]*"[[:space:]]*,?[[:space:]]*$/) bad = 1
+    }
+    if (depth == 1 && $0 ~ /^[[:space:]]*"engines"[[:space:]]*:/) {
+      engines++
+      if ($0 ~ /^[[:space:]]*"engines"[[:space:]]*:[[:space:]]*\{[[:space:]]*$/) engine = 1
+      else bad = 1
+    }
+    if (engine && depth == 2 && $0 ~ /^[[:space:]]*"node"[[:space:]]*:/) {
+      nodes++; node = value($0)
+      if ($0 !~ /^[[:space:]]*"node"[[:space:]]*:[[:space:]]*"[^"\\]*"[[:space:]]*,?[[:space:]]*$/) bad = 1
+    }
+    shape = $0
+    gsub(/"([^"\\]|\\.)*"/, "", shape)
+    depth += gsub(/[\{\[]/, "", shape) - gsub(/[\}\]]/, "", shape)
+    if (depth < 0) bad = 1
+    if (depth <= 1) engine = 0
+  }
+  END {
+    if (bad || depth != 0 || engines != 1 || pins != 1 || nodes != 1 ||
+        pin !~ /^pnpm@(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ ||
+        node !~ /^>=[0-9]+\.[0-9]+\.[0-9]+ <[0-9]+\.[0-9]+\.[0-9]+$/) exit 1
+    print node "|" pin
+  }
+') || DECLARATIONS=
+if [ -n "$DECLARATIONS" ]; then
+  pass TOOLCHAIN "Committed HEAD declarations: Node ${DECLARATIONS%%|*}; ${DECLARATIONS#*|} (static only)."
 else
-  fail TOOLCHAIN 'Node runtime/engine check failed or packageManager is not an exact numeric pnpm version pin; nothing installed.'
+  fail TOOLCHAIN 'Committed package/toolchain declarations are missing, ambiguous, invalid, or use an unsupported layout.'
 fi
-
-if probe codex --version >/dev/null 2>&1 && probe codex login status >/dev/null 2>&1; then
-  pass CODEX 'CLI launches and local login is configured; no inference requested.'
-else
-  fail CODEX 'Codex CLI launch/login failed; inspect codex login status in a WSL terminal.'
-fi
-echo 'INFO [DESKTOP] This script cannot test the Desktop runner before it spawns.'
-echo 'If Desktop reports CreateProcess/os error 2 or sandboxCwd errors, run this doctor from a WSL terminal.'
-echo 'If terminal probes pass but Desktop cannot spawn pwd in the same path, treat it as a Desktop runner failure.'
-echo 'Fallback: wsl.exe -d <distro-from-wsl-list> --cd /home/arund/dev/everywhereposter --exec bash -l'
-echo 'Then run this doctor and the START/CONTINUE gate; launch codex -C <verified-worker-path>.'
-echo 'Run codex doctor separately if advertised by codex --help; do not change config blindly.'
+for file in .githooks/pre-push scripts/check-repository-state.sh scripts/start-change.sh; do
+  [ -f "$ROOT/$file" ] || fail REPO "Missing required workflow file: $file"
+done
+echo 'INFO [STATIC] No shell-spawn, runtime version, login, auth, or connectivity verification was performed.'
+echo 'INFO [ACTIVE] Explicit runtime/network checks: sh scripts/local-agent-diagnostics.sh (tools may write local state).'
+echo 'INFO [DESKTOP] A script cannot test the Desktop runner before it spawns; use the WSL terminal fallback in OPERATING-MANUAL.md.'
 exit "$FAILED"

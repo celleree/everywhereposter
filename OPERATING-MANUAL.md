@@ -187,9 +187,17 @@ git push -u origin "$CURRENT_BRANCH"
 
 ## Local WSL / Codex Preflight And Fallback
 
-`sh scripts/local-agent-doctor.sh` is a read-only local diagnostic. It requires WSL2, native Linux tools (including resolved symlink targets), an ext4 checkout/worktree belonging to `/home/arund/dev/everywhereposter`, and matching effective HTTPS origin fetch/push URLs. It probes non-login sh/bash with `ENV`/`BASH_ENV` cleared and bash profiles disabled, authenticated GitHub CLI/API repository and main-ref access, the Node runtime against the engine in `postiz-app/package.json`, and Codex CLI launch/local login. pnpm checks are static: a native executable launcher file must exist and `postiz-app/package.json` must declare an exact numeric `pnpm@MAJOR.MINOR.PATCH` pin without leading zeroes. The doctor never executes pnpm/Corepack, creates their caches, or verifies the installed/resolved pnpm version; Corepack's global default cannot determine the result. Git origin/helper configuration checks are also static; no Git network or credential-helper lifecycle runs. Shell spawning and toolchain validation are separate; path discovery reports INFO, and toolchain PASS reports the Node runtime and static pnpm checks explicitly. Shell, version/login, and network probes have 15-second timeouts plus a 2-second kill grace. It does not fetch, install, change config/credentials, call a model, or prove Git transport/push permission. Exit 0 means all probes passed, 1 means a categorized failure, 2 means invalid usage. It does not replace START/CONTINUE/INTEGRATE or check tree cleanliness.
+The default `sh scripts/local-agent-doctor.sh` is **static and read-only**. It uses local Git reads and base Linux utilities to inspect WSL2/kernel state, native executable paths/permissions, canonical ext4 checkout/worktree ownership, required workflow files, effective HTTPS origin URLs, and credential-helper configuration. It reads toolchain declarations from committed `HEAD:postiz-app/package.json`, not dirty working files or Corepack defaults. Its narrow extractor validates unique root pnpm pins and direct Node engine declarations in the repository's line-oriented JSON layout; it is not a full JSON validator. Missing, invalid, duplicate, or unsupported declarations fail closed. pnpm must have a native executable launcher and an exact numeric `pnpm@MAJOR.MINOR.PATCH` pin without leading zeroes.
 
-Failure labels identify WSL, REPO, SHELL, AUTH (including network), TOOLCHAIN, or CODEX. Missing/native-tool failures stop dependent probes. Raw auth output and remote URLs are suppressed. If `codex --help` advertises `doctor`, run `timeout -k 2s 45s codex doctor --summary` separately for Codex config/runtime diagnostics; older CLI versions need not provide it.
+Static output uses `STATIC/` labels. The default never invokes Codex, Node, pnpm/Corepack, gh/API/network access, Git credential lifecycles, or shell startup/spawn probes. It does not verify runtime versions, launcher execution, login, authentication, connectivity, or Desktop runner health. It clears `ENV`/`BASH_ENV` for child utilities, but does not run hooks/preloads or application runtimes at all. Exit 0 means the static checks passed; 1 means a categorized failure; 2 means invalid usage. It does not replace START/CONTINUE/INTEGRATE or check tree cleanliness.
+
+**Active diagnostics are a separate, explicit command:**
+
+```bash
+sh scripts/local-agent-diagnostics.sh
+```
+
+This command prints its active-state warning before running tools. It is **not read-only**: Node/Codex/GitHub CLI execution and network access may create normal tool-local caches/config/state, and runtime preloads such as `NODE_OPTIONS` may execute. After passing static preflight, it checks non-login/profile-free shell spawning, Node runtime/version against the committed engine, authenticated GitHub repository/main-ref access, and Codex launch/local login. pnpm/Corepack and Git network/credential lifecycles remain excluded. Active output uses `ACTIVE/` labels and suppresses raw probe/auth output. Probes have 15-second timeouts plus a 2-second kill grace; no model inference is requested. For extended **active** Codex diagnostics, run `timeout -k 2s 45s codex doctor --summary` separately if advertised by `codex --help`.
 
 A Desktop `CreateProcess ... No such file or directory (os error 2)` or `sandboxCwd is not a local file URI` can occur before any command runs. A repo script cannot run at that point. Preserve the exact error and intended cwd, then use PowerShell to select the installed WSL2 distro explicitly:
 
@@ -198,7 +206,7 @@ wsl.exe --list --verbose
 wsl.exe -d <distro-name-from-list> --cd /home/arund/dev/everywhereposter --exec bash -l
 ```
 
-In that WSL terminal, run `pwd` and the doctor. If WSL launch fails, diagnose WSL first. If terminal probes pass while Desktop fails to spawn `pwd` in the same directory, classify the failure as the Desktop runner boundary; this comparison does not establish its internal cause. Do not repeatedly retry or randomly change Codex configuration.
+In that WSL terminal, run `pwd` and the doctor. If WSL launch fails, diagnose WSL first. Static PASS alone establishes no runtime health. If explicit active terminal probes pass while Desktop fails to spawn `pwd` in the same directory, classify the failure as the Desktop runner boundary; this comparison does not establish its internal cause. Do not repeatedly retry or randomly change Codex configuration.
 
 To continue deterministically from the WSL terminal:
 
