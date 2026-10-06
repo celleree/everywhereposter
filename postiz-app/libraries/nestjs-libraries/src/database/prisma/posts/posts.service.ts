@@ -90,6 +90,12 @@ export class PostsService {
     private _refreshIntegrationService: RefreshIntegrationService
   ) {}
 
+  private assertScheduledDateInFuture(date: string) {
+    if (!dayjs.utc(date).isAfter(dayjs.utc())) {
+      throw new BadRequestException('Scheduled date must be in the future');
+    }
+  }
+
   searchForMissingThreeHoursPosts() {
     return this._postRepository.searchForMissingThreeHoursPosts();
   }
@@ -1382,11 +1388,8 @@ export class PostsService {
   }
 
   async createPost(orgId: string, body: CreatePostDto): Promise<any[]> {
-    if (
-      body.type === 'schedule' &&
-      !dayjs.utc(body.date).isAfter(dayjs.utc())
-    ) {
-      throw new BadRequestException('Scheduled date must be in the future');
+    if (body.type === 'schedule') {
+      this.assertScheduledDateInFuture(body.date);
     }
 
     if (body.type === 'now' || body.type === 'schedule') {
@@ -1458,6 +1461,10 @@ export class PostsService {
           };
         }),
       };
+
+      if (body.type === 'schedule') {
+        this.assertScheduledDateInFuture(body.date);
+      }
 
       const { posts } = await this._postRepository.createOrUpdatePost(
         body.type,
@@ -1880,6 +1887,10 @@ export class PostsService {
     date: string,
     action: 'schedule' | 'update' = 'schedule'
   ) {
+    if (action === 'schedule') {
+      this.assertScheduledDateInFuture(date);
+    }
+
     const getPostById = await this._postRepository.getPostById(id, orgId);
 
     // schedule: Set status to QUEUE and change date (reschedule the post)
