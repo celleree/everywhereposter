@@ -18,7 +18,7 @@ WHY: [one sentence]
 
 The routing header is a ChatGPT-to-human instruction. Codex does not choose or rewrite these fields after the session starts.
 
-Use the same Codex chat for an approved investigation -> implementation -> repair sequence when retaining context is useful. Use a fresh Codex chat for independent review so the reviewer does not inherit the implementer's transcript.
+Use the same Codex chat for an approved investigation -> implementation -> repair sequence when retaining context is useful. Use a fresh Codex chat for independent review. A session or agent that implemented the change, designed the fix, or guided the repair is not independent and cannot serve as the final merge-gating reviewer.
 
 ## Incoming prompt structure
 
@@ -47,7 +47,7 @@ RETURN:
 [required result fields]
 ```
 
-Do not repeat large amounts of repository context that Codex can read from canonical files.
+Do not repeat large amounts of repository context that Codex can read from canonical files. Codex already has the repository, `AGENTS.md`, Git history, scripts, and CI; prompts should state the goal, important constraints, definition of done, and exact branch/base/HEAD identities when relevant.
 
 ## Codex return format
 
@@ -114,10 +114,10 @@ Do not include raw command logs unless they explain a failure, long diffs unless
 
 For bounded implementation work coordinated manually between ChatGPT and Codex, default to checkpoints instead of one large prompt:
 
-1. **Investigation / plan only.** Start from current `main`, inspect the smallest relevant file set, do not edit yet, confirm the contract, propose the smallest coherent implementation, estimate scope, list focused tests, and surface unresolved decisions.
+1. **Investigation / plan only.** Start from current `main`, inspect the smallest relevant file set, do not edit yet, define the governing contract precisely, including side-effect/trust boundaries when material, propose the smallest coherent implementation, estimate scope, list focused tests, and surface unresolved decisions.
 2. **ChatGPT review.** Return the plan to ChatGPT. Resolve scope, architecture, sequencing, PR-size, and product-contract questions before editing.
 3. **Implementation.** Continue the original implementation session and implement only the approved plan. Run focused verification, commit/push the completed change, and create/update the PR before final exact-SHA independent review.
-4. **Independent review.** After matching PR CI passes, use a fresh Codex session for the exact current live PR HEAD SHA when independent review is required. Never claim final exact-SHA review of an uncommitted diff. The reviewer should return findings, not silently repair the implementation.
+4. **Independent review.** After matching PR CI passes, use a fresh Codex session for the exact current live PR HEAD SHA when independent review is required. Give it the exact HEAD/base, acceptance criteria, and relevant repository instructions without a desired verdict or a long history of previous findings; include prior findings only when the current task explicitly requires verifying a specific repair. Never claim final exact-SHA review of an uncommitted diff. The reviewer should return findings, not silently repair the implementation.
 5. **Repair.** Send verified findings back to the original implementation session. Keep fixes inside the approved scope unless a new decision is explicitly reviewed.
 6. **Re-verify.** Re-run the relevant checks. Any HEAD change after a required exact-SHA review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
 7. **Merge/deploy gate.** Merge or deployment still requires the repository's normal human approvals and operational rules.
@@ -133,6 +133,14 @@ The no-argument repository-state check remains strict/current-main for unattende
 ## Review depth and edge cases
 
 Do not create infinite review loops trying to enumerate every theoretical edge case.
+
+Calibrate findings to the stated contract and realistic impact:
+
+- A finding should normally block merge only when there is a realistic correctness, security, data-loss, credential, workflow/protection, contract, or material regression risk.
+- Do not raise severity merely because an increasingly exotic adversarial chain can be constructed.
+- Do not expand the trust boundary indefinitely. When the repository contract explicitly delegates behavior to the OS, a tool, or a runtime, review that delegation and the repository-owned boundary; do not try to prove every external executable can never produce side effects unless the contract promises that stronger guarantee.
+- When repeated findings are manifestations of the same underlying design mistake, prefer repairing the abstraction or architecture once instead of patching each symptom independently.
+- Use targeted verification proportional to risk. Stop when the stated acceptance criteria and required gates are satisfied; further broad adversarial exploration requires a new concrete material risk.
 
 Default maximum: **three independent broad review passes for the same bounded change**.
 
