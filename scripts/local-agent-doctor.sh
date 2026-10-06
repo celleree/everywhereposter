@@ -1,6 +1,8 @@
 #!/bin/sh
 # Read-only local preflight. No fetch, installs, config writes, or agent/model calls.
 set -u
+# Noninteractive bash can still source BASH_ENV even with --noprofile/--norc.
+unset ENV BASH_ENV
 export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=Never
 export COREPACK_ENABLE_NETWORK=0 COREPACK_ENABLE_AUTO_PIN=0
 FAILED=0
@@ -29,7 +31,7 @@ for tool in timeout uname stat realpath git sh bash gh node pnpm codex; do
   case "$location" in
     /*) case "$location" in
           /mnt/*|*.exe) fail "$category" "$tool resolves to Windows/mounted tooling; use a WSL-native executable." ;;
-          *) pass "$category" "$tool: $location" ;;
+          *) printf 'INFO [%s] %s: %s\n' "$category" "$tool" "$location" ;;
         esac ;;
     *) fail "$category" "$tool is missing from PATH." ;;
   esac
@@ -62,12 +64,11 @@ case "$ROOT" in
        fail REPO 'Expected a native ext4 worktree belonging to /home/arund/dev/everywhereposter.' ;;
 esac
 
-if probe sh -c 'test "$(pwd -P)" = "$1"' doctor "$ROOT" &&
-   probe bash --noprofile --norc -c 'test "$(pwd -P)" = "$1"' doctor "$ROOT" &&
-   probe bash -lc 'test "$(pwd -P)" = "$1" && command -v git node pnpm codex >/dev/null' doctor "$ROOT"; then
-  pass SHELL 'sh, plain bash, and login bash spawn in the repository.'
+if probe sh -c 'test "$(pwd -P)" = "$1"' doctor "$ROOT" >/dev/null 2>&1 &&
+   probe bash --noprofile --norc -c 'test "$(pwd -P)" = "$1"' doctor "$ROOT" >/dev/null 2>&1; then
+  pass SHELL 'Non-login sh and bash spawn in the repository without startup files.'
 else
-  fail SHELL 'A shell probe failed/timed out; inspect WSL shell startup/PATH in a terminal.'
+  fail SHELL 'A shell spawn probe failed/timed out; inspect WSL shell/PATH in a terminal.'
 fi
 
 # Check effective URLs, including pushurl and insteadOf rewrites. Never print URLs/tokens.
@@ -96,10 +97,13 @@ if [ "$REMOTE_OK" -eq 1 ]; then
   else
     fail AUTH 'GitHub auth/API probe failed or timed out; check gh auth status and network in a terminal.'
   fi
-  if probe git ls-remote --exit-code origin refs/heads/main >/dev/null 2>&1; then
-    pass AUTH 'Noninteractive Git HTTPS access to main verified (read access only).'
+  # Use gh's existing auth directly; Git network commands may store/erase credentials.
+  MAIN_SHA=$(probe gh api --method GET repos/celleree/everywhereposter/git/ref/heads/main --jq .object.sha 2>/dev/null) || MAIN_SHA=
+  case "$MAIN_SHA" in *[!0-9a-f]*|'') MAIN_SHA= ;; esac
+  if [ "${#MAIN_SHA}" -eq 40 ]; then
+    pass AUTH 'Authenticated GitHub API/network access to main verified.'
   else
-    fail AUTH 'Git HTTPS/network probe failed or timed out; no fetch or SSH fallback attempted.'
+    fail AUTH 'GitHub API/network main probe failed or timed out; Git credential helpers were not invoked.'
   fi
 else
   fail REPO 'Origin fetch/push must use https://github.com/celleree/everywhereposter.git; auth probes skipped.'
