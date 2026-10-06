@@ -63,11 +63,7 @@ if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
   fail "A local branch named $BRANCH_NAME already exists."
 fi
 
-if [ -f "$HOME/.ssh/github_publish_everywhere" ]; then
-  REMOTE_BRANCH="$(GIT_SSH_COMMAND="ssh -i $HOME/.ssh/github_publish_everywhere -o IdentitiesOnly=yes" git ls-remote --heads origin "refs/heads/$BRANCH_NAME")" || fail "Unable to verify the remote branch name."
-else
-  REMOTE_BRANCH="$(git ls-remote --heads origin "refs/heads/$BRANCH_NAME")" || fail "Unable to verify the remote branch name."
-fi
+REMOTE_BRANCH="$(git ls-remote --heads origin "refs/heads/$BRANCH_NAME")" || fail "Unable to verify the remote branch name using the configured Git transport/auth."
 if [ -n "$REMOTE_BRANCH" ] || git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
   fail "A remote branch named $BRANCH_NAME already exists."
 fi

@@ -32,6 +32,9 @@ jobs:
       - name: Test repository workflow gates
         run: bash scripts/test-repository-workflow.sh
 
+      - name: Test local agent doctor
+        run: bash scripts/test-local-agent-doctor.sh
+
       - name: Verify canonical branch safeguards
         env:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

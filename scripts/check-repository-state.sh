@@ -34,12 +34,7 @@ if [ -n "$WORKTREE_STATUS" ]; then
   fail "The working tree is not clean. Review existing changes before proceeding."
 fi
 
-if [ -f "$HOME/.ssh/github_publish_everywhere" ]; then
-  GIT_SSH_COMMAND="ssh -i $HOME/.ssh/github_publish_everywhere -o IdentitiesOnly=yes" git fetch --quiet origin main ||
-    fail "Unable to fetch origin/main."
-else
-  git fetch --quiet origin main || fail "Unable to fetch origin/main."
-fi
+git fetch --quiet origin main || fail "Unable to fetch origin/main using the configured Git transport/auth."
 
 git show-ref --verify --quiet refs/remotes/origin/main ||
   fail "origin/main is unavailable after fetch."

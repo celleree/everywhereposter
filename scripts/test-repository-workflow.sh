@@ -14,6 +14,17 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/repository-workflow.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
 export HOME="$TMP_ROOT/home"
 mkdir -p "$HOME"
+# An old optional key must not change either workflow helper's Git invocation.
+mkdir -p "$HOME/.ssh" "$TMP_ROOT/bin"
+touch "$HOME/.ssh/github_publish_everywhere"
+export WORKFLOW_REAL_GIT=$(command -v git)
+cat > "$TMP_ROOT/bin/git" <<'SH'
+#!/bin/sh
+[ -z "${GIT_SSH_COMMAND:-}" ] || { echo 'Unexpected SSH override' >&2; exit 95; }
+exec "$WORKFLOW_REAL_GIT" "$@"
+SH
+chmod +x "$TMP_ROOT/bin/git"
+export PATH="$TMP_ROOT/bin:$PATH"
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL="$TMP_ROOT/gitconfig"
 git config --global user.name 'Workflow Test'
