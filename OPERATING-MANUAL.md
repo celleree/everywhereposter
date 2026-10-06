@@ -46,10 +46,14 @@ Do not batch:
 Commands:
 
 ```bash
+cd /home/arund/dev/everywhereposter
+pwd
+sh scripts/local-agent-doctor.sh
 sh scripts/install-git-guardrails.sh
-sh scripts/check-repository-state.sh
-git log -5 --oneline --decorate
+sh scripts/check-repository-state.sh --start
 ```
+
+Stop on failure. If clean local `main` is behind fetched `origin/main`, inspect divergence and update with `git merge --ff-only origin/main`, then rerun START. Preserve dirty or diverged work instead of resetting it. The obsolete `/mnt/c/dev/everywhereposter` checkout must not be used.
 
 For a new issue, create the branch automatically from the latest remote `main`:
 
@@ -173,13 +177,37 @@ Explain:
 
 ## Git Push
 
-Use explicit SSH key if normal push fails:
+Local development uses the HTTPS origin `https://github.com/celleree/everywhereposter.git` and GitHub CLI credentials. Verify `gh auth status --hostname github.com`; if credentials need repair, run `gh auth login --hostname github.com --git-protocol https` and `gh auth setup-git` in a terminal. Never print tokens or switch to the old optional SSH key to recover a local push.
 
 ```bash
 CURRENT_BRANCH=$(git branch --show-current)
 test "$CURRENT_BRANCH" != "main"
-GIT_SSH_COMMAND='ssh -i ~/.ssh/github_publish_everywhere -o IdentitiesOnly=yes' git push -u origin "$CURRENT_BRANCH"
+git push -u origin "$CURRENT_BRANCH"
 ```
+
+## Local WSL / Codex Preflight And Fallback
+
+`sh scripts/local-agent-doctor.sh` is a read-only local diagnostic. It requires WSL2, native Linux tools (including resolved symlink targets), an ext4 checkout/worktree belonging to `/home/arund/dev/everywhereposter`, and matching effective HTTPS origin fetch/push URLs. It probes sh/plain bash/login bash, GitHub CLI auth/repository access, noninteractive Git read access, the Node engine/pnpm versions in `postiz-app/package.json`, and Codex CLI launch/local login. Shell, version/login, and network probes have 15-second timeouts plus a 2-second kill grace. It does not fetch, install, change config/credentials, call a model, or prove push permission. Exit 0 means all probes passed, 1 means a categorized failure, 2 means invalid usage. It does not replace START/CONTINUE/INTEGRATE or check tree cleanliness.
+
+Failure labels identify WSL, REPO, SHELL, AUTH (including network), TOOLCHAIN, or CODEX. Missing/native-tool failures stop dependent probes. Raw auth output and remote URLs are suppressed. If `codex --help` advertises `doctor`, run `timeout -k 2s 45s codex doctor --summary` separately for Codex config/runtime diagnostics; older CLI versions need not provide it.
+
+A Desktop `CreateProcess ... No such file or directory (os error 2)` or `sandboxCwd is not a local file URI` can occur before any command runs. A repo script cannot run at that point. Preserve the exact error and intended cwd, then use PowerShell to select the installed WSL2 distro explicitly:
+
+```powershell
+wsl.exe --list --verbose
+wsl.exe -d <distro-name-from-list> --cd /home/arund/dev/everywhereposter --exec bash -l
+```
+
+In that WSL terminal, run `pwd` and the doctor. If WSL launch fails, diagnose WSL first. If terminal probes pass while Desktop fails to spawn `pwd` in the same directory, classify the failure as the Desktop runner boundary; this comparison does not establish its internal cause. Do not repeatedly retry or randomly change Codex configuration.
+
+To continue deterministically from the WSL terminal:
+
+1. New work: pass the pre-work checklist above, then use `start-change.sh ... --worktree ...` from current clean canonical `main`.
+2. Existing work: `cd` to the recorded worker path, run its doctor and `sh scripts/check-repository-state.sh --continue`; preserve the worker's HEAD and provenance.
+3. Launch `codex -C /home/arund/dev/<verified-worker-name>` and provide the bounded handoff with branch/base/HEAD and remaining scope. A new CLI session does not automatically inherit the Desktop transcript.
+4. For the selected PR, fetch/synchronize normally if needed, pass `--integrate`, push final HEAD, and obtain matching CI and fresh independent review before any separately approved merge.
+
+This uses [OpenAI's documented WSL CLI workflow](https://learn.chatgpt.com/docs/windows/wsl). It changes neither production procedures nor required checks. Deterministic fixture coverage runs in ordinary Linux CI with `bash scripts/test-local-agent-doctor.sh`; CI runs the tests, not the WSL-only live doctor.
 
 ## Code Change Workflow
 
