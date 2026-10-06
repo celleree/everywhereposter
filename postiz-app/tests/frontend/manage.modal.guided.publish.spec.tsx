@@ -110,9 +110,6 @@ jest.mock('@gitroom/frontend/components/media/media.component', () => ({
   MediaBox: () => null,
   MultiMediaComponent: () => null,
 }));
-jest.mock('@gitroom/react/helpers/video.or.image', () => ({
-  VideoOrImage: () => null,
-}));
 jest.mock('@gitroom/react/helpers/image.with.fallback', () => ({
   __esModule: true,
   default: ({ fallbackSrc: _fallbackSrc, ...props }: any) => <img {...props} />,
@@ -414,6 +411,63 @@ describe('ManageModal guided publishing bridge', () => {
       }
       throw new Error(`Unexpected request: ${url}`);
     });
+  });
+
+  it.each(['/video.mp4', '/VIDEO.MOV?download=1'])(
+    'keeps guided %s attachments inert through attachment, rerender and remount',
+    (path) => {
+      const attachment = { ...media[0], path };
+      useLaunchStore.getState().setGlobalValueMedia(0, []);
+      const view = renderGuidedManageModal();
+      fireEvent.click(screen.getByRole('button', { name: 'Media Library' }));
+      expect(mockOpenModal).toHaveBeenCalledTimes(1);
+      const picker = mockOpenModal.mock.calls[0][0].children(jest.fn());
+      act(() => picker.props.setMedia([attachment]));
+
+      const assertInert = () => {
+        const video = view.container.querySelector('video')!;
+        expect(video).not.toBeNull();
+        expect(video.autoplay).toBe(false);
+        expect(video.getAttribute('src')).toBe(path);
+        expect(screen.queryByText(/assets? attached/)).toBeNull();
+        expect(mockOpenModal).toHaveBeenCalledTimes(1);
+      };
+      assertInert();
+      act(() => useLaunchStore.getState().setCurrent(companyLinkedIn.id));
+      assertInert();
+      view.unmount();
+      const remounted = renderGuidedManageModal();
+      expect(remounted.container.querySelector('video')!.autoplay).toBe(false);
+      expect(mockOpenModal).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Remove video' }));
+      expect(remounted.container.querySelector('video')).toBeNull();
+      expect(useLaunchStore.getState().global[0].media).toEqual([]);
+    }
+  );
+
+  it('keeps recovered guided video inert without opening a preview', async () => {
+    mockDraftUser = { id: 'attachment-user', orgId: 'attachment-org' };
+    const key = composerDraftKey(mockDraftUser.id, mockDraftUser.orgId);
+    const saved = snapshotComposerDraft(mockDraftUser.id, mockDraftUser.orgId, 'now', null);
+    localStorage.setItem(key, JSON.stringify(saved));
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+    mockFetch.mockImplementation(async () => ({ ok: true, json: async () => media[0] }));
+    const view = render(
+      <ComposerDraftRecovery integrations={[founderLinkedIn, companyLinkedIn, disabledX]}>
+        <ManageModal {...manageModalProps} guidedComposerActive />
+      </ComposerDraftRecovery>
+    );
+    await waitFor(() => expect(view.container.querySelector('video')).not.toBeNull());
+    expect(view.container.querySelector('video')!.autoplay).toBe(false);
+    expect(useLaunchStore.getState().global[0].media[0].id).toBe(media[0].id);
+    expect(mockOpenModal).not.toHaveBeenCalled();
+    expect(screen.queryByText(/assets? attached/)).toBeNull();
+  });
+
+  it('preserves nonguided thumbnail autoplay and attachment count', () => {
+    const view = render(<ManageModal {...manageModalProps} />);
+    expect(view.container.querySelector('video')!.autoplay).toBe(true);
+    expect(screen.getByText('1 asset attached')).toBeTruthy();
   });
 
   it('removes a guided video from media intent while preserving images', () => {
