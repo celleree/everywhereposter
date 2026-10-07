@@ -2,9 +2,18 @@
 
 This opt-in integration embeds the existing standalone Creator Audit UI inside
 EverywherePoster. The Flask business pipeline stays separate. The pilot supports
-Instagram creator discovery, scanning up to 10 primary-owned Reels, reading saved
+Instagram creator discovery, scanning a bounded sample of primary-owned and
+verified collaboration Reels (6–300 requested, default 30), reading saved
 analysis, generating a saved report, and Markdown/print export. It does not publish
 posts. These are implementation capabilities, not evidence of provider approval.
+
+This contract targets the reconciled Creator Audit implementation. Both modes
+retain discovery request bounds and import batches of at most 100; the largest
+UI target is labelled "Up to 300 Reels", not full historical coverage. Reports
+retain actual eligible/measured/processed counts, relationship labels, and
+separate owned/collaboration medians. Shared Reel plays are not wholly attributable
+to this creator; small unmatched samples cannot establish a relationship effect.
+The proxy routes, signed identity, membership and administrator gates are unchanged.
 
 ## Enablement contract
 
