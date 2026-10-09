@@ -1,5 +1,6 @@
-import { FC } from 'react';
+import { createContext, FC, useContext } from 'react';
 import { clsx } from 'clsx';
+export const MediaAutoplayContext = createContext(true);
 export const VideoOrImage: FC<{
   src: string;
   autoplay: boolean;
@@ -8,11 +9,12 @@ export const VideoOrImage: FC<{
   videoClassName?: string;
 }> = (props) => {
   const { src, autoplay, isContain, imageClassName, videoClassName } = props;
+  const allowAutoplay = useContext(MediaAutoplayContext);
   if (/\.(mp4|mov)(?:$|[?#])/i.test(src || '')) {
     return (
       <video
         src={src}
-        autoPlay={autoplay}
+        autoPlay={autoplay && allowAutoplay}
         className={clsx('w-full h-full', videoClassName)}
         muted={true}
         loop={true}

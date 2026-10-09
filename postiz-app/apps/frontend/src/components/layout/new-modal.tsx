@@ -10,6 +10,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
 } from 'react';
 import { Button } from '@gitroom/react/form/button';
 import { useHotkeys } from 'react-hotkeys-hook';
@@ -30,6 +31,7 @@ interface OpenModalInterface {
   classNames?: {
     modal?: string;
   };
+  contentClassName?: 'upload-media-picker' | 'upload-media-preview';
   size?: string | number;
   height?: string | number;
   id?: string;
@@ -100,6 +102,32 @@ export const Component: FC<{
   isLast: boolean;
   modal: { id: string } & OpenModalInterface;
 }> = memo(({ isLast, modal, closeModal, zIndex }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!modal.contentClassName) return;
+    const previous = document.activeElement as HTMLElement | null;
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, [modal.contentClassName]);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!modal.contentClassName || !isLast || !dialog) return;
+    const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), a[href], input:not(:disabled), video[controls], [tabindex="0"]'
+    )).filter(element => element.getBoundingClientRect().width > 0);
+    if (!dialog.contains(document.activeElement)) controls()[0]?.focus();
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const items = controls(), first = items[0], last = items[items.length - 1];
+      if (!first) return;
+      if (!dialog.contains(document.activeElement) || (event.shiftKey && document.activeElement === first)) {
+        event.preventDefault(); (event.shiftKey ? last : first).focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener('keydown', trap, true);
+    return () => document.removeEventListener('keydown', trap, true);
+  }, [isLast, modal.contentClassName]);
   const decision = useDecisionModal();
   const closeModalFunction = useCallback(async () => {
     if (modal.askClose) {
@@ -198,7 +226,8 @@ export const Component: FC<{
                 !modal.removeLayout && 'gap-[40px] p-[32px]',
                 'bg-newBgColorInner mx-auto flex flex-col w-fit rounded-[24px] relative',
                 modal.size ? '' : 'min-w-[600px]',
-                modal.fullScreen && 'h-full'
+                modal.fullScreen && 'h-full',
+                modal.contentClassName
               )}
               {...((!!modal.size || !!modal.height) && {
                 style: {
@@ -207,8 +236,12 @@ export const Component: FC<{
                 },
               })}
               onClick={(e) => e.stopPropagation()}
+              ref={dialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label={modal.title || undefined}
             >
-              <div className="flex items-center">
+              <div className="modal-header flex items-center">
                 <div className="text-[24px] font-[600] flex-1">
                   {modal.title}
                 </div>
@@ -218,6 +251,7 @@ export const Component: FC<{
                     <button
                       className="outline-none absolute end-[20px] top-[20px] mantine-UnstyledButton-root mantine-ActionIcon-root hover:bg-tableBorder cursor-pointer mantine-Modal-close mantine-1dcetaa"
                       type="button"
+                      aria-label="Close dialog"
                       onClick={closeModalFunction}
                     >
                       <svg
@@ -240,7 +274,7 @@ export const Component: FC<{
               </div>
               <div
                 className={clsx(
-                  'whitespace-pre-line',
+                  'modal-body whitespace-pre-line',
                   !!modal.height && !!modal.size && 'flex flex-1 flex-col'
                 )}
               >

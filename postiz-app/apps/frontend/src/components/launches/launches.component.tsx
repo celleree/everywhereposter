@@ -1,17 +1,15 @@
 'use client';
 
-import { AddProviderButton } from '@gitroom/frontend/components/launches/add.provider.component';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import SafeImage from '@gitroom/react/helpers/safe.image';
-import { capitalize, groupBy, orderBy } from 'lodash';
+import { orderBy } from 'lodash';
 import { CalendarWeekProvider } from '@gitroom/frontend/components/launches/calendar.context';
 import { Filters } from '@gitroom/frontend/components/launches/filters';
-import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import clsx from 'clsx';
 import { useUser } from '../layout/user.context';
 import { Menu } from '@gitroom/frontend/components/launches/menu/menu';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Integration } from '@prisma/client';
 import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { useToaster } from '@gitroom/react/toaster/toaster';
@@ -19,14 +17,9 @@ import { useFireEvents } from '@gitroom/helpers/utils/use.fire.events';
 import { Calendar } from './calendar';
 import { useDrag, useDrop } from 'react-dnd';
 import { DNDProvider } from '@gitroom/frontend/components/launches/helpers/dnd.provider';
-import { GeneratorComponent } from './generator/generator';
-import { useVariables } from '@gitroom/react/helpers/variable.context';
-import { NewPost } from '@gitroom/frontend/components/launches/new.post';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
-import useCookie from 'react-use-cookie';
 import { Onboarding } from '@gitroom/frontend/components/onboarding/onboarding';
-import { storeIntegrationReturnRoute } from '@gitroom/frontend/components/launches/helpers/integration.return-route';
 
 export const SVGLine = () => {
   return (
@@ -351,68 +344,11 @@ export const MenuComponent: FC<
   );
 };
 export const LaunchesComponent = () => {
-  const fetch = useFetch();
-  const user = useUser();
-  const { billingEnabled } = useVariables();
-  const router = useRouter();
   const search = useSearchParams();
   const toast = useToaster();
   const fireEvents = useFireEvents();
   const t = useT();
-  const [reload, setReload] = useState(false);
-  const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
-  const [mode] = useCookie('mode', 'dark');
-  const [isMobile, setIsMobile] = useState(false);
-  const { isLoading, data: integrations, mutate } = useIntegrationList();
-  const isCollapsed = collapseMenu === '1' && !isMobile;
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const mediaQuery = window.matchMedia('(max-width: 1025px)');
-    const handleViewportChange = () => setIsMobile(mediaQuery.matches);
-
-    handleViewportChange();
-    mediaQuery.addEventListener('change', handleViewportChange);
-
-    return () =>
-      mediaQuery.removeEventListener('change', handleViewportChange);
-  }, []);
-
-  const totalNonDisabledChannels = useMemo(() => {
-    return (
-      integrations?.filter((integration: any) => !integration.disabled)
-        ?.length || 0
-    );
-  }, [integrations]);
-  const changeItemGroup = useCallback(
-    async (id: string, group: string) => {
-      mutate(
-        integrations.map((integration: any) => {
-          if (integration.id === id) {
-            return {
-              ...integration,
-              customer: {
-                id: group,
-              },
-            };
-          }
-          return integration;
-        }),
-        false
-      );
-      await fetch(`/integrations/${id}/group`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          group,
-        }),
-      });
-      mutate();
-    },
-    [integrations]
-  );
+  const { isLoading, data: integrations } = useIntegrationList();
   const sortedIntegrations = useMemo(() => {
     return orderBy(
       integrations,
@@ -420,61 +356,6 @@ export const LaunchesComponent = () => {
       ['desc', 'asc', 'asc']
     );
   }, [integrations]);
-  const menuIntegrations = useMemo(() => {
-    return orderBy(
-      Object.values(
-        groupBy(sortedIntegrations, (o) => o?.customer?.id || '')
-      ).map((p) => ({
-        name: (p[0].customer?.name || '') as string,
-        id: (p[0].customer?.id || '') as string,
-        isEmpty: p.length === 0,
-        values: orderBy(
-          p,
-          ['type', 'disabled', 'identifier'],
-          ['desc', 'asc', 'asc']
-        ),
-      })),
-      ['isEmpty', 'name'],
-      ['desc', 'asc']
-    );
-  }, [sortedIntegrations]);
-  const update = useCallback(async (shouldReload: boolean) => {
-    if (shouldReload) {
-      setReload(true);
-    }
-    await mutate();
-    if (shouldReload) {
-      setReload(false);
-    }
-  }, []);
-  const continueIntegration = useCallback(
-    (integration: any) => async () => {
-      router.push(
-        `/launches?added=${integration.identifier}&continue=${integration.id}`
-      );
-    },
-    []
-  );
-  const refreshChannel = useCallback(
-    (
-        integration: Integration & {
-          identifier: string;
-        }
-      ) =>
-      async () => {
-        const { url } = await (
-          await fetch(
-            `/integrations/social/${integration.identifier}?refresh=${integration.internalId}`,
-            {
-              method: 'GET',
-            }
-          )
-        ).json();
-        storeIntegrationReturnRoute();
-        window.location.href = url;
-      },
-    []
-  );
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -503,7 +384,7 @@ export const LaunchesComponent = () => {
       window.close();
     }
   }, []);
-  if (isLoading || reload) {
+  if (isLoading) {
     return (
       <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col gap-[15px] transition-all items-center justify-center">
         <LoadingComponent />
@@ -516,102 +397,7 @@ export const LaunchesComponent = () => {
     <DNDProvider>
       <Onboarding />
       <CalendarWeekProvider integrations={sortedIntegrations}>
-        <div
-          className={clsx(
-            'relative flex flex-col mobile:w-full mobile:min-h-[340px]',
-            isCollapsed ? 'group sidebar w-[100px]' : 'w-[260px]'
-          )}
-        >
-          <div
-            className={clsx(
-              'absolute start-0 top-0 flex h-full w-full flex-col gap-[15px] overflow-x-hidden overflow-y-auto bg-newBgColorInner p-[20px] transition-all scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor mobile:p-[16px]'
-            )}
-          >
-            <div className="flex items-center">
-              <h2 className="flex-1 text-[20px] font-[500] group-[.sidebar]:hidden">
-                {t('channels')}
-              </h2>
-              <div
-                onClick={() =>
-                  setCollapseMenu(collapseMenu === '1' ? '0' : '1')
-                }
-                className="flex h-[24px] w-[24px] cursor-pointer select-none items-center justify-center rounded-[6px] bg-btnSimple text-btnText group-[.sidebar]:mx-auto group-[.sidebar]:rotate-[180deg] mobile:hidden"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="7"
-                  height="13"
-                  viewBox="0 0 7 13"
-                  fill="none"
-                >
-                  <path
-                    d="M6 11.5L1 6.5L6 1.5"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div className="flex flex-col gap-[8px] group-[.sidebar]:mx-auto group-[.sidebar]:w-[44px] mobile:w-full">
-              <AddProviderButton update={() => update(true)} />
-              <div className="flex gap-[8px] group-[.sidebar]:flex-col mobile:flex-col">
-                {sortedIntegrations?.length > 0 && <NewPost />}
-                {sortedIntegrations?.length > 0 &&
-                  user?.tier?.ai &&
-                  billingEnabled && <GeneratorComponent />}
-              </div>
-            </div>
-            <div className="gap-[32px] flex flex-col select-none flex-1">
-              {sortedIntegrations.length === 0 && !isCollapsed && (
-                <div className="flex-1 max-h-[500px] justify-center items-center flex">
-                  <div className="flex flex-col gap-[12px] text-center">
-                    <img
-                      src={
-                        mode === 'dark'
-                          ? '/no-channels.svg'
-                          : '/no-channels-colors.svg'
-                      }
-                      alt="No channels"
-                      className="mx-auto min-w-[100%]"
-                    />
-                    <div className="font-[600] text-[20px]">
-                      {t('no_channels', 'No channels yet')}
-                    </div>
-                    <div className="text-[14px]">
-                      {t('connect_your_accounts')}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {menuIntegrations.map((menu) => (
-                <MenuGroupComponent
-                  collapsed={isCollapsed}
-                  changeItemGroup={changeItemGroup}
-                  key={menu.name}
-                  group={menu}
-                  mutate={mutate}
-                  continueIntegration={continueIntegration}
-                  update={update}
-                  refreshChannel={refreshChannel}
-                  totalNonDisabledChannels={totalNonDisabledChannels}
-                />
-              ))}
-            </div>
-            <div className="mt-[5px] text-center flex flex-col">
-              {billingEnabled && user?.isLifetime && (
-                <div>{capitalize(user?.tier?.current || '')} tier</div>
-              )}
-              <div>
-                {process.env.NEXT_PUBLIC_VERSION
-                  ? process.env.NEXT_PUBLIC_VERSION
-                  : ''}
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-[12px] bg-newBgColorInner p-[20px] mobile:min-h-[70vh] mobile:p-[16px]">
+        <div className="flex min-w-0 flex-1 flex-col gap-[12px] bg-newBgColorInner p-[20px] mobile:min-h-0 mobile:p-[16px]">
           <Filters />
           <div className="flex flex-1 min-w-0">
             <Calendar />

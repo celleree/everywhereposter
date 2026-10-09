@@ -52,7 +52,7 @@ import {
 } from '@gitroom/frontend/components/media/new.uploader';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
 import { Dashboard } from '@uppy/react';
-import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
+import { MediaAutoplayContext, VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 import {
   CopyPlatform,
@@ -1589,10 +1589,12 @@ export const ManageModal: FC<
             </div>
             <div className="min-w-0 overflow-x-hidden p-[20px] mobile:w-full mobile:min-h-[220px] mobile:px-[12px] mobile:py-[12px]">
               <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
-                <ShowAllProviders
-                  ref={ref}
-                  previewPostIdsByIntegration={previewPostIdsByIntegration}
-                />
+                  <MediaAutoplayContext.Provider value={!standaloneCreate}>
+                    <ShowAllProviders
+                      ref={ref}
+                      previewPostIdsByIntegration={previewPostIdsByIntegration}
+                    />
+                  </MediaAutoplayContext.Provider>
               </div>
             </div>
           </div>
@@ -1958,6 +1960,7 @@ const ComposerUploadCard: FC<{
 
       modals.openModal({
         title: t('media_library', 'Media Library'),
+        contentClassName: 'upload-media-picker',
         askClose: false,
         closeOnEscape: true,
         fullScreen: true,
@@ -1968,6 +1971,8 @@ const ComposerUploadCard: FC<{
             setMedia={onUpload}
             closeModal={close}
             guidedTranscription={guidedTranscription}
+            hideSourceTabs
+            compactPicker
           />
         ),
       });
@@ -2083,11 +2088,7 @@ const ComposerUploadCard: FC<{
               <div className="composer-media-label text-[14px] font-[700] text-white">
                 Shared media
               </div>
-              {!guidedTranscription && (
-                <div className="text-[13px] text-textColor/65">
-                  {media.length} asset{media.length > 1 ? 's' : ''} attached
-                </div>
-              )}
+
             </div>
             <div className="grid min-w-0 max-w-full grid-cols-2 gap-[10px] md:grid-cols-3 xl:grid-cols-4 mobile:gap-[8px]">
               {media.slice(0, 8).map((item: any) => (
@@ -2110,7 +2111,7 @@ const ComposerUploadCard: FC<{
                     )}
                   <div className="aspect-[1/1]">
                     <VideoOrImage
-                      autoplay={!guidedTranscription}
+                      autoplay={false}
                       src={mediaDirectory.set(item.path)}
                     />
                   </div>
