@@ -1,3 +1,5 @@
+'use client';
+
 import { createContext, FC, useContext } from 'react';
 import { clsx } from 'clsx';
 export const MediaAutoplayContext = createContext(true);
