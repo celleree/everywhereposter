@@ -34,14 +34,16 @@ it('has four mobile destinations and exposes the existing routes through More', 
   expect(dialog.overflowY).toBe('auto');
   expect(dialog.overflowX).toBe('hidden');
   expect(dialog.maxHeight).toBe('calc(100dvh - env(safe-area-inset-top))');
-  for (const [name, route] of [['Agent', '/agents'], ['Analytics', '/analytics'], ['Plugs', '/plugs'], ['Integrations', '/third-party'], ['Settings', '/settings']]) {
+  for (const [name, route] of [['Agent', '/agents'], ['Analytics', '/analytics'], ['Settings', '/settings']]) {
     expect(screen.getByRole('link', { name }).getAttribute('href')).toBe(route);
   }
   expect(screen.getByRole('button', { name: 'Add Channel' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Plugs' })).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Integrations' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Add Channel' }));
   expect(screen.getByRole('button', { name: 'More' }).getAttribute('aria-expanded')).toBe('false');
   fireEvent.click(screen.getByRole('button', { name: 'More' }));
-  fireEvent.click(screen.getByRole('link', { name: 'Integrations' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Analytics' }));
   expect(screen.getByRole('button', { name: 'More' }).getAttribute('aria-expanded')).toBe('false');
 });
 

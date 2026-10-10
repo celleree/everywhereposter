@@ -63,7 +63,6 @@ const TrendIndicator: FC<{ value: number; average?: boolean }> = ({
 const AnalyticsCard: FC<{
   item: AnalyticsDataItem;
   total: string | number;
-  index: number;
   chartKey: string;
   isInstagram: boolean;
   isInstagramBusiness: boolean;
@@ -71,14 +70,12 @@ const AnalyticsCard: FC<{
 }> = ({
   item,
   total,
-  index,
   chartKey,
   isInstagram,
   isInstagramBusiness,
   isTotalsMode,
 }) => {
-  const colorVariants = ['purple', 'green', 'blue'] as const;
-  const color = colorVariants[index % colorVariants.length];
+  const color = 'neutral' as const;
 
   const hasDataPoints = item.data.length > 0;
   const isInstagramTotalOnly = isInstagram && !item.average;
@@ -95,20 +92,13 @@ const AnalyticsCard: FC<{
           rounded-[12px]
           overflow-hidden
           transition-all duration-200
-          hover:border-ai
+          hover:border-newTableText
         `}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-[16px] pt-[14px] pb-[8px]">
           <div className="flex items-center gap-[10px]">
-            <div
-              className={`
-                w-[8px] h-[8px] rounded-full
-                ${color === 'purple' ? 'bg-[#612bd3]' : ''}
-                ${color === 'green' ? 'bg-[#32d583]' : ''}
-                ${color === 'blue' ? 'bg-[#1d9bf0]' : ''}
-              `}
-            />
+            <div className="w-[8px] h-[8px] rounded-full bg-newTableText" />
             <span className="text-[15px] font-medium text-newTableText">
               {item.label}
             </span>
@@ -189,7 +179,7 @@ const EmptyState: FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
-          className="text-ai"
+          className="text-newTableText"
         >
           <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           <path d="M12 8v4l2 2" />
@@ -407,7 +397,6 @@ export const RenderAnalytics: FC<{
             key={`analytics-${index}`}
             item={item}
             total={totals[index]}
-            index={index}
             chartKey={`chart-${integration.id}-${date}-${item.label}-${index}`}
             isInstagram={isInstagram}
             isInstagramBusiness={isInstagramBusiness}

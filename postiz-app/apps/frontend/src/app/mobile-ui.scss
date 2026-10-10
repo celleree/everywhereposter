@@ -1,6 +1,11 @@
 @mixin styles {
 // Shared mobile shell, navigation and form treatment for the approved Upload UI.
 .guided-review-existing-editor { display: none; }
+.settings-navigation button:focus-visible,
+.analytics-navigation button:focus-visible,
+.settings-navigation select:focus,
+.analytics-navigation select:focus,
+.analytics-panel select:focus { outline: 2px solid var(--new-btn-text) !important; outline-offset: 2px; }
 
 @media (max-width: 1025px) {
   .mobile-app-shell { padding: 8px 0 calc(88px + env(safe-area-inset-bottom)); }

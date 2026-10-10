@@ -812,12 +812,14 @@ export const MediaBox: FC<{
                         </button>
                       </div>
                       {isVideoMedia(media) ? (
-                        <VideoFrame url={mediaDirectory.set(media.path)} />
+                        <VideoFrame lazy url={mediaDirectory.set(media.path)} />
                       ) : (
                         <img
                           width="100%"
                           height="100%"
                           className="w-full h-full object-cover"
+                          loading="lazy"
+                          decoding="async"
                           src={mediaDirectory.set(media.path)}
                           alt="media"
                         />
