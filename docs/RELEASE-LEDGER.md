@@ -12,7 +12,23 @@ Update this ledger after each verified deployment and after any rollback. Record
 - Verification result: `<result, including the runtime container and public check>`
 - Rollback reference: `<last known-good full SHA or retained rollback tag>`
 
-## Current Verified Production Deployment — OAuth publishing and ChatGPT files
+## Current Production Deployment — mobile cleanup (authenticated acceptance pending)
+
+- Deployment date: `2026-10-10 UTC`.
+- Merged PR: [#156](https://github.com/celleree/everywhereposter/pull/156), mobile Settings/Analytics navigation, requested menu removal and deferred media loading. Reviewed HEAD `a3c2b0f2ed73970db2679b503678107bc19e699c`; its tree matches the actual merge/image commit.
+- Full image commit SHA and server revision at verification: `43c8002d2289d6e3b480c0b83dd543ed89aa2d92`.
+- GHCR image tag: `ghcr.io/celleree/publish-everywhere-postiz:43c8002d2289d6e3b480c0b83dd543ed89aa2d92`.
+- Deployed Docker image ID: `sha256:4c903fce209c078cec157caacf8d88a702a48d903210e8e4fb8ef1e9e81404d0`, independently matched to the requested full-SHA image.
+- Release status: `DEPLOYED_UNVERIFIED`. Container and public readiness passed; authenticated feature acceptance remains pending.
+- Gates: exact-HEAD [PR CI 38079819931](https://github.com/celleree/everywhereposter/actions/runs/38079819931) and [repository guard 38079819954](https://github.com/celleree/everywhereposter/actions/runs/38079819954) succeeded, followed by fresh independent exact-HEAD review with no unresolved findings. The initial WebKit native-control finding was repaired before final review. Final optimized build/TypeScript and six focused Settings/Analytics cases passed without retries across both themes, five viewport widths and Chromium/WebKit. Prior unchanged behavior had 318 tests/37 suites and 27 browser cases passing; those broader local cases were not all rerun after the CSS-only repair.
+- Image build: [38080479703](https://github.com/celleree/everywhereposter/actions/runs/38080479703), attempt 1, successful `push` on `main` at the exact image SHA; full-SHA image availability was checked before deployment.
+- Deployment: [38081238258](https://github.com/celleree/everywhereposter/actions/runs/38081238258), attempt 1, successful after explicit bounded human deployment approval. Workflow revision and requested image SHA both matched `43c8002d2289d6e3b480c0b83dd543ed89aa2d92`; `deployment_mode=release`, `prune_unused_images=false`. No pending migrations; no schema, environment, startup, Compose or deployment-script changes in this batch. Runtime container healthy with zero restarts, clean server checkout and matching revision. No production retry, rollback or additional cleanup occurred. Deployment stage timings were not captured in the filtered evidence.
+- Backup: `/home/arund/publish-everywhere-git/backups/postiz-20261010-194245.sql`, 1,242,209 bytes, nonempty, mode `600`, created through the existing backup script against the intended `postiz-db-local` database before dispatch. Contents were not displayed or downloaded.
+- Public verification: independent readiness returned HTTP 307 on its first attempt. Five fresh anonymous Chromium contexts at 375/390/430 px, 844x390 landscape and 1440x900 rendered `/auth/login` with HTTP 200 and visible Sign in controls; all served the new scoped light/dark native-control CSS. No page errors were observed in these five post-deployment runs. The previously observed intermittent React hydration error #418 is not claimed fixed. These checks used no credentials and blocked non-GET and third-party requests.
+- Evidence limit: authenticated Settings/Analytics, Upload/Schedule/Media behavior, stored-data retention and physical-device Safari acceptance still require an authorized signed-in production session. No real user data, grants, posts or provider-paid tests were created. Optimized synthetic runs measured cold/repeated navigation and video deferral, but do not establish a production speedup: initial video requests fell from 18 to 6 with all 18 loading after scroll; the reported production slowness remains to be measured in the affected session.
+- Rollback reference: pre-deployment server/image SHA `865b3c19b6117c077803cd62d419812657b3cf1c`; `publish-everywhere/postiz-app:previous` retains `sha256:8035990de5b1ea6b472967c3058001f2de62603f8e3072d3cf23fc48df7c40c4`. No rollback was performed.
+
+## Previous Verified Production Deployment — OAuth publishing and ChatGPT files
 
 - Deployment date: `2026-09-28 UTC` (`2026-09-27` America/Los_Angeles).
 - Merged PRs: [#127](https://github.com/celleree/everywhereposter/pull/127) restricted publishing and [#128](https://github.com/celleree/everywhereposter/pull/128) file ingestion.
