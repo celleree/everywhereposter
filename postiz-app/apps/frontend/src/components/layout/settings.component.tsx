@@ -29,7 +29,6 @@ import { Sets } from '@gitroom/frontend/components/sets/sets';
 import { SignaturesComponent } from '@gitroom/frontend/components/settings/signatures.component';
 import { Autopost } from '@gitroom/frontend/components/autopost/autopost';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import { SVGLine } from '@gitroom/frontend/components/launches/launches.component';
 import { GlobalSettings } from '@gitroom/frontend/components/settings/global.settings';
 import { ApprovedAppsComponent } from '@gitroom/frontend/components/approved-apps/approved-apps.component';
 import { KnowledgeBaseSettings } from '@gitroom/frontend/components/settings/knowledge-base.settings';
@@ -101,12 +100,6 @@ export const SettingsPopup: FC<{
     if (user?.tier?.ai) {
       arr.push({ tab: 'knowledge_base', label: t('knowledge_base', 'Knowledge Base') });
     }
-    if (user?.tier.current !== 'FREE') {
-      arr.push({ tab: 'sets', label: t('sets', 'Sets') });
-    }
-    if (user?.tier.current !== 'FREE') {
-      arr.push({ tab: 'signatures', label: t('signatures', 'Signatures') });
-    }
     if (user?.tier?.public_api && isGeneral && showLogout) {
       arr.push({ tab: 'api', label: t('developers', 'Developers') });
     }
@@ -121,29 +114,31 @@ export const SettingsPopup: FC<{
 
   return (
     <>
-      <div className="bg-newBgColorInner p-[20px] flex flex-col transition-all w-[260px]">
-        <div className="flex flex-1 flex-col gap-[15px]">
+      <div className="settings-navigation bg-newBgColorInner p-[20px] flex flex-col w-[260px] shrink-0 mobile:w-full mobile:p-[16px]">
+        <label className="hidden mobile:flex flex-col gap-[8px] text-[14px]">
+          {t('settings', 'Settings')}
+          <select value={tab} onChange={(event) => setTab(event.target.value)}
+            aria-controls="settings-panel" className="min-h-[44px] w-full min-w-0 rounded-[8px] border border-newTableBorder bg-newBgColorInner px-[12px] text-textColor focus-visible:outline focus-visible:outline-2">
+            {list.map(({ tab: tabKey, label }) => <option key={tabKey} value={tabKey}>{label}</option>)}
+          </select>
+        </label>
+        <nav aria-label={t('settings', 'Settings')} className="flex flex-1 flex-col gap-[8px] mobile:hidden">
           {list.map(({ tab: tabKey, label }) => (
-            <div
+            <button
+              type="button"
               key={tabKey}
+              aria-pressed={tabKey === tab}
+              aria-controls="settings-panel"
               className={clsx(
-                'cursor-pointer flex items-center gap-[12px] group/profile hover:bg-boxHover rounded-e-[8px]',
-                tabKey === tab && 'bg-boxHover'
+                'min-h-[44px] px-[12px] text-start rounded-[8px] hover:bg-boxHover focus-visible:outline focus-visible:outline-2',
+                tabKey === tab && 'bg-boxFocused text-textItemFocused'
               )}
               onClick={() => setTab(tabKey)}
             >
-              <div
-                className={clsx(
-                  'h-full w-[4px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity',
-                  tabKey === tab && 'opacity-100'
-                )}
-              >
-                <SVGLine />
-              </div>
               {label}
-            </div>
+            </button>
           ))}
-        </div>
+        </nav>
         <div>
           {showLogout && (
             <div className="mt-4">
@@ -152,7 +147,7 @@ export const SettingsPopup: FC<{
           )}
         </div>
       </div>
-      <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px]">
+      <div id="settings-panel" className="settings-panel bg-newBgColorInner min-w-0 flex-1 flex-col flex p-[20px] mobile:p-[16px] gap-[12px]">
         <FormProvider {...form}>
           <form onSubmit={form.handleSubmit(submit)}>
             {!!getRef && (

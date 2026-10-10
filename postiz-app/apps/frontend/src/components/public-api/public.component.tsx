@@ -219,7 +219,7 @@ const McpSection = ({
 
   return (
     <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
-      <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
+      <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px] mobile:flex-col">
         <div>
           <div className="text-[15px] font-[600]">
             {t('mcp_client_configuration', 'MCP Client Configuration')}
@@ -296,7 +296,7 @@ const McpSection = ({
           <pre className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-[13px] whitespace-pre-wrap break-all overflow-x-auto leading-[1.6]">
             {maskedConfig}
           </pre>
-          <div className="flex gap-[8px]">
+          <div className="flex gap-[8px] mobile:flex-wrap">
             <button
               type="button"
               onClick={() => setRevealed(!revealed)}
@@ -378,7 +378,7 @@ const CliSection = ({
 
   return (
     <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
-      <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
+      <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px] mobile:flex-col">
         <div>
           <div className="text-[15px] font-[600]">
             {t('cli_and_skills', 'CLI & AI Skills')}
@@ -412,7 +412,7 @@ const CliSection = ({
             </pre>
           </div>
         ))}
-        <div className="flex gap-[8px]">
+        <div className="flex gap-[8px] mobile:flex-wrap">
           <button
             type="button"
             onClick={() => setRevealed(!revealed)}
@@ -513,7 +513,7 @@ const PublicApiContent = () => {
         )}
       </div>
       <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
-        <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
+        <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px] mobile:flex-col">
           <div>
             <div className="text-[15px] font-[600]">
               {t('api_key', 'API Key')}
@@ -559,7 +559,7 @@ const PublicApiContent = () => {
               )}
             </code>
           </div>
-          <div className="flex gap-[8px]">
+          <div className="flex gap-[8px] mobile:flex-wrap">
             <button
               type="button"
               onClick={() => setReveal(!reveal)}

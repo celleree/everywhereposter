@@ -15,7 +15,6 @@ import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import useCookie from 'react-use-cookie';
-import { SVGLine } from '@gitroom/frontend/components/launches/launches.component';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 const allowedIntegrations = [
   'facebook',
@@ -40,7 +39,6 @@ export const PlatformAnalytics = () => {
 
   const [current, setCurrent] = useState(0);
   const [key, setKey] = useState<AnalyticsRange>(7);
-  const [refresh, setRefresh] = useState(false);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
   const toaster = useToaster();
   const load = useCallback(async () => {
@@ -155,6 +153,13 @@ export const PlatformAnalytics = () => {
       ? numericRanges[numericRanges.length - 1] || 7
       : selectedRange;
   const isTotalsMode = selectedRange === 'totals';
+  const selectChannel = (index: number) => {
+    if (sortedIntegrations[index]?.refreshNeeded) {
+      toaster.show('Please refresh the integration from the calendar', 'warning');
+      return;
+    }
+    setCurrent(index);
+  };
 
   if (isLoading) {
     return (
@@ -170,7 +175,7 @@ export const PlatformAnalytics = () => {
         <div>
           <img src="/peoplemarketplace.svg" />
         </div>
-        <div className="text-[48px]">
+        <div className="text-[48px] mobile:text-[24px]">
           {t('can_t_show_analytics_yet', "Can't show analytics yet")}
           <br />
           {t(
@@ -178,7 +183,7 @@ export const PlatformAnalytics = () => {
             'You have to add Social Media channels'
           )}
         </div>
-        <div className="text-[20px]">
+        <div className="text-[20px] mobile:text-[14px] break-words">
           {t('supported', 'Supported:')}
           {allowedIntegrations.map((p) => capitalize(p)).join(', ')}
         </div>
@@ -193,9 +198,18 @@ export const PlatformAnalytics = () => {
   }
   return (
     <>
+      <label className="analytics-navigation hidden mobile:flex flex-col gap-[8px] bg-newBgColorInner p-[16px] text-[14px]">
+        {t('channels', 'Channels')}
+        <select value={current} onChange={(event) => selectChannel(+event.target.value)}
+          className="min-h-[44px] min-w-0 w-full rounded-[8px] border border-newTableBorder bg-newBgColorInner px-[12px] focus-visible:outline focus-visible:outline-2">
+          {sortedIntegrations.map((integration, index) => (
+            <option key={integration.id} value={index}>{integration.name} ({integration.identifier}){integration.refreshNeeded ? ' — Refresh required' : ''}</option>
+          ))}
+        </select>
+      </label>
       <div
         className={clsx(
-          'bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all',
+          'analytics-navigation bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all shrink-0 mobile:hidden',
           collapseMenu === '1' ? 'group sidebar w-[100px]' : 'w-[260px]'
         )}
       >
@@ -204,9 +218,9 @@ export const PlatformAnalytics = () => {
             <h2 className="group-[.sidebar]:hidden flex-1 text-[20px] font-[500]">
               {t('channels')}
             </h2>
-            <div
+            <button type="button" aria-label={collapseMenu === '1' ? 'Expand channels' : 'Collapse channels'}
               onClick={() => setCollapseMenu(collapseMenu === '1' ? '0' : '1')}
-              className="group-[.sidebar]:rotate-[180deg] group-[.sidebar]:mx-auto text-btnText bg-btnSimple rounded-[6px] w-[24px] h-[24px] flex items-center justify-center cursor-pointer select-none"
+              className="group-[.sidebar]:rotate-[180deg] group-[.sidebar]:mx-auto text-btnText bg-btnSimple rounded-[6px] w-[44px] h-[44px] flex items-center justify-center focus-visible:outline focus-visible:outline-2"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -223,29 +237,16 @@ export const PlatformAnalytics = () => {
                   strokeLinejoin="round"
                 />
               </svg>
-            </div>
+            </button>
           </div>
           {sortedIntegrations.map((integration, index) => (
-            <div
+            <button type="button" aria-pressed={currentIntegration.id === integration.id} title={integration.name}
               key={integration.id}
-              onClick={() => {
-                if (integration.refreshNeeded) {
-                  toaster.show(
-                    'Please refresh the integration from the calendar',
-                    'warning'
-                  );
-                  return;
-                }
-                setRefresh(true);
-                setTimeout(() => {
-                  setRefresh(false);
-                }, 10);
-                setCurrent(index);
-              }}
+              onClick={() => selectChannel(index)}
               className={clsx(
-                'flex gap-[12px] items-center group/profile justify-center hover:bg-boxHover rounded-e-[8px]',
+                'flex min-h-[44px] gap-[12px] items-center group/profile justify-center hover:bg-boxHover rounded-[8px] focus-visible:outline focus-visible:outline-2',
                 currentIntegration.id !== integration.id &&
-                  'opacity-20 hover:opacity-100 cursor-pointer'
+                  'opacity-60 hover:opacity-100 cursor-pointer'
               )}
             >
               <div
@@ -262,9 +263,6 @@ export const PlatformAnalytics = () => {
                     <div className="bg-primary/60 w-[39px] h-[46px] start-0 top-0 absolute rounded-full z-[199]" />
                   </div>
                 )}
-                <div className="h-full w-[4px] -ms-[12px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity">
-                  <SVGLine />
-                </div>
                 <ImageWithFallback
                   fallbackSrc={`/icons/platforms/${integration.identifier}.png`}
                   src={integration.picture}
@@ -289,16 +287,17 @@ export const PlatformAnalytics = () => {
               >
                 {integration.name}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>
-      <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px]">
+      <div className="analytics-panel bg-newBgColorInner min-w-0 flex-1 flex-col flex p-[20px] mobile:p-[16px] gap-[12px]">
         {!!options.length && (
           <div className="flex-1 flex flex-col gap-[14px]">
             <div className="max-w-[200px]">
               <Select
                 label=""
+                aria-label={t('date_range', 'Date range')}
                 name="date"
                 disableForm={true}
                 hideErrors={true}
@@ -317,8 +316,9 @@ export const PlatformAnalytics = () => {
               </Select>
             </div>
             <div className="flex-1">
-              {!!effectiveDate && !!currentIntegration && !refresh && (
+              {!!effectiveDate && !!currentIntegration && (
                 <RenderAnalytics
+                  key={currentIntegration.id}
                   integration={currentIntegration}
                   date={effectiveDate}
                   isTotalsMode={isTotalsMode}

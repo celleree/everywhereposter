@@ -19,7 +19,7 @@ function mergeDataPoints(data: ChartPoint[], numPoints: number): ChartPoint[] {
 
 export const ChartSocial: FC<{
   data: ChartPoint[];
-  color?: 'purple' | 'green' | 'blue';
+  color?: 'purple' | 'green' | 'blue' | 'neutral';
   directPoints?: boolean;
 }> = (props) => {
   const { data, color = 'purple', directPoints = false } = props;
@@ -36,6 +36,11 @@ export const ChartSocial: FC<{
   const chart = useRef<null | DrawChart>(null);
 
   const colorSchemes = {
+    neutral: {
+      start: mode === 'dark' ? 'rgba(244, 244, 245, 0.8)' : 'rgba(24, 24, 27, 0.8)',
+      end: mode === 'dark' ? 'rgba(244, 244, 245, 0.1)' : 'rgba(24, 24, 27, 0.1)',
+      border: mode === 'dark' ? '#f4f4f5' : '#18181b',
+    },
     purple: {
       start: 'rgba(97, 43, 211, 0.8)',
       end: 'rgba(97, 43, 211, 0.1)',
