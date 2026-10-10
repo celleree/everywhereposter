@@ -218,7 +218,8 @@ export const RenderAnalytics: FC<{
   isTotalsMode?: boolean;
 }> = (props) => {
   const { integration, date, isTotalsMode } = props;
-  const [loading, setLoading] = useState(true);
+  const analyticsKey = `/analytics-${integration.id}-${date}`;
+  const [refreshingKey, setRefreshingKey] = useState<string | null>(null);
   const [showRefreshPrompt, setShowRefreshPrompt] = useState(false);
   const [refreshPromptCycle, setRefreshPromptCycle] = useState(0);
   const refreshPromptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -234,16 +235,9 @@ export const RenderAnalytics: FC<{
     [fetch, integration.id, date]
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      return loadAnalytics();
-    } finally {
-      setLoading(false);
-    }
-  }, [loadAnalytics]);
+  const load = useCallback(() => loadAnalytics(), [loadAnalytics]);
 
-  const { data, mutate } = useSWR(`/analytics-${integration?.id}-${date}`, load, {
+  const { data, mutate, isValidating } = useSWR(analyticsKey, load, {
     refreshInterval: 0,
     refreshWhenHidden: false,
     revalidateOnFocus: false,
@@ -252,6 +246,7 @@ export const RenderAnalytics: FC<{
     refreshWhenOffline: false,
     revalidateOnMount: true,
   });
+  const loading = isValidating || refreshingKey === analyticsKey;
 
   const refreshChannel = useCallback(
     (integrationData: AnalyticsIntegration) =>
@@ -320,16 +315,16 @@ export const RenderAnalytics: FC<{
   }, [isInstagramBusiness, integration.id, date, refreshPromptCycle]);
 
   const refreshAnalytics = useCallback(async () => {
-    setLoading(true);
+    setRefreshingKey(analyticsKey);
     setShowRefreshPrompt(false);
     try {
-      const refreshed = await loadAnalytics(true);
-      await mutate(refreshed, false);
+      // Start the mutation before awaiting so SWR retains this range's key.
+      await mutate(() => loadAnalytics(true), { revalidate: false });
     } finally {
-      setLoading(false);
+      setRefreshingKey((current) => current === analyticsKey ? null : current);
       setRefreshPromptCycle((current) => current + 1);
     }
-  }, [loadAnalytics, mutate]);
+  }, [analyticsKey, loadAnalytics, mutate]);
 
   const totals = useMemo(() => {
     return data?.map((p: AnalyticsDataItem) => {
@@ -356,7 +351,11 @@ export const RenderAnalytics: FC<{
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-[48px]">
+      <div
+        role="status"
+        aria-label={t('loading_analytics', 'Loading analytics')}
+        className="flex items-center justify-center py-[48px]"
+      >
         <LoadingComponent />
       </div>
     );
