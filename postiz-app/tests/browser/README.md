@@ -1,10 +1,14 @@
 # Isolated rendered UI tests
 
-Run from `postiz-app` with the project's pnpm 10.6.1 and existing installed browsers:
+Run from `postiz-app` with the project's pnpm 10.6.1. Install the frozen lockfile and use its pinned Playwright CLI to install the required browser:
 
 ```sh
-COREPACK_ENABLE_NETWORK=0 pnpm exec playwright test
-COREPACK_ENABLE_NETWORK=0 pnpm exec playwright test --project=phone-webkit
+pnpm install --frozen-lockfile
+pnpm exec playwright install --with-deps chromium
+pnpm run test:browser:ci
+# Full suite also needs WebKit:
+pnpm exec playwright install --with-deps webkit
+pnpm run test:browser
 pnpm exec playwright show-report browser-report
 pnpm exec node tests/browser/runtime.cjs
 ```
@@ -15,7 +19,7 @@ The test-only server binds 127.0.0.1:4217 (real frontend) and :4218 (synthetic A
 
 For accurate logos the runtime temporarily links the checkout's committed `site/branding` assets into the frontend's public directory, then removes only that exact task-created symlink at shutdown. No original branding or media is copied or changed.
 
-Installed transitive Playwright 1.58.2 is reused without package installation; a direct devDependency remains a future reproducibility change requiring dependency approval. On this machine the owned worktree's node_modules symlink points to the verified canonical installation. Never run package installs through that symlink.
+Playwright Test 1.58.2 is an explicitly approved exact devDependency, with the matching lockfile resolution. CI installs Chromium/system dependencies and the offline DejaVu font if absent, then runs three phone-Chromium smoke cases with one worker, zero retries and a 15-minute total bound including warm-up. It reuses the existing quality job, so the required Docker build aggregate fails when browser smoke fails. Reports, screenshots and traces are uploaded for seven days. Broader desktop/phone Chromium/WebKit coverage stays available through `test:browser`. If an owned local worktree uses a verified canonical node_modules symlink, never install packages through that symlink. See [`docs/browser-acceptance.md`](../../../docs/browser-acceptance.md) for the separate real-backend upload/save/reload and physical-phone acceptance record.
 
 Named viewport/full-page screenshots and geometry JSON live under `browser-results`, with failure traces and an HTML report. Geometry attachments include the Git revision and a SHA-256 fingerprint of the suite, edited product sources and synthetic video bytes. Screenshots use an offline DejaVu font fixture and synthetic data: diagnostic artifacts, not accepted visual baselines or a qualitative design verdict. Chromium/WebKit phone presets emulate browsers; they do not test physical iPhone hardware or native iOS. Desktop scheduled rows are checked; loading/error/retry is currently exercised on the mobile implementation. Creator Audit route/iframe coverage is deferred because that integration is absent from current remote main. More navigation uses the existing Settings route. Mobile bottom navigation targets are measured against 44px; this is not an exhaustive accessibility audit. Repeated clicks are exercised; native touch gestures and mobile keyboards are not covered.
 
