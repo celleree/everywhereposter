@@ -14,6 +14,10 @@ import {
   PLATFORM_CTA_STYLES,
 } from '@gitroom/nestjs-libraries/copy-generation/platform-rules';
 import { CopyGenerationBrief } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
+import {
+  getOpenAiReasoningEffort,
+  OPENAI_MODELS,
+} from '@gitroom/nestjs-libraries/openai/openai.models';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
@@ -130,7 +134,8 @@ export class CopyGenerationModelService {
     )}`;
 
     const analysis = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      model: OPENAI_MODELS.utility,
+      reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
       messages: [
         {
           role: 'system',
@@ -269,7 +274,8 @@ Analyze the sampled frames below as one video.`,
   protected async requestVideoInsights(userContent: ChatCompletionContentPart[]) {
     const analysis = await openai.chat.completions.parse(
       {
-        model: 'gpt-4.1',
+        model: OPENAI_MODELS.utility,
+        reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
         messages: [
           {
             role: 'system',
@@ -470,7 +476,8 @@ Rules:
 
   async summarizeTranscript(transcript: string) {
     const summary = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      model: OPENAI_MODELS.utility,
+      reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
       messages: [
         {
           role: 'system',
@@ -511,7 +518,8 @@ Rules:
     promptConstraints: string
   ) {
     const response = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      model: OPENAI_MODELS.copy,
+      reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.copy),
       messages: [
         {
           role: 'system',
@@ -549,7 +557,8 @@ Return a JSON object with draft, angle, hook, and cta.`,
     hardCap: number;
   }) {
     const response = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      model: OPENAI_MODELS.utility,
+      reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
       messages: [
         {
           role: 'system',

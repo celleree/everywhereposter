@@ -3,6 +3,10 @@ import OpenAI from 'openai';
 import { shuffle } from 'lodash';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
+import {
+  getOpenAiReasoningEffort,
+  OPENAI_MODELS,
+} from '@gitroom/nestjs-libraries/openai/openai.models';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
@@ -29,23 +33,40 @@ export class OpenaiService {
       : isHorizontal
       ? '1792x1024'
       : undefined;
-    const generate = (
-      await openai.images.generate({
-        prompt,
-        response_format: isUrl ? 'url' : 'b64_json',
-        model: 'dall-e-3',
-        ...(size ? { size } : {}),
-      })
-    ).data[0];
+    const model = OPENAI_MODELS.image;
+    const usesGptImageModel = model.startsWith('gpt-image-');
+    const response = usesGptImageModel
+      ? await openai.images.generate({
+          prompt,
+          model,
+          quality: OPENAI_MODELS.imageQuality,
+          output_format: 'png',
+          ...(size ? { size } : {}),
+        })
+      : await openai.images.generate({
+          prompt,
+          response_format: isUrl ? 'url' : 'b64_json',
+          model,
+          ...(size ? { size } : {}),
+        });
+    const generated = response.data?.[0];
 
-    return isUrl ? generate.url : generate.b64_json;
+    if (!generated) return undefined;
+    if (!usesGptImageModel) {
+      return isUrl ? generated.url : generated.b64_json;
+    }
+
+    return isUrl && generated.b64_json
+      ? `data:image/png;base64,${generated.b64_json}`
+      : generated.b64_json;
   }
 
   async generatePromptForPicture(prompt: string) {
     return (
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: OPENAI_MODELS.utility,
+          reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
           messages: [
             {
               role: 'system',
@@ -66,7 +87,8 @@ export class OpenaiService {
     return (
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: OPENAI_MODELS.utility,
+          reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
           messages: [
             {
               role: 'system',
@@ -99,8 +121,8 @@ export class OpenaiService {
             },
           ],
           n: 5,
-          temperature: 1,
-          model: 'gpt-4.1',
+          model: OPENAI_MODELS.utility,
+          reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
         }),
         openai.chat.completions.create({
           messages: [
@@ -115,8 +137,8 @@ export class OpenaiService {
             },
           ],
           n: 5,
-          temperature: 1,
-          model: 'gpt-4.1',
+          model: OPENAI_MODELS.utility,
+          reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
         }),
       ])
     ).flatMap((p) => p.choices);
@@ -154,7 +176,8 @@ export class OpenaiService {
           content,
         },
       ],
-      model: 'gpt-4.1',
+      model: OPENAI_MODELS.utility,
+      reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
     });
 
     const { content: articleContent } = websiteContent.choices[0].message;
@@ -174,7 +197,8 @@ export class OpenaiService {
     const posts =
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: OPENAI_MODELS.utility,
+          reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
           messages: [
             {
               role: 'system',
@@ -207,7 +231,10 @@ export class OpenaiService {
               return (
                 (
                   await openai.chat.completions.parse({
-                    model: 'gpt-4.1',
+                    model: OPENAI_MODELS.utility,
+                    reasoning_effort: getOpenAiReasoningEffort(
+                      OPENAI_MODELS.utility
+                    ),
                     messages: [
                       {
                         role: 'system',
@@ -243,7 +270,8 @@ export class OpenaiService {
         const parse =
           (
             await openai.chat.completions.parse({
-              model: 'gpt-4.1',
+              model: OPENAI_MODELS.utility,
+              reasoning_effort: getOpenAiReasoningEffort(OPENAI_MODELS.utility),
               messages: [
                 {
                   role: 'system',
