@@ -230,6 +230,7 @@ export const MediaBox: FC<{
   source?: 'library' | 'posted';
   onSourceChange?: (source: 'library' | 'posted') => void;
   hideSourceTabs?: boolean;
+  compactPicker?: boolean;
   type?: 'image' | 'video';
   guidedTranscription?: boolean;
   closeModal: () => void;
@@ -239,6 +240,7 @@ export const MediaBox: FC<{
   source: controlledSource,
   onSourceChange,
   hideSourceTabs = false,
+  compactPicker = false,
   setMedia,
   guidedTranscription = false,
 }) => {
@@ -283,7 +285,59 @@ export const MediaBox: FC<{
     `get-media-${source}-${page}`,
     loadMedia
   );
-  const [selected, setSelected] = useState([]);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [pickerCapacity, setPickerCapacity] = useState(9);
+  const [pickerGridWidth, setPickerGridWidth] = useState<number>();
+  const [pickerOffset, setPickerOffset] = useState(0);
+  const [previousBatch, setPreviousBatch] = useState(false);
+  const filteredMedia = useMemo<Array<Media & { postedMedia?: boolean }>>(() => (data?.results || []).filter((media: Media) => {
+    if (guidedTranscription && !isGuidedMediaLibraryMedia(media)) return false;
+    if (type === 'video') return isVideoMedia(media);
+    if (type === 'image') return !isVideoMedia(media);
+    return true;
+  }), [data, guidedTranscription, type]);
+  const lastPickerOffset = Math.max(0, Math.floor((filteredMedia.length - 1) / pickerCapacity) * pickerCapacity);
+  const visibleOffset = Math.min(pickerOffset, lastPickerOffset);
+  const visibleMedia = compactPicker
+    ? filteredMedia.slice(visibleOffset, visibleOffset + pickerCapacity)
+    : filteredMedia;
+  useEffect(() => {
+    if (!compactPicker || !gridRef.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      // Three square columns, at most three rows. The API's 18-item batches stay unchanged.
+      if (width <= 0 || height <= 0) return;
+      const gridWidth = Math.min(width, 720, height * 3);
+      const rows = Math.max(1, Math.min(3, Math.floor(height / (gridWidth / 3))));
+      setPickerGridWidth(gridWidth);
+      setPickerCapacity(rows * 3);
+    });
+    observer.observe(gridRef.current);
+    return () => observer.disconnect();
+  }, [compactPicker]);
+  useEffect(() => {
+    if (previousBatch && !isLoading && data) {
+      setPickerOffset(lastPickerOffset);
+      setPreviousBatch(false);
+    }
+  }, [previousBatch, isLoading, data, lastPickerOffset]);
+  const previousPickerPage = () => {
+    if (visibleOffset > 0) {
+      setPickerOffset(Math.max(0, visibleOffset - pickerCapacity));
+    } else if (page > 0) {
+      setPreviousBatch(true);
+      setPage(page - 1);
+    }
+  };
+  const nextPickerPage = () => {
+    if (visibleOffset + pickerCapacity < filteredMedia.length) {
+      setPickerOffset(visibleOffset + pickerCapacity);
+    } else if (page + 1 < (data?.pages || 0)) {
+      setPickerOffset(0);
+      setPage(page + 1);
+    }
+  };
+  const [selected, setSelected] = useState<Media[]>([]);
   const t = useT();
   const uploaderRef = useRef<any>(null);
   const mediaDirectory = useMediaDirectory();
@@ -326,14 +380,11 @@ export const MediaBox: FC<{
       if (standalone) {
         return;
       }
-      const exists = selected.find((p: any) => p.id === media.id);
-      if (exists) {
-        setSelected(selected.filter((f: any) => f.id !== media.id));
-        return;
-      }
-      setSelected([...selected, media]);
+      setSelected((current) => current.some((item) => item.id === media.id)
+        ? current.filter((item) => item.id !== media.id)
+        : [...current, media]);
     },
-    [selected]
+    [standalone]
   );
 
   const addMedia = useCallback(async () => {
@@ -452,6 +503,23 @@ export const MediaBox: FC<{
   const maximize = useCallback(
     (media: Media) => async (e: any) => {
       e.stopPropagation();
+      if (compactPicker) {
+        modals.openModal({
+          title: media.originalName || t('media_preview', 'Media preview'),
+          contentClassName: 'upload-media-preview',
+          fullScreen: true,
+          size: 'calc(100% - 24px)',
+          height: 'calc(100% - 24px)',
+          closeOnEscape: true,
+          askClose: false,
+          children: isVideoMedia(media) ? (
+            <video controls preload="metadata" className="w-full h-full object-contain" src={mediaDirectory.set(media.path)} />
+          ) : (
+            <img className="w-full h-full object-contain" src={mediaDirectory.set(media.path)} alt={media.originalName || 'Media preview'} />
+          ),
+        });
+        return;
+      }
       modals.openModal({
         title: '',
         top: 10,
@@ -475,7 +543,7 @@ export const MediaBox: FC<{
         ),
       });
     },
-    []
+    [compactPicker, mediaDirectory, modals, t]
   );
 
   const deleteImage = useCallback(
@@ -521,7 +589,7 @@ export const MediaBox: FC<{
   return (
     <DropFiles
       disabled={loading || postedMedia}
-      className="flex flex-col flex-1"
+      className={clsx("flex flex-col flex-1", compactPicker && "upload-picker-content")}
       onDrop={dragAndDrop}
     >
       <div className="flex flex-col flex-1">
@@ -579,7 +647,7 @@ export const MediaBox: FC<{
         <div
           className={clsx(
             'w-full pointer-events-none relative mt-[5px] mb-[5px]',
-            postedMedia && 'hidden'
+            (postedMedia || (compactPicker && !loading)) && 'hidden'
           )}
         >
           <div className="w-full h-[46px] overflow-hidden absolute left-0 bg-newBgColorInner uppyChange">
@@ -598,8 +666,10 @@ export const MediaBox: FC<{
           <div className="w-full h-[46px] uppyChange" />
         </div>
         <div
+          ref={gridRef}
           className={clsx(
             'flex-1 relative',
+            compactPicker && 'upload-picker-grid-area',
             !error &&
               !isLoading &&
               !data?.results?.length &&
@@ -607,14 +677,16 @@ export const MediaBox: FC<{
           )}
         >
           <div
+            style={compactPicker ? { width: pickerGridWidth } : undefined}
             className={clsx(
               'absolute -left-[3px] -top-[3px] withp3 h-full overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner',
+              compactPicker && 'upload-picker-grid',
               !error &&
                 !isLoading &&
                 !data?.results?.length &&
                 'flex justify-center items-center gap-[20px] flex-col',
               (isLoading || !!data?.results?.length || error) &&
-                'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6'
+                (compactPicker ? 'grid grid-cols-3' : 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6')
             )}
           >
             {error && !isLoading && (
@@ -666,7 +738,7 @@ export const MediaBox: FC<{
             )}
             {isLoading && (
               <>
-                {[...new Array(16)].map((_, i) => (
+                {[...new Array(compactPicker ? pickerCapacity : 16)].map((_, i) => (
                   <div
                     className={clsx(
                       'w-full px-[3px] py-[3px] rounded-[6px] cursor-pointer aspect-square'
@@ -678,22 +750,7 @@ export const MediaBox: FC<{
                 ))}
               </>
             )}
-            {data?.results
-              ?.filter((f: any) => {
-                if (
-                  guidedTranscription &&
-                  !isGuidedMediaLibraryMedia(f)
-                ) {
-                  return false;
-                }
-                if (type === 'video') {
-                  return isVideoMedia(f);
-                } else if (type === 'image') {
-                  return !isVideoMedia(f);
-                }
-                return true;
-              })
-              .map((media: any) => (
+            {visibleMedia.map((media) => (
                 <div
                   className={clsx(
                     'group w-full px-[3px] py-[3px] rounded-[6px] aspect-square',
@@ -708,13 +765,13 @@ export const MediaBox: FC<{
                         ? 'border-ai'
                         : 'border-transparent'
                     )}
-                    onClick={addRemoveSelected(media)}
+                    onClick={compactPicker ? undefined : addRemoveSelected(media)}
                   >
                     {!!selected.find((p: any) => p.id === media.id) ? (
                       <div className="text-white flex z-[101] justify-center items-center text-[14px] font-[500] w-[24px] h-[24px] rounded-full bg-btnPrimary absolute -bottom-[10px] -end-[10px]">
                         {selected.findIndex((z: any) => z.id === media.id) + 1}
                       </div>
-                    ) : !media.postedMedia ? (
+                    ) : !compactPicker && !media.postedMedia ? (
                       <DeleteCircleIcon
                         className="cursor-pointer hidden z-[100] group-hover:block absolute -top-[5px] -end-[5px]"
                         onClick={deleteImage(media)}
@@ -727,10 +784,18 @@ export const MediaBox: FC<{
                       {media.originalName}
                     </div>
                     <div className="w-full h-full rounded-[6px] overflow-hidden relative">
-                      <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
-                        <div
+                      {compactPicker && (
+                        <button type="button" className="absolute inset-0 z-[10] rounded-[6px]"
+                          aria-label={`${selected.some((item) => item.id === media.id) ? 'Deselect' : 'Select'} ${media.originalName || 'media'}`}
+                          aria-pressed={selected.some((item) => item.id === media.id)}
+                          onClick={addRemoveSelected(media)} />
+                      )}
+                      <div className={clsx('absolute z-[20]', compactPicker ? 'top-0 end-0' : 'left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]')}>
+                        <button
+                          type="button"
+                          aria-label={`Preview ${media.originalName || 'media'}`}
                           onClick={maximize(media)}
-                          className="cursor-pointer p-[4px] bg-black/40 hidden group-hover:block hover:scale-150 transition-all"
+                          className={clsx('cursor-pointer p-[4px] bg-black/40 transition-all', compactPicker ? 'upload-picker-preview-button' : 'hidden group-hover:block hover:scale-150')}
                         >
                           <svg
                             width="30"
@@ -744,7 +809,7 @@ export const MediaBox: FC<{
                               fill="#F1F5F9"
                             />
                           </svg>
-                        </div>
+                        </button>
                       </div>
                       {isVideoMedia(media) ? (
                         <VideoFrame url={mediaDirectory.set(media.path)} />
@@ -763,7 +828,19 @@ export const MediaBox: FC<{
               ))}
           </div>
         </div>
-        {(data?.pages || 0) > 1 && (
+        {compactPicker && (filteredMedia.length > pickerCapacity || (data?.pages || 0) > 1) && (
+          <nav aria-label="Media pages" className="upload-picker-pagination flex items-center justify-between gap-[8px]">
+            <button type="button" onClick={previousPickerPage}
+              disabled={isLoading || !!error || (page === 0 && visibleOffset === 0)}>
+              {t('previous', 'Previous')}
+            </button>
+            <button type="button" onClick={nextPickerPage}
+              disabled={isLoading || !!error || (visibleOffset + pickerCapacity >= filteredMedia.length && page + 1 >= (data?.pages || 0))}>
+              {t('next', 'Next')}
+            </button>
+          </nav>
+        )}
+        {!compactPicker && (data?.pages || 0) > 1 && (
           <Pagination
             current={page}
             totalPages={data?.pages}
@@ -771,7 +848,7 @@ export const MediaBox: FC<{
           />
         )}
         {!standalone && (
-          <div className="flex justify-end mt-[32px] gap-[8px]">
+          <div className={clsx('flex justify-end mt-[32px] gap-[8px]', compactPicker && 'upload-picker-actions')}>
             <button
               onClick={() => modals.closeCurrent()}
               className="cursor-pointer h-[52px] px-[20px] items-center justify-center border border-newTextColor/10 flex rounded-[10px]"

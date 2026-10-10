@@ -130,3 +130,61 @@
 }
 
 }
+
+
+// Upload's picker and deliberate preview only; the standalone Media page stays unchanged.
+.upload-media-picker,
+.upload-media-preview {
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  padding: 16px !important;
+  gap: 12px !important;
+  overflow: hidden;
+  .modal-header {
+    min-height: 44px;
+    flex-shrink: 0;
+    padding-right: 44px;
+    > div:first-child { font-size: 20px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mantine-Modal-close {
+      top: 16px !important; right: 16px !important; width: 44px; height: 44px;
+      display: flex; align-items: center; justify-content: center;
+    }
+  }
+  .modal-body { min-height: 0; overflow: hidden; }
+}
+.upload-picker-content,
+.upload-picker-content > div { min-height: 0; gap: 8px; }
+.upload-picker-grid-area { min-height: 0; }
+.upload-picker-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
+  &.flex { justify-content: center; }
+  .truncate { pointer-events: none; font-size: 11px; }
+}
+.upload-picker-preview-button {
+  display: flex;
+  min-width: 44px; min-height: 44px;
+  align-items: center; justify-content: center;
+  &:hover { transform: none; }
+}
+.upload-picker-pagination {
+  flex-shrink: 0;
+  button {
+    min-height: 44px; padding: 0 16px; border-radius: 8px;
+    background: var(--newColColor);
+    &:disabled { opacity: .4; cursor: default; }
+  }
+}
+.upload-picker-actions {
+  flex-shrink: 0; margin-top: 0 !important;
+  button { min-height: 48px; height: auto !important; padding: 8px 12px !important; }
+}
+@media (max-width: 1025px) {
+  .upload-media-picker,
+  .upload-media-preview {
+    width: calc(100% - 24px) !important;
+    height: calc(100dvh - 24px) !important;
+    border-radius: 16px !important;
+  }
+}

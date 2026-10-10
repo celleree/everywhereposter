@@ -184,6 +184,7 @@ jest.mock('@tiptap/react', () => ({
 import { GuidedComposerReview } from '../../apps/frontend/src/components/new-launch/guided.composer.review';
 import { GuidedComposerShell } from '../../apps/frontend/src/components/new-launch/guided.composer.shell';
 import { ManageModal } from '../../apps/frontend/src/components/new-launch/manage.modal';
+import { VideoOrImage } from '../../libraries/react-shared-libraries/src/helpers/video.or.image';
 import {
   GuidedComposerPublish,
   GuidedComposerPublishBridgeProvider,
@@ -464,10 +465,16 @@ describe('ManageModal guided publishing bridge', () => {
     expect(screen.queryByText(/assets? attached/)).toBeNull();
   });
 
-  it('preserves nonguided thumbnail autoplay and attachment count', () => {
+  it('keeps nonguided attached thumbnails paused without redundant counts', () => {
     const view = render(<ManageModal {...manageModalProps} />);
+    expect(view.container.querySelector('video')!.autoplay).toBe(false);
+    expect(screen.queryByText('1 asset attached')).toBeNull();
+    expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it('preserves requested autoplay outside the standalone Upload preview subtree', () => {
+    const view = render(<VideoOrImage src="/unrelated-preview.mp4" autoplay={true} />);
     expect(view.container.querySelector('video')!.autoplay).toBe(true);
-    expect(screen.getByText('1 asset attached')).toBeTruthy();
   });
 
   it('removes a guided video from media intent while preserving images', () => {
