@@ -79,6 +79,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install pinned Chromium and browser system dependencies
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          if [ ! -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ]; then
+            sudo apt-get install -y fonts-dejavu-core
+          fi
+
+      - name: Run offline Chromium regression smoke
+        run: pnpm run test:browser:ci
+
+      - name: Upload offline browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-browser-${{ github.run_id }}
+          path: |
+            postiz-app/browser-results
+            postiz-app/browser-report
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Verify FFmpeg tools
         run: |
           if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
