@@ -1,3 +1,4 @@
+import { LUNA_CHAT, SOL_CHAT } from './model-config';
 import { Injectable } from '@nestjs/common';
 import OpenAI from 'openai';
 import { shuffle } from 'lodash';
@@ -7,6 +8,18 @@ import { z } from 'zod';
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
 });
+
+export async function generateFlareImage(
+  prompt: string,
+  size: '1024x1024' | '1024x1536' | '1536x1024' = '1024x1024'
+) {
+  const result = await openai.images.generate({
+    model: 'gpt-image-2.5-flare', prompt, size, output_format: 'png', n: 1,
+  });
+  const image = result.data?.[0]?.b64_json;
+  if (!image) throw new Error('Flare returned no image data.');
+  return image;
+}
 
 const PicturePrompt = z.object({
   prompt: z.string(),
@@ -24,28 +37,16 @@ export class OpenaiService {
     isVertical = false,
     isHorizontal = false
   ) {
-    const size = isVertical
-      ? '1024x1792'
-      : isHorizontal
-      ? '1792x1024'
-      : undefined;
-    const generate = (
-      await openai.images.generate({
-        prompt,
-        response_format: isUrl ? 'url' : 'b64_json',
-        model: 'dall-e-3',
-        ...(size ? { size } : {}),
-      })
-    ).data[0];
-
-    return isUrl ? generate.url : generate.b64_json;
+    const size = isVertical ? '1024x1536' : isHorizontal ? '1536x1024' : '1024x1024';
+    const image = await generateFlareImage(prompt, size);
+    return isUrl ? `data:image/png;base64,${image}` : image;
   }
 
   async generatePromptForPicture(prompt: string) {
     return (
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          ...SOL_CHAT,
           messages: [
             {
               role: 'system',
@@ -66,7 +67,7 @@ export class OpenaiService {
     return (
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          ...LUNA_CHAT,
           messages: [
             {
               role: 'system',
@@ -85,7 +86,7 @@ export class OpenaiService {
 
   async generatePosts(content: string) {
     const posts = (
-      await Promise.all([
+      await Promise.all(Array.from({ length: 5 }, () => [
         openai.chat.completions.create({
           messages: [
             {
@@ -98,9 +99,7 @@ export class OpenaiService {
               content: content!,
             },
           ],
-          n: 5,
-          temperature: 1,
-          model: 'gpt-4.1',
+          ...SOL_CHAT,
         }),
         openai.chat.completions.create({
           messages: [
@@ -114,11 +113,9 @@ export class OpenaiService {
               content: content!,
             },
           ],
-          n: 5,
-          temperature: 1,
-          model: 'gpt-4.1',
+          ...SOL_CHAT,
         }),
-      ])
+      ]).flat())
     ).flatMap((p) => p.choices);
 
     return shuffle(
@@ -154,7 +151,7 @@ export class OpenaiService {
           content,
         },
       ],
-      model: 'gpt-4.1',
+      ...LUNA_CHAT,
     });
 
     const { content: articleContent } = websiteContent.choices[0].message;
@@ -174,7 +171,7 @@ export class OpenaiService {
     const posts =
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          ...LUNA_CHAT,
           messages: [
             {
               role: 'system',
@@ -207,7 +204,7 @@ export class OpenaiService {
               return (
                 (
                   await openai.chat.completions.parse({
-                    model: 'gpt-4.1',
+                    ...LUNA_CHAT,
                     messages: [
                       {
                         role: 'system',
@@ -243,7 +240,7 @@ export class OpenaiService {
         const parse =
           (
             await openai.chat.completions.parse({
-              model: 'gpt-4.1',
+              ...SOL_CHAT,
               messages: [
                 {
                   role: 'system',

@@ -87,7 +87,7 @@ export class LoadToolsService {
       )}
 `;
       },
-      model: openai('gpt-5.2'),
+      model: openai.responses('gpt-6.1-sol'),
       tools,
       memory: new Memory({
         storage: pStore,

@@ -10,8 +10,10 @@ import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/po
 
 const model = new ChatOpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-4o-2024-08-06',
-  temperature: 0,
+  model: 'gpt-6-luna',
+  useResponsesApi: true,
+  // This SDK does not yet recognize GPT-6 names as reasoning models.
+  modelKwargs: { reasoning: { effort: 'low' } },
 });
 
 interface WorkflowChannelsState {

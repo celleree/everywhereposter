@@ -1,3 +1,4 @@
+import { generateFlareImage } from '@gitroom/nestjs-libraries/openai/openai.service';
 import { Injectable } from '@nestjs/common';
 import {
   BaseMessage,
@@ -5,7 +6,7 @@ import {
   ToolMessage,
 } from '@langchain/core/messages';
 import { END, START, StateGraph } from '@langchain/langgraph';
-import { ChatOpenAI, DallEAPIWrapper } from '@langchain/openai';
+import { ChatOpenAI } from '@langchain/openai';
 import { TavilySearch } from '@langchain/tavily';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
@@ -23,14 +24,12 @@ const toolNode = new ToolNode(tools);
 
 const model = new ChatOpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-4.1',
-  temperature: 0.7,
+  model: 'gpt-6.1-sol',
+  useResponsesApi: true,
+  // This SDK does not yet recognize GPT-6 names as reasoning models.
+  modelKwargs: { reasoning: { effort: 'medium' } },
 });
 
-const dalle = new DallEAPIWrapper({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'dall-e-3',
-});
 
 interface WorkflowChannelsState {
   messages: BaseMessage[];
@@ -320,7 +319,7 @@ export class AgentGraphService {
 
     const newContent = await Promise.all(
       (state.content || []).map(async (p) => {
-        const image = await dalle.invoke(p.prompt!);
+        const image = `data:image/png;base64,${await generateFlareImage(p.prompt!)}`;
         return {
           ...p,
           image,
