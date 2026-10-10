@@ -1,5 +1,34 @@
 import { test, expect, openApp, capture, noHorizontalOverflow, reachable } from './fixtures';
 
+// Match native control painting to the existing theme; WebKit can otherwise
+// paint a light control behind white selected text despite a dark CSS background.
+async function nativeSelectThemes(page: any, info: any, name: string) {
+  const themeRoot = page.locator('.dark, .light').first();
+  const original = await themeRoot.evaluate((element: Element) => element.classList.contains('dark') ? 'dark' : 'light');
+  try {
+    for (const theme of ['dark', 'light']) {
+      await themeRoot.evaluate((element: Element, selected: string) => {
+        element.classList.remove('dark', 'light');
+        element.classList.add(selected);
+      }, theme);
+      const selects = page.locator(':is(.settings-navigation, .settings-panel, .analytics-navigation, .analytics-panel) select:visible');
+      expect(await selects.count()).toBeGreaterThan(0);
+      for (const select of await selects.all()) {
+        await expect(select).toHaveCSS('color-scheme', theme);
+        await expect(select).toHaveCSS('appearance', 'auto');
+        expect(await select.evaluate((element: HTMLSelectElement) => element.selectedOptions[0]?.textContent?.trim())).toBeTruthy();
+      }
+      await noHorizontalOverflow(page);
+      await capture(page, info, `${name}-${theme}`);
+    }
+  } finally {
+    await themeRoot.evaluate((element: Element, selected: string) => {
+      element.classList.remove('dark', 'light');
+      element.classList.add(selected);
+    }, original);
+  }
+}
+
 async function settingsFixture(page: any) {
   const values: Record<string, unknown> = {
     '/user/personal': { name: 'Synthetic creator', bio: '', picture: null },
@@ -80,6 +109,7 @@ test('Settings: remaining sections, keyboard, menu removals and repeated navigat
     }
     await expect(page.getByRole('button', { name: 'Sets', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Signatures', exact: true })).toHaveCount(0);
+    await nativeSelectThemes(page, info, `settings-${width}`);
     await capture(page, info, `settings-${width}`);
     // Finish this document's prefetches before leaving; WebKit reports cancelled
     // same-origin RSC requests as page errors if a full navigation interrupts them.
@@ -120,6 +150,7 @@ test('Analytics: channel selection and range controls fit phone, landscape and d
     await expect(page.getByRole('combobox', { name: 'Date range', exact: true })).toHaveCSS('outline-style', 'solid');
     await expect(page.getByText('579', { exact: true })).toBeVisible();
     await noHorizontalOverflow(page);
+    await nativeSelectThemes(page, info, `analytics-${width}`);
     await capture(page, info, `analytics-${width}`);
   }
 });
