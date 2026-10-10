@@ -1,3 +1,5 @@
+import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
+import { generateFlareImage } from '@gitroom/nestjs-libraries/openai/openai.service';
 import { Injectable } from '@nestjs/common';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
 import { AutopostDto } from '@gitroom/nestjs-libraries/dtos/autopost/autopost.dto';
@@ -6,7 +8,7 @@ import { END, START, StateGraph } from '@langchain/langgraph';
 import { AutoPost, Integration } from '@prisma/client';
 import { BaseMessage } from '@langchain/core/messages';
 import striptags from 'striptags';
-import { ChatOpenAI, DallEAPIWrapper } from '@langchain/openai';
+import { ChatOpenAI } from '@langchain/openai';
 import { JSDOM } from 'jsdom';
 import { z } from 'zod';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
@@ -37,14 +39,12 @@ interface WorkflowChannelsState {
 
 const model = new ChatOpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-4.1',
-  temperature: 0.7,
+  model: 'gpt-6.1-sol',
+  useResponsesApi: true,
+  // This SDK does not yet recognize GPT-6 names as reasoning models.
+  modelKwargs: { reasoning: { effort: 'medium' } },
 });
 
-const dalle = new DallEAPIWrapper({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-image-1',
-});
 
 const generateContent = z.object({
   socialMediaPostContent: z
@@ -257,7 +257,9 @@ export class AutopostService {
           content: state.load.description || state.description,
         });
 
-    const image = await dalle.invoke(generatedTextToBeSentToDallE);
+    const image = await UploadFactory.createStorage().uploadSimple(
+      `data:image/png;base64,${await generateFlareImage(generatedTextToBeSentToDallE)}`
+    );
 
     return { ...state, image };
   }
