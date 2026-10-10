@@ -661,3 +661,176 @@ it('locks an orphaned unsent preparation after reopening and consumes an actual 
   expect(attempts).toEqual([true, false]);
   expect(draft().journal).toBeTruthy();
 });
+
+it.each(['true', 'false'])(
+  'reopens newly saved nullable media metadata with guided shell %s',
+  async (guided) => {
+    process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL = guided;
+    const view = render(composer());
+    await screen.findByTestId('manage-modal');
+    act(() => {
+      editDraft();
+      const media: any = {
+        id: 'media-1',
+        path: '/uploads/photo.jpg',
+        alt: null,
+        thumbnailTimestamp: null,
+      };
+      useLaunchStore.getState().setGlobalValueMedia(0, [media]);
+      useLaunchStore
+        .getState()
+        .setInternalValueMedia(integration.id, 1, [media]);
+    });
+    expect(draft().global[0].media).toEqual([{ id: 'media-1' }]);
+    expect(draft().internal[0].integrationValue[1].media).toEqual([
+      { id: 'media-1' },
+    ]);
+    view.unmount();
+    render(composer());
+    await screen.findByTestId('manage-modal');
+    expect(useLaunchStore.getState().global[0]).toMatchObject({
+      content: 'Original draft',
+      media: [{ id: 'media-1', path: '/uploads/photo.jpg' }],
+    });
+    expect(
+      useLaunchStore.getState().internal[0].integrationValue[1]
+    ).toMatchObject({
+      content: 'Platform comment',
+      delay: 7,
+      media: [{ id: 'media-1', path: '/uploads/photo.jpg' }],
+    });
+    expect(screen.queryByRole('button', { name: 'Retry recovery' })).toBeNull();
+    expect(localStorage.getItem(key())).not.toBeNull();
+  }
+);
+
+it.each([
+  { alt: null },
+  { thumbnailTimestamp: null },
+  { alt: null, thumbnailTimestamp: null },
+])(
+  'recovers an existing v1 draft with nullable metadata %j without losing work',
+  async (metadata) => {
+    const view = render(composer());
+    await screen.findByTestId('manage-modal');
+    act(editDraft);
+    view.unmount();
+    const saved = draft();
+    saved.global[0].media = [{ id: 'media-1', ...metadata } as any];
+    saved.internal[0].integrationValue[1].media = [
+      { id: 'media-1', ...metadata } as any,
+    ];
+    saved.destinations[0].settings.privacy = 'private';
+    const raw = JSON.stringify(saved);
+    localStorage.setItem(key(), raw);
+    mockFetch.mockClear();
+    expect(
+      readComposerDraft(raw, mockUser.id, mockUser.orgId).global[0].media
+    ).toEqual([{ id: 'media-1' }]);
+    expect(localStorage.getItem(key())).toBe(raw);
+    render(composer());
+    await screen.findByTestId('manage-modal');
+    expect(useLaunchStore.getState().global[0].content).toBe('Original draft');
+    expect(useLaunchStore.getState().global[0].media[0].id).toBe('media-1');
+    expect(useLaunchStore.getState().global[0].media[0].path).toBe(
+      '/uploads/photo.jpg'
+    );
+    expect(
+      useLaunchStore.getState().internal[0].integrationValue[1]
+    ).toMatchObject({
+      content: 'Platform comment',
+      delay: 7,
+      media: [{ id: 'media-1' }],
+    });
+    expect(useLaunchStore.getState().date.toISOString()).toBe(
+      '2035-04-05T14:15:00.000Z'
+    );
+    expect(
+      useGuidedComposerStore.getState().reviewDrafts[integration.id].caption
+    ).toBe('Manually reviewed caption');
+    expect(
+      (screen.getByLabelText('Privacy setting') as HTMLInputElement).value
+    ).toBe('private');
+    expect(draft().global[0].media).toEqual([{ id: 'media-1' }]);
+    expect(draft().internal[0].integrationValue[1].media).toEqual([
+      { id: 'media-1' },
+    ]);
+    expect(mockFetch.mock.calls.some(([url]) => url === '/media/media-1')).toBe(
+      true
+    );
+    expect(
+      mockFetch.mock.calls.every(([, options]) => options?.method === 'GET')
+    ).toBe(true);
+  }
+);
+
+it('preserves empty alt text and zero thumbnail timestamps during recovery', async () => {
+  const view = render(composer());
+  await screen.findByTestId('manage-modal');
+  const media: any = {
+    id: 'media-1',
+    path: '/uploads/photo.jpg',
+    alt: '',
+    thumbnailTimestamp: 0,
+  };
+  act(() => {
+    editDraft();
+    useLaunchStore.getState().setGlobalValueMedia(0, [media]);
+  });
+  const saved = readComposerDraft(
+    JSON.stringify(
+      snapshotComposerDraft(mockUser.id, mockUser.orgId, 'now', null)
+    ),
+    mockUser.id,
+    mockUser.orgId
+  );
+  expect(saved.global[0].media).toEqual([
+    { id: 'media-1', alt: '', thumbnailTimestamp: 0 },
+  ]);
+  view.unmount();
+  await hydrateComposerDraft(saved, [integration], mockFetch);
+  expect(useLaunchStore.getState().global[0].media[0]).toMatchObject({
+    id: 'media-1',
+    alt: '',
+    thumbnailTimestamp: 0,
+  });
+});
+
+it.each([
+  { alt: 42 },
+  { alt: false },
+  { alt: {} },
+  { alt: [] },
+  { thumbnailTimestamp: '0' },
+  { thumbnailTimestamp: false },
+  { thumbnailTimestamp: -1 },
+  { thumbnailTimestamp: {} },
+  { thumbnailTimestamp: [] },
+])(
+  'retains malformed non-null media metadata %j as blocked recovery',
+  async (metadata) => {
+    const view = render(composer());
+    await screen.findByTestId('manage-modal');
+    act(editDraft);
+    view.unmount();
+    const saved = draft();
+    for (const location of ['global', 'internal']) {
+      const altered = JSON.parse(JSON.stringify(saved));
+      const values =
+        location === 'global'
+          ? altered.global
+          : altered.internal[0].integrationValue;
+      values[0].media = [{ id: 'media-1', ...metadata }];
+      const raw = JSON.stringify(altered);
+      expect(() =>
+        readComposerDraft(raw, mockUser.id, mockUser.orgId)
+      ).toThrow();
+      localStorage.setItem(key(), raw);
+      const blocked = render(composer());
+      await screen.findByRole('button', { name: 'Retry recovery' });
+      expect(localStorage.getItem(key())).toBe(raw);
+      expect(screen.queryByTestId('manage-modal')).toBeNull();
+      blocked.unmount();
+    }
+  }
+);

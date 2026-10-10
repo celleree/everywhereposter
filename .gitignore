@@ -2,3 +2,8 @@
 /.cloudflared/
 /.playwright-mcp/
 /backups/*.sql
+
+/postiz-app/browser-results/
+/postiz-app/browser-report/
+
+/postiz-app/apps/frontend/public/branding

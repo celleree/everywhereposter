@@ -112,13 +112,13 @@ const storedValues = (values: Values): StoredValues =>
     delay: value.delay || 0,
     media: value.media.map((media) => {
       const editable = media as typeof media & {
-        alt?: string;
-        thumbnailTimestamp?: number;
+        alt?: string | null;
+        thumbnailTimestamp?: number | null;
       };
       return {
         id: media.id,
-        ...(editable.alt !== undefined ? { alt: editable.alt } : {}),
-        ...(editable.thumbnailTimestamp !== undefined
+        ...(editable.alt != null ? { alt: editable.alt } : {}),
+        ...(editable.thumbnailTimestamp != null
           ? { thumbnailTimestamp: editable.thumbnailTimestamp }
           : {}),
       };
@@ -201,8 +201,8 @@ export function readComposerDraft(
             media &&
             typeof media.id === 'string' &&
             /^[a-zA-Z0-9_-]{1,128}$/.test(media.id) &&
-            (media.alt === undefined || typeof media.alt === 'string') &&
-            (media.thumbnailTimestamp === undefined ||
+            (media.alt == null || typeof media.alt === 'string') &&
+            (media.thumbnailTimestamp == null ||
               (Number.isFinite(media.thumbnailTimestamp) &&
                 media.thumbnailTimestamp >= 0))
         )
