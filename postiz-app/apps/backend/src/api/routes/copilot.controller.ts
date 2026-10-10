@@ -1,3 +1,4 @@
+import { createLunaCopilotAdapter } from '@gitroom/nestjs-libraries/openai/copilot-model-adapter';
 import {
   Logger,
   Controller,
@@ -10,7 +11,6 @@ import {
 } from '@nestjs/common';
 import {
   CopilotRuntime,
-  OpenAIAdapter,
   copilotRuntimeNodeHttpEndpoint,
   copilotRuntimeNextJSAppRouterEndpoint,
 } from '@copilotkit/runtime';
@@ -49,9 +49,7 @@ export class CopilotController {
     const copilotRuntimeHandler = copilotRuntimeNodeHttpEndpoint({
       endpoint: '/copilot/chat',
       runtime: new CopilotRuntime(),
-      serviceAdapter: new OpenAIAdapter({
-        model: 'gpt-4.1',
-      }),
+      serviceAdapter: createLunaCopilotAdapter(),
     });
 
     return copilotRuntimeHandler(req, res);
@@ -95,9 +93,7 @@ export class CopilotController {
       endpoint: '/copilot/agent',
       runtime,
       // properties: req.body.variables.properties,
-      serviceAdapter: new OpenAIAdapter({
-        model: 'gpt-4.1',
-      }),
+      serviceAdapter: createLunaCopilotAdapter(),
     });
 
     return copilotRuntimeHandler.handleRequest(req, res);

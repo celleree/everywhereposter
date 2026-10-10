@@ -1,3 +1,4 @@
+import { SOL_CHAT } from '@gitroom/nestjs-libraries/openai/model-config';
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod';
@@ -166,7 +167,7 @@ Create the smallest useful platform-specific image plan.`;
     }
 
     const response = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      ...SOL_CHAT,
       messages: [
         {
           role: 'system',

@@ -1,3 +1,4 @@
+import { LUNA_CHAT, SOL_CHAT } from '@gitroom/nestjs-libraries/openai/model-config';
 import { Injectable } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { mkdtemp, readFile, rm } from 'fs/promises';
@@ -130,7 +131,7 @@ export class CopyGenerationModelService {
     )}`;
 
     const analysis = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      ...LUNA_CHAT,
       messages: [
         {
           role: 'system',
@@ -269,7 +270,7 @@ Analyze the sampled frames below as one video.`,
   protected async requestVideoInsights(userContent: ChatCompletionContentPart[]) {
     const analysis = await openai.chat.completions.parse(
       {
-        model: 'gpt-4.1',
+        ...LUNA_CHAT,
         messages: [
           {
             role: 'system',
@@ -470,7 +471,7 @@ Rules:
 
   async summarizeTranscript(transcript: string) {
     const summary = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      ...LUNA_CHAT,
       messages: [
         {
           role: 'system',
@@ -511,7 +512,7 @@ Rules:
     promptConstraints: string
   ) {
     const response = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      ...SOL_CHAT,
       messages: [
         {
           role: 'system',
@@ -549,7 +550,7 @@ Return a JSON object with draft, angle, hook, and cta.`,
     hardCap: number;
   }) {
     const response = await openai.chat.completions.parse({
-      model: 'gpt-4.1',
+      ...SOL_CHAT,
       messages: [
         {
           role: 'system',
