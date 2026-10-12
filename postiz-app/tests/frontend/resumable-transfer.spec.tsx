@@ -121,3 +121,17 @@ it.each([false, true])('reconciles cancellation after creation starts without it
   expect(fetch.mock.calls.filter(([, options]) => options?.method === 'DELETE').map(([url]) => url)).toEqual(['/media/uploads/pending-session']);
   expect(changed.mock.calls.at(-1)[0]).toEqual([]);
 });
+
+it('discards a definitively rejected new session without claiming server uncertainty', async () => {
+  const changed = jest.fn();
+  const fetch = jest.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ message: 'Upload limit reached.' }) });
+  const transfers = new ResumableTransfers(fetch, changed, 'org');
+  const receipt = transfers.start(file(4));
+  const rejected = expect(receipt).rejects.toThrow('cancelled');
+  await waitFor(() => expect(changed.mock.calls.at(-1)[0][0].state).toBe('Resume needed'));
+  await transfers.cancel(changed.mock.calls[0][0][0].id);
+  await rejected;
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(changed.mock.calls.at(-1)[0]).toEqual([]);
+  expect((transfers as any).files.size).toBe(0);
+});

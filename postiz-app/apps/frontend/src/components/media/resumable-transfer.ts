@@ -101,6 +101,7 @@ export class ResumableTransfers {
     let item = this.items.get(id)!;
     const file = this.files.get(id)!;
     const controller = new AbortController();
+    const creationWasPending = this.pendingCreations.has(id);
     this.controllers.set(id, controller);
     this.update({ ...item, state: 'Uploading', error: undefined });
     try {
@@ -134,11 +135,13 @@ export class ResumableTransfers {
       this.receipts.get(id)?.resolve(session.media); this.receipts.delete(id); this.files.delete(id);
     } catch (error) {
       // A lost acknowledgement never creates a new identity or automatically retries.
+      const status = (error as any).status;
+      if (!creationWasPending && status >= 400 && status < 500 && status !== 408) this.pendingCreations.delete(id);
       const remaining = this.items.get(id);
       if (!this.disposed && remaining) {
         this.update({ ...remaining, state: controller.signal.aborted ? 'Paused' : (error as any).status === 400 ? 'Failed' : 'Resume needed', error: controller.signal.aborted ? undefined : (error as Error).message });
       }
-      if ((error as any).status === 400) { this.pendingCreations.delete(id); this.receipts.get(id)?.reject(error as Error); this.receipts.delete(id); this.files.delete(id); }
+      if (status === 400) { this.receipts.get(id)?.reject(error as Error); this.receipts.delete(id); this.files.delete(id); }
     } finally { this.controllers.delete(id); }
   }
 }
