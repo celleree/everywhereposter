@@ -29,11 +29,14 @@ import {
 } from '@gitroom/frontend/components/new-launch/guided.composer.review';
 import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
+import type { QuickUploadSkip } from './guided.composer.quick-upload';
 import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
 export type GuidedPublishTiming = 'now' | 'schedule';
 
 interface GuidedPublishRequestBase {
+  quickUpload?: boolean;
+  sourceMediaId?: string;
   destinationIds: string[];
   captionOverrides: Record<string, string>;
 }
@@ -66,12 +69,14 @@ export type GuidedPublishSubmitResult =
   | {
       ok: true;
       posts: GuidedPublishPostReference[];
+      skipped?: QuickUploadSkip[];
     }
   | {
       ok: false;
       kind: GuidedPublishFailureKind;
       message: string;
       ambiguous: boolean;
+      skipped?: QuickUploadSkip[];
     };
 
 export type GuidedPublishDestinationStatus =
@@ -83,7 +88,8 @@ export type GuidedPublishDestinationStatus =
   | 'published'
   | 'failed'
   | 'reconnect-required'
-  | 'unknown';
+  | 'unknown'
+  | 'skipped';
 
 interface GuidedPublishDestinationResult {
   destinationId: string;
@@ -337,12 +343,14 @@ const statusLabel: Record<GuidedPublishDestinationStatus, string> = {
   failed: 'Failed',
   'reconnect-required': 'Reconnect required',
   unknown: 'Status unknown',
+  skipped: 'Skipped',
 };
 
 export const GuidedComposerPublish: FC<{
   active?: boolean;
+  quickUpload?: boolean;
   onSubmittingChange?: (submitting: boolean) => void;
-}> = ({ active = true, onSubmittingChange }) => {
+}> = ({ active = true, quickUpload = false, onSubmittingChange }) => {
   const recovery = useComposerDraftRecovery();
   const fetch = useFetch();
   const { available, submit } = useContext(GuidedPublishBridgeContext);
@@ -358,7 +366,7 @@ export const GuidedComposerPublish: FC<{
       }))
     );
   const reviewDrafts = useGuidedComposerStore((state) => state.reviewDrafts);
-  const [timing, setTiming] = useState<GuidedPublishTiming>(recovery.timing);
+  const [timing, setTiming] = useState<GuidedPublishTiming>(quickUpload ? 'now' : recovery.timing);
   const [phase, setPhase] = useState<
     'idle' | 'submitting' | 'success' | 'failed'
   >('idle');
@@ -371,6 +379,8 @@ export const GuidedComposerPublish: FC<{
     string[] | null
   >(null);
   const submissionInFlightRef = useRef(false);
+  const automaticAttemptedRef = useRef(false);
+  const automaticSubmittedRef = useRef(false);
 
   const availableDestinationIds = useMemo(
     () =>
@@ -466,6 +476,7 @@ export const GuidedComposerPublish: FC<{
 
     try {
       const requestDetails: GuidedPublishRequestBase = {
+        ...(quickUpload ? { quickUpload: true, sourceMediaId: video?.id } : {}),
         destinationIds: submissionDestinations.map(
           (destination) => destination.id
         ),
@@ -488,6 +499,7 @@ export const GuidedComposerPublish: FC<{
               type: 'now',
             };
       const submitted = await submit(request);
+      const skippedByDestination = new Map((submitted.skipped || []).map(skip => [skip.integration, skip.message]));
 
       if (submitted.ok === false) {
         const safeToRetry =
@@ -499,8 +511,8 @@ export const GuidedComposerPublish: FC<{
           submissionDestinations.forEach((destination) => {
             nextResults[destination.id] = {
               destinationId: destination.id,
-              status: safeToRetry ? 'failed' : 'unknown',
-              message: submitted.message,
+              status: skippedByDestination.has(destination.id) ? 'skipped' : safeToRetry ? 'failed' : 'unknown',
+              message: skippedByDestination.get(destination.id) || submitted.message,
               retryable: safeToRetry,
             };
           });
@@ -517,7 +529,7 @@ export const GuidedComposerPublish: FC<{
         submitted.posts.map((post) => [post.integration, post])
       );
       const missingDestinations = submissionDestinations.filter(
-        (destination) => !referencesByDestination.has(destination.id)
+        (destination) => !referencesByDestination.has(destination.id) && !skippedByDestination.has(destination.id)
       );
       setResults((currentResults) => {
         const nextResults = { ...currentResults };
@@ -527,11 +539,11 @@ export const GuidedComposerPublish: FC<{
             postId: referencesByDestination.get(destination.id)?.postId,
             status: referencesByDestination.has(destination.id)
               ? 'accepted'
-              : 'unknown',
+              : skippedByDestination.has(destination.id) ? 'skipped' : 'unknown',
             ...(!referencesByDestination.has(destination.id)
               ? {
                   message:
-                    'The publishing response did not include this destination.',
+                    skippedByDestination.get(destination.id) || 'The publishing response did not include this destination.',
                 }
               : {}),
           };
@@ -546,6 +558,10 @@ export const GuidedComposerPublish: FC<{
       const nextResults = { ...results };
       pollResults.forEach((result) => {
         nextResults[result.destinationId] = result;
+      });
+
+      skippedByDestination.forEach((message, destinationId) => {
+        nextResults[destinationId] = { destinationId, status: 'skipped', message };
       });
 
       missingDestinations.forEach((destination) => {
@@ -586,6 +602,13 @@ export const GuidedComposerPublish: FC<{
         setRetryDestinationIds([]);
         setPhase('success');
       }
+    } catch (error) {
+      const message = getErrorMessage(error, 'The publishing response could not be confirmed.');
+      setResults(current => ({ ...current, ...Object.fromEntries(submissionDestinations.map(destination => [destination.id, { destinationId: destination.id, status: 'unknown' as const, message }])) }));
+      setRetryDestinationIds([]);
+      setPhase('failed');
+      setError(message);
+      setAmbiguous(true);
     } finally {
       submissionInFlightRef.current = false;
       onSubmittingChange?.(false);
@@ -603,7 +626,27 @@ export const GuidedComposerPublish: FC<{
     submissionDestinations,
     timing,
     recovery,
+    quickUpload,
+    video?.id,
   ]);
+
+  useEffect(() => {
+    if (!quickUpload && !recovery.publishLocked) {
+      automaticAttemptedRef.current = false;
+      automaticSubmittedRef.current = false;
+    }
+    if (!quickUpload || !active || !available || automaticAttemptedRef.current || recovery.publishLocked || !submissionDestinations.length || hasBlockingError) return;
+    automaticAttemptedRef.current = true;
+    setTiming('now');
+    recovery.setTiming('now');
+    // Submit on the next render with immediate timing, never the restored schedule.
+  }, [quickUpload, active, available, recovery, submissionDestinations.length, hasBlockingError]);
+  useEffect(() => {
+    if (quickUpload && active && automaticAttemptedRef.current && !automaticSubmittedRef.current && timing === 'now' && available && !recovery.publishLocked) {
+      automaticSubmittedRef.current = true;
+      void submitPublish();
+    }
+  }, [quickUpload, active, timing, available, recovery.publishLocked, submitPublish]);
 
   const retry = useCallback(() => {
     if (ambiguous || retryDestinationIds !== null) {
@@ -625,12 +668,12 @@ export const GuidedComposerPublish: FC<{
         <div className="flex flex-wrap items-start justify-between gap-[14px]">
           <div>
             <h2 className="text-[18px] font-[700] text-white">
-              Confirm your post
+              {quickUpload ? 'Quick Upload results' : 'Confirm your post'}
             </h2>
             <p className="mt-[4px] text-[13px] text-textColor/60">
-              {destinations.length} enabled destination
-              {destinations.length === 1 ? '' : 's'} will receive the final
-              captions approved in Review.
+              {quickUpload
+                ? 'AI-generated captions are submitted only for accounts that pass validation, without individual review.'
+                : `${destinations.length} enabled destination${destinations.length === 1 ? '' : 's'} will receive the final captions approved in Review.`}
             </p>
           </div>
           <div className="rounded-full bg-newBgLineColor px-[11px] py-[6px] text-[11px] font-[700] text-textColor/75">
@@ -737,7 +780,7 @@ export const GuidedComposerPublish: FC<{
       </div>
 
       <div className="rounded-[18px] border border-newBorder bg-newBgColorInner p-[20px] mobile:p-[15px]">
-        <fieldset disabled={phase === 'submitting'}>
+        <fieldset hidden={quickUpload} disabled={phase === 'submitting'}>
           <legend className="text-[14px] font-[700] text-white">
             Publishing time
           </legend>
@@ -850,12 +893,12 @@ export const GuidedComposerPublish: FC<{
           >
             {timing === 'schedule'
               ? 'The enabled destinations are scheduled.'
-              : 'Publishing was confirmed for every enabled destination.'}
+              : quickUpload ? 'Publishing was confirmed for the submitted destinations. Skipped accounts were not submitted.' : 'Publishing was confirmed for every enabled destination.'}
           </div>
         )}
 
         <div className="mt-[16px] flex justify-end gap-[10px] mobile:flex-col">
-          {phase === 'failed' &&
+          {!quickUpload && phase === 'failed' &&
             !ambiguous &&
             retryDestinationIds === null && (
               <button
@@ -868,6 +911,7 @@ export const GuidedComposerPublish: FC<{
             )}
           <button
             type="button"
+            hidden={quickUpload}
             onClick={submitPublish}
             disabled={
               recovery.publishLocked ||

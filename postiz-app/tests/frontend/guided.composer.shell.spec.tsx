@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { TextEncoder, TextDecoder } from 'node:util';
+Object.assign(global, { TextEncoder, TextDecoder });
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mockFetch = jest.fn();
@@ -99,6 +101,318 @@ describe('guided composer shell', () => {
     useGuidedComposerStore.getState().resetGuidedComposer();
     useLaunchStore.getState().reset();
     seedUploadedVideo();
+  });
+
+  const quickAccounts = [
+    {
+      id: 'quick-x',
+      name: 'Quick X',
+      identifier: 'x',
+      type: 'social',
+      inBetweenSteps: false,
+    },
+    {
+      id: 'quick-linkedin',
+      name: 'Quick LinkedIn',
+      identifier: 'linkedin',
+      type: 'social',
+      inBetweenSteps: false,
+    },
+    {
+      id: 'disabled',
+      name: 'Disabled account',
+      identifier: 'x',
+      type: 'social',
+      disabled: true,
+    },
+    {
+      id: 'reconnect',
+      name: 'Reconnect account',
+      identifier: 'facebook',
+      type: 'social',
+      refreshNeeded: true,
+    },
+    {
+      id: 'unsupported',
+      name: 'Blog account',
+      identifier: 'medium',
+      type: 'social',
+    },
+    {
+      id: 'tiktok',
+      name: 'TikTok account',
+      identifier: 'tiktok',
+      type: 'social',
+    },
+  ] as any[];
+  const quickResponse = (overrides: any = {}) => ({
+    requestId: 'quick-generation',
+    status: 'complete',
+    sourceConfidence: 0.8,
+    warnings: [],
+    imagePlans: [],
+    results: ['x', 'linkedin'].map((platform) => ({
+      platform,
+      draft: `${platform} grounded caption`,
+      origin: 'generated',
+      warnings: [],
+      charCount: 25,
+    })),
+    ...overrides,
+  });
+  const quickFetch = (generation = quickResponse(), accounts = quickAccounts) => {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url === '/integrations/list')
+        return { ok: true, json: async () => ({ integrations: accounts }) };
+      if (url === '/posts/copy/generate') {
+        let read = false;
+        const bytes = new TextEncoder().encode(
+          JSON.stringify({ name: 'completed', data: generation }) + '\n'
+        );
+        return {
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: async () =>
+                read
+                  ? { done: true }
+                  : ((read = true), { done: false, value: bytes }),
+            }),
+          },
+        };
+      }
+      if (url.startsWith('/posts/'))
+        return {
+          ok: true,
+          json: async () => ({ posts: [{ state: 'PUBLISHED' }] }),
+        };
+      return { ok: true, json: async () => ({ status: 'READY', text: '' }) };
+    });
+  };
+  const renderQuick = (submitter: any) =>
+    render(
+      <GuidedComposerShell>
+        <PublishBridge submitter={submitter} />
+      </GuidedComposerShell>
+    );
+
+  it('runs Quick Upload once with dynamic accounts, generated copy and visible exclusions', async () => {
+    quickFetch();
+    const submitter = jest.fn(async () => ({
+      ok: true,
+      posts: [
+        { postId: 'posted-x', integration: 'quick-x' },
+        { postId: 'posted-linkedin', integration: 'quick-linkedin' },
+      ],
+    }));
+    renderQuick(submitter);
+    expect(screen.getByText(/without individual review/)).toBeTruthy();
+    const quick = screen.getByRole('button', {
+      name: 'Quick Upload',
+      exact: true,
+    });
+    fireEvent.click(quick);
+    fireEvent.click(quick);
+    await waitFor(() => expect(submitter).toHaveBeenCalledTimes(1));
+    expect(submitter).toHaveBeenCalledWith({
+      type: 'now',
+      quickUpload: true,
+      sourceMediaId: 'video-1',
+      destinationIds: ['quick-x', 'quick-linkedin'],
+      captionOverrides: {
+        'quick-x': 'x grounded caption',
+        'quick-linkedin': 'linkedin grounded caption',
+      },
+    });
+    await waitFor(() => expect(screen.getAllByText('Published')).toHaveLength(2));
+    expect(screen.getByText('Quick Upload results')).toBeTruthy();
+    expect(screen.queryByText(/captions approved in Review/)).toBeNull();
+    expect(screen.getByTestId('quick-skip-disabled').textContent).toContain(
+      'disabled'
+    );
+    expect(screen.getByTestId('quick-skip-reconnect').textContent).toContain(
+      'Reconnect required'
+    );
+    expect(screen.getByTestId('quick-skip-tiktok').textContent).toContain(
+      'privacy'
+    );
+    expect(useLaunchStore.getState().global[0].media[0].id).toBe('video-1');
+  });
+
+  it('publishes a valid partial result while skipping missing platform copy', async () => {
+    quickFetch(
+      quickResponse({
+        status: 'partial',
+        warnings: [
+          {
+            code: 'PLATFORM_GENERATION_FAILED',
+            message: 'LinkedIn generation failed',
+          },
+        ],
+        results: quickResponse().results.slice(0, 1),
+      })
+    );
+    const submitter = jest.fn(async () => ({
+      ok: true,
+      posts: [{ postId: 'posted-x', integration: 'quick-x' }],
+    }));
+    renderQuick(submitter);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Quick Upload', exact: true })
+    );
+    await waitFor(() => expect(submitter).toHaveBeenCalledTimes(1));
+    expect(submitter.mock.calls[0][0].destinationIds).toEqual(['quick-x']);
+    expect(screen.getByTestId('quick-skip-quick-linkedin').textContent).toContain(
+      'Skipped'
+    );
+  });
+
+  it('retains valid no-speech visual generation without substituting fallback captions', async () => {
+    quickFetch(
+      quickResponse({
+        warnings: [
+          {
+            code: 'NO_TRANSCRIPT',
+            message: 'No speech; grounded frames available',
+          },
+        ],
+      })
+    );
+    const submitter = jest.fn(async () => ({
+      ok: true,
+      posts: [
+        { postId: 'posted-x', integration: 'quick-x' },
+        { postId: 'posted-linkedin', integration: 'quick-linkedin' },
+      ],
+    }));
+    renderQuick(submitter);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Quick Upload', exact: true })
+    );
+    await waitFor(() => expect(submitter).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    'no accounts',
+    'generation failed',
+    'warning',
+    'blank caption',
+    'fallback caption',
+  ])(
+    'does not publish for %s and keeps media available for Customize',
+    async (failure) => {
+      const generation = quickResponse();
+      if (failure === 'generation failed')
+        Object.assign(generation, { status: 'failed', results: [] });
+      if (failure === 'warning')
+        generation.warnings = [
+          { code: 'SOURCE_FACTS_THIN', message: 'Review weak grounding' },
+        ] as any;
+      if (failure === 'blank caption')
+        generation.results.forEach((result) => (result.draft = ''));
+      if (failure === 'fallback caption')
+        generation.results.forEach((result) => (result.origin = 'original'));
+      quickFetch(generation, failure === 'no accounts' ? [] : quickAccounts);
+      const submitter = jest.fn();
+      renderQuick(submitter);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Quick Upload', exact: true })
+      );
+      await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+      expect(submitter).not.toHaveBeenCalled();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Customize', exact: true })
+      );
+      expect(useLaunchStore.getState().global[0].media[0].id).toBe('video-1');
+    }
+  );
+
+  it('keeps uncertain submissions locked in the automatic path', async () => {
+    quickFetch();
+    const submitter = jest.fn(async () => ({
+      ok: false,
+      kind: 'transport',
+      ambiguous: true,
+      message: 'Response lost',
+    }));
+    renderQuick(submitter);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Quick Upload', exact: true })
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain('Response lost')
+    );
+    expect(submitter).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Prepare retry' })).toBeNull();
+    await act(async () => undefined);
+    expect(submitter).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['failed', 'reconnect-required'])(
+    'retains partial success and %s without resubmission',
+    async (status) => {
+      quickFetch();
+      const originalFetch = mockFetch.getMockImplementation()!;
+      mockFetch.mockImplementation(async (url: string, options: any) =>
+        url === '/posts/posted-linkedin'
+          ? {
+              ok: true,
+              json: async () => ({
+                posts: [
+                  {
+                    id: 'posted-linkedin',
+                    state: 'ERROR',
+                    error: 'Provider rejected the video',
+                    integration: {
+                      refreshNeeded: status === 'reconnect-required',
+                    },
+                  },
+                ],
+              }),
+            }
+          : originalFetch(url, options)
+      );
+      const submitter = jest.fn(async () => ({
+        ok: true,
+        posts: [
+          { postId: 'posted-x', integration: 'quick-x' },
+          { postId: 'posted-linkedin', integration: 'quick-linkedin' },
+        ],
+      }));
+      renderQuick(submitter);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Quick Upload', exact: true })
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByTestId('guided-publish-destination-quick-x').textContent
+        ).toContain('Published')
+      );
+      expect(
+        screen.getByTestId('guided-publish-destination-quick-linkedin')
+          .textContent
+      ).toContain(status === 'failed' ? 'Failed' : 'Reconnect required');
+      expect(submitter).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('button', { name: 'Prepare retry' })).toBeNull();
+    }
+  );
+
+  it('treats an unexpected thrown submission as uncertain and never auto-retries', async () => {
+    quickFetch();
+    const submitter = jest.fn(async () => {
+      throw new Error('Response lost after submission');
+    });
+    renderQuick(submitter);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Quick Upload', exact: true })
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain(
+        'Response lost after submission'
+      )
+    );
+    expect(submitter).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Prepare retry' })).toBeNull();
   });
 
   it('requests transcription as soon as a guided video Media ID is selected', async () => {
