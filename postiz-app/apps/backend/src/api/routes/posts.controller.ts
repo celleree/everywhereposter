@@ -170,6 +170,24 @@ export class PostsController {
     return this._postsService.getPostsByGroup(org.id, group);
   }
 
+  @Get('/submissions/:attemptId')
+  reconcileSubmission(@GetOrgFromRequest() org: Organization, @Param('attemptId') attemptId: string) {
+    return this._postsService.reconcileSubmission(org.id, attemptId);
+  }
+
+  @Post('/submissions/:attemptId/resume')
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  resumeSubmission(@GetOrgFromRequest() org: Organization, @Param('attemptId') attemptId: string) {
+    return this._postsService.reconcileSubmission(org.id, attemptId, true);
+  }
+
+  @Post('/submissions/:attemptId/destinations/:integrationId/retry')
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  retrySubmission(@GetOrgFromRequest() org: Organization, @Param('attemptId') attemptId: string,
+    @Param('integrationId') integrationId: string) {
+    return this._postsService.retrySubmission(org.id, attemptId, integrationId);
+  }
+
   @Get('/:id')
   getPost(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
     return this._postsService.getPost(org.id, id);

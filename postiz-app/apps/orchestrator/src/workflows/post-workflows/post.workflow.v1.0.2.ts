@@ -54,11 +54,13 @@ export async function postWorkflowV102({
   postId,
   organizationId,
   postNow = false,
+  durableSubmission = false,
 }: {
   taskQueue: string;
   postId: string;
   organizationId: string;
   postNow?: boolean;
+  durableSubmission?: boolean;
 }) {
   // Dynamic task queue, for concurrency
   const {
@@ -244,6 +246,10 @@ export async function postWorkflowV102({
         // break the current while to move to the next post
         break;
       } catch (err) {
+        if (durableSubmission) {
+          await changeState(postsList[0].id, 'ERROR', err, postsList);
+          return false;
+        }
         // if token refresh is needed, do it and repeat
         if (
           err instanceof ActivityFailure &&
@@ -301,6 +307,8 @@ export async function postWorkflowV102({
     post.organizationId,
     post.integration.id
   );
+
+  if (durableSubmission) return;
 
   // load internal plugs like repost by other users
   const internalPlugsList = await internalPlugs(

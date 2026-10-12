@@ -9,6 +9,7 @@ import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prism
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { IntegrationRepository } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.repository';
+import { PublishingSubmissionService } from './posts/publishing-submission.service';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
@@ -76,6 +77,7 @@ import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/pr
     IntegrationService,
     IntegrationRepository,
     PostsService,
+    PublishingSubmissionService,
     PostsRepository,
     StripeService,
     SignatureRepository,

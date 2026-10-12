@@ -1,7 +1,7 @@
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
 import { Post as PostBody } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
-import { APPROVED_SUBMIT_FOR_ORDER, Post, State } from '@prisma/client';
+import { APPROVED_SUBMIT_FOR_ORDER, Post, State, Prisma } from '@prisma/client';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
 import { GetPostsListDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.list.dto';
 import dayjs from 'dayjs';
@@ -41,6 +41,7 @@ export class PostsRepository {
           lt: dayjs.utc().add(2, 'hour').toDate(),
         },
         state: 'QUEUE',
+        submissionDestination: null,
         deletedAt: null,
         parentPostId: null,
       },
@@ -590,24 +591,20 @@ export class PostsRepository {
   }
 
   async changeState(id: string, state: State, err?: any, body?: any) {
-    const update = await this._post.model.post.update({
-      where: {
-        id,
-      },
-      data: {
-        state,
-        ...(err
-          ? { error: typeof err === 'string' ? err : JSON.stringify(err) }
-          : {}),
-      },
-      include: {
-        integration: {
-          select: {
-            providerIdentifier: true,
-          },
-        },
-      },
-    });
+    const data = { state, ...(err ? { error: typeof err === 'string' ? err : JSON.stringify(err) } : {}) };
+    const include = { integration: { select: { providerIdentifier: true } } } as const;
+    let update;
+    if (state === 'ERROR') {
+      // A late notification/activity failure must not overwrite a committed
+      // durable provider receipt. This predicate races safely with receipt commit.
+      const changed = await this._post.model.post.updateMany({ where: {
+        id, OR: [{ submissionDestination: null }, { submissionDestination: { providerState: { not: 'SUCCEEDED' } }, state: { not: 'PUBLISHED' } }],
+      }, data });
+      update = await this._post.model.post.findUnique({ where: { id }, include });
+      if (!changed.count) return update;
+    } else {
+      update = await this._post.model.post.update({ where: { id }, data, include });
+    }
 
     if (state === 'ERROR' && err && body) {
       try {
@@ -690,8 +687,12 @@ export class PostsRepository {
     date: string,
     body: PostBody,
     tags: { value: string; label: string }[],
-    inter?: number
+    inter?: number,
+    transaction?: Prisma.TransactionClient
   ) {
+    const postModel = transaction?.post || this._post.model.post;
+    const tagsPosts = transaction?.tagsPosts || this._tagsPosts.model.tagsPosts;
+    const tagsModel = transaction?.tags || this._tags.model.tags;
     const posts: Post[] = [];
     const uuid = uuidv4();
 
@@ -740,7 +741,7 @@ export class PostsRepository {
       });
 
       posts.push(
-        await this._post.model.post.upsert({
+        await postModel.upsert({
           where: {
             id: value.id || uuidv4(),
           },
@@ -758,7 +759,7 @@ export class PostsRepository {
       );
 
       if (posts.length === 1) {
-        await this._tagsPosts.model.tagsPosts.deleteMany({
+        await tagsPosts.deleteMany({
           where: {
             post: {
               id: posts[0].id,
@@ -767,7 +768,7 @@ export class PostsRepository {
         });
 
         if (tags.length) {
-          const tagsList = await this._tags.model.tags.findMany({
+          const tagsList = await tagsModel.findMany({
             where: {
               orgId: orgId,
               name: {
@@ -777,7 +778,7 @@ export class PostsRepository {
           });
 
           if (tagsList.length) {
-            await this._post.model.post.update({
+            await postModel.update({
               where: {
                 id: posts[posts.length - 1].id,
               },
@@ -798,7 +799,7 @@ export class PostsRepository {
 
     const previousPost = body.group
       ? (
-          await this._post.model.post.findFirst({
+          await postModel.findFirst({
             where: {
               group: body.group,
               deletedAt: null,
@@ -812,7 +813,7 @@ export class PostsRepository {
       : undefined;
 
     if (body.group) {
-      await this._post.model.post.updateMany({
+      await postModel.updateMany({
         where: {
           group: body.group,
           deletedAt: null,

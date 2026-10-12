@@ -51,6 +51,8 @@ model Organization {
   historicalPostMetrics   HistoricalPostMetric[]
   integrationAnalyticsSnapshots IntegrationAnalyticsSnapshot[]
 
+  publishingSubmissions PublishingSubmission[]
+
   @@index([apiKey])
   @@index([streakSince])
   @@index([paymentId])
@@ -536,6 +538,8 @@ model Post {
   submittedForOrder          Orders?                   @relation(fields: [submittedForOrderId], references: [id])
   submittedForOrganization   Organization?             @relation("submittedForOrg", fields: [submittedForOrganizationId], references: [id])
   tags                       TagsPosts[]
+
+  submissionDestination PublishingSubmissionDestination?
 
   @@index([group])
   @@index([deletedAt])
@@ -1217,4 +1221,34 @@ model Announcement {
   description String
   color       AnnouncementColor @default(INFO)
   createdAt   DateTime          @default(now())
+}
+
+// Opt-in new, immediate submissions. No tokens or provider credentials are stored.
+model PublishingSubmission {
+  id             String   @id @default(uuid())
+  organizationId String
+  attemptId      String
+  contentHash    String
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  destinations   PublishingSubmissionDestination[]
+
+  @@unique([organizationId, attemptId])
+}
+
+model PublishingSubmissionDestination {
+  id             String   @id @default(uuid())
+  submissionId   String
+  integrationId  String
+  postId         String   @unique
+  generation     Int      @default(1)
+  dispatched     Boolean  @default(false)
+  providerState  String   @default("READY")
+  providerResult Json?
+  createdAt      DateTime @default(now())
+  submission     PublishingSubmission @relation(fields: [submissionId], references: [id])
+  post           Post @relation(fields: [postId], references: [id])
+
+  @@unique([submissionId, integrationId])
+  @@index([dispatched, createdAt])
 }
