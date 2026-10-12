@@ -49,7 +49,7 @@ jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
   IntegrationManager: class IntegrationManager {},
 }));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 
@@ -77,6 +77,7 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
 
   const postRepository = {
     changeState: jest.fn(),
+    changeDate: jest.fn(),
     isSubmissionPost: jest.fn().mockResolvedValue(false),
     createOrUpdatePost: jest.fn(),
     deletePost: jest.fn(),
@@ -302,6 +303,15 @@ describe('PostsService published post management', () => {
     postRepository.isSubmissionPost.mockResolvedValue(true);
     await service.startWorkflow('x', 'reserved-root', 'org-1', 'QUEUE');
     expect(postRepository.isSubmissionPost).toHaveBeenCalledWith('reserved-root');
+    expect(getRawClient).not.toHaveBeenCalled();
+    expect(workflowStart).not.toHaveBeenCalled();
+  });
+
+  it.each(['schedule', 'update'] as const)('propagates a rejected durable %s date change before workflow work', async action => {
+    const { service, postRepository, getRawClient, workflowStart } = createService();
+    postRepository.getPostById.mockResolvedValue({ id: 'reserved-root', state: 'PUBLISHED', integration: { providerIdentifier: 'x' } });
+    postRepository.changeDate.mockRejectedValue(new ConflictException('Submission posts are immutable.'));
+    await expect(service.changeDate('org-1', 'reserved-root', '2030-01-01T00:00:00.000Z', action)).rejects.toBeInstanceOf(ConflictException);
     expect(getRawClient).not.toHaveBeenCalled();
     expect(workflowStart).not.toHaveBeenCalled();
   });

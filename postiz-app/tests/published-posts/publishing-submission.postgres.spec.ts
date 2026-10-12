@@ -519,6 +519,48 @@ describePostgres('durable submissions against isolated PostgreSQL', () => {
     }
   );
 
+  it.each(['schedule', 'update'] as const)(
+    'rejects %s date writes without changing outstanding, published or uncertain receipts',
+    async (action) => {
+      const roots = await service.submit(org, request);
+      const id = roots[0].postId;
+      const unchangedAfterDate = async () => {
+        const original = await prisma.post.findUnique({ where: { id } });
+        const destination = await prisma.publishingSubmissionDestination.findUnique({ where: { postId: id } });
+        const reconciled = await service.reconcile(org, request.submissionId);
+        await expect(repository.changeDate(org, id, '2030-01-01T00:00:00.000Z', false, action)).rejects.toBeInstanceOf(ConflictException);
+        expect(await prisma.post.findUnique({ where: { id } })).toEqual(original);
+        expect(await prisma.publishingSubmissionDestination.findUnique({ where: { postId: id } })).toEqual(destination);
+        expect(await service.reconcile(org, request.submissionId)).toEqual(reconciled);
+      };
+      await unchangedAfterDate();
+      await runProvider(id, 0, jest.fn(async () => receipt(id)));
+      await unchangedAfterDate();
+
+      const uncertainId = roots[1].postId;
+      await expect(runProvider(uncertainId, 1, jest.fn(async () => { throw new Error('acknowledgement lost'); }))).rejects.toMatchObject({ type: 'submission_uncertain', nonRetryable: true });
+      const uncertain = await prisma.post.findUnique({ where: { id: uncertainId } });
+      const fence = await prisma.publishingSubmissionDestination.findUnique({ where: { postId: uncertainId } });
+      await expect(repository.changeDate(org, uncertainId, '2030-01-01T00:00:00.000Z', false, action)).rejects.toBeInstanceOf(ConflictException);
+      expect(await prisma.post.findUnique({ where: { id: uncertainId } })).toEqual(uncertain);
+      expect(await prisma.publishingSubmissionDestination.findUnique({ where: { postId: uncertainId } })).toEqual(fence);
+      expect(fence.providerState).toBe('UNCERTAIN');
+    }
+  );
+
+  it.each(['schedule', 'update'] as const)('preserves ordinary %s date writes outside the durable ledger', async action => {
+    const created = await repository.createOrUpdatePost('now', org, request.date, {
+      ...request.posts[0], group: undefined, value: [{ content: 'Normal caption', image: [] }],
+    } as any, []);
+    const id = created.posts[0].id;
+    await prisma.post.update({ where: { id }, data: { state: 'PUBLISHED', releaseId: 'normal-receipt', releaseURL: 'https://provider.example/normal' } });
+    const changed = await repository.changeDate(org, id, '2030-01-01T00:00:00.000Z', false, action);
+    expect(changed.publishDate).toEqual(new Date('2030-01-01T00:00:00.000Z'));
+    expect(changed.state).toBe(action === 'schedule' ? 'QUEUE' : 'PUBLISHED');
+    expect(changed.releaseId).toBe(action === 'schedule' ? null : 'normal-receipt');
+    expect(changed.releaseURL).toBe(action === 'schedule' ? null : 'https://provider.example/normal');
+  });
+
   it('preserves ordinary root editing outside the durable ledger', async () => {
     const body = {
       ...request.posts[0],

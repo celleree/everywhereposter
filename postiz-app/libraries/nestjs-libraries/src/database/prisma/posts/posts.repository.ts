@@ -639,6 +639,14 @@ export class PostsRepository {
     isDraft: boolean,
     action: 'schedule' | 'update' = 'schedule'
   ) {
+    if (await this._post.model.post.findFirst({
+      where: { organizationId: orgId, id, submissionDestination: { isNot: null } },
+      select: { id: true },
+    })) {
+      throw new ConflictException(
+        'Submission posts are immutable. Create a new draft and submission instead.'
+      );
+    }
     return this._post.model.post.update({
       where: {
         organizationId: orgId,
