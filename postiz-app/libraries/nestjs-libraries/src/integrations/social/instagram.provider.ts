@@ -1,3 +1,4 @@
+import { suppressPublishingRetry } from '../publishing-attempt.context';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -1069,7 +1070,7 @@ export class InstagramProvider
       body.includes('Rate limit') ||
       handleError?.type === 'retry'
     ) {
-      if (totalRetries > 2) {
+      if (suppressPublishingRetry() || totalRetries > 2) {
         throw new BadBody(
           identifier,
           bodyForError,
@@ -2043,7 +2044,7 @@ export class InstagramProvider
         return mediaId;
       } catch (error) {
         if (
-          attempt >= maxAttempts ||
+          suppressPublishingRetry() || attempt >= maxAttempts ||
           !this.isMediaPublishMediaIdUnavailable(error)
         ) {
           throw error;

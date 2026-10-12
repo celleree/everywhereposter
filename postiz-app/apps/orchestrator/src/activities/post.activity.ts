@@ -1,3 +1,4 @@
+import { activityInfo } from '@temporalio/activity';
 import { Injectable } from '@nestjs/common';
 import {
   Activity,
@@ -53,6 +54,7 @@ export class PostActivity {
 
   @ActivityMethod()
   async searchForMissingThreeHoursPosts() {
+    await this._postService.recoverSubmissionDispatches();
     const list = await this._postService.searchForMissingThreeHoursPosts();
     for (const post of list) {
       await this._temporalService.client
@@ -176,10 +178,7 @@ export class PostActivity {
       posts
     );
 
-    const postNow = await getIntegration.post(
-      integration.internalId,
-      integration.token,
-      await Promise.all(
+    const preparedPosts = await Promise.all(
         (newPosts || []).map(async (p) => ({
           id: p.id,
           message: stripHtmlValidation(
@@ -197,8 +196,11 @@ export class PostActivity {
             getIntegration?.convertToJPEG || false
           ),
         }))
-      ),
-      integration
+      );
+    const postNow = await this._postService.runSubmissionProvider(
+      integration.organizationId, posts[0].id, integration.id,
+      activityInfo().workflowExecution.workflowId,
+      () => getIntegration.post(integration.internalId, integration.token, preparedPosts, integration)
     );
 
     await this._temporalService.client

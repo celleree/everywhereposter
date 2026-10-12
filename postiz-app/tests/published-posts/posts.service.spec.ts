@@ -77,6 +77,7 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
 
   const postRepository = {
     changeState: jest.fn(),
+    isSubmissionPost: jest.fn().mockResolvedValue(false),
     createOrUpdatePost: jest.fn(),
     deletePost: jest.fn(),
     getPostById: jest.fn(),
@@ -294,6 +295,15 @@ describe('PostsService published post management', () => {
       { postId: 'draft-post', integration: 'integration-db-id' },
     ]);
     expect(integrationService.getIntegrationById).not.toHaveBeenCalled();
+  });
+
+  it('never lists, terminates or starts legacy workflows for a reserved root', async () => {
+    const { service, postRepository, getRawClient, workflowStart } = createService();
+    postRepository.isSubmissionPost.mockResolvedValue(true);
+    await service.startWorkflow('x', 'reserved-root', 'org-1', 'QUEUE');
+    expect(postRepository.isSubmissionPost).toHaveBeenCalledWith('reserved-root');
+    expect(getRawClient).not.toHaveBeenCalled();
+    expect(workflowStart).not.toHaveBeenCalled();
   });
 
   it('preserves immediate publishing for a usable normal-composer destination', async () => {
@@ -852,5 +862,32 @@ describe('PostsService published post management', () => {
       'org-1',
       'integration-db-id'
     );
+  });
+});
+
+
+describe('opt-in durable submission routing and existing provider validation', () => {
+  it('passes a durable attempt through the existing create service without starting a second workflow', async () => {
+    const { service, workflowStart, postRepository } = createService();
+    const submit = jest.fn().mockResolvedValue([{ postId: 'original', integration: 'integration-db-id' }]);
+    (service as any)._submissions = { submit };
+    const body = { submissionId: 'attempt-1234567890', type: 'now' };
+    expect(await service.createPost('org-1', body as any)).toEqual([{ postId: 'original', integration: 'integration-db-id' }]);
+    expect(submit).toHaveBeenCalledWith('org-1', body);
+    expect(postRepository.createOrUpdatePost).not.toHaveBeenCalled();
+    expect(workflowStart).not.toHaveBeenCalled();
+  });
+
+  it('retains required YouTube title validation before accepting a durable submission', async () => {
+    const { service, integrationService } = createService();
+    integrationService.getIntegrationById.mockResolvedValue({ providerIdentifier: 'youtube' });
+    const body = { submissionId: 'attempt-1234567890', type: 'now', shortLink: false,
+      date: new Date().toISOString(), tags: [], posts: [{ integration: { id: 'integration-db-id' },
+        settings: { type: 'private' }, value: [{ content: 'Description', image: [], delay: 0 }] }] };
+    await expect(service.mapTypeToPost(body as any, 'org-1')).rejects.toBeInstanceOf(BadRequestException);
+    const mapped = await service.mapTypeToPost({ ...body, posts: [{ ...body.posts[0], settings: { type: 'private', title: 'Grounded title' } }] } as any, 'org-1');
+    expect(mapped.submissionId).toBe(body.submissionId);
+    expect(mapped.posts[0].value[0].content).toBe('Description');
+    expect(mapped.posts[0].settings).toMatchObject({ __type: 'youtube', type: 'private', title: 'Grounded title' });
   });
 });

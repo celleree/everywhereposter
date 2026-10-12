@@ -1,3 +1,4 @@
+import { suppressPublishingRetry } from '../publishing-attempt.context';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -377,7 +378,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
           media: {
             body: response.data,
           },
-        }),
+        }, suppressPublishingRetry() ? { retry: false } : undefined),
       true
     );
 

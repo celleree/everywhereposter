@@ -1,3 +1,4 @@
+import { suppressPublishingRetry } from './publishing-attempt.context';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Integration } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
@@ -159,7 +160,7 @@ export abstract class SocialAbstract {
       return request;
     }
 
-    if (totalRetries > 2) {
+    if (suppressPublishingRetry() || totalRetries > 2) {
       throw new BadBody(identifier, '{}', options.body || '{}');
     }
 
