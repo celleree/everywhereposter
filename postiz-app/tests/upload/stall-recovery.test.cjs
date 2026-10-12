@@ -44,7 +44,8 @@ function harness() {
   requests.length = 0;
   const state = { loading: false, locked: false, issues: [], successes: [] };
   const hook = load('apps/frontend/src/components/media/new.uploader.tsx', {
-    react: { useMemo: fn => fn(), useRef: value => ({ current: value }) },
+    react: { useMemo: fn => fn(), useRef: value => ({ current: value }), useEffect: fn => fn() },
+    './resumable-upload.provider': { useResumableTransfers: () => null },
     '@uppy/core': Uppy,
     '@uppy/react': {},
     '@uppy/compressor': class {},
@@ -56,19 +57,19 @@ function harness() {
     '@gitroom/frontend/components/new-launch/store': { useLaunchStore: () => locked => state.locked = locked },
     '@gitroom/frontend/components/media/structural.upload.file.type': { resolveStructurallyValidatedUploadFileType: async file => file.type },
   }).useUppyUploader;
-  const uppy = hook({ allowedFileTypes: 'video/mp4,video/quicktime,video/mov',
+  const uppy = hook({ allowedFileTypes: 'image/*',
     onStart: () => state.loading = true, onEnd: () => state.loading = false,
     onUploadIssue: message => state.issues.push(message),
     onUploadSuccess: media => state.successes.push(media),
   });
-  const add = name => uppy.addFile({ name, type: name.endsWith('.mov') ? 'video/quicktime' : 'video/mp4', data: new Blob(['fixture']) });
+  const add = name => uppy.addFile({ name, type: name.endsWith('.jpg') ? 'image/jpeg' : 'image/png', data: new Blob(['fixture']) });
   return { uppy, state, add };
 }
 
 test('100% without a response releases controls, retains the file, and accepts late success once', async () => {
   const { uppy, state, add } = harness();
   uppy.getPlugin('XHRUpload').setOptions({ timeout: 20 }); // Test clock only.
-  const id = add('iphone.mov');
+  const id = add('iphone.jpg');
   await tick();
   const xhr = requests[0];
   xhr.progress();
@@ -83,7 +84,7 @@ test('100% without a response releases controls, retains the file, and accepts l
   assert.deepEqual(state.successes, []);
   let result;
   uppy.on('complete', value => result = value);
-  xhr.respond(201, { id: 'saved-media', path: '/uploads/fixture.mov' });
+  xhr.respond(201, { id: 'saved-media', path: '/uploads/fixture.jpg' });
   await tick();
   assert.equal(state.successes.length, 1);
   assert.equal(state.successes[0][0].id, 'saved-media');
@@ -97,7 +98,7 @@ test('100% without a response releases controls, retains the file, and accepts l
 for (const failure of ['413 HTML', 'connection interruption']) {
   test(`${failure} preserves failed selections and never retries them when adding another file`, async () => {
     const { uppy, state, add } = harness();
-    const id = add('source.mp4');
+    const id = add('source.png');
     await tick();
     if (failure === '413 HTML') requests[0].respond(413, '<html>Content Too Large</html>');
     else requests[0].onerror();
@@ -109,17 +110,17 @@ for (const failure of ['413 HTML', 'connection interruption']) {
     assert.deepEqual(state.successes, []);
     // Both caller APIs must recover when the retained file is reselected.
     state.loading = true;
-    assert.throws(() => add('source.mp4'), /duplicate/i);
+    assert.throws(() => add('source.png'), /duplicate/i);
     assert.equal(state.loading, false);
     state.loading = true;
-    uppy.addFiles([{ name: 'source.mp4', type: 'video/mp4', data: new Blob(['fixture']) }]);
+    uppy.addFiles([{ name: 'source.png', type: 'image/png', data: new Blob(['fixture']) }]);
     assert.equal(state.loading, false);
     assert.ok(uppy.getFile(id).data);
     assert.equal(requests.length, 1);
-    add('another.mp4');
+    add('another.png');
     await tick();
     assert.equal(requests.length, 2);
-    requests[1].respond(201, { id: 'another-media', path: '/uploads/another.mp4' });
+    requests[1].respond(201, { id: 'another-media', path: '/uploads/another.png' });
     await tick();
     assert.equal(state.successes.length, 1);
     assert.equal(state.successes[0][0].id, 'another-media');
@@ -133,19 +134,19 @@ for (const failure of ['413 HTML', 'connection interruption']) {
 
 test('a stale completion cannot attach an old response to a newly selected file with the same ID', async () => {
   const { uppy, state, add } = harness();
-  add('same.mp4');
+  add('same.png');
   await tick();
   let oldResult;
   uppy.on('complete', result => oldResult ||= result);
-  requests[0].respond(201, { id: 'first-media', path: '/uploads/first.mp4' });
+  requests[0].respond(201, { id: 'first-media', path: '/uploads/first.png' });
   await tick();
-  add('same.mp4');
+  add('same.png');
   await tick();
   uppy.emit('complete', oldResult);
   await tick();
   assert.equal(state.successes.length, 1);
   assert.equal(state.loading, true);
-  requests[1].respond(201, { id: 'second-media', path: '/uploads/second.mp4' });
+  requests[1].respond(201, { id: 'second-media', path: '/uploads/second.png' });
   await tick();
   assert.deepEqual(state.successes.flat().map(media => media.id), ['first-media', 'second-media']);
   uppy.destroy();

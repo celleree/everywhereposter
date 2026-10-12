@@ -1,5 +1,6 @@
 'use client';
 
+import { ResumableUploadProvider } from '../media/resumable-upload.provider';
 import React, { ReactNode, useCallback } from 'react';
 import { Logo } from '@gitroom/frontend/components/new-layout/logo';
 import { Plus_Jakarta_Sans } from 'next/font/google';
@@ -76,6 +77,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
         showDevConsole={false}
       >
         <MantineWrapper>
+          <ResumableUploadProvider>
           <ToolTip />
           <Toaster />
           <CheckPayment check={searchParams.get('check') || ''} mutate={mutate}>
@@ -159,6 +161,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
               )}
             </div>
           </CheckPayment>
+          </ResumableUploadProvider>
         </MantineWrapper>
       </CopilotKit>
     </ContextWrapper>
