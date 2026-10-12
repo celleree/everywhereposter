@@ -55,12 +55,15 @@ import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/pris
 import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
+import { ResumableUploadService } from '../../upload/resumable-upload.service';
+
 @Global()
 @Module({
   imports: [],
   controllers: [],
   providers: [
     PrismaService,
+    ResumableUploadService,
     PrismaRepository,
     PrismaTransaction,
     UsersService,

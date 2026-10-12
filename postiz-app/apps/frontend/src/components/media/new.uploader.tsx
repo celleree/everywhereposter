@@ -1,3 +1,4 @@
+import { useResumableTransfers } from './resumable-upload.provider';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // @ts-ignore
 import Uppy, { BasePlugin, UploadResult, UppyFile } from '@uppy/core';
@@ -62,6 +63,9 @@ export function useUppyUploader(props: {
   allowedFileTypes: string;
   guidedTranscription?: boolean;
 }) {
+  const transfers = useResumableTransfers();
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const setLocked = useLaunchStore((state) => state.setLocked);
   const toast = useToaster();
   const { storageProvider, backendUrl, disableImageCompression, transloadit } =
@@ -84,7 +88,7 @@ export function useUppyUploader(props: {
       restrictions: {
         // maxNumberOfFiles: 5,
         // allowedFileTypes: allowedFileTypes.split(','),
-        maxFileSize: 1000000000, // Default 1GB, but we'll override with custom validation
+        maxFileSize: 1000 * 1024 * 1024, // Default 1GB, but we'll override with custom validation
       },
     });
 
@@ -252,6 +256,15 @@ export function useUppyUploader(props: {
 
     // Set additional metadata when a file is added
     uppy2.on('file-added', (file) => {
+      if (storageProvider === 'local' && !transloadit.length && allowedFileTypes.includes('video/') && /\.(mp4|mov)$/i.test(file.name)) {
+        // The layout owns local video transfer; modal/navigation locks belong only to the legacy path.
+        uppy2.removeFile(file.id);
+        if (!transfers) { showIssue('Open the authenticated app to start a resumable video transfer.'); return; }
+        void transfers.start(file.data as File).then(media => {
+          if (mounted.current) notifySuccess([media]);
+        }).catch(error => { if (mounted.current) showIssue(error.message); });
+        return;
+      }
       uploadCancelled = false;
       deliveredFiles.delete(file.id);
       busyFiles.add(file.id);

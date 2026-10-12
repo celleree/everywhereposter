@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createReadStream, statSync } from 'fs';
+import { createReadStream, statSync, realpathSync } from 'fs';
+import { resolve, sep } from 'path';
 // @ts-ignore
 import mime from 'mime';
 async function* nodeStreamToIterator(stream: any) {
@@ -28,8 +29,12 @@ export const GET = async (
   }
 ) => {
   const { path } = await context.params;
-  const filePath =
-    process.env.UPLOAD_DIRECTORY + '/' + (path ?? []).join('/');
+  const root = realpathSync(process.env.UPLOAD_DIRECTORY!);
+  const segments = path ?? [];
+  if (segments.some(segment => segment.startsWith('.') || segment.includes('/') || segment.includes('\\'))) return new Response(null, { status: 404 });
+  let filePath: string;
+  try { filePath = realpathSync(resolve(root, ...segments)); } catch { return new Response(null, { status: 404 }); }
+  if (!filePath.startsWith(root + sep) || filePath.startsWith(resolve(root, '.resumable') + sep)) return new Response(null, { status: 404 });
   const response = createReadStream(filePath);
   const fileStats = statSync(filePath);
   const contentType = mime.getType(filePath) || 'application/octet-stream';

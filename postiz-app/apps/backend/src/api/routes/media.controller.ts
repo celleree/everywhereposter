@@ -7,6 +7,8 @@ import {
   Logger,
   Param,
   Post,
+  Put,
+  ParseIntPipe,
   Query,
   Req,
   Res,
@@ -18,7 +20,7 @@ import { Request, Response } from 'express';
 import { existsSync, statSync } from 'fs';
 import { resolve, sep } from 'path';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
-import { Organization } from '@prisma/client';
+import { Organization, User } from '@prisma/client';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { ApiTags } from '@nestjs/swagger';
 import handleR2Upload from '@gitroom/nestjs-libraries/upload/r2.uploader';
@@ -31,6 +33,12 @@ import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
+import { validateVideoOnDisk } from '@gitroom/nestjs-libraries/upload/resumable-video.validation';
+import { rm } from 'fs/promises';
+import { ResumableUploadService } from '@gitroom/nestjs-libraries/upload/resumable-upload.service';
+import { CreateVideoUploadDto } from '@gitroom/nestjs-libraries/dtos/media/create.video.upload.dto';
+import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
+
 @ApiTags('Media')
 @Controller('/media')
 export class MediaController {
@@ -39,9 +47,32 @@ export class MediaController {
 
   constructor(
     private _mediaService: MediaService,
+    private readonly resumable: ResumableUploadService,
     private _subscriptionService: SubscriptionService,
     private _mediaTranscriptionService: MediaTranscriptionService
   ) {}
+
+  @Post('/uploads')
+  createUpload(@GetOrgFromRequest() org: Organization, @GetUserFromRequest() user: User, @Body() body: CreateVideoUploadDto) {
+    return this.resumable.create(org.id, user.id, body);
+  }
+
+  @Get('/uploads')
+  listUploads(@GetOrgFromRequest() org: Organization) { return this.resumable.list(org.id); }
+
+  @Get('/uploads/:id')
+  uploadStatus(@GetOrgFromRequest() org: Organization, @Param('id') id: string) { return this.resumable.get(org.id, id); }
+
+  @Put('/uploads/:id/parts/:index')
+  uploadPart(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Param('index', ParseIntPipe) index: number, @Req() req: Request) {
+    return this.resumable.part(org.id, id, index, req, req.headers['content-length']);
+  }
+
+  @Post('/uploads/:id/complete')
+  completeUpload(@GetOrgFromRequest() org: Organization, @Param('id') id: string) { return this.resumable.complete(org.id, id); }
+
+  @Delete('/uploads/:id')
+  cancelUpload(@GetOrgFromRequest() org: Organization, @Param('id') id: string) { return this.resumable.cancel(org.id, id); }
 
   @Delete('/:id')
   deleteMedia(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
@@ -103,6 +134,7 @@ export class MediaController {
     const originalName = file?.originalname || '';
     const uploadedFile = await this.storage.uploadFile(file);
     const diskPath = this.assertLocalUploadExists(uploadedFile.path);
+    await this.validateLegacyVideo(diskPath, uploadedFile.mimetype);
     const savedMedia = await this._mediaService.saveFile(
       org.id,
       uploadedFile.originalname,
@@ -169,6 +201,7 @@ export class MediaController {
   ) {
     const originalName = file.originalname;
     const getFile = await this.storage.uploadFile(file);
+    await this.validateLegacyVideo(this.assertLocalUploadExists(getFile.path), getFile.mimetype);
 
     if (preventSave === 'true') {
       const { path } = getFile;
@@ -286,6 +319,12 @@ export class MediaController {
     @Param('id') id: string
   ) {
     return this._mediaService.getMediaByOrganizationIdAndId(org.id, id);
+  }
+
+  private async validateLegacyVideo(diskPath?: string, mimeType?: string) {
+    if (!diskPath || !mimeType?.startsWith('video/')) return;
+    try { await validateVideoOnDisk(diskPath, statSync(diskPath).size); }
+    catch (error) { await rm(diskPath, { force: true }); throw error; }
   }
 
   private assertLocalUploadExists(publicPath: string) {

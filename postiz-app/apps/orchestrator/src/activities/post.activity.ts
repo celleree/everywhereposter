@@ -24,10 +24,18 @@ import {
 } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 
+import { ResumableUploadService } from '@gitroom/nestjs-libraries/upload/resumable-upload.service';
+
 @Injectable()
 @Activity()
 export class PostActivity {
+  @ActivityMethod()
+  async maintainVideoUploads() {
+    return this.resumableUploads.maintain();
+  }
+
   constructor(
+    private readonly resumableUploads: ResumableUploadService,
     private _postService: PostsService,
     private _notificationService: NotificationService,
     private _integrationManager: IntegrationManager,
