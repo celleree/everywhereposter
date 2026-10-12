@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Validate,
   ValidateIf,
   ValidateNested,
@@ -89,6 +90,11 @@ class Tags {
 }
 
 export class CreatePostDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-zA-Z0-9_-]{16,128}$/)
+  submissionId?: string;
+
   @IsDefined()
   @IsIn(['draft', 'schedule', 'now', 'update'])
   type: 'draft' | 'schedule' | 'now' | 'update';

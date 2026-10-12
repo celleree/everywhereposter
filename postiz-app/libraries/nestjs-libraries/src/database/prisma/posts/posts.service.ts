@@ -3,6 +3,7 @@ import {
   Injectable,
   ValidationPipe,
 } from '@nestjs/common';
+import { PublishingSubmissionService } from './publishing-submission.service';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
 import { CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
 import dayjs from 'dayjs';
@@ -39,6 +40,7 @@ import {
   PublishedComment,
   PublishedDeleteResponse,
   PostDetails,
+  PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { timer } from '@gitroom/helpers/utils/timer';
@@ -87,8 +89,26 @@ export class PostsService {
     private _shortLinkService: ShortLinkService,
     private _openaiService: OpenaiService,
     private _temporalService: TemporalService,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _submissions?: PublishingSubmissionService
   ) {}
+
+  reconcileSubmission(orgId: string, attemptId: string, resume = false) {
+    return this._submissions.reconcile(orgId, attemptId, resume);
+  }
+
+  retrySubmission(orgId: string, attemptId: string, integrationId: string) {
+    return this._submissions.retryBeforeProvider(orgId, attemptId, integrationId);
+  }
+
+  recoverSubmissionDispatches() {
+    return this._submissions.recoverPendingDispatches();
+  }
+
+  runSubmissionProvider(orgId: string, postId: string, integrationId: string,
+    workflowId: string, operation: () => Promise<PostResponse[]>) {
+    return this._submissions.runProvider(orgId, postId, integrationId, workflowId, operation);
+  }
 
   searchForMissingThreeHoursPosts() {
     return this._postRepository.searchForMissingThreeHoursPosts();
@@ -1327,6 +1347,9 @@ export class PostsService {
     orgId: string,
     state: State
   ) {
+    // Only the durable dispatcher may start or resume a reserved root.
+    // In particular, never terminate its workflow through the legacy restarter.
+    if (await this._postRepository.isSubmissionPost(postId)) return;
     try {
       const workflows = this._temporalService.client
         .getRawClient()
@@ -1382,6 +1405,7 @@ export class PostsService {
   }
 
   async createPost(orgId: string, body: CreatePostDto): Promise<any[]> {
+    if (body.submissionId) return this._submissions.submit(orgId, body);
     if (
       body.type === 'schedule' &&
       !dayjs.utc(body.date).isAfter(dayjs.utc())

@@ -219,3 +219,37 @@ describe('postWorkflowV102 unusable account states', () => {
     );
   });
 });
+
+
+describe('postWorkflowV102 durable submission boundary', () => {
+  beforeEach(() => {
+    jest.clearAllMocks(); patched.mockReturnValue(true);
+    getIntegrationById.mockResolvedValue(baseIntegration);
+    isCommentable.mockResolvedValue(false);
+    updatePost.mockResolvedValue(undefined);
+    inAppNotification.mockResolvedValue(undefined);
+    sendWebhooks.mockResolvedValue(undefined);
+  });
+
+  it('does not refresh and reissue a durable provider call after an uncertain failure', async () => {
+    const { ActivityFailure, ApplicationFailure } = require('@temporalio/workflow');
+    const failure = new ActivityFailure('Provider failure');
+    failure.cause = new ApplicationFailure('Provider may have accepted');
+    failure.cause.type = 'refresh_token';
+    postSocial.mockRejectedValue(failure);
+    setPostIntegrationState({});
+    await postWorkflowV102({ taskQueue: 'x', postId: 'post-1', organizationId: 'org-1', durableSubmission: true });
+    expect(postSocial).toHaveBeenCalledTimes(1);
+    expect(refreshTokenWithCause).not.toHaveBeenCalled();
+    expect(changeState).toHaveBeenCalledWith('post-1', 'ERROR', failure, expect.any(Array));
+  });
+
+  it('does not start implicit repost plugs after a durable root succeeds', async () => {
+    setPostIntegrationState({});
+    postSocial.mockResolvedValue([{ postId: 'remote-1', releaseURL: 'https://fixture.invalid/post' }]);
+    await postWorkflowV102({ taskQueue: 'x', postId: 'post-1', organizationId: 'org-1', durableSubmission: true });
+    expect(sendWebhooks).toHaveBeenCalled();
+    expect(internalPlugs).not.toHaveBeenCalled();
+    expect(globalPlugs).not.toHaveBeenCalled();
+  });
+});
