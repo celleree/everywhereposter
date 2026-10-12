@@ -94,8 +94,15 @@ suite('durable Quick Upload (real local ledger; provider/copy mocks)', () => {
   });
   it('retains uncertain publishing outcomes without a resend', async () => {
     const upload = await session(), intent = await service.enroll(org, actor, upload.id, consent); await finish(upload.id); await service.prepare(intent.id); await service.generate(intent.id);
-    reconcile.mockResolvedValue({ destinations: [{ integrationId: 'quick-fixture-x', postId: 'reserved-post', state: 'uncertain' }] }); await service.submit(intent.id); await service.reconcile(intent.id);
+    reconcile.mockResolvedValue({ destinations: [{ integrationId: 'quick-fixture-x', postId: 'reserved-post', state: 'uncertain', providerState: 'UNCERTAIN' }] }); await service.submit(intent.id); await service.reconcile(intent.id);
     expect(submit).toHaveBeenCalledTimes(1); expect((await service.status(org, upload.id)).results).toEqual([expect.objectContaining({ state: 'Failed', reason: expect.stringContaining('not be retried') })]);
+  });
+  it('keeps IN_FLIGHT under observation until its provider receipt succeeds without another submit', async () => {
+    const upload = await session(), intent = await service.enroll(org, actor, upload.id, consent); await finish(upload.id); await service.prepare(intent.id); await service.generate(intent.id);
+    reconcile.mockResolvedValue({ destinations: [{ integrationId: 'quick-fixture-x', postId: 'reserved-post', state: 'uncertain', providerState: 'IN_FLIGHT' }] });
+    await service.submit(intent.id); expect((await service.status(org, upload.id)).status).toBe('PUBLISHING'); expect(await service.reconcile(intent.id)).toBe(false);
+    service = instantiate(); reconcile.mockResolvedValue({ destinations: [{ integrationId: 'quick-fixture-x', postId: 'reserved-post', state: 'published', providerState: 'SUCCEEDED' }] });
+    expect(await service.reconcile(intent.id)).toBe(true); expect((await service.status(org, upload.id)).results).toEqual([expect.objectContaining({ state: 'Published' })]); expect(submit).toHaveBeenCalledTimes(1);
   });
   it('skips content needing review and rechecks actor and account eligibility', async () => {
     const upload = await session(), intent = await service.enroll(org, actor, upload.id, consent); await finish(upload.id); await service.prepare(intent.id);

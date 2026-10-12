@@ -76,6 +76,7 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
     if (pathname.endsWith('/complete')) { session.status = 'COMPLETE'; session.media = { id: 'quick-media', name: 'quick.mp4', path: '/audit-fixtures/quick.mp4', type: 'video' }; return route.fulfill({ json: session }); }
     return route.fulfill({ json: session });
   });
+  await page.route('**/backend-api/integrations/list', route => route.fulfill({ json: { integrations: [{ id: 'fixture', name: 'Fixture account', identifier: 'x', type: 'social', editor: 'normal', additionalSettings: '[]', time: [] }] } }));
   await openApp(page, '/media');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('complementary', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);

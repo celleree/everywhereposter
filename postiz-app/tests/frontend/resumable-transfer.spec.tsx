@@ -104,3 +104,22 @@ it('queues explicit Quick Upload during hashing and persists it before transferr
   expect(fetch.mock.calls.filter(call => call[0].endsWith('/quick-upload'))).toHaveLength(1);
   expect(changed.mock.calls.at(-1)![0][0].session.quickIntent.id).toBe('intent');
 });
+
+it('routes completed resumable media through one server consent and fails closed when enrollment is disabled', async () => {
+  const session: any = { id: 'media', media: { id: 'media' }, originalName: 'video.mp4', byteSize: 1, status: 'COMPLETE', parts: [] };
+  let enrollments = 0, disabled = false;
+  const fetch = jest.fn(async (url: string, options?: RequestInit) => {
+    if (url.endsWith('/quick-upload')) {
+      if (disabled) return { ok: false, status: 400, json: async () => ({ message: 'Enrollment is disabled' }) } as Response;
+      enrollments++; session.quickIntent = { id: 'intent', status: 'WAITING', results: [] };
+      return { ok: true, json: async () => session.quickIntent } as Response;
+    }
+    return { ok: true, json: async () => JSON.parse(JSON.stringify(session)) } as Response;
+  });
+  const transfers = new ResumableTransfers(fetch, jest.fn(), 'org');
+  const body = { confirmNoIndividualReview: true as const, destinations: [{ id: 'x', settings: {} }] };
+  expect(await transfers.tryCompletedQuickUpload('media', body)).toBe(true);
+  await expect(transfers.tryCompletedQuickUpload('media', body)).rejects.toThrow('saved Quick Upload'); expect(enrollments).toBe(1);
+  session.quickIntent = undefined; disabled = true;
+  await expect(transfers.tryCompletedQuickUpload('media', body)).rejects.toThrow('disabled'); expect(enrollments).toBe(1);
+});

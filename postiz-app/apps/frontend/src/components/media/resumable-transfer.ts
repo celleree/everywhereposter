@@ -65,6 +65,21 @@ export class ResumableTransfers {
     }
     return result;
   }
+  async tryCompletedQuickUpload(mediaId: string, body: QuickConsent) {
+    let session: UploadSession;
+    try { session = await this.request('/' + encodeURIComponent(mediaId)); }
+    catch (error) { if ((error as any).status === 404) return false; throw error; }
+    if (session.status !== 'COMPLETE' || !session.media?.id) throw new Error('Wait for server-confirmed video completion.');
+    if (session.quickIntent) throw new Error('This video already has a saved Quick Upload choice. Check its transfer progress; use Customize for a separate post.');
+    const item = [...this.items.values()].find(value => value.session?.id === session.id) || {
+      id: session.id, name: session.originalName, bytes: session.byteSize, sent: session.byteSize, state: 'Transfer complete' as const,
+    };
+    this.update({ ...item, session });
+    // Resumable media always uses server consent. Disabled enrollment never falls
+    // back to the old browser generator, which could race a later durable choice.
+    await this.optIntoQuickUpload(item.id, body);
+    return true;
+  }
   async assertNoQuickUpload(mediaId: string) {
     let session: UploadSession;
     try { session = await this.request('/' + encodeURIComponent(mediaId)); }

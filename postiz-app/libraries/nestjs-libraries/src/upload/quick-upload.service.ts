@@ -222,8 +222,8 @@ export class QuickUploadService {
     const names = new Map((intent.destinations as unknown as Destination[]).map(value => [value.id, value.name]));
     const results = (intent.results as unknown as Result[]).filter(value => value.state === 'Skipped');
     for (const destination of ledger.destinations) results.push({ integrationId: destination.integrationId, name: names.get(destination.integrationId) || destination.integrationId, postId: destination.postId,
-      state: destination.state === 'published' ? 'Published' : ['uncertain', 'failed', 'failed-before-provider', 'unavailable', 'reconnect-required'].includes(destination.state) ? 'Failed' : 'Publishing',
-      ...(destination.state === 'uncertain' ? { reason: 'Publishing outcome is uncertain. It will not be retried automatically.' } : {}) });
+      state: destination.providerState === 'IN_FLIGHT' ? 'Publishing' : destination.state === 'published' ? 'Published' : ['uncertain', 'failed', 'failed-before-provider', 'unavailable', 'reconnect-required'].includes(destination.state) ? 'Failed' : 'Publishing',
+      ...(destination.state === 'uncertain' && destination.providerState !== 'IN_FLIGHT' ? { reason: 'Publishing outcome is uncertain. It will not be retried automatically.' } : {}) });
     const done = !results.some(value => value.state === 'Publishing');
     await this.db.quickUploadIntent.update({ where: { id: intentId }, data: { results: results as any, status: done ? 'COMPLETE' : 'PUBLISHING' } });
     return done;

@@ -664,6 +664,16 @@ export const GuidedComposerShell: FC<{
             selected.settings,
           ])
       );
+      if (await resumableTransfers?.tryCompletedQuickUpload(globalMedia[0].id, {
+        confirmNoIndividualReview: true,
+        destinations: freshAccounts.map(account => ({ id: account.id, settings: {
+          ...(account.identifier === 'x' ? { who_can_reply_post: 'everyone' } : account.identifier.startsWith('instagram') ? { post_type: 'reel', post_type_explicit: false } : {}),
+          ...settings.get(account.id),
+        } })),
+      })) {
+        setQuickStage('done'); quickInFlightRef.current = false;
+        return;
+      }
       useLaunchStore.setState({ integrations: freshAccounts });
       useLaunchStore
         .getState()
