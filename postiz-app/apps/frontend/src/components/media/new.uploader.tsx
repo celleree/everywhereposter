@@ -279,6 +279,10 @@ export function useUppyUploader(props: {
       if (!file || !uppy2.getFile(file.id)) return;
       recoverUpload(file, response?.status ?? (error as any)?.request?.status);
     });
+    uppy2.on('restriction-failed', (_file, error) => {
+      showIssue(`${error.message} Your selection is preserved. Check Media Library before uploading again.`);
+      finishUpload();
+    });
     uppy2.on('upload-stalled', (_error, files) => {
       const pending = files.filter((file) => uppy2.getFile(file.id) && !uppy2.getFile(file.id).progress.uploadComplete);
       if (pending.length === 0) return;

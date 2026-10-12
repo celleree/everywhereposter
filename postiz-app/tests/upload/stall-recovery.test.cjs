@@ -107,6 +107,15 @@ for (const failure of ['413 HTML', 'connection interruption']) {
     assert.ok(uppy.getFile(id).data);
     assert.match(state.issues.at(-1), failure === '413 HTML' ? /too large.*smaller/ : /Check Media Library/);
     assert.deepEqual(state.successes, []);
+    // Both caller APIs must recover when the retained file is reselected.
+    state.loading = true;
+    assert.throws(() => add('source.mp4'), /duplicate/i);
+    assert.equal(state.loading, false);
+    state.loading = true;
+    uppy.addFiles([{ name: 'source.mp4', type: 'video/mp4', data: new Blob(['fixture']) }]);
+    assert.equal(state.loading, false);
+    assert.ok(uppy.getFile(id).data);
+    assert.equal(requests.length, 1);
     add('another.mp4');
     await tick();
     assert.equal(requests.length, 2);
