@@ -84,3 +84,40 @@ it('cancellation during hashing never resurrects a transfer or sends a session',
   await waitFor(() => expect((f.transfers as any).controllers.size).toBe(0));
   expect(f.changed.mock.calls.at(-1)[0]).toEqual([]); expect(f.requests).toEqual([]);
 });
+
+it.each([false, true])('reconciles cancellation after creation starts without its acknowledgement (commit delayed: %s)', async delayed => {
+  let session: any;
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const changed = jest.fn();
+  const fetch = jest.fn(async (url: string, options?: RequestInit) => {
+    if (options?.method === 'POST') {
+      const saved = { ...JSON.parse(String(options.body)), id: 'pending-session', parts: [], status: 'UPLOADING' };
+      if (!delayed) session = saved;
+      await held;
+      if (delayed) { session = saved; throw new Error('lost creation acknowledgement'); }
+      return { ok: true, json: async () => saved } as Response;
+    }
+    if (options?.method === 'DELETE') session.status = 'CANCELLED';
+    return { ok: true, json: async () => url === '/media/uploads' ? { sessions: session?.status === 'UPLOADING' ? [session] : [] } : session } as Response;
+  });
+  const transfers = new ResumableTransfers(fetch, changed, 'org');
+  const receipt = transfers.start(file(4));
+  const rejected = expect(receipt).rejects.toThrow('cancelled');
+  await waitFor(() => expect(fetch.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true));
+  const id = changed.mock.calls[0][0][0].id;
+  if (delayed) {
+    await expect(transfers.cancel(id)).rejects.toThrow('uncertain');
+    expect(changed.mock.calls.at(-1)[0]).toHaveLength(1);
+    expect((transfers as any).files.has(id)).toBe(true);
+  } else await transfers.cancel(id);
+  release();
+  await waitFor(() => expect((transfers as any).controllers.size).toBe(0));
+  if (delayed) await transfers.cancel(id);
+  await rejected;
+  await transfers.refresh();
+  expect(session.status).toBe('CANCELLED');
+  expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+  expect(fetch.mock.calls.filter(([, options]) => options?.method === 'DELETE').map(([url]) => url)).toEqual(['/media/uploads/pending-session']);
+  expect(changed.mock.calls.at(-1)[0]).toEqual([]);
+});

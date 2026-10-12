@@ -1,6 +1,6 @@
 export const CHUNK_BYTES = 8 * 1024 * 1024;
 export type UploadSession = {
-  id: string; originalName: string; byteSize: number; manifest: string[];
+  id: string; clientId?: string; originalName: string; byteSize: number; manifest: string[];
   status: string; parts: { index: number; digest: string; byteSize: number }[];
   media?: any; error?: string; expiresAt?: string;
 };
@@ -23,6 +23,7 @@ export async function fileManifest(file: Blob, signal?: AbortSignal) {
 export class ResumableTransfers {
   private files = new Map<string, File>();
   private controllers = new Map<string, AbortController>();
+  private pendingCreations = new Set<string>();
   private receipts = new Map<string, { resolve: (media: any) => void; reject: (error: Error) => void }>();
   private items = new Map<string, Transfer>();
   private disposed = false;
@@ -45,8 +46,9 @@ export class ResumableTransfers {
   async refresh() {
     const result = await this.request('');
     for (const session of result.sessions as UploadSession[]) {
-      const existing = [...this.items.values()].find(item => item.session?.id === session.id);
+      const existing = [...this.items.values()].find(item => item.session?.id === session.id || item.id === session.clientId);
       if (existing) {
+        if (!existing.session) this.update({ ...existing, session });
         if (!this.controllers.has(existing.id) && session.status === 'COMPLETE' && session.media?.id) {
           this.update({ ...existing, session, sent: existing.bytes, state: 'Transfer complete', error: undefined });
           this.receipts.get(existing.id)?.resolve(session.media); this.receipts.delete(existing.id); this.files.delete(existing.id);
@@ -78,8 +80,13 @@ export class ResumableTransfers {
   }
   async cancel(id: string) {
     this.pause(id);
+    if (!this.items.get(id)?.session && this.pendingCreations.has(id)) {
+      await this.refresh();
+      if (!this.items.get(id)?.session) throw new Error('Upload session creation is uncertain. Return to the saved upload before cancelling.');
+    }
     const item = this.items.get(id);
     if (item?.session) await this.request('/' + item.session.id, { method: 'DELETE' });
+    this.pendingCreations.delete(id);
     this.items.delete(id); this.files.delete(id);
     this.receipts.get(id)?.reject(new Error('Upload cancelled.')); this.receipts.delete(id);
     this.changed([...this.items.values()]);
@@ -104,8 +111,11 @@ export class ResumableTransfers {
         session = await this.request('/' + item.session.id, { signal: controller.signal });
         if (file.size !== session.byteSize || JSON.stringify(manifest) !== JSON.stringify(session.manifest)) throw new Error('This is not the original file. Select the original video.');
       } else {
+        this.pendingCreations.add(id);
         session = await this.request('', { method: 'POST', body: JSON.stringify({ organizationId: this.organizationId, clientId: id, originalName: file.name, byteSize: file.size, manifest }), signal: controller.signal });
       }
+      if (this.items.has(id)) this.update({ ...this.items.get(id)!, session });
+      this.pendingCreations.delete(id);
       if (controller.signal.aborted || !this.items.has(id)) throw new DOMException('Upload paused', 'AbortError');
       item = { ...item, session, sent: session.parts.reduce((sum, part) => sum + part.byteSize, 0), state: 'Uploading' };
       this.update(item);
@@ -128,7 +138,7 @@ export class ResumableTransfers {
       if (!this.disposed && remaining) {
         this.update({ ...remaining, state: controller.signal.aborted ? 'Paused' : (error as any).status === 400 ? 'Failed' : 'Resume needed', error: controller.signal.aborted ? undefined : (error as Error).message });
       }
-      if ((error as any).status === 400) { this.receipts.get(id)?.reject(error as Error); this.receipts.delete(id); this.files.delete(id); }
+      if ((error as any).status === 400) { this.pendingCreations.delete(id); this.receipts.get(id)?.reject(error as Error); this.receipts.delete(id); this.files.delete(id); }
     } finally { this.controllers.delete(id); }
   }
 }

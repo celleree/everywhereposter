@@ -15,7 +15,7 @@ export function ResumableUploadProvider({ children }: { children: React.ReactNod
   const [actionError, setActionError] = useState('');
   const [items, setItems] = useState<Transfer[]>([]);
   // Capture organization; stop using the old controller if the user's context changes.
-  const transfers = useMemo(() => new ResumableTransfers((url, options) => fetch(url, { ...options, headers: { ...options?.headers, showorg: user?.orgId || '' } }), setItems, user?.orgId || ''), [fetch, user?.orgId]);
+  const transfers = useMemo(() => new ResumableTransfers(fetch, setItems, user?.orgId || ''), [fetch, user?.orgId]);
   const local = storageProvider === 'local' && !transloadit?.length;
   useEffect(() => {
     transfers.activate();

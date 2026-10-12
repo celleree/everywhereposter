@@ -114,7 +114,7 @@ export class ResumableUploadService {
   async get(org: string, id: string) {
     const row = await this.db.videoUploadSession.findFirst({ where: { id, organizationId: org }, include: { parts: { select: { index: true, digest: true, byteSize: true } }, media: { select: MEDIA_SELECT } } });
     if (!row) throw new NotFoundException('Upload not found.');
-    return { id: row.id, originalName: row.originalName, byteSize: row.byteSize, manifest: row.manifest, status: row.status, expiresAt: row.expiresAt, parts: row.parts, media: row.media, error: row.error, chunkBytes: VIDEO_CHUNK_BYTES, maxBytes: VIDEO_MAX_BYTES };
+    return { id: row.id, clientId: row.clientId, originalName: row.originalName, byteSize: row.byteSize, manifest: row.manifest, status: row.status, expiresAt: row.expiresAt, parts: row.parts, media: row.media, error: row.error, chunkBytes: VIDEO_CHUNK_BYTES, maxBytes: VIDEO_MAX_BYTES };
   }
 
   private async claim(org: string, id: string, finalize: boolean) {

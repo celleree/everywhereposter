@@ -43,6 +43,8 @@ suite('persistent upload transport (disposable PostgreSQL, no providers)', () =>
     const body = input();
     const [a, b] = await Promise.all([service.create(org, 'actor', body), service.create(org, 'actor', body)]);
     expect(a.id).toBe(b.id);
+    expect(a.clientId).toBe(body.clientId);
+    expect((await service.list(org)).sessions[0].clientId).toBe(body.clientId);
     await expect(service.create(org, 'actor', { ...body, manifest: ['f'.repeat(64)] })).rejects.toThrow('different file');
     await expect(service.create(other, 'actor', body)).rejects.toThrow('Organization changed');
   });
