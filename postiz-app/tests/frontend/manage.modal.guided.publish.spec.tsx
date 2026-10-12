@@ -4,6 +4,7 @@ import { readFileSync } from 'fs';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 let mockUseActualEditor = false;
+let mockUploaderCallbacks: any;
 let mockDraftUser: any;
 jest.mock('@gitroom/frontend/components/layout/user.context', () => ({ useUser: () => mockDraftUser }));
 const mockFetch = jest.fn();
@@ -122,10 +123,10 @@ jest.mock('@gitroom/react/helpers/use.media.directory', () => ({
 }));
 jest.mock('@gitroom/frontend/components/media/new.uploader', () => ({
   cancelUppyUploads: jest.fn(),
-  useUppyUploader: () => ({
-    addFile: jest.fn(),
-    clear: jest.fn(),
-  }),
+  useUppyUploader: (props: any) => {
+    mockUploaderCallbacks = props;
+    return { addFile: jest.fn(), clear: jest.fn() };
+  },
 }));
 jest.mock('react-dropzone', () => ({
   useDropzone: () => ({
@@ -473,6 +474,27 @@ describe('ManageModal guided publishing bridge', () => {
       'Edited company caption.'
     );
   });
+
+  it.each(['too large; choose a smaller file', 'connection failed; check Media Library', 'waiting for a response; it may still finish'])(
+    'restores Composer controls and preserves attachments after %s',
+    (message) => {
+      renderGuidedManageModal();
+      const selected = useLaunchStore.getState().global[0].media;
+      act(() => mockUploaderCallbacks.onStart());
+      expect(screen.getByRole('button', { name: 'Choose files' })).toBeDisabled();
+      act(() => {
+        mockUploaderCallbacks.onUploadIssue(message);
+        mockUploaderCallbacks.onEnd();
+      });
+      expect(screen.getByRole('alert').textContent).toBe(message);
+      expect(screen.getByRole('button', { name: 'Choose files' })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Media Library' })).not.toBeDisabled();
+      expect(useLaunchStore.getState().global[0].media).toEqual(selected);
+      const late = { id: 'late-video', path: '/late.mov', type: 'video' };
+      act(() => mockUploaderCallbacks.onUploadSuccess([late]));
+      expect(useLaunchStore.getState().global[0].media.filter((item: any) => item.id === late.id)).toHaveLength(1);
+    }
+  );
 
   it.each(['/video.mp4', '/VIDEO.MOV?download=1'])(
     'keeps guided %s attachments inert through attachment, rerender and remount',

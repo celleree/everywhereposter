@@ -1923,13 +1923,14 @@ const ComposerUploadCard: FC<{
   const modals = useModals();
   const mediaDirectory = useMediaDirectory();
   const [loading, setLoading] = useState(false);
+  const [uploadIssue, setUploadIssue] = useState('');
 
   const uppy = useUppyUploader({
     allowedFileTypes: 'image/*,video/mp4,video/quicktime,video/mov',
     guidedTranscription,
+    onUploadIssue: setUploadIssue,
     onUploadSuccess: (result: any) => {
       onUpload(result);
-      uppy.clear();
     },
     onStart: () => setLoading(true),
     onEnd: () => setLoading(false),
@@ -2016,6 +2017,7 @@ const ComposerUploadCard: FC<{
       )}
     >
       <input {...getInputProps()} />
+      {uploadIssue && <p role="alert" className="mb-[12px] text-[13px] text-textColor">{uploadIssue}</p>}
       {guidedTranscription && (
         <div className="mobile-upload-intro hidden">
           <div className="mobile-upload-icon" aria-hidden="true">

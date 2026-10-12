@@ -1,7 +1,8 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mockFetch = jest.fn();
+let mockUploaderCallbacks: any;
 const mockMutate = jest.fn();
 const mockUploaderMount = jest.fn();
 const mockUploaderUnmount = jest.fn();
@@ -57,7 +58,8 @@ jest.mock('@gitroom/react/toaster/toaster', () => ({
   useToaster: () => ({ show: jest.fn() }),
 }));
 jest.mock('@gitroom/frontend/components/media/new.uploader', () => ({
-  useUppyUploader: () => {
+  useUppyUploader: (props: any) => {
+    mockUploaderCallbacks = props;
     const React = require('react');
     React.useEffect(() => {
       mockUploaderMount();
@@ -149,6 +151,28 @@ describe('main Media page', () => {
     mockUploaderMount.mockReset();
     mockUploaderUnmount.mockReset();
   });
+
+  it.each(['too large; choose a smaller file', 'connection failed; check Media Library', 'waiting for a response; it may still finish'])(
+    'restores Media Library controls and preserves media after %s',
+    async (message) => {
+      mockFetch.mockResolvedValue(response({ pages: 1, results: [
+        { id: 'library-1', path: '/library.jpg', originalName: 'Existing.jpg' },
+      ] }));
+      render(<MediaBox standalone setMedia={jest.fn()} closeModal={jest.fn()} />);
+      await screen.findByText('Existing.jpg');
+      act(() => mockUploaderCallbacks.onStart());
+      act(() => {
+        mockUploaderCallbacks.onUploadIssue(message);
+        mockUploaderCallbacks.onEnd();
+      });
+      expect(screen.getByRole('alert').textContent).toBe(message);
+      expect(screen.getByText('Existing.jpg')).not.toBeNull();
+      expect(screen.getByRole('button', { name: 'Upload' })).not.toBeDisabled();
+      const before = mockFetch.mock.calls.length;
+      await act(async () => mockUploaderCallbacks.onUploadSuccess([{ id: 'late-video', path: '/late.mov' }]));
+      expect(mockFetch.mock.calls.length).toBe(before + 1);
+    }
+  );
 
   it('shows library media and preserves the posted-media source contract', async () => {
     mockFetch.mockImplementation((url: string) =>

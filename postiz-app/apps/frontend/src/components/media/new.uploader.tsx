@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // @ts-ignore
 import Uppy, { BasePlugin, UploadResult, UppyFile } from '@uppy/core';
 // @ts-ignore
@@ -55,10 +55,10 @@ export function cancelUppyUploads(uppy: Uppy<any, any>) {
 }
 
 export function useUppyUploader(props: {
-  // @ts-ignore
-  onUploadSuccess: (result: UploadResult) => void;
+  onUploadSuccess: (result: any[]) => void | Promise<void>;
   onStart?: () => void;
   onEnd?: () => void;
+  onUploadIssue?: (message: string) => void;
   allowedFileTypes: string;
   guidedTranscription?: boolean;
 }) {
@@ -66,13 +66,18 @@ export function useUppyUploader(props: {
   const toast = useToaster();
   const { storageProvider, backendUrl, disableImageCompression, transloadit } =
     useVariables();
-  const { onUploadSuccess, allowedFileTypes } = props;
+  const { allowedFileTypes } = props;
   const fetch = useFetch();
+  const callbacks = useRef(props);
+  callbacks.current = props;
   return useMemo(() => {
     // Track file order to maintain original sequence after upload
     let fileOrderIndex = 0;
     let uploadCancelled = false;
     let removingCompletedFiles = false;
+    const busyFiles = new Set<string>();
+    const deliveredFiles = new Set<string>();
+    const issueFiles = new Set<string>();
 
     const uppy2 = new Uppy({
       autoProceed: true,
@@ -82,6 +87,28 @@ export function useUppyUploader(props: {
         maxFileSize: 1000000000, // Default 1GB, but we'll override with custom validation
       },
     });
+
+    // Uppy upload() retries old errors before selecting new files. Suppress that
+    // synchronous retry scan, then restore the errors for its normal result/UI.
+    const upload = uppy2.upload.bind(uppy2);
+    uppy2.upload = () => {
+      const failed = uppy2.getFiles().filter((file) => file.error);
+      for (const file of failed) uppy2.setFileState(file.id, { error: null });
+      try {
+        return upload();
+      } finally {
+        for (const file of failed) {
+          uppy2.setFileState(file.id, {
+            error: file.error,
+            progress: {
+              ...file.progress,
+              uploadStarted: file.progress.uploadStarted || Date.now(),
+              bytesUploaded: file.progress.bytesUploaded || 0,
+            },
+          });
+        }
+      }
+    };
 
     // check for valid file types it can be something like this image/*,video/mp4.
     // If it's an image, I need to replace image/* with image/png, image/jpeg, image/jpeg, image/gif (separately)
@@ -196,15 +223,40 @@ export function useUppyUploader(props: {
     }
 
     const finishUpload = () => {
-      setLocked(false);
-      props.onEnd?.();
-      fileOrderIndex = 0;
+      if (busyFiles.size === 0) {
+        setLocked(false);
+        callbacks.current.onEnd?.();
+      }
+    };
+
+    const showIssue = (message: string) => {
+      callbacks.current.onUploadIssue?.(message);
+      toast.show(message, 'warning');
+    };
+    const notifySuccess = (media: any[]) => {
+      Promise.resolve().then(() => callbacks.current.onUploadSuccess(media)).catch(() => {
+        showIssue('The upload was saved, but the view could not refresh. Open Media Library to find it; do not upload it again.');
+      });
+    };
+    const recoverUpload = (file?: UppyFile<any, any>, status?: number) => {
+      if (file) {
+        busyFiles.delete(file.id);
+        issueFiles.add(file.id);
+      }
+      else busyFiles.clear();
+      showIssue(status === 413
+        ? 'The server rejected this upload because it is too large. Choose a smaller file.'
+        : 'The upload connection failed. Your selection is preserved. Check Media Library before uploading again; the server may have saved the file.');
+      finishUpload();
     };
 
     // Set additional metadata when a file is added
     uppy2.on('file-added', (file) => {
       uploadCancelled = false;
+      deliveredFiles.delete(file.id);
+      busyFiles.add(file.id);
       setLocked(true);
+      callbacks.current.onStart?.();
       uppy2.setFileMeta(file.id, {
         useCloudflare: storageProvider === 'cloudflare' ? 'true' : 'false', // Example of adding a custom field
         addedOrder: fileOrderIndex++, // Track original order for sorting after upload
@@ -212,55 +264,77 @@ export function useUppyUploader(props: {
         // Add more fields as needed
       });
     });
-    uppy2.on('file-removed', () => {
+    uppy2.on('file-removed', (file) => {
+      busyFiles.delete(file.id);
+      issueFiles.delete(file.id);
       if (!removingCompletedFiles && uppy2.getFiles().length === 0) {
         uploadCancelled = true;
         finishUpload();
       }
     });
     uppy2.on('error', (result) => {
-      uppy2.clear();
-      uploadCancelled = false;
+      recoverUpload();
+    });
+    uppy2.on('upload-error', (file, error, response) => {
+      if (!file || !uppy2.getFile(file.id)) return;
+      recoverUpload(file, response?.status ?? (error as any)?.request?.status);
+    });
+    uppy2.on('restriction-failed', (_file, error) => {
+      showIssue(`${error.message} Your selection is preserved. Check Media Library before uploading again.`);
+      finishUpload();
+    });
+    uppy2.on('upload-stalled', (_error, files) => {
+      const pending = files.filter((file) => uppy2.getFile(file.id) && !uppy2.getFile(file.id).progress.uploadComplete);
+      if (pending.length === 0) return;
+      for (const file of pending) {
+        busyFiles.delete(file.id);
+        issueFiles.add(file.id);
+      }
+      showIssue('The upload is waiting for a response. It may still finish. Your selection is preserved; check Media Library before uploading again.');
+      // Keep the request alive: a delayed response can confirm a committed upload.
       finishUpload();
     });
     uppy2.on('cancel-all', () => {
       uploadCancelled = true;
+      busyFiles.clear();
       finishUpload();
     });
     uppy2.on('upload-start', () => {
-      props.onStart?.();
+      if (busyFiles.size > 0) callbacks.current.onStart?.();
     });
     uppy2.on('complete', async (result) => {
-      console.log(result);
+      const successful = result.successful.filter((file) =>
+        file.progress.uploadComplete &&
+        uppy2.getFile(file.id)?.response === file.response &&
+        !deliveredFiles.has(file.id)
+      );
       removingCompletedFiles = true;
       try {
-        for (const file of [...result.successful]) {
+        for (const file of successful) {
           uppy2.removeFile(file.id);
         }
       } finally {
         removingCompletedFiles = false;
       }
 
-      props.onEnd?.();
+      finishUpload();
       // Sort results by original add order to maintain file sequence
-      const sortedSuccessful = [...result.successful].sort((a, b) => {
+      const sortedSuccessful = [...successful].sort((a, b) => {
         const orderA = +((a.meta as any)?.addedOrder ?? 0);
         const orderB = +((b.meta as any)?.addedOrder ?? 0);
         return orderA - orderB;
       });
 
+      for (const file of sortedSuccessful) deliveredFiles.add(file.id);
+
       if (uploadCancelled || sortedSuccessful.length === 0) {
-        setLocked(false);
-        fileOrderIndex = 0;
         uploadCancelled = false;
         return;
       }
 
       if (storageProvider === 'local') {
-        setLocked(false);
-        fileOrderIndex = 0;
         uploadCancelled = false;
-        onUploadSuccess(sortedSuccessful.map((p) => p.response.body));
+        notifySuccess(sortedSuccessful.map((p) => p.response.body));
         return;
       }
 
@@ -305,19 +379,20 @@ export function useUppyUploader(props: {
           })
           .map((p) => p.file);
 
-        setLocked(false);
-        fileOrderIndex = 0;
         uploadCancelled = false;
-        onUploadSuccess(loadAllMedia);
+        notifySuccess(loadAllMedia);
         return;
       }
 
-      setLocked(false);
-      fileOrderIndex = 0;
       uploadCancelled = false;
-      onUploadSuccess(sortedSuccessful.map((p) => p.response.body.saved));
+      notifySuccess(sortedSuccessful.map((p) => p.response.body.saved));
     });
     uppy2.on('upload-success', (file, response) => {
+      if (!file || !uppy2.getFile(file.id)) return;
+      busyFiles.delete(file.id);
+      issueFiles.delete(file.id);
+      if (issueFiles.size === 0) callbacks.current.onUploadIssue?.('');
+      finishUpload();
       // @ts-ignore
       uppy2.setFileState(file.id, {
         // @ts-ignore
