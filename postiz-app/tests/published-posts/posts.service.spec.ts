@@ -77,6 +77,7 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
 
   const postRepository = {
     changeState: jest.fn(),
+    isSubmissionPost: jest.fn().mockResolvedValue(false),
     createOrUpdatePost: jest.fn(),
     deletePost: jest.fn(),
     getPostById: jest.fn(),
@@ -294,6 +295,15 @@ describe('PostsService published post management', () => {
       { postId: 'draft-post', integration: 'integration-db-id' },
     ]);
     expect(integrationService.getIntegrationById).not.toHaveBeenCalled();
+  });
+
+  it('never lists, terminates or starts legacy workflows for a reserved root', async () => {
+    const { service, postRepository, getRawClient, workflowStart } = createService();
+    postRepository.isSubmissionPost.mockResolvedValue(true);
+    await service.startWorkflow('x', 'reserved-root', 'org-1', 'QUEUE');
+    expect(postRepository.isSubmissionPost).toHaveBeenCalledWith('reserved-root');
+    expect(getRawClient).not.toHaveBeenCalled();
+    expect(workflowStart).not.toHaveBeenCalled();
   });
 
   it('preserves immediate publishing for a usable normal-composer destination', async () => {

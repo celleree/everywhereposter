@@ -1,5 +1,5 @@
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { Post as PostBody } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
 import { APPROVED_SUBMIT_FOR_ORDER, Post, State, Prisma } from '@prisma/client';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
@@ -681,6 +681,13 @@ export class PostsRepository {
     });
   }
 
+  async isSubmissionPost(postId: string) {
+    return !!(await this._post.model.post.findFirst({
+      where: { id: postId, submissionDestination: { isNot: null } },
+      select: { id: true },
+    }));
+  }
+
   async createOrUpdatePost(
     state: 'draft' | 'schedule' | 'now' | 'update',
     orgId: string,
@@ -691,6 +698,24 @@ export class PostsRepository {
     transaction?: Prisma.TransactionClient
   ) {
     const postModel = transaction?.post || this._post.model.post;
+    // A reserved root and its group remain bound to their original attempt.
+    // The ledger mapping is permanent; ordinary edits cannot reset the fence,
+    // add thread children, or alter content for a subsequent safe retry.
+    const reservedPost = await postModel.findFirst({
+      where: {
+        submissionDestination: { isNot: null },
+        OR: [
+          { id: { in: body.value.map((value) => value.id).filter(Boolean) } },
+          ...(body.group ? [{ group: body.group }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    if (reservedPost) {
+      throw new ConflictException(
+        'Submission posts are immutable. Create a new draft and submission instead.'
+      );
+    }
     const tagsPosts = transaction?.tagsPosts || this._tagsPosts.model.tagsPosts;
     const tagsModel = transaction?.tags || this._tags.model.tags;
     const posts: Post[] = [];

@@ -1347,6 +1347,9 @@ export class PostsService {
     orgId: string,
     state: State
   ) {
+    // Only the durable dispatcher may start or resume a reserved root.
+    // In particular, never terminate its workflow through the legacy restarter.
+    if (await this._postRepository.isSubmissionPost(postId)) return;
     try {
       const workflows = this._temporalService.client
         .getRawClient()

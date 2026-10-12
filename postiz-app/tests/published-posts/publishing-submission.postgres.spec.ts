@@ -474,6 +474,68 @@ describePostgres('durable submissions against isolated PostgreSQL', () => {
     expect(await prisma.post.count({ where: { organizationId: org } })).toBe(2);
   });
 
+  it.each(['id', 'group'])(
+    'rejects ordinary edits by %s before they can alter a durable root or add children',
+    async (reference) => {
+      const roots = await service.submit(org, request);
+      const id = roots[0].postId;
+      const original = await prisma.post.findUnique({ where: { id } });
+      const edit = {
+        ...request.posts[0],
+        group: reference === 'group' ? original.group : undefined,
+        settings: { __type: 'x', changed: true },
+        value: [
+          {
+            ...request.posts[0].value[0],
+            id: reference === 'id' ? id : undefined,
+            content: 'Unreserved changed caption',
+          },
+          { content: 'Unreserved thread child', image: [] },
+        ],
+      };
+      await expect(
+        repository.createOrUpdatePost('now', org, request.date, edit as any, [])
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(await repository.isSubmissionPost(id)).toBe(true);
+      expect(await prisma.post.findUnique({ where: { id } })).toEqual(original);
+      expect(await prisma.post.count({ where: { organizationId: org } })).toBe(2);
+
+      // A later confirmed-safe retry still uses exactly the reserved caption.
+      executions.set(workflow(id), 'FAILED');
+      await service.retryBeforeProvider(org, request.submissionId, channels[0]);
+      const publish = jest.fn(async () => {
+        const source = await prisma.post.findUnique({ where: { id } });
+        expect(source.content).toBe('Grounded caption');
+        expect(source.settings).toBe(original.settings);
+        return receipt(id);
+      });
+      await runProvider(id, 0, publish, 2);
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(await service.submit(org, request)).toEqual(roots);
+      // The binding remains permanent after successful publication, too.
+      await expect(
+        repository.createOrUpdatePost('update', org, request.date, edit as any, [])
+      ).rejects.toBeInstanceOf(ConflictException);
+    }
+  );
+
+  it('preserves ordinary root editing outside the durable ledger', async () => {
+    const body = {
+      ...request.posts[0],
+      group: undefined,
+      value: [{ content: 'Normal caption', image: [] }],
+    };
+    const created = await repository.createOrUpdatePost('now', org, request.date, body as any, []);
+    const id = created.posts[0].id;
+    const edited = await repository.createOrUpdatePost('now', org, request.date, {
+      ...body, value: [{ id, content: 'Edited normal caption', image: [] }],
+    } as any, []);
+    expect(edited.posts[0].id).toBe(id);
+    expect(edited.posts[0].content).toBe('Edited normal caption');
+    expect(await repository.isSubmissionPost(id)).toBe(false);
+    expect(await prisma.post.count({ where: { organizationId: org } })).toBe(1);
+  });
+
   it('serializes concurrent confirmed-safe retries onto a single new workflow generation', async () => {
     const roots = await service.submit(org, request);
     const id = roots[0].postId;
