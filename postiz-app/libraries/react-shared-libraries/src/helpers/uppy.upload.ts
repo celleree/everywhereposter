@@ -98,6 +98,8 @@ export const getUppyUploadPlugin = (
         options: {
           endpoint: `${backendUrl}/media/upload-server`,
           withCredentials: true,
+          // A lost response may follow a committed media record. Never repeat the POST.
+          shouldRetry: () => false,
         },
       };
 

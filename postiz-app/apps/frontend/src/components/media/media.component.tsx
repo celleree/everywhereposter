@@ -342,6 +342,7 @@ export const MediaBox: FC<{
   const uploaderRef = useRef<any>(null);
   const mediaDirectory = useMediaDirectory();
   const [loading, setLoading] = useState(false);
+  const [uploadIssue, setUploadIssue] = useState('');
   const changeSource = useCallback(
     (nextSource: 'library' | 'posted') => {
       setPage(0);
@@ -355,6 +356,7 @@ export const MediaBox: FC<{
   );
 
   const uppy = useUppyUploader({
+    onUploadIssue: setUploadIssue,
     allowedFileTypes:
       type == 'image'
         ? 'image/*'
@@ -593,6 +595,7 @@ export const MediaBox: FC<{
       onDrop={dragAndDrop}
     >
       <div className="flex flex-col flex-1">
+        {uploadIssue && <p role="alert" className="mb-[12px] text-[13px] text-textColor">{uploadIssue}</p>}
         {!hideSourceTabs && (
           <div className="flex gap-[8px] mb-[12px]">
             <button
