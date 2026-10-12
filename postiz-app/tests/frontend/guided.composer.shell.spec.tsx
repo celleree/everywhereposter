@@ -225,6 +225,8 @@ describe('guided composer shell', () => {
       },
     });
     await waitFor(() => expect(screen.getAllByText('Published')).toHaveLength(2));
+    expect(screen.getByText('Quick Upload results')).toBeTruthy();
+    expect(screen.queryByText(/captions approved in Review/)).toBeNull();
     expect(screen.getByTestId('quick-skip-disabled').textContent).toContain(
       'disabled'
     );

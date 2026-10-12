@@ -668,12 +668,12 @@ export const GuidedComposerPublish: FC<{
         <div className="flex flex-wrap items-start justify-between gap-[14px]">
           <div>
             <h2 className="text-[18px] font-[700] text-white">
-              Confirm your post
+              {quickUpload ? 'Quick Upload results' : 'Confirm your post'}
             </h2>
             <p className="mt-[4px] text-[13px] text-textColor/60">
-              {destinations.length} enabled destination
-              {destinations.length === 1 ? '' : 's'} will receive the final
-              captions approved in Review.
+              {quickUpload
+                ? 'AI-generated captions are submitted only for accounts that pass validation, without individual review.'
+                : `${destinations.length} enabled destination${destinations.length === 1 ? '' : 's'} will receive the final captions approved in Review.`}
             </p>
           </div>
           <div className="rounded-full bg-newBgLineColor px-[11px] py-[6px] text-[11px] font-[700] text-textColor/75">
