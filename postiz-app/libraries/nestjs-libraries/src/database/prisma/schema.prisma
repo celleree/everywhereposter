@@ -9,6 +9,7 @@ datasource db {
 }
 
 model Organization {
+  uploadSessions VideoUploadSession[]
   id                  String               @id @default(uuid())
   name                String
   description         String?
@@ -215,6 +216,7 @@ model Star {
 }
 
 model Media {
+  uploadSession VideoUploadSession?
   id                 String              @id @default(uuid())
   name               String
   originalName       String?
@@ -1217,4 +1219,44 @@ model Announcement {
   description String
   color       AnnouncementColor @default(INFO)
   createdAt   DateTime          @default(now())
+}
+
+// Persistent local transport receipts; completed identities are retained for reconciliation.
+model VideoUploadSession {
+  id             String   @id @default(uuid())
+  organizationId String
+  creatorId      String
+  clientId       String
+  originalName   String
+  byteSize       Int
+  manifest       String[]
+  status         String   @default("UPLOADING")
+  generation     Int      @default(0)
+  leaseToken     String?
+  leaseUntil     DateTime?
+  expiresAt      DateTime
+  mediaId        String?  @unique
+  stagingCleaned Boolean @default(false)
+  duration       Float?
+  mimeType       String?
+  error          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  media          Media? @relation(fields: [mediaId], references: [id])
+  parts          VideoUploadPart[]
+
+  @@unique([organizationId, clientId])
+  @@index([status, expiresAt])
+}
+
+model VideoUploadPart {
+  sessionId String
+  index     Int
+  digest    String
+  byteSize  Int
+  token     String
+  session   VideoUploadSession @relation(fields: [sessionId], references: [id])
+
+  @@id([sessionId, index])
 }
