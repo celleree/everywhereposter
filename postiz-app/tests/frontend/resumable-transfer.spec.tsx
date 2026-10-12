@@ -76,3 +76,11 @@ it('pauses during hashing and retains a layout-owned file for explicit resume', 
   expect(f.requests).toHaveLength(0);
   await f.transfers.resume(id); expect(current(f).state).toBe('Transfer complete');
 });
+
+it('cancellation during hashing never resurrects a transfer or sends a session', async () => {
+  const f = fixture(); const receipt = f.transfers.start(file());
+  const rejected = expect(receipt).rejects.toThrow('cancelled');
+  const id = current(f).id; await f.transfers.cancel(id); await rejected;
+  await waitFor(() => expect((f.transfers as any).controllers.size).toBe(0));
+  expect(f.changed.mock.calls.at(-1)[0]).toEqual([]); expect(f.requests).toEqual([]);
+});

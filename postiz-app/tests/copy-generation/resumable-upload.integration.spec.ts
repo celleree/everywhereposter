@@ -1,3 +1,5 @@
+import { ValidationPipe } from '@nestjs/common';
+import { CreateVideoUploadDto } from '../../libraries/nestjs-libraries/src/dtos/media/create.video.upload.dto';
 import { PrismaService } from '../../libraries/nestjs-libraries/src/database/prisma/prisma.service';
 import { ResumableUploadService } from '../../libraries/nestjs-libraries/src/upload/resumable-upload.service';
 import { VIDEO_CHUNK_BYTES, validateVideoOnDisk } from '../../libraries/nestjs-libraries/src/upload/resumable-video.validation';
@@ -43,6 +45,15 @@ suite('persistent upload transport (disposable PostgreSQL, no providers)', () =>
     expect(a.id).toBe(b.id);
     await expect(service.create(org, 'actor', { ...body, manifest: ['f'.repeat(64)] })).rejects.toThrow('different file');
     await expect(service.create(other, 'actor', body)).rejects.toThrow('Organization changed');
+  });
+  it('ignores unwhitelisted HTTP fields and cannot attach another organization media', async () => {
+    const foreignId = randomUUID();
+    await db.media.create({ data: { id: foreignId, organizationId: other, name: 'foreign.mp4', path: '/uploads/foreign.mp4', type: 'video' } });
+    const body = await new ValidationPipe({ transform: true }).transform({ ...input(), id: foreignId, mediaId: foreignId, status: 'COMPLETE', duration: 1, stagingCleaned: true, createdAt: new Date(0).toISOString() }, { type: 'body', metatype: CreateVideoUploadDto });
+    const saved = await service.create(org, 'actor', body);
+    expect(saved.id).not.toBe(foreignId); expect(saved.status).toBe('UPLOADING'); expect(saved.media).toBeNull();
+    const row = await db.videoUploadSession.findUnique({ where: { id: saved.id } });
+    expect(row.stagingCleaned).toBe(false); expect(row.createdAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
   });
   it('enforces organization and global quotas under competing admissions', async () => {
     const outcomes = await Promise.allSettled([service.create(org, 'actor', input()), service.create(org, 'actor', input())]);
@@ -101,7 +112,7 @@ suite('persistent upload transport (disposable PostgreSQL, no providers)', () =>
   });
   it('recovers a stale FINALIZING claim without any browser and fences older generations', async () => {
     const session = await service.create(org, 'actor', input()); await service.part(org, session.id, 0, Readable.from(source));
-    const old = await db.videoUploadSession.update({ where: { id: session.id }, data: { status: 'FINALIZING', leaseToken: randomUUID(), leaseUntil: new Date(0), generation: 1 } });
+    const old = await db.videoUploadSession.update({ where: { id: session.id }, data: { status: 'FINALIZING', leaseToken: randomUUID(), leaseUntil: new Date(0), expiresAt: new Date(0), generation: 1 } });
     await service.maintain(); expect((await service.get(org, session.id)).status).toBe('COMPLETE');
     await expect((service as any).locked((tx: any) => (service as any).fence(tx, old))).rejects.toThrow('expired');
   });

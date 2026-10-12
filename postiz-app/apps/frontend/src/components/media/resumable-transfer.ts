@@ -106,6 +106,7 @@ export class ResumableTransfers {
       } else {
         session = await this.request('', { method: 'POST', body: JSON.stringify({ organizationId: this.organizationId, clientId: id, originalName: file.name, byteSize: file.size, manifest }), signal: controller.signal });
       }
+      if (controller.signal.aborted || !this.items.has(id)) throw new DOMException('Upload paused', 'AbortError');
       item = { ...item, session, sent: session.parts.reduce((sum, part) => sum + part.byteSize, 0), state: 'Uploading' };
       this.update(item);
       if (session.status === 'FAILED') throw new Error(session.error || 'Video validation failed.');
@@ -123,8 +124,9 @@ export class ResumableTransfers {
       this.receipts.get(id)?.resolve(session.media); this.receipts.delete(id); this.files.delete(id);
     } catch (error) {
       // A lost acknowledgement never creates a new identity or automatically retries.
-      if (!this.disposed) {
-        this.update({ ...this.items.get(id)!, state: controller.signal.aborted ? 'Paused' : (error as any).status === 400 ? 'Failed' : 'Resume needed', error: controller.signal.aborted ? undefined : (error as Error).message });
+      const remaining = this.items.get(id);
+      if (!this.disposed && remaining) {
+        this.update({ ...remaining, state: controller.signal.aborted ? 'Paused' : (error as any).status === 400 ? 'Failed' : 'Resume needed', error: controller.signal.aborted ? undefined : (error as Error).message });
       }
       if ((error as any).status === 400) { this.receipts.get(id)?.reject(error as Error); this.receipts.delete(id); this.files.delete(id); }
     } finally { this.controllers.delete(id); }

@@ -4,7 +4,7 @@ This change prepares local-storage video transfers for files above the proxy's s
 
 ## Transport and persistence
 
-Authenticated `/media/uploads` routes create/list organization-owned sessions. Each 8 MiB part is streamed directly to persistent private staging, hashed and checked against a complete original-file manifest. Repeat content is idempotent; changed content conflicts. Session creation also binds the selected organization to prevent a cookie/workspace change during hashing from enrolling the file elsewhere.
+Authenticated `/media/uploads` routes create/list organization-owned sessions. Each 8 MiB part is streamed directly to persistent private staging, hashed and checked against a complete original-file manifest. Repeat content is idempotent; changed content conflicts. Session creation accepts an explicit field allowlist; client-provided lifecycle, media and identity fields cannot control persisted state. Session creation also binds the selected organization to prevent a cookie/workspace change during hashing from enrolling the file elsewhere.
 
 Parts are stored under `UPLOAD_DIRECTORY/.resumable`. Repository proxy rules and the Next upload-serving route block this directory. The proxy rules stream upload requests and retain existing general limits. Production configuration has not been changed. All serving layers must be upgraded together before enabling this client.
 
@@ -19,7 +19,7 @@ The existing Temporal maintenance workflow discovers interrupted finalization an
 - One pending upload per organization, two globally, ten new sessions per organization in 24 hours.
 - One part request per session, two globally; one finalizer globally. Database leases and generations fence stale handlers.
 - Capacity reservation includes parts, assembly and one request temporary file, subtracting bytes already persisted. Admission/claims preserve a 2 GiB free-space floor on the actual upload volume.
-- Incomplete upload expiry follows 24 hours of inactivity. Explicit cancellation waits for an active request and refuses already-started finalization.
+- Incomplete transfer expiry follows 24 hours of inactivity. Once finalization has started, maintenance can recover it after that deadline; it does not permanently reserve a slot solely because a worker was unavailable. Explicit cancellation waits for an active request and refuses already-started finalization.
 
 These are conservative implementation defaults, not proof of production capacity. Capacity/quotas and all static-serving paths require authorized deployment acceptance. Codec acceptance does not guarantee browser playback or a destination's acceptance; no transcoding is added.
 

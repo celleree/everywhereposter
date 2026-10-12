@@ -52,7 +52,7 @@ export class ResumableUploadService {
   }
 
   private assertActive(session: VideoUploadSession) {
-    if (!ACTIVE_UPLOAD_STATES.includes(session.status) || session.expiresAt <= new Date()) {
+    if (!ACTIVE_UPLOAD_STATES.includes(session.status) || (session.status !== 'FINALIZING' && session.expiresAt <= new Date())) {
       throw new ConflictException('Upload is complete, cancelled, failed or expired.');
     }
   }
@@ -99,7 +99,8 @@ export class ResumableUploadService {
       if (recent >= 10) throw new ConflictException('Daily upload session quota reached.');
       await this.space(tx, input.byteSize * 2 + VIDEO_CHUNK_BYTES);
       return (await tx.videoUploadSession.create({ data: {
-        ...input, organizationId: org, creatorId: actor, expiresAt: new Date(Date.now() + UPLOAD_TTL_MS),
+        clientId: input.clientId, originalName: input.originalName, byteSize: input.byteSize, manifest: input.manifest,
+        organizationId: org, creatorId: actor, expiresAt: new Date(Date.now() + UPLOAD_TTL_MS),
       } })).id;
     });
     return this.get(org, id);
