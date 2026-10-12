@@ -443,6 +443,20 @@ export class PublishingSubmissionService {
           id: destination.id,
           generation: destination.generation,
           providerState: 'READY',
+          post: {
+            organizationId,
+            integrationId,
+            state: 'QUEUE',
+            deletedAt: null,
+            releaseId: null,
+            integration: {
+              organizationId,
+              disabled: false,
+              refreshNeeded: false,
+              inBetweenSteps: false,
+              deletedAt: null,
+            },
+          },
         },
         data: { providerState: 'IN_FLIGHT' },
       });

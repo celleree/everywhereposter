@@ -720,6 +720,35 @@ describePostgres('durable submissions against isolated PostgreSQL', () => {
     ).rejects.toThrow();
   });
 
+  it('does not cross the provider fence after cancellation or account revocation during preparation', async () => {
+    const roots = await service.submit(org, request);
+    await prisma.post.update({
+      where: { id: roots[0].postId },
+      data: { deletedAt: new Date() },
+    });
+    const cancelled = jest.fn(async () => receipt(roots[0].postId));
+    await expect(
+      runProvider(roots[0].postId, 0, cancelled)
+    ).rejects.toMatchObject({ type: 'submission_uncertain' });
+    expect(cancelled).not.toHaveBeenCalled();
+    await prisma.integration.update({
+      where: { id: channels[1] },
+      data: { refreshNeeded: true },
+    });
+    const revoked = jest.fn(async () => receipt(roots[1].postId));
+    await expect(
+      runProvider(roots[1].postId, 1, revoked)
+    ).rejects.toMatchObject({ type: 'submission_uncertain' });
+    expect(revoked).not.toHaveBeenCalled();
+    expect(
+      (
+        await prisma.publishingSubmissionDestination.findUnique({
+          where: { postId: roots[1].postId },
+        })
+      ).providerState
+    ).toBe('READY');
+  });
+
   it('keeps normal provider calls outside the opt-in contract', async () => {
     const publish = jest.fn(async () => receipt('normal-post'));
     expect(
