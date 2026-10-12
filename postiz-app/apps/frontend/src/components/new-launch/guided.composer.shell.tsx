@@ -31,6 +31,7 @@ import {
   selectGuidedGenerationMedia,
 } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
 import {
+  buildGuidedReviewDraftSeeds,
   getGuidedReviewDestinationLimit,
   getGuidedReviewDraftValidation,
   GuidedComposerReview,
@@ -45,6 +46,7 @@ import {
   isGuidedMp4MovMedia,
   selectGuidedSourceVideo,
 } from '@gitroom/frontend/components/new-launch/guided.video.validation';
+import { quickUploadAccountReason, quickUploadCopyReason, QuickUploadSkip } from './guided.composer.quick-upload';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
@@ -95,6 +97,13 @@ export const GuidedComposerShell: FC<{
   const composerMountedRef = useRef(true);
   const previousVideoIdsRef = useRef<Set<string> | null>(null);
   const [publishSubmitting, setPublishSubmitting] = useState(false);
+  const [quickStage, setQuickStage] = useState<'idle' | 'resolving' | 'generating' | 'publishing' | 'done'>('idle');
+  const [quickSkips, setQuickSkips] = useState<QuickUploadSkip[]>([]);
+  const [quickError, setQuickError] = useState('');
+  const quickInFlightRef = useRef(false);
+  const quickGenerationStartedRef = useRef(false);
+  const quickUpload = quickStage !== 'idle';
+
   const fetch = useFetch();
   const {
     global,
@@ -272,7 +281,7 @@ export const GuidedComposerShell: FC<{
   const navigationLocked =
     locked ||
     generationLoading ||
-    publishSubmitting;
+    publishSubmitting || quickStage === 'resolving' || quickStage === 'generating';
   const destinationRequiredForCurrentStep =
     currentStepIndex >= destinationStepIndex;
   const generationRequiredForCurrentStep =
@@ -597,6 +606,157 @@ export const GuidedComposerShell: FC<{
     sourceType,
   ]);
 
+  const startQuickUpload = async () => {
+    if (
+      quickInFlightRef.current ||
+      navigationLocked ||
+      recovery.publishLocked ||
+      globalMedia.length !== 1 ||
+      !hasUploadedVideo
+    )
+      return;
+    quickInFlightRef.current = true;
+    setQuickStage('resolving');
+    setQuickError('');
+    setQuickSkips([]);
+    try {
+      const response = await fetch('/integrations/list');
+      if (!response.ok)
+        throw new Error(
+          'Connected accounts could not be checked. Use Customize or try again.'
+        );
+      const payload = await response.json();
+      if (!Array.isArray(payload?.integrations))
+        throw new Error('Connected accounts could not be checked safely.');
+      if (!composerMountedRef.current) return;
+      const freshAccounts = payload.integrations as typeof integrations;
+      const skipped = freshAccounts.flatMap((account) => {
+        const message = quickUploadAccountReason(account);
+        return message ? [{ integration: account.id, message }] : [];
+      });
+      // Show removed/disconnected accounts that were visible before the refresh.
+      integrations
+        .filter(
+          (account) => !freshAccounts.some((fresh) => fresh.id === account.id)
+        )
+        .forEach((account) =>
+          skipped.push({
+            integration: account.id,
+            message: 'Account is disconnected or unavailable.',
+          })
+        );
+      const candidates = freshAccounts.filter(
+        (account) => !quickUploadAccountReason(account)
+      );
+      setQuickSkips(skipped);
+      if (!candidates.length)
+        throw new Error(
+          'No eligible connected video accounts. Use Customize to connect or configure accounts.'
+        );
+      const settings = new Map(
+        useLaunchStore
+          .getState()
+          .selectedIntegrations.map((selected) => [
+            selected.integration.id,
+            selected.settings,
+          ])
+      );
+      useLaunchStore.setState({ integrations: freshAccounts });
+      useLaunchStore
+        .getState()
+        .setSelectedIntegrations(
+          candidates.map((account) => ({
+            selectedIntegrations: account,
+            settings: settings.get(account.id) || {},
+          }))
+        );
+      useGuidedComposerStore.getState().setCaptionMode('generate');
+      invalidateGeneration();
+      quickGenerationStartedRef.current = false;
+      setComposerStep('destinations');
+      setQuickStage('generating');
+    } catch (error) {
+      if (composerMountedRef.current) {
+        setQuickError(
+          error instanceof Error ? error.message : 'Quick Upload could not start.'
+        );
+        setQuickStage('done');
+        quickInFlightRef.current = false;
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (quickStage !== 'generating') return;
+    if (generationStatus === 'failed') {
+      setQuickSkips(current => [...current, ...selectedDestinations.map(account => ({ integration: account.id, message: 'Caption generation failed; use Customize.' }))]);
+      setQuickError(
+        generationError ||
+          'Caption generation failed. Your video is preserved; use Customize.'
+      );
+      setQuickStage('done');
+      quickInFlightRef.current = false;
+      return;
+    }
+    if (generationReady) {
+      const response = useGuidedComposerStore.getState().generatedResponse;
+      const seeds = buildGuidedReviewDraftSeeds({
+        destinations: selectedDestinations,
+        generatedResponse: response,
+        generationInputFingerprint,
+        unsupportedDestinationIds: new Set(),
+        fallbackCaption: '',
+        originalCaption: '',
+      });
+      const newSkips: QuickUploadSkip[] = [];
+      useGuidedComposerStore.getState().reconcileReviewDrafts(seeds);
+      for (const seed of seeds) {
+        const result = response?.results.find(
+          (result) => result.platform === seed.platform
+        );
+        const limit = getGuidedReviewDestinationLimit({
+          providerLimit: chars[seed.destinationId],
+          platform: seed.platform,
+        });
+        const draft =
+          useGuidedComposerStore.getState().reviewDrafts[seed.destinationId];
+        const reason =
+          quickUploadCopyReason(response, result) ||
+          getGuidedReviewDraftValidation(draft, limit, true).errors[0];
+        useGuidedComposerStore
+          .getState()
+          .setReviewDestinationEnabled(seed.destinationId, !reason);
+        if (reason)
+          newSkips.push({ integration: seed.destinationId, message: reason });
+      }
+      setQuickSkips((current) => [...current, ...newSkips]);
+      if (newSkips.length === seeds.length) {
+        setQuickError(
+          'No captions are safe to publish without review. Your video is preserved; use Customize.'
+        );
+        setQuickStage('done');
+        quickInFlightRef.current = false;
+      } else {
+        setQuickStage('publishing');
+        setComposerStep('publish');
+      }
+    } else if (!quickGenerationStartedRef.current && !generationLoading) {
+      quickGenerationStartedRef.current = true;
+      void generateForReview();
+    }
+  }, [
+    quickStage,
+    generationStatus,
+    generationError,
+    generationReady,
+    generationLoading,
+    generationInputFingerprint,
+    selectedDestinations,
+    chars,
+    generateForReview,
+    setComposerStep,
+  ]);
+
   const continueComposer = useCallback(() => {
     if (composerStep === 'destinations') {
       if (sourceType === 'text') {
@@ -654,14 +814,14 @@ export const GuidedComposerShell: FC<{
               tabIndex={-1}
               className="mt-[4px] break-words text-[22px] font-[700] text-white outline-none mobile:text-[19px]"
             >
-              {currentStep.title}
+              {quickUpload ? 'Quick Upload' : currentStep.title}
             </h1>
             <p className="mt-[4px] max-w-[720px] break-words text-[13px] leading-[1.5] text-textColor/65">
               {currentStep.description}
             </p>
           </div>
 
-          <nav
+          <nav hidden={quickUpload}
             aria-label="Post creation progress"
             className="guided-progress min-w-0 overflow-x-auto pb-[2px]"
           >
@@ -730,10 +890,10 @@ export const GuidedComposerShell: FC<{
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         <GuidedComposerPublishBridgeProvider>
-          {composerStep === 'review' && <GuidedComposerReview />}
+          {composerStep === 'review' && !quickUpload && <GuidedComposerReview />}
           <div
             data-testid="guided-composer-upload-content"
-            hidden={composerStep !== 'upload' && composerStep !== 'review'}
+            hidden={quickUpload || (composerStep !== 'upload' && composerStep !== 'review')}
             className={clsx("min-h-full", composerStep === 'review' && 'guided-review-existing-editor')}
           >
             <div className="guided-upload-existing-composer">
@@ -763,10 +923,21 @@ export const GuidedComposerShell: FC<{
           {composerStep === 'destinations' && generationLoading && (
             <GuidedComposerGeneration progress={generationProgress} />
           )}
-          {composerStep === 'destinations' && !generationLoading && (
+          {composerStep === 'destinations' && !generationLoading && !quickUpload && (
             <GuidedComposerDestinations disabled={navigationLocked} />
           )}
+          {quickUpload && (
+            <section aria-label="Quick Upload progress" className="mx-auto w-full max-w-[1120px] p-[20px] mobile:p-[14px]">
+              <h2 className="text-[18px] font-bold">Quick Upload</h2>
+              <p role="status">{quickStage === 'resolving' ? 'Checking connected accounts...' : quickStage === 'generating' ? generationProgress || 'Analyzing video and generating captions...' : 'Destination results'}</p>
+              {quickError && <p role="alert">{quickError}</p>}
+              {quickStage === 'generating' && selectedDestinations.map(account => <p key={account.id}>{account.name}: Processing</p>)}
+              {quickSkips.map(skip => <p key={skip.integration} data-testid={`quick-skip-${skip.integration}`}><strong>{integrations.find(account => account.id === skip.integration)?.name || skip.integration}</strong>: {skip.message.startsWith('Reconnect') ? 'Reconnect required' : 'Skipped'} — {skip.message}</p>)}
+              <button type="button" disabled={navigationLocked || publishSubmitting || recovery.publishLocked} onClick={() => { setQuickStage('idle'); quickInFlightRef.current = false; setComposerStep(generationReady ? 'review' : 'upload'); }} className="mt-[12px] min-h-[44px] rounded border border-newBorder px-[18px] disabled:opacity-40">Customize</button>
+            </section>
+          )}
           <GuidedComposerPublish
+            quickUpload={quickUpload}
             active={composerStep === 'publish'}
             onSubmittingChange={setPublishSubmitting}
           />
@@ -777,14 +948,14 @@ export const GuidedComposerShell: FC<{
         <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-[12px] mobile:flex-col-reverse mobile:items-stretch">
           <button
             type="button"
-            disabled={currentStepIndex === 0 || navigationLocked}
+            disabled={quickUpload || currentStepIndex === 0 || navigationLocked}
             onClick={previousComposerStep}
             className={clsx(composerStep === 'upload' && 'mobile:hidden', "flex h-[44px] min-w-[120px] items-center justify-center rounded-[8px] bg-btnSimple px-[18px] text-[14px] font-[700] disabled:cursor-not-allowed disabled:opacity-40 mobile:w-full")}
           >
             Back
           </button>
 
-          {nextStep && (
+          {nextStep && !quickUpload && (
             <div className="flex min-w-0 flex-col items-end gap-[5px] mobile:items-stretch">
               {!!continueValidationMessage && (
                 <div
@@ -804,6 +975,12 @@ export const GuidedComposerShell: FC<{
                     {generationError}
                   </div>
                 )}
+              {composerStep === 'upload' && globalMedia.length > 0 && (
+                <>
+                  <p id="quick-upload-warning" className="max-w-[480px] text-[12px] text-textColor/70">Quick Upload generates AI captions and publishes immediately to eligible accounts without individual review. Accounts needing settings or review will be skipped.</p>
+                  <button type="button" aria-describedby="quick-upload-warning" disabled={navigationLocked || recovery.publishLocked || globalMedia.length !== 1 || !hasUploadedVideo} onClick={() => void startQuickUpload()} className="min-h-[44px] rounded-[8px] bg-btnPrimary px-[18px] font-bold text-white disabled:opacity-40 mobile:w-full">Quick Upload</button>
+                </>
+              )}
               <button
                 type="button"
                 aria-label={generationLoading ? 'Generating captions...' : sourceType !== 'text' && composerStep === 'destinations' && generationStatus === 'failed' ? 'Retry generation' : `Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}
@@ -817,8 +994,8 @@ export const GuidedComposerShell: FC<{
                     composerStep === 'destinations' &&
                     generationStatus === 'failed'
                   ? 'Retry generation'
-                  : <><span className="mobile:hidden">{`Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}</span>
-                    <span className="hidden mobile:inline">Continue</span>
+                  : <><span className="mobile:hidden">{composerStep === 'upload' ? 'Customize' : `Continue to ${GUIDED_COMPOSER_STEP_DETAILS[nextStep].title}`}</span>
+                    <span className="hidden mobile:inline">{composerStep === 'upload' ? 'Customize' : 'Continue'}</span>
                     <svg className="hidden mobile:block" aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></>}
               </button>
             </div>

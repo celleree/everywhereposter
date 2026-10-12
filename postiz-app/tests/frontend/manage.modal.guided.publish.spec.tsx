@@ -414,6 +414,66 @@ describe('ManageModal guided publishing bridge', () => {
     });
   });
 
+  it('Quick Upload skips missing provider fields, preserves YouTube description and disables shortlinks/repeats', async () => {
+    const youtube = { ...companyLinkedIn, identifier: 'youtube' };
+    const valid = providerResult(founderLinkedIn, { __type: 'linkedin' });
+    valid.values = valid.values.slice(0, 1);
+    const missingTitle = providerResult(youtube, { __type: 'youtube' }, false);
+    missingTitle.values = missingTitle.values.slice(0, 1);
+    mockCheckAllValid.mockResolvedValue([valid, missingTitle]);
+    useLaunchStore.getState().setRepeater(7);
+    render(
+      <GuidedComposerPublishBridgeProvider>
+        <ManageModal {...manageModalProps} guidedComposerActive />
+        <GuidedComposerPublish quickUpload />
+      </GuidedComposerPublishBridgeProvider>
+    );
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+    const data = postPayload();
+    expect(data.type).toBe('now');
+    expect(data.posts).toHaveLength(1);
+    expect(data.posts[0].value[0].content).toBe('Edited founder caption.');
+    expect(data.shortLink).toBe(false);
+    expect(data.inter).toBeUndefined();
+    expect(
+      mockFetch.mock.calls.some(([url]) => url === '/posts/should-shortlink')
+    ).toBe(false);
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('guided-publish-destination-linkedin-company')
+          .textContent
+      ).toContain('Skipped')
+    );
+    expect(
+      screen.getByTestId('guided-publish-destination-linkedin-company')
+        .textContent
+    ).toContain('Required platform settings');
+  });
+
+  it('Quick Upload carries the generated YouTube description with a validated title', async () => {
+    const youtube = providerResult(companyLinkedIn, {
+      __type: 'youtube',
+      title: 'User title',
+      type: 'public',
+    });
+    youtube.values = youtube.values.slice(0, 1);
+    mockCheckAllValid.mockResolvedValue([youtube]);
+    useGuidedComposerStore
+      .getState()
+      .setReviewDestinationEnabled(founderLinkedIn.id, false);
+    render(
+      <GuidedComposerPublishBridgeProvider>
+        <ManageModal {...manageModalProps} guidedComposerActive />
+        <GuidedComposerPublish quickUpload />
+      </GuidedComposerPublishBridgeProvider>
+    );
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+    expect(postPayload().posts[0].settings.title).toBe('User title');
+    expect(postPayload().posts[0].value[0].content).toBe(
+      'Edited company caption.'
+    );
+  });
+
   it.each(['/video.mp4', '/VIDEO.MOV?download=1'])(
     'keeps guided %s attachments inert through attachment, rerender and remount',
     (path) => {

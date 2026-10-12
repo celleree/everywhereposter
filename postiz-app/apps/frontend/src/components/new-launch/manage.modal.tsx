@@ -1,4 +1,6 @@
 'use client';
+
+import { quickUploadProviderReason, QuickUploadSkip } from './guided.composer.quick-upload';
 import { useComposerDraftRecovery } from './composer.draft.recovery';
 
 import React, {
@@ -918,7 +920,7 @@ export const ManageModal: FC<
       const checkedProviders = await ref.current.checkAllValid(
         guidedRequest?.destinationIds
       );
-      const checkAllValid = guidedRequest
+      let checkAllValid = guidedRequest
         ? checkedProviders.map((post: any) => ({
             ...post,
             values: post.values.map((value: any, index: number) =>
@@ -936,6 +938,19 @@ export const ManageModal: FC<
             ),
           }))
         : checkedProviders;
+
+      const quickSkipped: QuickUploadSkip[] = [];
+      if (guidedRequest?.quickUpload) {
+        checkAllValid = checkAllValid.filter((post: any) => {
+          const reason = quickUploadProviderReason(post, guidedRequest.sourceMediaId);
+          if (reason) quickSkipped.push({ integration: post.integration.id, message: reason });
+          return !reason;
+        });
+        if (!checkAllValid.length) {
+          setLoading(false);
+          return { ok: false, kind: 'validation', ambiguous: false, message: 'No destinations have valid captions and required settings. Your video is preserved; use Customize.', skipped: quickSkipped };
+        }
+      }
 
       const notEnoughChars = checkAllValid.filter((p: any) => {
         return p.values.some((a: any) => {
@@ -1049,7 +1064,7 @@ export const ManageModal: FC<
 
       let shortLink = false;
 
-      if (!dummy && shortlinkPreference !== 'NO') {
+      if (!dummy && !guidedRequest?.quickUpload && shortlinkPreference !== 'NO') {
         let shortLinkUrl: any;
 
         try {
@@ -1107,7 +1122,7 @@ export const ManageModal: FC<
       const group = existingData.group || makeId(10);
       const data = {
         type,
-        ...(repeater ? { inter: repeater } : {}),
+        ...(repeater && !guidedRequest?.quickUpload ? { inter: repeater } : {}),
         tags,
         shortLink,
         date: submissionDate.utc().format('YYYY-MM-DDTHH:mm:ss'),
@@ -1205,6 +1220,7 @@ export const ManageModal: FC<
                 kind: 'request',
                 message,
                 ambiguous: Boolean(guidedRequest),
+                ...(guidedRequest?.quickUpload ? { skipped: quickSkipped } : {}),
               };
             }
 
@@ -1244,6 +1260,7 @@ export const ManageModal: FC<
                   kind: 'response',
                   message,
                   ambiguous: true,
+                  ...(guidedRequest?.quickUpload ? { skipped: quickSkipped } : {}),
                 };
               }
             }
@@ -1260,6 +1277,7 @@ export const ManageModal: FC<
             kind: 'transport',
             message,
             ambiguous: Boolean(guidedRequest),
+                ...(guidedRequest?.quickUpload ? { skipped: quickSkipped } : {}),
           };
         }
 
@@ -1285,7 +1303,7 @@ export const ManageModal: FC<
         }
       }
 
-      return { ok: true, posts: submittedPosts };
+      return { ok: true, posts: submittedPosts, ...(guidedRequest?.quickUpload ? { skipped: quickSkipped } : {}) };
     },
     [
       addEditSets,
