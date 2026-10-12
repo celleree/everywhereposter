@@ -52,3 +52,44 @@ test('Resumable upload: navigation, browser return and safe completion', async (
   expect(chunks.filter(index => index === 0)).toHaveLength(1);
   expect(session.status).toBe('COMPLETE');
 });
+
+test('Resumable upload: persisted Quick Upload choice before completion survives navigation and return', async ({ page }, info) => {
+  const bytes = Buffer.concat([readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')), Buffer.alloc(17 * 1024 * 1024)]);
+  let session: any, release: () => void, held = false, continueTransfer = false;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  let intent: any;
+  await page.route('**/backend-api/media/uploads**', async route => {
+    const req = route.request(), pathname = new URL(req.url()).pathname;
+    if (pathname === '/backend-api/media/uploads' && req.method() === 'GET') return route.fulfill({ json: { durableQuickUploadEnabled: true, sessions: session ? [session] : [] } });
+    if (pathname === '/backend-api/media/uploads' && req.method() === 'POST') { session = { ...req.postDataJSON(), id: 'quick-session', status: 'UPLOADING', parts: [] }; return route.fulfill({ json: session }); }
+    if (pathname.endsWith('/quick-upload')) {
+      expect(session.status).toBe('UPLOADING'); expect(req.postDataJSON().confirmNoIndividualReview).toBe(true);
+      intent = { id: 'quick-intent', status: 'WAITING', results: [] }; session.quickIntent = intent;
+      return route.fulfill({ json: intent });
+    }
+    if (pathname.includes('/parts/')) {
+      const index = Number(pathname.split('/').pop());
+      if (index === 0 && !continueTransfer) { held = true; await hold; }
+      session.parts.push({ index, digest: session.manifest[index], byteSize: req.postDataBuffer()!.length });
+      return route.fulfill({ json: session });
+    }
+    if (pathname.endsWith('/complete')) { session.status = 'COMPLETE'; session.media = { id: 'quick-media', name: 'quick.mp4', path: '/audit-fixtures/quick.mp4', type: 'video' }; return route.fulfill({ json: session }); }
+    return route.fulfill({ json: session });
+  });
+  await openApp(page, '/media');
+  await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
+  const tray = page.getByRole('complementary', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);
+  await tray.getByRole('button', { name: 'Quick Upload without individual review' }).click();
+  await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Uploading'); expect(intent.id).toBe('quick-intent');
+  await expect(tray.getByText('Safe to leave.', { exact: false })).toHaveCount(0);
+  if (mobileProject(info)) {
+    await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name: 'More', exact: true }).click();
+    await page.getByRole('navigation', { name: 'More navigation' }).getByRole('link', { name: 'Settings', exact: true }).click();
+  } else await page.locator('#left-menu').getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page).toHaveURL(/settings/); continueTransfer = true; release!();
+  await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
+  intent.status = 'PUBLISHING'; session.quickIntent = intent; await page.reload();
+  await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Publishing');
+  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }]; session.quickIntent = intent; await page.reload();
+  await expect(tray.getByText('Fixture account: Published')).toBeVisible();
+});

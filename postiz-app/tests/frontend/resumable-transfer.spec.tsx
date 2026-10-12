@@ -84,3 +84,23 @@ it('cancellation during hashing never resurrects a transfer or sends a session',
   await waitFor(() => expect((f.transfers as any).controllers.size).toBe(0));
   expect(f.changed.mock.calls.at(-1)[0]).toEqual([]); expect(f.requests).toEqual([]);
 });
+
+it('queues explicit Quick Upload during hashing and persists it before transferring parts', async () => {
+  let session: any, quick: any;
+  const events: string[] = [], changed = jest.fn();
+  const fetch = jest.fn(async (url: string, options?: RequestInit) => {
+    events.push(url);
+    if (url.endsWith('/quick-upload')) { quick = { id: 'intent', status: 'WAITING', results: [] }; session.quickIntent = quick; return { ok: true, json: async () => quick } as Response; }
+    if (url === '/media/uploads' && options?.method === 'POST') session = { ...JSON.parse(String(options.body)), id: 'session', parts: [], status: 'UPLOADING' };
+    if (url.includes('/parts/')) session.parts.push({ index: Number(url.split('/').pop()), byteSize: (options!.body as Blob).size });
+    if (url.endsWith('/complete')) session = { ...session, status: 'COMPLETE', media: { id: 'media' } };
+    return { ok: true, json: async () => JSON.parse(JSON.stringify(session)) } as Response;
+  });
+  const transfers = new ResumableTransfers(fetch, changed, 'org'); const receipt = transfers.start(file());
+  const id = changed.mock.calls.at(-1)![0][0].id;
+  await transfers.optIntoQuickUpload(id, { confirmNoIndividualReview: true, destinations: [{ id: 'x', settings: { who_can_reply_post: 'everyone' } }] });
+  await receipt;
+  expect(events.indexOf('/media/uploads/session/quick-upload')).toBeLessThan(events.indexOf('/media/uploads/session/parts/0'));
+  expect(fetch.mock.calls.filter(call => call[0].endsWith('/quick-upload'))).toHaveLength(1);
+  expect(changed.mock.calls.at(-1)![0][0].session.quickIntent.id).toBe('intent');
+});
