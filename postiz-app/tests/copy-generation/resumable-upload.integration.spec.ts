@@ -120,9 +120,14 @@ suite('persistent upload transport (disposable PostgreSQL, no providers)', () =>
   });
   it('keeps interrupted chunks unacknowledged and safely resumes', async () => {
     const session = await service.create(org, 'actor', input());
-    const stream = new PassThrough(); const attempt = service.part(org, session.id, 0, stream);
-    setTimeout(() => { stream.write(source.subarray(0, 100)); stream.destroy(new Error('disconnect')); }, 25);
-    await expect(attempt).rejects.toThrow('disconnect');
+    const stream = new PassThrough();
+    // Interrupt an attached consumer, independent of database admission latency.
+    const consuming = new Promise<void>(resolve => stream.once('resume', resolve));
+    const attempt = service.part(org, session.id, 0, stream);
+    const rejected = expect(attempt).rejects.toThrow('disconnect');
+    await consuming;
+    stream.write(source.subarray(0, 100)); stream.destroy(new Error('disconnect'));
+    await rejected;
     expect((await service.get(org, session.id)).parts).toEqual([]);
     await service.part(org, session.id, 0, Readable.from(source));
     expect((await service.complete(org, session.id)).status).toBe('COMPLETE');
