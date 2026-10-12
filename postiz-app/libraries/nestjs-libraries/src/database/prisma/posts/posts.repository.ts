@@ -1,7 +1,7 @@
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { Post as PostBody } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
-import { APPROVED_SUBMIT_FOR_ORDER, Post, State } from '@prisma/client';
+import { APPROVED_SUBMIT_FOR_ORDER, Post, State, Prisma } from '@prisma/client';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
 import { GetPostsListDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.list.dto';
 import dayjs from 'dayjs';
@@ -41,6 +41,7 @@ export class PostsRepository {
           lt: dayjs.utc().add(2, 'hour').toDate(),
         },
         state: 'QUEUE',
+        submissionDestination: null,
         deletedAt: null,
         parentPostId: null,
       },
@@ -590,24 +591,20 @@ export class PostsRepository {
   }
 
   async changeState(id: string, state: State, err?: any, body?: any) {
-    const update = await this._post.model.post.update({
-      where: {
-        id,
-      },
-      data: {
-        state,
-        ...(err
-          ? { error: typeof err === 'string' ? err : JSON.stringify(err) }
-          : {}),
-      },
-      include: {
-        integration: {
-          select: {
-            providerIdentifier: true,
-          },
-        },
-      },
-    });
+    const data = { state, ...(err ? { error: typeof err === 'string' ? err : JSON.stringify(err) } : {}) };
+    const include = { integration: { select: { providerIdentifier: true } } } as const;
+    let update;
+    if (state === 'ERROR') {
+      // A late notification/activity failure must not overwrite a committed
+      // durable provider receipt. This predicate races safely with receipt commit.
+      const changed = await this._post.model.post.updateMany({ where: {
+        id, OR: [{ submissionDestination: null }, { submissionDestination: { providerState: { not: 'SUCCEEDED' } }, state: { not: 'PUBLISHED' } }],
+      }, data });
+      update = await this._post.model.post.findUnique({ where: { id }, include });
+      if (!changed.count) return update;
+    } else {
+      update = await this._post.model.post.update({ where: { id }, data, include });
+    }
 
     if (state === 'ERROR' && err && body) {
       try {
@@ -642,6 +639,14 @@ export class PostsRepository {
     isDraft: boolean,
     action: 'schedule' | 'update' = 'schedule'
   ) {
+    if (await this._post.model.post.findFirst({
+      where: { organizationId: orgId, id, submissionDestination: { isNot: null } },
+      select: { id: true },
+    })) {
+      throw new ConflictException(
+        'Submission posts are immutable. Create a new draft and submission instead.'
+      );
+    }
     return this._post.model.post.update({
       where: {
         organizationId: orgId,
@@ -684,14 +689,43 @@ export class PostsRepository {
     });
   }
 
+  async isSubmissionPost(postId: string) {
+    return !!(await this._post.model.post.findFirst({
+      where: { id: postId, submissionDestination: { isNot: null } },
+      select: { id: true },
+    }));
+  }
+
   async createOrUpdatePost(
     state: 'draft' | 'schedule' | 'now' | 'update',
     orgId: string,
     date: string,
     body: PostBody,
     tags: { value: string; label: string }[],
-    inter?: number
+    inter?: number,
+    transaction?: Prisma.TransactionClient
   ) {
+    const postModel = transaction?.post || this._post.model.post;
+    // A reserved root and its group remain bound to their original attempt.
+    // The ledger mapping is permanent; ordinary edits cannot reset the fence,
+    // add thread children, or alter content for a subsequent safe retry.
+    const reservedPost = await postModel.findFirst({
+      where: {
+        submissionDestination: { isNot: null },
+        OR: [
+          { id: { in: body.value.map((value) => value.id).filter(Boolean) } },
+          ...(body.group ? [{ group: body.group }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    if (reservedPost) {
+      throw new ConflictException(
+        'Submission posts are immutable. Create a new draft and submission instead.'
+      );
+    }
+    const tagsPosts = transaction?.tagsPosts || this._tagsPosts.model.tagsPosts;
+    const tagsModel = transaction?.tags || this._tags.model.tags;
     const posts: Post[] = [];
     const uuid = uuidv4();
 
@@ -740,7 +774,7 @@ export class PostsRepository {
       });
 
       posts.push(
-        await this._post.model.post.upsert({
+        await postModel.upsert({
           where: {
             id: value.id || uuidv4(),
           },
@@ -758,7 +792,7 @@ export class PostsRepository {
       );
 
       if (posts.length === 1) {
-        await this._tagsPosts.model.tagsPosts.deleteMany({
+        await tagsPosts.deleteMany({
           where: {
             post: {
               id: posts[0].id,
@@ -767,7 +801,7 @@ export class PostsRepository {
         });
 
         if (tags.length) {
-          const tagsList = await this._tags.model.tags.findMany({
+          const tagsList = await tagsModel.findMany({
             where: {
               orgId: orgId,
               name: {
@@ -777,7 +811,7 @@ export class PostsRepository {
           });
 
           if (tagsList.length) {
-            await this._post.model.post.update({
+            await postModel.update({
               where: {
                 id: posts[posts.length - 1].id,
               },
@@ -798,7 +832,7 @@ export class PostsRepository {
 
     const previousPost = body.group
       ? (
-          await this._post.model.post.findFirst({
+          await postModel.findFirst({
             where: {
               group: body.group,
               deletedAt: null,
@@ -812,7 +846,7 @@ export class PostsRepository {
       : undefined;
 
     if (body.group) {
-      await this._post.model.post.updateMany({
+      await postModel.updateMany({
         where: {
           group: body.group,
           deletedAt: null,
