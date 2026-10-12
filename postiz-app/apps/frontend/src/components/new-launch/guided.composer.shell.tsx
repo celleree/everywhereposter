@@ -41,6 +41,7 @@ import {
   GuidedComposerPublishBridgeProvider,
 } from '@gitroom/frontend/components/new-launch/guided.composer.publish';
 import { requestMediaCopyGenerationForDestinations } from '@gitroom/frontend/components/new-launch/copy-generation.client';
+import { useResumableTransfers } from '../media/resumable-upload.provider';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import {
   isGuidedMp4MovMedia,
@@ -606,6 +607,7 @@ export const GuidedComposerShell: FC<{
     sourceType,
   ]);
 
+  const resumableTransfers = useResumableTransfers();
   const startQuickUpload = async () => {
     if (
       quickInFlightRef.current ||
@@ -620,6 +622,7 @@ export const GuidedComposerShell: FC<{
     setQuickError('');
     setQuickSkips([]);
     try {
+      await resumableTransfers?.assertNoQuickUpload(globalMedia[0].id);
       const response = await fetch('/integrations/list');
       if (!response.ok)
         throw new Error(
@@ -661,6 +664,16 @@ export const GuidedComposerShell: FC<{
             selected.settings,
           ])
       );
+      if (await resumableTransfers?.tryCompletedQuickUpload(globalMedia[0].id, {
+        confirmNoIndividualReview: true,
+        destinations: freshAccounts.map(account => ({ id: account.id, settings: {
+          ...(account.identifier === 'x' ? { who_can_reply_post: 'everyone' } : account.identifier.startsWith('instagram') ? { post_type: 'reel', post_type_explicit: false } : {}),
+          ...settings.get(account.id),
+        } })),
+      })) {
+        setQuickStage('done'); quickInFlightRef.current = false;
+        return;
+      }
       useLaunchStore.setState({ integrations: freshAccounts });
       useLaunchStore
         .getState()

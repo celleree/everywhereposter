@@ -8,7 +8,10 @@ import { IntegrationsActivity } from '@gitroom/orchestrator/activities/integrati
 import { HealthController } from '@gitroom/orchestrator/health.controller';
 import { MediaTranscriptionActivity } from '@gitroom/orchestrator/activities/media-transcription.activity';
 
+import { QuickUploadActivity } from './activities/quick-upload.activity';
+
 const activities = [
+  QuickUploadActivity,
   PostActivity,
   AutopostService,
   EmailActivity,

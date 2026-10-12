@@ -56,6 +56,8 @@ import { HistoricalImportService } from '@gitroom/nestjs-libraries/database/pris
 import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
+import { QuickUploadService } from '../../upload/quick-upload.service';
+import { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
 import { ResumableUploadService } from '../../upload/resumable-upload.service';
 
 @Global()
@@ -65,6 +67,8 @@ import { ResumableUploadService } from '../../upload/resumable-upload.service';
   providers: [
     PrismaService,
     ResumableUploadService,
+    QuickUploadService,
+    PermissionsService,
     PrismaRepository,
     PrismaTransaction,
     UsersService,
