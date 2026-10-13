@@ -28,6 +28,22 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
   const guard = useRef(false);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const epoch = useRef(0);
+  useEffect(() => {
+    if (!confirm) return;
+    // The outer composer has a native document hotkey. Capture Escape before
+    // it reaches that listener, including while a deletion is being confirmed.
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!busy) {
+        setConfirm(false);
+        deleteButton.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', dismiss, true);
+    return () => document.removeEventListener('keydown', dismiss, true);
+  }, [confirm, busy]);
   const request = useCallback(
     async (method = 'GET', body?: object, reconcile = false) => {
       const response = await fetch(
@@ -202,14 +218,6 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
               {confirm && (
                 <div
                   role="alertdialog"
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape' && !busy) {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setConfirm(false);
-                      deleteButton.current?.focus();
-                    }
-                  }}
                   aria-labelledby={`facebook-delete-${postId}`}
                   className="rounded border border-red-400 p-3"
                 >
