@@ -99,7 +99,7 @@ function startFrontend() {
 }
 async function warmRoutes() {
   const deadline = Date.now() + 330_000;
-  for (const route of ['/auth/login', '/media', '/launches', '/create', '/settings']) {
+  for (const route of ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor']) {
     let loaded = false;
     while (!stopping && !loaded && Date.now() < deadline) {
       try {
