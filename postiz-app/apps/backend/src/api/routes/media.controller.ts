@@ -36,6 +36,8 @@ import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/pr
 import { validateVideoOnDisk } from '@gitroom/nestjs-libraries/upload/resumable-video.validation';
 import { rm } from 'fs/promises';
 import { ResumableUploadService } from '@gitroom/nestjs-libraries/upload/resumable-upload.service';
+import { QuickUploadService } from '@gitroom/nestjs-libraries/upload/quick-upload.service';
+import { QuickUploadIntentDto } from '@gitroom/nestjs-libraries/dtos/media/quick.upload.intent.dto';
 import { CreateVideoUploadDto } from '@gitroom/nestjs-libraries/dtos/media/create.video.upload.dto';
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 
@@ -48,6 +50,7 @@ export class MediaController {
   constructor(
     private _mediaService: MediaService,
     private readonly resumable: ResumableUploadService,
+    private readonly quickUpload: QuickUploadService,
     private _subscriptionService: SubscriptionService,
     private _mediaTranscriptionService: MediaTranscriptionService
   ) {}
@@ -62,6 +65,17 @@ export class MediaController {
 
   @Get('/uploads/:id')
   uploadStatus(@GetOrgFromRequest() org: Organization, @Param('id') id: string) { return this.resumable.get(org.id, id); }
+
+  @Post('/uploads/:id/quick-upload')
+  enrollQuickUpload(@GetOrgFromRequest() org: Organization, @GetUserFromRequest() user: User, @Param('id') id: string, @Body() body: QuickUploadIntentDto) {
+    return this.quickUpload.enroll(org.id, user.id, id, body);
+  }
+
+  @Get('/uploads/:id/quick-upload')
+  quickUploadStatus(@GetOrgFromRequest() org: Organization, @Param('id') id: string) { return this.quickUpload.status(org.id, id); }
+
+  @Delete('/uploads/:id/quick-upload')
+  cancelQuickUpload(@GetOrgFromRequest() org: Organization, @GetUserFromRequest() user: User, @Param('id') id: string) { return this.quickUpload.cancel(org.id, user.id, id); }
 
   @Put('/uploads/:id/parts/:index')
   uploadPart(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Param('index', ParseIntPipe) index: number, @Req() req: Request) {

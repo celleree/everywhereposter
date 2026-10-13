@@ -10,6 +10,7 @@ datasource db {
 
 model Organization {
   uploadSessions VideoUploadSession[]
+  quickUploadIntents QuickUploadIntent[]
   id                  String               @id @default(uuid())
   name                String
   description         String?
@@ -1227,6 +1228,7 @@ model Announcement {
 
 // Persistent local transport receipts; completed identities are retained for reconciliation.
 model VideoUploadSession {
+  quickIntent QuickUploadIntent?
   id             String   @id @default(uuid())
   organizationId String
   creatorId      String
@@ -1292,5 +1294,29 @@ model PublishingSubmissionDestination {
   post           Post @relation(fields: [postId], references: [id])
 
   @@unique([submissionId, integrationId])
+  @@index([dispatched, createdAt])
+}
+
+// Consent, generated result and dispatch outbox are retained independently of a browser.
+model QuickUploadIntent {
+  id              String @id @default(uuid())
+  sessionId       String @unique
+  organizationId  String
+  actorId         String
+  actorRole       Role
+  consentVersion  String @default("quick-upload-v1")
+  destinations    Json
+  status          String @default("WAITING")
+  dispatched      Boolean @default(false)
+  copyStartedAt   DateTime?
+  generated       Json?
+  submissionBody  Json?
+  results         Json @default("[]")
+  message         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  session         VideoUploadSession @relation(fields: [sessionId], references: [id])
+  organization    Organization @relation(fields: [organizationId], references: [id])
+
   @@index([dispatched, createdAt])
 }

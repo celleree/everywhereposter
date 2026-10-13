@@ -108,13 +108,13 @@ export class ResumableUploadService {
 
   async list(org: string) {
     const rows = await this.db.videoUploadSession.findMany({ where: { organizationId: org, status: { in: [...ACTIVE_UPLOAD_STATES, 'COMPLETE', 'FAILED'] } }, orderBy: { createdAt: 'desc' }, take: 20 });
-    return { chunkBytes: VIDEO_CHUNK_BYTES, maxBytes: VIDEO_MAX_BYTES, sessions: await Promise.all(rows.map((row) => this.get(org, row.id))) };
+    return { durableQuickUploadEnabled: process.env.ENABLE_DURABLE_QUICK_UPLOAD === 'true', chunkBytes: VIDEO_CHUNK_BYTES, maxBytes: VIDEO_MAX_BYTES, sessions: await Promise.all(rows.map((row) => this.get(org, row.id))) };
   }
 
   async get(org: string, id: string) {
-    const row = await this.db.videoUploadSession.findFirst({ where: { id, organizationId: org }, include: { parts: { select: { index: true, digest: true, byteSize: true } }, media: { select: MEDIA_SELECT } } });
+    const row = await this.db.videoUploadSession.findFirst({ where: { id, organizationId: org }, include: { quickIntent: { select: { id: true, status: true, results: true, message: true, consentVersion: true } }, parts: { select: { index: true, digest: true, byteSize: true } }, media: { select: MEDIA_SELECT } } });
     if (!row) throw new NotFoundException('Upload not found.');
-    return { id: row.id, clientId: row.clientId, originalName: row.originalName, byteSize: row.byteSize, manifest: row.manifest, status: row.status, expiresAt: row.expiresAt, parts: row.parts, media: row.media, error: row.error, chunkBytes: VIDEO_CHUNK_BYTES, maxBytes: VIDEO_MAX_BYTES };
+    return { quickIntent: row.quickIntent, id: row.id, clientId: row.clientId, originalName: row.originalName, byteSize: row.byteSize, manifest: row.manifest, status: row.status, expiresAt: row.expiresAt, parts: row.parts, media: row.media, error: row.error, chunkBytes: VIDEO_CHUNK_BYTES, maxBytes: VIDEO_MAX_BYTES };
   }
 
   private async claim(org: string, id: string, finalize: boolean) {
