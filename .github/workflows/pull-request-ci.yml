@@ -187,6 +187,9 @@ jobs:
       - name: Run published-posts tests
         run: pnpm exec jest --config jest.published-posts.config.cjs --runInBand
 
+      - name: Test private connected Creator Audit
+        run: pnpm exec jest --config jest.published-posts.config.cjs --testMatch '**/tests/creator-audit/**/*.spec.ts' --runInBand
+
   classify-docker-build:
     name: Classify Docker build requirement
     runs-on: ubuntu-latest

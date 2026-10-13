@@ -52,6 +52,16 @@ connected tasks obtain account identity from the selected OAuth connection and d
 not use cookie discovery or cookie metric refresh. Users cannot read or change
 these credentials through this integration. There is no user-settings endpoint.
 
+The matching Creator Audit source includes `compose.integrated.yaml` and
+`integrated.env.example` for this dedicated runtime. Use an independently
+verified full-commit image, a separate Compose project, new dedicated database
+and media volumes, and the existing EverywherePoster Docker network. The service
+has no public port; its internal origin is `http://creator-audit-service:5151`.
+The health check tests the listener and dedicated database schema without
+provider calls or credential output. Supply the shared secret and existing
+provider configuration through an ignored operator environment file. Preserve
+the configured model. Never reuse the standalone Compose project or volumes.
+
 ## Identity and permissions
 
 `CreatorAuditController` belongs to the existing `authenticatedController` list.
