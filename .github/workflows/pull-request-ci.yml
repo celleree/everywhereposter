@@ -91,6 +91,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare disposable publication fixture database
+        env:
+          DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
+        run: pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
+
       - name: Install pinned Chromium and browser system dependencies
         run: |
           pnpm exec playwright install --with-deps chromium
@@ -99,6 +104,9 @@ jobs:
           fi
 
       - name: Run offline Chromium regression smoke
+        env:
+          EP_FACEBOOK_BROWSER: '1'
+          EP_SUBMISSION_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
         run: pnpm run test:browser:ci
 
       - name: Upload offline browser diagnostics
@@ -195,11 +203,6 @@ jobs:
 
       - name: Run knowledge-base tests
         run: pnpm exec jest --config jest.knowledge-base.config.cjs --runInBand
-
-      - name: Prepare disposable publication fixture database
-        env:
-          DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
-        run: pnpm exec prisma db push --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma --skip-generate
 
       - name: Run published-posts tests
         env:
