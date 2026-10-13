@@ -44,7 +44,7 @@ setInterval(() => {}, 1000);
       await writeFile(join(bin, 'pnpm'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
       const script = join(dir, 'start.sh');
       await writeFile(script, source.replace(/\/app(?=\/|\s|$)/g, app));
-      launcher = spawn('/bin/sh', [script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`,
+      launcher = spawn('/bin/sh', [script], { timeout: 10000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`,
         MAIN_URL: 'http://localhost', FRONTEND_URL: 'http://localhost', SKIP_PRISMA_DB_PUSH: 'true',
         START_TEST_LOG: log, START_TEST_FAIL: failure, START_TEST_PRIORITY: 'from-process' }, stdio: 'ignore' });
       const [code, signal] = await once(launcher, 'exit');
