@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, ReactNode, useCallback, useMemo, useState } from 'react';
+import { FC, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -41,7 +41,20 @@ export const useMenuItem = () => {
     }
   }, [fetch]);
 
+  const [auditEnabled, setAuditEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    fetch('/creator-audit/status').then((res) => res.ok ? res.json() : null)
+      .then((data) => { if (active) setAuditEnabled(data?.enabled === true); })
+      .catch(() => { if (active) setAuditEnabled(false); });
+    return () => { active = false; };
+  }, [fetch]);
+
   const firstMenu = [
+    {
+      name: 'Creator Audit', path: '/creator-audit', hide: !auditEnabled,
+      icon: <svg aria-hidden="true" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 20V10m8 10V4m8 16v-7" strokeWidth="2" /></svg>,
+    },
     {
       name: t('upload', 'Upload'),
       icon: (

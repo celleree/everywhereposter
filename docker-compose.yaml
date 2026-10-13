@@ -17,6 +17,9 @@ services:
       FRONTEND_URL: '${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
       NEXT_PUBLIC_BACKEND_URL: '${PUBLIC_BACKEND_URL:?PUBLIC_BACKEND_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
       JWT_SECRET: '${JWT_SECRET}'
+      CREATOR_AUDIT_ENABLED: '${CREATOR_AUDIT_ENABLED:-false}'
+      CREATOR_AUDIT_SERVICE_URL: '${CREATOR_AUDIT_SERVICE_URL:-}'
+      CREATOR_AUDIT_SERVICE_SECRET: '${CREATOR_AUDIT_SERVICE_SECRET:-}'
       # The bundled postiz-postgres service is a local Docker database, not production data.
       DATABASE_URL: '${DATABASE_URL:-postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local}'
       REDIS_URL: 'redis://postiz-redis:6379'
