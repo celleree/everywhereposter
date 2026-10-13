@@ -14,7 +14,10 @@ type Status = {
   deleted?: boolean;
   pending?: boolean;
 };
-export function FacebookPublishedManagement({ postId }: { postId: string }) {
+export function FacebookPublishedManagement({ postId, onConfirmed }: {
+  postId: string;
+  onConfirmed?: (message: string, deleted: boolean) => void;
+}) {
   const fetch = useFetch();
   const { mutate } = useSWRConfig();
   const [status, setStatus] = useState<Status>();
@@ -60,6 +63,9 @@ export function FacebookPublishedManagement({ postId }: { postId: string }) {
         if (generation === epoch.current) {
           setStatus(data);
           setMessage(data.message || '');
+          if (data.eligible && typeof data.message === 'string') {
+            onConfirmed?.(data.message, !!data.deleted);
+          }
         }
       })
       .catch((error) => {
@@ -68,7 +74,7 @@ export function FacebookPublishedManagement({ postId }: { postId: string }) {
     return () => {
       epoch.current++;
     };
-  }, [request]);
+  }, [request, onConfirmed]);
   const perform = async (action: 'edit' | 'delete' | 'reconcile') => {
     if (guard.current) return;
     guard.current = true;
@@ -91,6 +97,9 @@ export function FacebookPublishedManagement({ postId }: { postId: string }) {
       setStatus(data);
       setMessage(data.message || '');
       setConfirm(false);
+      if (data.eligible && typeof data.message === 'string') {
+        onConfirmed?.(data.message, !!data.deleted);
+      }
       // Details, calendar, lists and platform-media keys use different formats.
       await mutate(() => true);
     } catch (error) {
@@ -195,6 +204,8 @@ export function FacebookPublishedManagement({ postId }: { postId: string }) {
                   role="alertdialog"
                   onKeyDown={(event) => {
                     if (event.key === 'Escape' && !busy) {
+                      event.preventDefault();
+                      event.stopPropagation();
                       setConfirm(false);
                       deleteButton.current?.focus();
                     }

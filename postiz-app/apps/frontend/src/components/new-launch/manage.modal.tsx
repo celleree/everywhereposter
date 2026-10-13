@@ -32,7 +32,7 @@ import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
-import { capitalize } from 'lodash';
+import { capitalize, escape } from 'lodash';
 import { SelectCustomer } from '@gitroom/frontend/components/launches/select.customer';
 import { CopilotPopup } from '@copilotkit/react-ui';
 import { useCopilotReadable } from '@copilotkit/react-core';
@@ -150,6 +150,7 @@ export const ManageModal: FC<
   const guidedReview = useGuidedComposerStore((state) => state.composerStep === 'review');
   const guidedStep = useGuidedComposerStore((state) => state.composerStep);
   const [loading, setLoading] = useState(false);
+  const [facebookDeletedPostId, setFacebookDeletedPostId] = useState<string>();
   const toaster = useToaster();
   const modal = useModals();
   const [showSettings, setShowSettings] = useState(false);
@@ -288,6 +289,15 @@ export const ManageModal: FC<
       posts[0]
     );
   }, [current, existingData.integration, existingData.posts]);
+  const confirmFacebookPreview = useCallback((message: string, deleted: boolean) => {
+    if (!existingRootPost?.integrationId) return;
+    upsertInternalValueText(
+      existingRootPost.integrationId,
+      0,
+      escape(message).replace(/\n/g, '<br>')
+    );
+    setFacebookDeletedPostId(deleted ? existingRootPost.id : undefined);
+  }, [existingRootPost?.id, existingRootPost?.integrationId, upsertInternalValueText]);
   const previewPostIdsByIntegration = useMemo(() => {
     return (existingData?.posts || []).reduce<Record<string, string>>(
       (acc, post) => {
@@ -314,8 +324,10 @@ export const ManageModal: FC<
   );
   const publishedCapabilities = existingIntegration?.publishedCapabilities;
   const isPublishedPost = existingRootPost?.state === 'PUBLISHED';
-  const isRemoteDeletedPost = existingRootPost?.state === 'DELETED_REMOTE';
-  const isPublishedManagementView = isPublishedPost;
+  const isRemoteDeletedPost = existingRootPost?.state === 'DELETED_REMOTE' ||
+    (!!existingRootPost?.id && facebookDeletedPostId === existingRootPost.id);
+  const isPublishedManagementView = isPublishedPost ||
+    (existingIntegration?.identifier === 'facebook' && isRemoteDeletedPost);
   const showPublishedActions =
     !!existingData?.integration && (isPublishedPost || isRemoteDeletedPost);
   const missingPublishedReleaseId =
@@ -1422,7 +1434,7 @@ export const ManageModal: FC<
                 className="flex w-full min-w-0 max-w-full flex-col gap-[24px] overflow-x-hidden p-[20px] mobile:gap-[16px] mobile:px-[12px] mobile:py-[12px]"
               >
                 {showPublishedActions && existingIntegration?.identifier === 'facebook' && existingRootPost?.id && (
-                  <FacebookPublishedManagement postId={existingRootPost.id} />
+                  <FacebookPublishedManagement postId={existingRootPost.id} onConfirmed={confirmFacebookPreview} />
                 )}
                 {!isPublishedManagementView && (
                   <>
@@ -1619,12 +1631,16 @@ export const ManageModal: FC<
             </div>
             <div className="min-w-0 overflow-x-hidden p-[20px] mobile:w-full mobile:min-h-[220px] mobile:px-[12px] mobile:py-[12px]">
               <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
+                {existingIntegration?.identifier === 'facebook' && isRemoteDeletedPost ? (
+                  <p role="status">Deleted on Facebook. This post is no longer published.</p>
+                ) : (
                   <MediaAutoplayContext.Provider value={!standaloneCreate}>
                     <ShowAllProviders
                       ref={ref}
                       previewPostIdsByIntegration={previewPostIdsByIntegration}
                     />
                   </MediaAutoplayContext.Provider>
+                )}
               </div>
             </div>
           </div>
