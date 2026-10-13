@@ -1,5 +1,6 @@
 'use client';
 
+import { FacebookPublishedManagement } from './facebook.published.management';
 import { quickUploadProviderReason, QuickUploadSkip } from './guided.composer.quick-upload';
 import { useComposerDraftRecovery } from './composer.draft.recovery';
 
@@ -1193,6 +1194,14 @@ export const ManageModal: FC<
               setLoading(false);
               return { ok: false, kind: 'preflight', ambiguous: false, message: 'The publishing attempt could not be saved safely. Keep this page open and restore browser storage before trying again.' };
             }
+            // New immediate, single-destination Facebook text posts use the existing
+            // durable publication receipt so later mutations have trusted provenance.
+            if (type === 'now' && !data.shortLink && !data.inter && data.posts.length === 1 &&
+                data.posts[0].settings.__type === 'facebook' && !existingData.integration &&
+                data.posts[0].value.length === 1 && !data.posts[0].value[0].image.length &&
+                !data.posts[0].settings.url && !Object.keys(data.posts[0].settings).some((key) => key.startsWith('plug-'))) {
+              (data as any).submissionId = crypto.randomUUID();
+            }
             const response = await fetch('/posts', {
               method: 'POST',
               body: JSON.stringify(data),
@@ -1412,6 +1421,9 @@ export const ManageModal: FC<
                 id="social-content"
                 className="flex w-full min-w-0 max-w-full flex-col gap-[24px] overflow-x-hidden p-[20px] mobile:gap-[16px] mobile:px-[12px] mobile:py-[12px]"
               >
+                {showPublishedActions && existingIntegration?.identifier === 'facebook' && existingRootPost?.id && (
+                  <FacebookPublishedManagement postId={existingRootPost.id} />
+                )}
                 {!isPublishedManagementView && (
                   <>
                     <ComposerSection

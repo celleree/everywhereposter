@@ -3,6 +3,7 @@ import {
   Injectable,
   ValidationPipe,
 } from '@nestjs/common';
+import { FacebookPublishedService } from './facebook-published.service';
 import { PublishingSubmissionService } from './publishing-submission.service';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
 import { CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
@@ -90,8 +91,13 @@ export class PostsService {
     private _openaiService: OpenaiService,
     private _temporalService: TemporalService,
     private _refreshIntegrationService: RefreshIntegrationService,
-    private _submissions?: PublishingSubmissionService
+    private _submissions?: PublishingSubmissionService,
+    private _facebookPublished?: FacebookPublishedService
   ) {}
+
+  facebookPublishedStatus(orgId: string, postId: string) { return this._facebookPublished.status(orgId, postId); }
+  mutateFacebookPublished(orgId: string, postId: string, body: any) { return this._facebookPublished.mutate(orgId, postId, body); }
+  reconcileFacebookPublished(orgId: string, postId: string) { return this._facebookPublished.reconcile(orgId, postId); }
 
   reconcileSubmission(orgId: string, attemptId: string, resume = false) {
     return this._submissions.reconcile(orgId, attemptId, resume);
@@ -1557,6 +1563,10 @@ export class PostsService {
       throw new BadRequestException(
         'The original published post could not be found.'
       );
+    }
+
+    if (previousPost.integration.providerIdentifier === 'facebook') {
+      throw new BadRequestException('Use the Facebook text/feed management actions for eligible posts.');
     }
 
     if (previousPost.state === 'DELETED_REMOTE') {

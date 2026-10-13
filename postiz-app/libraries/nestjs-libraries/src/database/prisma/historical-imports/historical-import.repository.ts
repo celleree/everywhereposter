@@ -101,7 +101,7 @@ export class HistoricalImportRepository {
   constructor(
     private _sources: PrismaRepository<'historicalImportSource'>,
     private _jobs: PrismaRepository<'historicalImportJob'>,
-    private _posts: PrismaRepository<'historicalPost'>,
+    private _posts: PrismaRepository<'historicalPost' | 'post'>,
     private _metrics: PrismaRepository<'historicalPostMetric'>
   ) {}
 
@@ -204,7 +204,15 @@ export class HistoricalImportRepository {
     });
   }
 
-  upsertHistoricalPost(input: HistoricalPostUpsertInput) {
+  async upsertHistoricalPost(input: HistoricalPostUpsertInput) {
+    if (input.platform === 'facebook') {
+      const tombstone = await this._posts.model.post.findFirst({
+        where: { organizationId: input.organizationId, releaseId: input.platformPostId,
+          state: 'DELETED_REMOTE', integration: { providerIdentifier: 'facebook', internalId: input.platformAccountId } },
+        select: { remoteDeletedAt: true },
+      });
+      if (tombstone) input = { ...input, deletedOrUnavailableAt: tombstone.remoteDeletedAt || new Date() };
+    }
     const lastSyncedAt = input.lastSyncedAt || new Date();
 
     return this._posts.model.historicalPost.upsert({
