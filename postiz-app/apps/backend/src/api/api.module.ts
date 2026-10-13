@@ -47,7 +47,10 @@ import { FarcasterProvider } from '@gitroom/backend/services/auth/providers/farc
 import { WalletProvider } from '@gitroom/backend/services/auth/providers/wallet.provider';
 import { OauthProvider } from '@gitroom/backend/services/auth/providers/oauth.provider';
 
+import { CreatorAuditController } from './routes/creator-audit.controller';
+
 const authenticatedController = [
+  CreatorAuditController,
   UsersController,
   AnalyticsController,
   IntegrationsController,
