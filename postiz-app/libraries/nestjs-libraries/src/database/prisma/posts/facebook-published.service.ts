@@ -30,7 +30,10 @@ export class FacebookPublishedService {
   private async target(orgId: string, postId: string) {
     const row = await this.prisma.publishingSubmissionDestination.findFirst({
       where: { postId, submission: { organizationId: orgId } },
-      include: { post: { include: { integration: true, childrenPost: true } } },
+      include: {
+        post: { include: { integration: true, childrenPost: true } },
+        submission: { select: { _count: { select: { destinations: true } } } },
+      },
     });
     if (!row) throw new NotFoundException(unavailable);
     const post = row.post;
@@ -41,6 +44,7 @@ export class FacebookPublishedService {
     const text = receipt?.facebookText;
     if (
       row.providerState !== 'SUCCEEDED' ||
+      row.submission._count.destinations !== 1 ||
       post.organizationId !== orgId ||
       integration.organizationId !== orgId ||
       integration.providerIdentifier !== 'facebook' ||

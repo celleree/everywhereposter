@@ -136,6 +136,88 @@ describeDatabase(
         } as Response;
       });
     });
+    it('keeps multi-destination receipts read-only without touching either post or Graph', async () => {
+      const original =
+        await prisma.publishingSubmissionDestination.findUniqueOrThrow({
+          where: { id: ledger },
+        });
+      const siblingIntegration = await prisma.integration.create({
+        data: {
+          id: randomUUID(),
+          organizationId: org,
+          internalId: '124',
+          name: 'Second fixture Page',
+          providerIdentifier: 'facebook',
+          type: 'social',
+          token: 'fixture-no-real-credential',
+        },
+      });
+      const sibling = await prisma.post.create({
+        data: {
+          id: randomUUID(),
+          organizationId: org,
+          integrationId: siblingIntegration.id,
+          group: randomUUID(),
+          state: 'PUBLISHED',
+          content: 'Sibling',
+          publishDate: new Date(),
+          image: '[]',
+          settings: '{"__type":"facebook"}',
+          releaseId: '124_555',
+          releaseURL: 'https://www.facebook.com/124_555',
+        },
+      });
+      const receipt = (original.providerResult as any[])[0];
+      await prisma.publishingSubmissionDestination.create({
+        data: {
+          submissionId: original.submissionId,
+          integrationId: siblingIntegration.id,
+          postId: sibling.id,
+          providerState: 'SUCCEEDED',
+          providerResult: [
+            {
+              ...receipt,
+              id: sibling.id,
+              postId: '124_555',
+              releaseURL: sibling.releaseURL,
+              facebookText: {
+                ...receipt.facebookText,
+                pageId: '124',
+                message: 'Sibling',
+              },
+            },
+          ],
+        },
+      });
+      for (const target of [post, sibling.id]) {
+        await expect(service.status(org, target)).resolves.toMatchObject({
+          eligible: false,
+        });
+        for (const action of ['edit', 'delete'] as const) {
+          await expect(
+            service.mutate(org, target, {
+              action,
+              revision: 0,
+              ...(action === 'edit' ? { message: 'Edited' } : {}),
+            })
+          ).rejects.toThrow('Only new');
+        }
+      }
+      expect(calls).toEqual([]);
+      expect(
+        await prisma.post.findUnique({ where: { id: post } })
+      ).toMatchObject({ state: 'PUBLISHED', content: 'Original' });
+      expect(
+        await prisma.post.findUnique({ where: { id: sibling.id } })
+      ).toMatchObject({ state: 'PUBLISHED', content: 'Sibling' });
+      expect(
+        (
+          await prisma.publishingSubmissionDestination.findUniqueOrThrow({
+            where: { id: ledger },
+          })
+        ).providerResult
+      ).toEqual(original.providerResult);
+    });
     it('allows only one winner across separate service instances and stale edit/delete requests', async () => {
       let release!: () => void;
       const gate = new Promise<void>((resolve) => {

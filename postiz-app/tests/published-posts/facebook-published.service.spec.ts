@@ -9,6 +9,7 @@ const setup = () => {
     id: 'ledger',
     postId: 'post',
     integrationId: 'integration',
+    submission: { _count: { destinations: 1 } },
     providerState: 'SUCCEEDED',
     providerResult: [
       {
@@ -112,6 +113,28 @@ const setup = () => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('Facebook published message ledger', () => {
+  it('rejects multi-destination provenance before any provider or ledger mutation', async () => {
+    const { service, row, db, read, update, remove } = setup();
+    row.submission._count.destinations = 2;
+    await expect(service.status('org', 'post')).resolves.toMatchObject({
+      eligible: false,
+    });
+    for (const action of ['edit', 'delete'] as const) {
+      await expect(
+        service.mutate('org', 'post', {
+          action,
+          revision: 0,
+          ...(action === 'edit' ? { message: 'Edited' } : {}),
+        })
+      ).rejects.toThrow('Only new');
+    }
+    expect(read).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(
+      db.publishingSubmissionDestination.updateMany
+    ).not.toHaveBeenCalled();
+  });
   it('commits only after remote verification while preserving identity, group and PUBLISHED state', async () => {
     const { service, row, update } = setup();
     update.mockImplementationOnce(async () => {
