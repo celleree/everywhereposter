@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { isDeepStrictEqual } from 'node:util';
 import { QuickUploadIntent, Prisma } from '@prisma/client';
 import { TemporalService } from 'nestjs-temporal-core';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/common';
@@ -62,7 +63,7 @@ export class QuickUploadService {
     if (previous) {
       const requested = body.destinations.map(value => ({ id: value.id, settings: value.settings }));
       const stored = (previous.destinations as unknown as Destination[]).map(value => ({ id: value.id, settings: value.settings }));
-      if (previous.organizationId !== org || previous.actorId !== actor || JSON.stringify(requested) !== JSON.stringify(stored) || previous.status === 'CANCELLED') throw new ConflictException('Quick Upload consent is immutable.');
+      if (previous.organizationId !== org || previous.actorId !== actor || !isDeepStrictEqual(requested, stored) || previous.status === 'CANCELLED') throw new ConflictException('Quick Upload consent is immutable.');
       await this.dispatch(previous); return this.status(org, sessionId);
     }
     const destinations: Destination[] = [];
@@ -107,7 +108,9 @@ export class QuickUploadService {
     if (!intent || terminal.includes(intent.status)) return;
     // Recover provider receipts through the existing ledger; never dispatch on this path.
     if (intent.submissionBody) {
-      try { if (await this.reconcile(intentId)) return; } catch {}
+      if (await this.reconcile(intentId)) return;
+      // The failure activity retries observation, never generation or submission.
+      throw new ConflictException('Publishing is still pending. Continue observing the existing reservation.');
     }
     const latest = await this.db.quickUploadIntent.findUnique({ where: { id: intentId } });
     const saved = latest!.results as unknown as Result[];

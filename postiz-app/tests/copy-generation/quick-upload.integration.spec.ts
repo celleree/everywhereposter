@@ -73,6 +73,17 @@ suite('durable Quick Upload (real local ledger; provider/copy mocks)', () => {
     await expect(service.enroll(org, actor, upload.id, { ...consent, destinations: [{ id: 'quick-fixture-x', settings: { who_can_reply_post: 'following' } }] })).rejects.toThrow('immutable');
     await expect(service.enroll(other, actor, upload.id, consent)).rejects.toThrow('not found'); await expect(service.status(other, upload.id)).rejects.toThrow('not found'); await expect(service.cancel(other, actor, upload.id)).rejects.toThrow('not found');
   });
+  it('reconciles identical consent after JSONB reorders settings while rejecting changed values', async () => {
+    const upload = await session();
+    const body = { ...consent, destinations: [{ id: 'quick-fixture-x', settings: { who_can_reply_post: 'everyone', made_with_ai: false } }] };
+    const intent = await service.enroll(org, actor, upload.id, body);
+    service = instantiate();
+    expect((await service.enroll(org, actor, upload.id, body)).id).toBe(intent.id);
+    expect((await service.enroll(org, actor, upload.id, { ...body, destinations: [{ id: 'quick-fixture-x', settings: { made_with_ai: false, who_can_reply_post: 'everyone' } }] })).id).toBe(intent.id);
+    await expect(service.enroll(org, actor, upload.id, { ...body, destinations: [{ id: 'quick-fixture-x', settings: { made_with_ai: true, who_can_reply_post: 'everyone' } }] })).rejects.toThrow('immutable');
+    expect(await db.quickUploadIntent.count({ where: { sessionId: upload.id } })).toBe(1);
+    expect(start).toHaveBeenCalledTimes(1); expect(generate).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled();
+  });
   it('retains an outbox on Temporal outage and dispatches one stable job later', async () => {
     start.mockRejectedValue(new Error('unavailable')); const upload = await session(), intent = await service.enroll(org, actor, upload.id, consent);
     expect((await db.quickUploadIntent.findUnique({ where: { id: intent.id } })).dispatched).toBe(false);
@@ -101,7 +112,12 @@ suite('durable Quick Upload (real local ledger; provider/copy mocks)', () => {
     const upload = await session(), intent = await service.enroll(org, actor, upload.id, consent); await finish(upload.id); await service.prepare(intent.id); await service.generate(intent.id);
     reconcile.mockResolvedValue({ destinations: [{ integrationId: 'quick-fixture-x', postId: 'reserved-post', state: 'uncertain', providerState: 'IN_FLIGHT' }] });
     await service.submit(intent.id); expect((await service.status(org, upload.id)).status).toBe('PUBLISHING'); expect(await service.reconcile(intent.id)).toBe(false);
+    reconcile.mockRejectedValueOnce(new Error('temporary ledger read outage'));
+    await expect(service.fail(intent.id)).rejects.toThrow('temporary ledger read outage');
+    await expect(service.fail(intent.id)).rejects.toThrow('still pending');
+    expect((await service.status(org, upload.id)).status).toBe('PUBLISHING');
     service = instantiate(); reconcile.mockResolvedValue({ destinations: [{ integrationId: 'quick-fixture-x', postId: 'reserved-post', state: 'published', providerState: 'SUCCEEDED' }] });
+    await service.fail(intent.id);
     expect(await service.reconcile(intent.id)).toBe(true); expect((await service.status(org, upload.id)).results).toEqual([expect.objectContaining({ state: 'Published' })]); expect(submit).toHaveBeenCalledTimes(1);
   });
   it('skips content needing review and rechecks actor and account eligibility', async () => {
