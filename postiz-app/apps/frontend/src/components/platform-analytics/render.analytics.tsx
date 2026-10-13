@@ -228,9 +228,10 @@ export const RenderAnalytics: FC<{
   const loadAnalytics = useCallback(
     async (forceRefresh = false) => {
       const refresh = forceRefresh ? '&refresh=true' : '';
-      return (
-        await fetch(`/analytics/${integration.id}?date=${date}${refresh}`)
-      ).json();
+      const response = await fetch(`/analytics/${integration.id}?date=${date}${refresh}`);
+      if (!response.ok) return [];
+      const metrics = await response.json();
+      return Array.isArray(metrics) ? metrics : [];
     },
     [fetch, integration.id, date]
   );

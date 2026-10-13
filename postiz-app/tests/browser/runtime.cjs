@@ -5,7 +5,10 @@ const net = require('node:net');
 const { spawn } = require('node:child_process');
 
 const root = path.resolve(__dirname, '../..');
-const origin = 'http://127.0.0.1:4217';
+const frontendPort = Number(process.env.BROWSER_FRONTEND_PORT || 4217);
+const apiPort = Number(process.env.BROWSER_API_PORT || 4218);
+if (![frontendPort, apiPort].every(port => Number.isInteger(port) && port > 1024 && port < 65536) || frontendPort === apiPort) throw new Error('Invalid owned fixture ports');
+const origin = `http://127.0.0.1:${frontendPort}`;
 const token = 'synthetic-playwright-session';
 const branding = path.join(root, 'apps/frontend/public/branding');
 const brandingSource = path.resolve(root, '../site/branding');
@@ -17,6 +20,7 @@ for (const dir of [root, path.dirname(root), path.join(root, 'apps/frontend')]) 
     }
   }
 }
+const discovery = process.env.EP_DISCOVERY_BROWSER === '1' ? require('./discovery-runtime.cjs')() : undefined;
 const user = { id: 'synthetic-user', orgId: 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
 const posts = Array.from({ length: 18 }, (_, index) => ({ id: `synthetic-post-${index}`, group: `synthetic-group-${index}`, state: 'QUEUE', content: `Synthetic scheduled post ${index + 1}: a long caption for responsive scrolling and reachability checks.`, publishDate: '2035-01-01T18:00:00.000Z', tags: [], intervalInDays: null, integration: { id: 'synthetic-channel', name: 'Synthetic channel', providerIdentifier: 'x', picture: '/icons/platforms/x.png' } }));
 const values = {
@@ -48,8 +52,9 @@ let frontend;
 let ready = false;
 let stopping = false;
 let createdBranding = false;
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://127.0.0.1:4218');
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://127.0.0.1:${apiPort}`);
+  if (discovery && await discovery.handle(req, res, url, token)) return;
   if (req.method !== 'GET') { res.writeHead(405); return res.end('Fixture mutations are disabled'); }
   if (url.pathname === '/__ready') { res.writeHead(ready ? 200 : 503); return res.end('synthetic fixture readiness'); }
   const auth = req.headers.auth || /(?:^|;\s*)auth=([^;]+)/.exec(req.headers.cookie || '')?.[1];
@@ -62,9 +67,9 @@ const server = http.createServer((req, res) => {
 const reservation = net.createServer();
 reservation.once('error', error => { console.error('Frontend port unavailable: ' + error.code); process.exitCode = 1; });
 server.once('error', error => { reservation.close(); console.error('Fixture API port unavailable: ' + error.code); process.exitCode = 1; });
-reservation.listen(4217, '127.0.0.1', () => {
+reservation.listen(frontendPort, '127.0.0.1', () => {
   if (stopping) { reservation.close(); return; }
-  server.listen(4218, '127.0.0.1', () => reservation.close(startFrontend));
+  server.listen(apiPort, '127.0.0.1', () => reservation.close(startFrontend));
 });
 function startFrontend() {
   if (stopping) { server.close(); return; }
@@ -76,13 +81,14 @@ function startFrontend() {
     PATH: process.env.PATH, HOME: process.env.HOME,
     NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1',
     FRONTEND_URL: origin, MAIN_URL: origin, NOT_SECURED: 'true',
-    BACKEND_INTERNAL_URL: 'http://127.0.0.1:4218', NEXT_PUBLIC_BACKEND_URL: '/backend-api',
+    BACKEND_INTERNAL_URL: `http://127.0.0.1:${apiPort}`, NEXT_PUBLIC_BACKEND_URL: '/backend-api',
     DISABLE_REGISTRATION: 'true', STORAGE_PROVIDER: 'local',
     NEXT_PUBLIC_GUIDED_COMPOSER_SHELL: 'true',
     NEXT_FONT_GOOGLE_MOCKED_RESPONSES: path.join(__dirname, 'fonts.cjs'),
+    BROWSER_FRONTEND_PORT: String(frontendPort), BROWSER_API_PORT: String(apiPort),
     NODE_OPTIONS: '--require=' + path.join(__dirname, 'network-guard.cjs'),
   };
-  frontend = spawn(process.execPath, [require.resolve('next/dist/bin/next'), 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', '4217'], { cwd: path.join(root, 'apps/frontend'), env, stdio: ['ignore', 'pipe', 'pipe'] });
+  frontend = spawn(process.execPath, [require.resolve('next/dist/bin/next'), 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(frontendPort)], { cwd: path.join(root, 'apps/frontend'), env, stdio: ['ignore', 'pipe', 'pipe'] });
   let startup = '';
   let warming = false;
   frontend.stdout.on('data', data => {
@@ -99,7 +105,7 @@ function startFrontend() {
 }
 async function warmRoutes() {
   const deadline = Date.now() + 330_000;
-  for (const route of ['/auth/login', '/media', '/launches', '/create', '/settings']) {
+  for (const route of (discovery ? ['/auth/login', '/analytics'] : ['/auth/login', '/media', '/launches', '/create', '/settings'])) {
     let loaded = false;
     while (!stopping && !loaded && Date.now() < deadline) {
       try {
