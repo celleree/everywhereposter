@@ -213,7 +213,7 @@ it('rejects account changes on checkpoint resume before another Meta request or 
 
 it('replays a complete cached snapshot after receiver rejection without any new Meta calls', async () => {
   let reject = true;
-  upstream = transport(url => url.origin === origin && reject ? json({ error: connection.token }, 503) : undefined);
+  upstream = transport(url => url.origin === origin && reject ? json({ error: connection.token }, 400) : undefined);
   global.fetch = upstream;
   const { started, view } = await startAndSettle();
   expect(view.error_code).toBe('connected_audit_interrupted'); safePublic(view);
@@ -225,7 +225,7 @@ it('replays a complete cached snapshot after receiver rejection without any new 
 });
 
 it.each([{ internalId: '99999' }, { providerIdentifier: 'instagram' }])('refuses cached replay for a changed account/provider: %j', async change => {
-  upstream = transport(url => url.origin === origin ? json({}, 503) : undefined); global.fetch = upstream;
+  upstream = transport(url => url.origin === origin ? json({}, 400) : undefined); global.fetch = upstream;
   const { started } = await startAndSettle();
   const calls = upstream.mock.calls.length;
   lookup.mockResolvedValue({ ...connection, ...change });
@@ -258,4 +258,26 @@ it('completion requires task ownership and frees the organization for its next a
   expect(jobs.current(org)).toBeNull(); expect(jobs.submitted(started.id, org)).toBe(true);
   const next = await jobs.start(org, actor, input); await settled(next.id);
   expect(next.id).not.toBe(started.id); expect(receiverCalls()).toHaveLength(2);
+});
+
+
+it.each(['lost-response', 503, 409])('retains the submission lock and never resends ambiguous acceptance: %s', async failure => {
+  upstream = transport(url => {
+    if (url.origin !== origin) return undefined;
+    if (failure === 'lost-response') throw new Error('Accepted task response lost PRIVATE_FIXTURE_TOKEN');
+    return json({}, failure as number);
+  });
+  global.fetch = upstream;
+  const { started, view } = await startAndSettle();
+  expect(view).toMatchObject({ error_code: 'submission_unconfirmed', resumable: false });
+  safePublic(view);
+  expect(jobs.submitted(started.id, org)).toBe(true);
+  expect(jobs.current(org)).toBe(started.id);
+  const calls = upstream.mock.calls.length;
+  expect(await jobs.start(org, actor, { ...input, resume_task_id: started.id })).toEqual(started);
+  await expect(jobs.start(org, actor, input)).rejects.toMatchObject({ status: 409 });
+  expect(upstream).toHaveBeenCalledTimes(calls);
+  expect(receiverCalls()).toHaveLength(1);
+  jobs.finished(started.id, org); // Only an observed terminal task permits new work.
+  expect(jobs.current(org)).toBeNull();
 });

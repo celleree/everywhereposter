@@ -61,9 +61,9 @@ export class CreatorAuditController {
       try { origin = new URL(process.env.FRONTEND_URL || '').origin; } catch { throw new HttpException('Audit origin unavailable.', 503); }
       if (req.headers.origin !== origin || req.headers['sec-fetch-site'] === 'cross-site') throw new HttpException('Cross-origin audit writes are forbidden.', 403);
     }
+    const taskId = /^\/api\/audit\/tasks\/([a-f0-9]{32})$/.exec(path)?.[1];
     if (req.method === 'GET') {
       let local: unknown;
-      const taskId = /^\/api\/audit\/tasks\/([a-f0-9]{32})$/.exec(path)?.[1];
       if (path === '/api/audit/tasks/current' && this.connectedJobs.current(org.id)) local = { id: this.connectedJobs.current(org.id) };
       else if (taskId && this.connectedJobs.owns(taskId, org.id) && !this.connectedJobs.submitted(taskId, org.id)) local = this.connectedJobs.view(taskId, org.id);
       if (local) {
@@ -82,6 +82,11 @@ export class CreatorAuditController {
     // Never forward Location, cookies, arbitrary upstream headers or raw errors.
     if (upstream.status >= 300 && upstream.status < 400) throw new HttpException('Unexpected audit service response.', 502);
     if (upstream.status >= 500 || [401, 403].includes(upstream.status)) throw new HttpException('Creator Audit needs operator attention.', 502);
+    if (req.method === 'GET' && upstream.status === 404 && taskId && this.connectedJobs.owns(taskId, org.id)) {
+      res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.status(200).send(JSON.stringify(this.connectedJobs.view(taskId, org.id)));
+    }
     const type = upstream.headers.get('content-type') || '';
     const expected = path === '/audit' ? 'text/html' : path === '/static/audit-results.js' ? 'javascript' : 'application/json';
     if (!(path === '/static/audit-results.js' ? ['text/javascript', 'application/javascript'].includes(type.split(';')[0]) : type.split(';')[0] === expected)) throw new HttpException('Unexpected audit service response.', 502);
@@ -101,7 +106,6 @@ export class CreatorAuditController {
       finally { reader.releaseLock(); }
     }
     let responseBody = Buffer.concat(chunks).toString('utf8');
-    const taskId = /^\/api\/audit\/tasks\/([a-f0-9]{32})$/.exec(path)?.[1];
     if (taskId && this.connectedJobs.owns(taskId, org.id)) {
       try {
         const payload = JSON.parse(responseBody);

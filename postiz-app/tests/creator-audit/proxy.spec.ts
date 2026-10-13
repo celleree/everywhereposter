@@ -164,3 +164,31 @@ it('connected start resolves only the server-derived organization connection', a
   expect(lookup).toHaveBeenCalledWith(org, 'fixture');
   expect(upstream).not.toHaveBeenCalled();
 });
+
+
+it.each(['running', 'done', 'missing'])('reconciles an uncertain submission through its original receiver task: %s', async state => {
+  const id = 'a'.repeat(32);
+  const connected = new CreatorAuditController();
+  const jobs = (connected as any).connectedJobs;
+  // Model the exact producer state retained after an accepted POST loses its response.
+  jobs.jobs.set(id, { id, org, actor, integrationId: 'fixture', cap: 12, status: 'uncertain', attempt: 0 });
+  upstream.mockResolvedValue(new Response(JSON.stringify(state === 'missing' ? { error: 'PRIVATE_ERROR' } : { id, status: state }),
+    { status: state === 'missing' ? 404 : 200, headers: { 'Content-Type': 'application/json' } }));
+  const res = response();
+  await connected.proxy(request('GET', '/api/audit/tasks/' + id), res);
+  expect(upstream).toHaveBeenCalledTimes(1);
+  expect(upstream.mock.calls[0][0]).toBe('http://service.example.test/api/audit/tasks/' + id);
+  expect(upstream.mock.calls[0][1].method).toBe('GET');
+  const payload = JSON.parse(res.send.mock.calls[0][0]);
+  expect(payload).toMatchObject({ id, integration_id: 'fixture', analysis_cap: 12 });
+  if (state === 'missing') {
+    expect(payload).toMatchObject({ error_code: 'submission_unconfirmed', resumable: false });
+    expect(JSON.stringify(payload)).not.toContain('PRIVATE_ERROR');
+  } else expect(payload.status).toBe(state);
+  expect(jobs.current(org)).toBe(state === 'done' ? null : id);
+  if (state !== 'done') {
+    await expect(jobs.start(org, actor, { integration_id: 'fixture', analysis_cap: 12 })).rejects.toMatchObject({ status: 409 });
+    await jobs.start(org, actor, { integration_id: 'fixture', analysis_cap: 12, resume_task_id: id });
+    expect(upstream).toHaveBeenCalledTimes(1);
+  }
+});

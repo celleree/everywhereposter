@@ -6,7 +6,7 @@ import { auditAssertion, creatorAuditConfig } from './creator-audit.proxy';
 type Connection = { id: string; organizationId: string; internalId: string; providerIdentifier: string; token: string;
   disabled?: boolean; deletedAt?: unknown; refreshNeeded?: boolean; inBetweenSteps?: boolean; tokenExpiration?: Date | string | null };
 type Job = { id: string; org: string; actor: string; integrationId: string; cap: number;
-  status: 'running' | 'paused' | 'submitted' | 'error' | 'done'; checkpoint?: InstagramAuditCheckpoint;
+  status: 'running' | 'paused' | 'uncertain' | 'submitted' | 'error' | 'done'; checkpoint?: InstagramAuditCheckpoint;
   collection?: Awaited<ReturnType<typeof collectInstagramAudit>>; error_code?: string; attempt: number };
 
 /** Small adapter around the existing private task API. Checkpoints never enter browser payloads. */
@@ -43,21 +43,21 @@ export class ConnectedAuditJobs {
       if (!prior || prior.org !== org || prior.integrationId !== input.integration_id || prior.cap !== cap) {
         throw new HttpException('Audit task unavailable.', 404);
       }
-      if (['running', 'submitted'].includes(prior.status)) return { id: prior.id, kind: 'connected', status: 'running' };
+      if (['running', 'uncertain', 'submitted'].includes(prior.status)) return { id: prior.id, kind: 'connected', status: 'running' };
       job = prior;
     } else {
-      if ([...this.jobs.values()].some(j => j.org === org && ['running', 'submitted'].includes(j.status))) {
+      if ([...this.jobs.values()].some(j => j.org === org && ['running', 'uncertain', 'submitted'].includes(j.status))) {
         throw new HttpException('Wait for the active audit or resume its saved task.', 409);
       }
       job = { id: randomUUID().replace(/-/g, ''), org, actor, integrationId: input.integration_id, cap: Number(cap), status: 'running', attempt: 0 };
     }
     await this.connection(org, job.integrationId); // Ownership and reconnect checks precede collection or assertions.
-    if (input.resume_task_id && ['running', 'submitted'].includes(job.status)) return { id: job.id, kind: 'connected', status: 'running' };
-    if ([...this.jobs.values()].some(j => j.org === org && j.id !== job.id && ['running', 'submitted'].includes(j.status))) {
+    if (input.resume_task_id && ['running', 'uncertain', 'submitted'].includes(job.status)) return { id: job.id, kind: 'connected', status: 'running' };
+    if ([...this.jobs.values()].some(j => j.org === org && j.id !== job.id && ['running', 'uncertain', 'submitted'].includes(j.status))) {
       throw new HttpException('Wait for the active audit or resume its saved task.', 409);
     }
     if (this.jobs.size >= 100 && !this.jobs.has(job.id)) {
-      const oldest = [...this.jobs.values()].find(j => !['running', 'submitted'].includes(j.status));
+      const oldest = [...this.jobs.values()].find(j => !['running', 'uncertain', 'submitted'].includes(j.status));
       if (!oldest) throw new HttpException('Audit worker is busy. Try later.', 503);
       this.jobs.delete(oldest.id);
     }
@@ -69,7 +69,7 @@ export class ConnectedAuditJobs {
 
   current(org: string) {
     const own = [...this.jobs.values()].filter(j => j.org === org);
-    return own.find(j => ['running', 'submitted'].includes(j.status))?.id ||
+    return own.find(j => ['running', 'uncertain', 'submitted'].includes(j.status))?.id ||
       own.reverse().find(j => ['paused', 'error'].includes(j.status))?.id || null;
   }
   owns(id: string, org: string) { return this.jobs.get(id)?.org === org; }
@@ -77,11 +77,14 @@ export class ConnectedAuditJobs {
     const job = this.jobs.get(id);
     return job?.org === org ? { integration_id: job.integrationId, analysis_cap: job.cap } : {};
   }
-  submitted(id: string, org: string) { return this.owns(id, org) && ['submitted', 'done'].includes(this.jobs.get(id)!.status); }
+  submitted(id: string, org: string) { return this.owns(id, org) && ['uncertain', 'submitted', 'done'].includes(this.jobs.get(id)!.status); }
   finished(id: string, org: string) { if (this.owns(id, org)) this.jobs.get(id)!.status = 'done'; }
   view(id: string, org: string) {
     const job = this.jobs.get(id);
     if (!job || job.org !== org) throw new HttpException('Audit task unavailable.', 404);
+    if (['uncertain', 'submitted'].includes(job.status)) return { id, kind: 'connected', ...this.identity(id, org), status: 'error',
+      error: 'Audit acceptance cannot be confirmed. An operator must check this task before starting again.',
+      error_code: 'submission_unconfirmed', resumable: false };
     return { id, kind: 'connected', ...this.identity(id, org), status: job.status === 'running' ? 'running' : 'error',
       ...(job.status !== 'running' ? { error: 'Collection or processing needs attention. Reconnect or resume this account.',
         error_code: job.error_code || 'resume_available', resumable: true } : {}) };
@@ -103,16 +106,21 @@ export class ConnectedAuditJobs {
       const body = JSON.stringify({ task_id: job.id, account: result.account, snapshot: result.snapshot,
         assets: result.assets, analysis_cap: job.cap, ...(paused ? { collect_only: true } : {}) });
       if (Buffer.byteLength(body) > 4_000_000) throw new Error('snapshot_budget');
+      // Once sent, a lost response or server failure may hide an accepted task. Keep its lock until status is reconciled.
+      job.status = 'uncertain';
       const response = await fetch(config.origin + path, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(30_000),
         headers: { Authorization: 'Bearer ' + auditAssertion(config.secret, job.org, job.actor, 'POST', path, body, true, 'connected_snapshot'),
           'Content-Type': 'application/json' }, body });
-      if (response.status !== 202) throw new Error('receiver_rejected');
+      if (response.status !== 202) {
+        if ([400, 401, 403, 404, 413, 422].includes(response.status)) job.status = 'error';
+        throw new Error('receiver_rejected');
+      }
       job.attempt++;
       job.status = paused ? 'paused' : 'submitted';
       if (paused) job.error_code = result.snapshot.coverage.partial_reason || 'partial_collection';
     } catch {
       // Exceptions may contain tokens or expiring CDN URLs. Never serialize or log them.
-      job.status = 'error'; job.error_code = 'connected_audit_interrupted';
+      if (job.status !== 'uncertain') { job.status = 'error'; job.error_code = 'connected_audit_interrupted'; }
     }
   }
 }

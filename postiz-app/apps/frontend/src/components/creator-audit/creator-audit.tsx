@@ -20,6 +20,8 @@ type AuditTask = {
   kind?: string;
   integration_id?: string;
   analysis_cap?: number;
+  resumable?: boolean;
+  error?: string;
 };
 
 const auditHeaders = (orgId: string) => ({ 'X-Audit-Organization': orgId });
@@ -113,7 +115,7 @@ export function CreatorAudit() {
                   );
                   if (restoredIntegration) setSelectedIntegration(restoredIntegration.id);
                   if (restored.status === 'error' || restored.status === 'paused') {
-                    setTaskError('The previous audit could not finish. Resume it to try again.');
+                    setTaskError(restored.resumable === false ? restored.error || 'An operator must check this audit before starting again.' : 'The previous audit could not finish. Resume it to try again.');
                   }
                 }
               }
@@ -164,7 +166,7 @@ export function CreatorAudit() {
         } else if (status.status === 'error' || status.status === 'paused') {
           setTask(status);
           setTaskOrg(capturedOrg);
-          setTaskError('The audit could not finish. Resume this audit to try again.');
+          setTaskError(status.resumable === false ? status.error || 'An operator must check this audit before starting again.' : 'The audit could not finish. Resume this audit to try again.');
         } else {
           setTask(status);
           setTaskOrg(capturedOrg);
@@ -250,7 +252,7 @@ export function CreatorAudit() {
                     ))}
                   </select>
                 </label>
-                <button type="button" disabled={!selectedIntegration || !allowedToStart || busy || visibleTask?.status === 'running'} onClick={() => startAudit()}>
+                <button type="button" disabled={!selectedIntegration || !allowedToStart || busy || visibleTask?.status === 'running' || visibleTask?.resumable === false} onClick={() => startAudit()}>
                   {busy ? 'Starting…' : visibleTask?.status === 'running' ? 'Audit running…' : 'Start audit'}
                 </button>
               </div>
@@ -260,7 +262,7 @@ export function CreatorAudit() {
             {taskError && (
               <div role="alert" className="mt-2">
                 <p>{taskError}</p>
-                {visibleTask?.id && selectedIntegration && allowedToStart && (
+                {visibleTask?.id && visibleTask.resumable !== false && selectedIntegration && allowedToStart && (
                   <button type="button" disabled={busy} onClick={() => startAudit(visibleTask.id, visibleTask.analysis_cap)}>
                     Resume audit
                   </button>

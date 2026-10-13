@@ -170,3 +170,21 @@ it('does not offer start authority when the loaded membership role is unknown', 
   fireEvent.click(screen.getByRole('button', { name: 'Start audit' }));
   expect(mockFetch.mock.calls.some(([path]) => path === '/creator-audit/connected')).toBe(false);
 });
+
+
+it('retains an unconfirmed task on reload and disables resubmission pending operator reconciliation', async () => {
+  mockEnabled = true; mockBackend = '/backend-api'; mockIntegrations = [goodInstagram];
+  mockFetch.mockImplementation(async (path: string) => {
+    if (path === '/creator-audit/status') return { ok: true, json: async () => ({ enabled: true }) } as Response;
+    if (path === '/integrations/list') return { ok: true, json: async () => ({ integrations: mockIntegrations }) } as Response;
+    if (path.endsWith('/tasks/current')) return { ok: true, json: async () => ({ id: 'uncertain-task' }) } as Response;
+    return { ok: true, json: async () => ({ id: 'uncertain-task', integration_id: 'ig-1', status: 'error',
+      resumable: false, error: 'An operator must check this task before starting again.' }) } as Response;
+  });
+  render(<CreatorAudit />);
+  expect((await screen.findByRole('alert')).textContent).toContain('An operator must check');
+  expect(screen.queryByRole('button', { name: 'Resume audit' })).toBeNull();
+  expect((screen.getByRole('button', { name: 'Start audit' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Start audit' }));
+  expect(mockFetch.mock.calls.some(([path]) => path === '/creator-audit/connected')).toBe(false);
+});
