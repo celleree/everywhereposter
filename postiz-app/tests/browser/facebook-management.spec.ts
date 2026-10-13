@@ -151,11 +151,13 @@ test('Facebook management: composer creates a real receipt then opens same-ID te
 
 test('Facebook management: stale editor cannot overwrite newer confirmed text', async ({ page, context }, info) => {
   await openPost(page, info);
+  const panel = page.getByRole('region', { name: 'Facebook text post management' });
+  await expect(panel.getByRole('textbox')).toHaveValue('Original Browser Page A text');
+  await expect(panel.getByRole('textbox')).toBeEnabled();
   const post = (await evidence(context.request)).posts[0];
   const status = await (await context.request.get(`${api}/posts/${post.id}/facebook-published`)).json();
   const updated = await context.request.post(`${api}/posts/${post.id}/facebook-published`, { data: { action: 'edit', revision: status.revision, message: 'Newer confirmed text' } });
   expect(updated.ok()).toBeTruthy();
-  const panel = page.getByRole('region', { name: 'Facebook text post management' });
   await panel.getByRole('textbox').fill('Stale editor text');
   await panel.getByRole('button', { name: 'Save Facebook message' }).click();
   await expect(panel.getByRole('alert')).toContainText('Reload before editing');
