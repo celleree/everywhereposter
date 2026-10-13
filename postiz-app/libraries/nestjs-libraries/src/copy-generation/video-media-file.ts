@@ -69,7 +69,7 @@ export const resolveLocalUploadVideoPath = async (
   const uploadDirectory = process.env.UPLOAD_DIRECTORY;
   const frontendUrl = process.env.FRONTEND_URL;
   if (
-    process.env.STORAGE_PROVIDER !== 'local' ||
+    (process.env.STORAGE_PROVIDER || 'local') !== 'local' ||
     !uploadDirectory ||
     !frontendUrl
   ) {
@@ -134,7 +134,8 @@ export const resolveLocalUploadVideoPath = async (
 
 export const prepareVideoMediaFile = async (
   path: string,
-  originalName?: string | null
+  originalName?: string | null,
+  limits?: { maxBytes: number; maxRedirects: number; signal: AbortSignal }
 ): Promise<PreparedVideoMediaFile> => {
   if (!/^https?:\/\//i.test(path)) {
     await access(path);
@@ -166,14 +167,15 @@ export const prepareVideoMediaFile = async (
       method: 'GET',
       responseType: 'stream',
       timeout: REMOTE_MEDIA_TIMEOUT_MS,
-      maxRedirects: 5,
-      maxContentLength: REMOTE_MEDIA_MAX_BYTES,
+      maxRedirects: limits?.maxRedirects ?? 5,
+      maxContentLength: limits?.maxBytes ?? REMOTE_MEDIA_MAX_BYTES,
+      signal: limits?.signal,
     });
     const contentLength = Number(response.headers?.['content-length']);
 
     if (
       Number.isFinite(contentLength) &&
-      contentLength > REMOTE_MEDIA_MAX_BYTES
+      contentLength > (limits?.maxBytes ?? REMOTE_MEDIA_MAX_BYTES)
     ) {
       response.data.destroy();
       throw createRemoteMediaTooLargeError();
@@ -181,7 +183,7 @@ export const prepareVideoMediaFile = async (
 
     await pipeline(
       response.data,
-      createRemoteMediaByteLimitStream(),
+      createRemoteMediaByteLimitStream(limits?.maxBytes),
       createWriteStream(inputPath, { flags: 'wx' })
     );
 
