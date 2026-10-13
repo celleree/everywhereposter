@@ -328,6 +328,8 @@ export const ManageModal: FC<
     (!!existingRootPost?.id && facebookDeletedPostId === existingRootPost.id);
   const isPublishedManagementView = isPublishedPost ||
     (existingIntegration?.identifier === 'facebook' && isRemoteDeletedPost);
+  const isFacebookPublishedManagement =
+    existingIntegration?.identifier === 'facebook' && isPublishedManagementView;
   const showPublishedActions =
     !!existingData?.integration && (isPublishedPost || isRemoteDeletedPost);
   const missingPublishedReleaseId =
@@ -1648,7 +1650,7 @@ export const ManageModal: FC<
 
         <div className="flex min-h-[84px] min-w-0 items-center border-t border-newBorder py-[16px] select-none mobile:relative mobile:flex-col mobile:items-stretch mobile:gap-[12px] mobile:overflow-x-hidden mobile:py-[12px]">
           <div className="flex min-w-0 flex-1 gap-[8px] ps-[20px] mobile:flex-col mobile:px-[12px] mobile:[&>*]:ml-0 mobile:[&>*]:w-full">
-            {!dummy && (
+            {!dummy && !isFacebookPublishedManagement && (
               <TagsComponent
                 name="tags"
                 label={t('tags', 'Tags')}
@@ -1659,13 +1661,13 @@ export const ManageModal: FC<
               />
             )}
 
-            {!dummy && (
+            {!dummy && !isFacebookPublishedManagement && (
               <RepeatComponent repeat={repeater} onChange={setRepeater} />
             )}
           </div>
           <div className="flex min-w-0 max-w-full flex-col items-end gap-[8px] pe-[20px] mobile:items-stretch mobile:px-[12px]">
             <div className="flex min-w-0 max-w-full items-center justify-end gap-[8px] mobile:flex-col mobile:items-stretch">
-              {showPublishedActions && (
+              {showPublishedActions && !isFacebookPublishedManagement && (
                 <span
                   className="mobile:w-full"
                   title={deleteOnPlatformDisabledReason || undefined}
@@ -1703,12 +1705,12 @@ export const ManageModal: FC<
                   </div>
                 </button>
               )}
-              {(!showPublishedActions || isRemoteDeletedPost) && (
+              {!isFacebookPublishedManagement && (!showPublishedActions || isRemoteDeletedPost) && (
                 <div className="mobile:w-full mobile:min-w-0 mobile:[&>*]:w-full">
                   <DatePicker onChange={setDate} date={date} />
                 </div>
               )}
-              {!addEditSets && (
+              {!addEditSets && !isFacebookPublishedManagement && (
                 <button
                   disabled={
                     selectedIntegrations.length === 0 || loading || locked || recovery.publishLocked
@@ -1755,7 +1757,7 @@ export const ManageModal: FC<
                   </div>
                 </button>
               )}
-              {!addEditSets && (
+              {!addEditSets && !isFacebookPublishedManagement && (
                 <div className="group relative min-w-0 cursor-pointer mobile:w-full">
                   <button
                     disabled={
@@ -1818,7 +1820,7 @@ export const ManageModal: FC<
                 </div>
               )}
             </div>
-            {!!publishedActionHint && (
+            {!!publishedActionHint && !isFacebookPublishedManagement && (
               <div className="max-w-[420px] text-end text-[12px] text-[#A3A3A3] mobile:max-w-none mobile:text-start">
                 {publishedActionHint}
               </div>
