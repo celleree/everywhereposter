@@ -4,10 +4,11 @@ import { TopMenu } from '../../apps/frontend/src/components/layout/top.menu';
 
 let mockRole = 'ADMIN';
 let mockPath = '/create';
+let mockAuditEnabled = false;
 let mockBilling = false;
 let mockTier = 'STANDARD';
 let mockOrganizations = [{ id: 'org-1', name: 'Current workspace' }, { id: 'org-2', name: 'Other workspace' }];
-const mockFetch = jest.fn(async () => ({ ok: true, json: async () => mockOrganizations }));
+const mockFetch = jest.fn(async (path?: string) => ({ ok: true, json: async () => path === '/creator-audit/status' ? { enabled: mockAuditEnabled } : mockOrganizations }));
 jest.mock('next/navigation', () => ({ usePathname: () => mockPath }));
 jest.mock('next/link', () => ({ __esModule: true, default: ({ children, prefetch, ...props }: any) => <a {...props}>{children}</a> }));
 jest.mock('@gitroom/frontend/components/layout/user.context', () => ({ useUser: () => ({ role: mockRole, orgId: 'org-1', tier: { current: mockTier } }) }));
@@ -18,7 +19,7 @@ jest.mock('@gitroom/frontend/components/launches/helpers/use.integration.list', 
 jest.mock('swr', () => ({ __esModule: true, default: () => ({ data: mockOrganizations, isLoading: false }) }));
 jest.mock('@gitroom/frontend/components/launches/add.provider.component', () => ({ AddProviderButton: () => <button>Add Channel</button> }));
 
-beforeEach(() => { mockRole = 'ADMIN'; mockPath = '/create'; mockBilling = false; mockTier = 'STANDARD'; mockOrganizations = [{ id: 'org-1', name: 'Current workspace' }, { id: 'org-2', name: 'Other workspace' }]; mockFetch.mockClear(); });
+beforeEach(() => { mockAuditEnabled = false; mockRole = 'ADMIN'; mockPath = '/create'; mockBilling = false; mockTier = 'STANDARD'; mockOrganizations = [{ id: 'org-1', name: 'Current workspace' }, { id: 'org-2', name: 'Other workspace' }]; mockFetch.mockClear(); });
 
 it('has four mobile destinations and exposes the existing routes through More', () => {
   render(<TopMenu mobileNav />);
@@ -141,4 +142,25 @@ it('scopes a visible keyboard focus ring to More buttons and links', () => {
   expect(focusRule.selector).toContain('.mobile-more-drawer a:focus-visible');
   expect(focusRule.parent.params).toBe('(max-width: 1025px)');
   expect(focusRule.nodes.find((node: any) => node.prop === 'box-shadow').value).toBe('0 0 0 2px var(--new-btn-text)');
+});
+
+
+it('shows configured Creator Audit directly on desktop and inside mobile More', async () => {
+  mockAuditEnabled = true;
+  const desktop = render(<TopMenu />);
+  await waitFor(() => expect(screen.getByRole('link', { name: 'Creator Audit' }).getAttribute('href')).toBe('/creator-audit'));
+  desktop.unmount();
+  mockPath = '/creator-audit';
+  render(<TopMenu mobileNav />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'More' }).className).toContain('mobile-nav-active'));
+  fireEvent.click(screen.getByRole('button', { name: 'More' }));
+  const audit = screen.getByRole('link', { name: 'Creator Audit' });
+  expect(audit.getAttribute('href')).toBe('/creator-audit');
+  expect(audit.getAttribute('aria-current')).toBe('page');
+});
+
+it('hides Creator Audit when the authenticated configuration is disabled', async () => {
+  render(<TopMenu />);
+  await waitFor(() => expect(mockFetch).toHaveBeenCalledWith('/creator-audit/status'));
+  expect(screen.queryByRole('link', { name: 'Creator Audit' })).toBeNull();
 });
