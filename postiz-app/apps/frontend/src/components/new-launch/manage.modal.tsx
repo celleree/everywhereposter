@@ -1209,7 +1209,7 @@ export const ManageModal: FC<
             // New immediate, single-destination Facebook text posts use the existing
             // durable publication receipt so later mutations have trusted provenance.
             if (type === 'now' && !data.shortLink && !data.inter && data.posts.length === 1 &&
-                data.posts[0].settings.__type === 'facebook' && !existingData.integration &&
+                integrations.find((integration) => integration.id === data.posts[0].integration.id)?.identifier === 'facebook' && !existingData.integration &&
                 data.posts[0].value.length === 1 && !data.posts[0].value[0].image.length &&
                 !data.posts[0].settings.url && !Object.keys(data.posts[0].settings).some((key) => key.startsWith('plug-'))) {
               (data as any).submissionId = crypto.randomUUID();
