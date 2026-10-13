@@ -18,12 +18,12 @@ export function auditRouteAllowed(method: string, path: string) {
   return method === 'POST' && ['/api/audit/tasks', '/api/audit/retry'].includes(path);
 }
 
-export function auditAssertion(secret: string, org: string, actor: string, method: string, path: string, body: string, writable: boolean) {
+export function auditAssertion(secret: string, org: string, actor: string, method: string, path: string, body: string, writable: boolean, purpose?: 'connected_snapshot') {
   if (!uuid.test(org) || !uuid.test(actor)) throw new Error('Invalid authenticated identity');
   const iat = Math.floor(Date.now() / 1000);
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const payload = Buffer.from(JSON.stringify({ iss: 'everywhereposter', aud: 'creator-audit', org, sub: actor, iat, exp: iat + 30,
-    method, path, writable, body_sha256: createHash('sha256').update(body).digest('hex') })).toString('base64url');
+    method, path, writable, ...(purpose ? { purpose } : {}), body_sha256: createHash('sha256').update(body).digest('hex') })).toString('base64url');
   const signature = createHmac('sha256', secret).update(header + '.' + payload).digest('base64url');
   return header + '.' + payload + '.' + signature;
 }

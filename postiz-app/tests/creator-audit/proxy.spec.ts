@@ -11,6 +11,7 @@ import { AuthorizationActions, Sections } from '../../apps/backend/src/services/
 
 jest.mock('@gitroom/nestjs-libraries/database/prisma/organizations/organization.service', () => ({ OrganizationService: class {} }));
 jest.mock('@gitroom/nestjs-libraries/database/prisma/users/users.service', () => ({ UsersService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/database/prisma/integrations/integration.service', () => ({ IntegrationService: class {} }));
 
 const org = '00000000-0000-4000-8000-000000000011';
 const foreign = '00000000-0000-4000-8000-000000000012';
@@ -129,4 +130,37 @@ it('actual AuthMiddleware derives allowed membership even when caller requests f
   await rejected(req, 409);
   req.headers['x-audit-organization'] = org;
   await controller.proxy(req, response()); expect(upstream).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the private snapshot route outside the browser proxy allowlist', async () => {
+  expect(auditRouteAllowed('POST', '/api/audit/connected')).toBe(false);
+  await rejected(request('POST', '/api/audit/connected', { snapshot: {} }), 404);
+});
+
+it('connected start enforces admin, organization and origin before connection lookup', async () => {
+  const lookup = jest.fn();
+  const connected = new CreatorAuditController({ getIntegrationById: lookup } as any);
+  for (const change of ['guest', 'disabled', 'foreign', 'cross-site', 'missing', 'large']) {
+    const req = request('POST', '/connected', { integration_id: 'fixture' });
+    let status = 403;
+    if (change === 'guest') req.org.users[0].role = 'USER';
+    if (change === 'disabled') req.org.users[0].disabled = true;
+    if (change === 'foreign') { req.headers['x-audit-organization'] = foreign; status = 409; }
+    if (change === 'cross-site') req.headers['sec-fetch-site'] = 'cross-site';
+    if (change === 'missing') delete req.user;
+    if (change === 'large') { req.body.padding = 'a'.repeat(1025); status = 413; }
+    await expect(connected.connected(req, response())).rejects.toMatchObject({ status });
+  }
+  expect(lookup).not.toHaveBeenCalled();
+  expect(upstream).not.toHaveBeenCalled();
+  expect(Reflect.getMetadata(CHECK_POLICIES_KEY, connected.connected)).toEqual(
+    [[AuthorizationActions.Create, Sections.AI], [AuthorizationActions.Create, Sections.ADMIN]]);
+});
+
+it('connected start resolves only the server-derived organization connection', async () => {
+  const lookup = jest.fn(async () => null);
+  const connected = new CreatorAuditController({ getIntegrationById: lookup } as any);
+  await expect(connected.connected(request('POST', '/connected', { integration_id: 'fixture' }), response())).rejects.toMatchObject({ status: 400 });
+  expect(lookup).toHaveBeenCalledWith(org, 'fixture');
+  expect(upstream).not.toHaveBeenCalled();
 });

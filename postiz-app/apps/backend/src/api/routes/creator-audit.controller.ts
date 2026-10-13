@@ -1,14 +1,40 @@
-import { Controller, Get, Post, Req, Res, HttpException } from '@nestjs/common';
+import { Controller, Get, Post, Req, Res, HttpException, Optional } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { auditAssertion, auditRouteAllowed, creatorAuditConfig } from './creator-audit.proxy';
+import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
+import { ConnectedAuditJobs } from './creator-audit.connected';
 
 @Controller('/creator-audit')
 export class CreatorAuditController {
+  private readonly connectedJobs: ConnectedAuditJobs;
+  constructor(@Optional() integrations?: IntegrationService) {
+    this.connectedJobs = new ConnectedAuditJobs((org, id) => {
+      if (!integrations) throw new HttpException('Audit connections are unavailable.', 503);
+      return integrations.getIntegrationById(org, id);
+    });
+  }
   // Configuration discovery must never open the shared payment-required UI.
   @Get('/status')
   status() { return { enabled: Boolean(creatorAuditConfig()) }; }
+
+  @Post('/connected')
+  @CheckPolicies([AuthorizationActions.Create, Sections.AI], [AuthorizationActions.Create, Sections.ADMIN])
+  async connected(@Req() req: Request, @Res() res: Response) {
+    if (!creatorAuditConfig()) throw new HttpException('Creator Audit is unavailable.', 404);
+    const { org, user } = req as Request & { org?: { id: string; users: { userId: string; role: string; disabled?: boolean }[] }; user?: { id: string } };
+    const member = org?.users.find(entry => entry.userId === user?.id && !entry.disabled);
+    if (!org?.id || !user?.id || !member || !['ADMIN', 'SUPERADMIN'].includes(member.role)) throw new HttpException('An administrator must start audit work.', 403);
+    if (req.headers['x-audit-organization'] !== org.id) throw new HttpException('Workspace changed. Reload Creator Audit.', 409);
+    let origin: string;
+    try { origin = new URL(process.env.FRONTEND_URL || '').origin; } catch { throw new HttpException('Audit origin unavailable.', 503); }
+    if (req.headers.origin !== origin || req.headers['sec-fetch-site'] === 'cross-site') throw new HttpException('Cross-origin audit writes are forbidden.', 403);
+    if (Buffer.byteLength(JSON.stringify(req.body ?? {})) > 1024) throw new HttpException('Audit request too large.', 413);
+    const task = await this.connectedJobs.start(org.id, user.id, req.body);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(202).send(task);
+  }
 
   @Get('/*')
   @CheckPolicies([AuthorizationActions.Read, Sections.AI])
@@ -34,6 +60,16 @@ export class CreatorAuditController {
       let origin: string;
       try { origin = new URL(process.env.FRONTEND_URL || '').origin; } catch { throw new HttpException('Audit origin unavailable.', 503); }
       if (req.headers.origin !== origin || req.headers['sec-fetch-site'] === 'cross-site') throw new HttpException('Cross-origin audit writes are forbidden.', 403);
+    }
+    if (req.method === 'GET') {
+      let local: unknown;
+      const taskId = /^\/api\/audit\/tasks\/([a-f0-9]{32})$/.exec(path)?.[1];
+      if (path === '/api/audit/tasks/current' && this.connectedJobs.current(org.id)) local = { id: this.connectedJobs.current(org.id) };
+      else if (taskId && this.connectedJobs.owns(taskId, org.id) && !this.connectedJobs.submitted(taskId, org.id)) local = this.connectedJobs.view(taskId, org.id);
+      if (local) {
+        res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('X-Content-Type-Options', 'nosniff'); return res.status(200).send(JSON.stringify(local));
+      }
     }
     const body = req.method === 'POST' ? JSON.stringify(req.body ?? {}) : '';
     if (Buffer.byteLength(body) > 16_384) throw new HttpException('Audit request too large.', 413);
@@ -64,7 +100,15 @@ export class CreatorAuditController {
       } catch { throw new HttpException('Unexpected audit service response.', 502); }
       finally { reader.releaseLock(); }
     }
-    const responseBody = Buffer.concat(chunks).toString('utf8');
+    let responseBody = Buffer.concat(chunks).toString('utf8');
+    const taskId = /^\/api\/audit\/tasks\/([a-f0-9]{32})$/.exec(path)?.[1];
+    if (taskId && this.connectedJobs.owns(taskId, org.id)) {
+      try {
+        const payload = JSON.parse(responseBody);
+        if (['done', 'error'].includes(payload.status)) this.connectedJobs.finished(taskId, org.id);
+        responseBody = JSON.stringify({ ...payload, ...this.connectedJobs.identity(taskId, org.id) });
+      } catch { throw new HttpException('Unexpected audit service response.', 502); }
+    }
     res.setHeader('Content-Type', (expected === 'javascript' ? 'text/javascript' : expected) + '; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
