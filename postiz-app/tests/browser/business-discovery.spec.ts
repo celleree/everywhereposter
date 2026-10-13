@@ -5,9 +5,19 @@ test.skip(process.env.EP_DISCOVERY_BROWSER !== '1', 'Requires the isolated real-
 const region = (page: Page) => page.getByRole('region', { name: 'Business Discovery', exact: true });
 const input = (page: Page) => page.getByRole('textbox', { name: 'Public account username', exact: true });
 const evidence = async (page: Page) => (await page.request.get(`${browserOrigin}/backend-api/__discovery/evidence`)).json();
+async function openDiscovery(page: Page) {
+  const ownerFailure = page.waitForResponse(response => /\/analytics\/discovery-0\?/.test(response.url()) && response.status() === 502);
+  await openApp(page, '/analytics');
+  await ownerFailure;
+  await expect(page.getByRole('button', { name: 'Refresh Channel', exact: true })).toBeVisible();
+}
+
 async function search(page: Page, username: string) {
   await input(page).fill(username);
-  await page.getByRole('button', { name: 'Search public account', exact: true }).click();
+  const button = page.getByRole('button', { name: 'Search public account', exact: true });
+  await expect(button).toBeEnabled();
+  await reachable(button);
+  await button.click();
 }
 async function switchAccount(page: Page, info: TestInfo, index: number) {
   if ((page.viewportSize()?.width || 1440) <= 1025) await page.getByRole('combobox', { name: 'Channels', exact: true }).selectOption(String(index));
@@ -47,7 +57,7 @@ test('Discovery remains usable during owner-insights failure and displays public
 });
 
 test('Discovery shows empty, invalid, unavailable, permission, expiry, rate and upstream states', async ({ page }, info) => {
-  await openApp(page, '/analytics');
+  await openDiscovery(page);
   await search(page, 'emptytarget');
   await expect(region(page).getByText('This account has no public media available.', { exact: true })).toBeVisible();
   await search(page, 'invalid){insights}');
@@ -64,7 +74,7 @@ test('Discovery shows empty, invalid, unavailable, permission, expiry, rate and 
 });
 
 test('Discovery isolates late responses across account switches and starts fresh after reload', async ({ page }, info) => {
-  await openApp(page, '/analytics');
+  await openDiscovery(page);
   await search(page, 'slowtarget');
   await expect(region(page).getByRole('status')).toContainText('Loading public');
   await expect(page.getByRole('button', { name: 'Search public account', exact: true })).toBeDisabled();
