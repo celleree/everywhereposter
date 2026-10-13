@@ -9,7 +9,7 @@ permissions, API-version support, Advanced Access, or real creator usefulness.
 
 The connected path discovers a default 180-day window, at most 300 media items,
 10 pages, 1,900 requests and 120 seconds per collection attempt, with at most two
-retries per request. It freezes a deterministic selection of at most 30 Reels
+attempts (one retry) per request. It freezes a deterministic selection of at most 30 Reels
 before invoking existing media/transcription/visual/analysis/card stages. A smaller
 `analysis_cap` can bound a verification run; it cannot change on resume. Completed
 saved stages are reused only with matching organization/project/account/media

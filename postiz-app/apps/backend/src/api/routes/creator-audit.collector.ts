@@ -106,7 +106,7 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
       if (evidence) {
         evidence.request_count = requests;
         evidence.ledger.push({ attempt: requests, operation: parameters.metric ? 'insights' :
-          parameters.fields.includes('account_type') ? 'profile' : 'metadata', metric: parameters.metric || null, http_status: null, response_version: null });
+          parameters.fields.includes('username') ? 'profile' : 'metadata', metric: parameters.metric || null, http_status: null, response_version: null });
       }
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout>;
@@ -175,11 +175,11 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
   try {
     if (!state.profileDone) {
       const standalone = provider === 'instagram-standalone';
-      const profile = await request(standalone ? 'me' : internalId, { fields: standalone ? 'user_id,username,account_type' : 'id,username,account_type' });
+      const profile = await request(standalone ? 'me' : internalId, { fields: standalone ? 'user_id,username' : 'id,username' });
       if (profile.failure) throw new Stop('error');
       const accountId = standalone ? profile.user_id : profile.id;
       if (accountId !== internalId || (profile.id && !standalone && profile.id !== internalId) ||
-          !['BUSINESS', 'MEDIA_CREATOR', 'CREATOR'].includes(profile.account_type) ||
+          (profile.account_type !== undefined && !['BUSINESS', 'MEDIA_CREATOR', 'CREATOR'].includes(profile.account_type)) ||
           typeof profile.username !== 'string' || !/^[A-Za-z0-9_.]{1,30}$/.test(profile.username) || profile.username.includes(token)) throw invalid();
       state.account.username = profile.username; state.profileDone = true;
       if (evidence) evidence.login_verified = true;
@@ -246,7 +246,7 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
         if (record.metrics[name]) continue;
         if (record.relationship === 'unknown') { record.metrics[name] = measurement(name, 'not_requested', timestamp()); continue; }
         const cached = state.capabilities[name];
-        if (cached === 'unsupported' || cached === 'not_authorized') { record.metrics[name] = measurement(name, cached, timestamp()); continue; }
+        if (cached === 'not_authorized') { record.metrics[name] = measurement(name, cached, timestamp()); continue; }
         const payload = await request(`${record.media_id}/insights`, { metric: name, period: 'lifetime' });
         let status: Status = payload.failure || 'not_returned', value: number | null = null;
         let returnedName: string | null = null, returnedPeriod: string | null = null, unit: string | null = null, definition: string | null = null;
@@ -279,7 +279,9 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
           evidence.metrics[name] = { value, status, returned_metric_name: returnedName, returned_period: returnedPeriod, unit, definition, collector_unit_label: 'count' };
           if (name === 'views' && status !== 'available') throw new Stop('invalid_core_metric');
         }
-        if (status === 'available' || status === 'unsupported' || status === 'not_authorized' || !state.capabilities[name]) state.capabilities[name] = status;
+        // A media-specific unsupported response cannot suppress later media or erase observed support.
+        if (status === 'available' || status === 'not_authorized' ||
+            (status === 'unsupported' && state.capabilities[name] !== 'available') || !state.capabilities[name]) state.capabilities[name] = status;
       }
     }
     reason = state.terminalReason;

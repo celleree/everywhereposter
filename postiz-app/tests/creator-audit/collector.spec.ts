@@ -47,10 +47,15 @@ it('exports immutable sanitized official measurements including real zero and tr
   if (process.env.AUDIT_COLLECTOR_FIXTURE) writeFileSync(process.env.AUDIT_COLLECTOR_FIXTURE, JSON.stringify(result.snapshot, null, 2));
 });
 
-it('uses graph.facebook.com and exact profile id for the existing Instagram provider', async () => {
-  const fetcher = transport();
-  const result = await collect(fetcher, {}, { ...connection, providerIdentifier: 'instagram' });
-  expect(fetcher.mock.calls[0][0]).toContain('https://graph.facebook.com/v25.0/12345?');
+it.each([
+  ['instagram', 'graph.facebook.com', '12345', 'id,username', { id: '12345', username: 'fixture_creator' }],
+  ['instagram-standalone', 'graph.instagram.com', 'me', 'user_id,username', { user_id: '12345', username: 'fixture_creator' }],
+])('uses existing %s profile fields without requiring an account type', async (provider, host, path, fields, response) => {
+  const fetcher = transport([reel()], url => url.pathname === `/v25.0/${path}` ? json(response) : undefined);
+  const result = await collect(fetcher, {}, { ...connection, providerIdentifier: provider as string });
+  const requested = new URL(fetcher.mock.calls[0][0]);
+  expect(requested.origin + requested.pathname).toBe(`https://${host}/v25.0/${path}`);
+  expect(requested.searchParams.get('fields')).toBe(fields);
   expect(result.account).toEqual({ account_id: '12345', username: 'fixture_creator' });
 });
 
@@ -66,7 +71,7 @@ it('ignores arbitrary paging.next URLs, uses opaque after on its fixed endpoint,
 });
 
 it.each([
-  { user_id: '999' }, { username: 'bad/name' }, { account_type: 'PERSONAL' }, { account_type: undefined },
+  { user_id: '999' }, { username: 'bad/name' }, { account_type: 'PERSONAL' }, { account_type: null },
 ])('fails profile contradiction/professional probe before metadata or metrics: %j', async change => {
   const fetcher = transport([], url => url.pathname.endsWith('/me') ? json({ ...profile, ...change }) : undefined);
   await expect(collect(fetcher)).rejects.toThrow('instagram_audit_invalid_identity_or_response');
@@ -125,16 +130,28 @@ it('accepts Meta fbcdn URLs only as server assets and redacts credential text fr
   expect(result.assets).toEqual([{ media_id: '100', url: 'https://scontent.fbcdn.net/a.mp4', caption: '[redacted]' }]);
 });
 
-it.each(['unsupported', 'not_authorized'])('caches %s metrics across records without erasing views', async status => {
+it.each(['unsupported', 'not_authorized'])('preserves %s metric failures without erasing views', async status => {
   const fetcher = transport([reel(), reel('101')], url => url.searchParams.get('metric') === 'reach' ?
     json({ error: { code: status === 'unsupported' ? 100 : 200, message: `secret=${connection.token}` } }, 400) : undefined);
   const result = await collect(fetcher);
-  expect(calls(fetcher, 'reach')).toHaveLength(1);
+  expect(calls(fetcher, 'reach')).toHaveLength(status === 'unsupported' ? 2 : 1);
   for (const record of result.snapshot.records) {
     expect(record.metrics.views).toMatchObject({ value: 0, status: 'available' });
     expect(record.metrics.reach).toMatchObject({ value: null, status });
   }
   expect(JSON.stringify(result)).not.toContain(connection.token);
+});
+
+it.each(['100', '101'])('keeps unsupported reach on media %s from suppressing supported media', async failingId => {
+  const fetcher = transport([reel(), reel('101')], url => url.pathname === `/v25.0/${failingId}/insights` &&
+    url.searchParams.get('metric') === 'reach' ? json({ error: { code: 100 } }, 400) : undefined);
+  const result = await collect(fetcher);
+  expect(calls(fetcher, 'reach')).toHaveLength(2);
+  for (const record of result.snapshot.records) {
+    expect(record.metrics.reach).toMatchObject(record.media_id === failingId ?
+      { value: null, status: 'unsupported' } : { value: 10, status: 'available' });
+  }
+  expect(result.snapshot.capabilities.reach).toBe('available');
 });
 
 it.each([{}, { value: -1 }, { value: '10' }, { value: null }])('keeps missing/invalid values null instead of assuming zero: %j', async value => {

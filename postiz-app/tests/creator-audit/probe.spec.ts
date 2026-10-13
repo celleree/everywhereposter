@@ -15,6 +15,23 @@ function transport(override?: (url: URL) => Response | undefined) {
   });
 }
 const probe = (fetcher: any, targetMediaId?: string) => runInstagramCapabilityProbe(connection, 'run', { fetcher, targetMediaId });
+it.each([
+  ['instagram', '12345', 'id,username', { id: '12345', username: 'fixture' }],
+  ['instagram-standalone', 'me', 'user_id,username', { user_id: '12345', username: 'fixture' }],
+])('verifies %s profile identity without an account type and rejects a returned personal type', async (provider, path, fields, response) => {
+  const conn = { ...connection, providerIdentifier: provider as string };
+  const fetcher = transport(url => url.pathname === `/v25.0/${path}` ? json(response) : undefined);
+  const result = await runInstagramCapabilityProbe(conn, 'run', { fetcher });
+  expect(result).toMatchObject({ status: 'complete', login_verified: true, request_count: 8 });
+  expect(result.ledger[0].operation).toBe('profile');
+  expect(new URL(fetcher.mock.calls[0][0]).searchParams.get('fields')).toBe(fields);
+  for (const change of [{ account_type: 'PERSONAL' }, provider === 'instagram' ? { id: '999' } : { user_id: '999' }]) {
+    const invalidProfile = transport(url => url.pathname === `/v25.0/${path}` ? json({ ...response as object, ...change }) : undefined);
+    const stopped = await runInstagramCapabilityProbe(conn, 'run', { fetcher: invalidProfile });
+    expect(stopped).toMatchObject({ status: 'stopped', stop_reason: 'invalid_response', login_verified: false, request_count: 1 });
+    expect(invalidProfile).toHaveBeenCalledTimes(1);
+  }
+});
 it('runs the real default transport with eight attempts, limit=1, no redirects or pagination and sanitized evidence', async () => {
   const fetcher = transport(), native = jest.spyOn(globalThis, 'fetch').mockImplementation(fetcher);
   try {
