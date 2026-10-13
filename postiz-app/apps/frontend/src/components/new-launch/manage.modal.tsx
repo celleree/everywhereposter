@@ -1547,7 +1547,7 @@ export const ManageModal: FC<
                   </>
                 )}
 
-                {current !== 'global' && (
+                {current !== 'global' && !(isPublishedManagementView && existingIntegration?.identifier === 'facebook') && (
                   <ComposerSection
                     step={isPublishedManagementView ? undefined : '5'}
                     title={
