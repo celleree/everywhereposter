@@ -191,7 +191,7 @@ export class FfmpegVideoEditorService {
     input: AnalyzeTalkingHeadVideoInput
   ): Promise<VideoEditDecisionListV1> {
     try {
-      if (!Object.hasOwn(PACING_SETTINGS, input.pacingPreset)) {
+      if (!Object.prototype.hasOwnProperty.call(PACING_SETTINGS, input.pacingPreset)) {
         throw new VideoEditDecisionError('INVALID_EDIT_DECISIONS', 'Unknown pacing preset.');
       }
       await this.assertLocalMp4(input.inputPath);

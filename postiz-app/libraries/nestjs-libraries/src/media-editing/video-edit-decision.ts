@@ -70,7 +70,7 @@ export const buildVideoEditDecisionList = (input: {
   transcription?: VideoEditDecisionListV1['source']['transcription'];
   detectedSilence: SourceTimeRange[];
 }): VideoEditDecisionListV1 => {
-  if (!Object.hasOwn(PACING_SETTINGS, input.pacingPreset) || !input.mediaId || !Number.isInteger(input.durationMs) || input.durationMs <= 0) invalid();
+  if (!Object.prototype.hasOwnProperty.call(PACING_SETTINGS, input.pacingPreset) || !input.mediaId || !Number.isInteger(input.durationMs) || input.durationMs <= 0) invalid();
   const settings = PACING_SETTINGS[input.pacingPreset];
   const cuts = normalizeRanges(input.detectedSilence, input.durationMs)
     .filter((r) => r.sourceEndMs - r.sourceStartMs >= settings.minimumSilenceMs)
@@ -104,7 +104,7 @@ export const buildVideoEditDecisionList = (input: {
 
 export function assertValidVideoEditDecisionList(list: VideoEditDecisionListV1): void {
   if (!list || list.schemaVersion !== 1 || list.strategy !== 'talking-head-dead-air-v1' ||
-      !Object.hasOwn(PACING_SETTINGS, list.pacingPreset) || !list.source?.mediaId ||
+      !Object.prototype.hasOwnProperty.call(PACING_SETTINGS, list.pacingPreset) || !list.source?.mediaId ||
       !Number.isInteger(list.source.durationMs) || list.source.durationMs <= 0 ||
       !Array.isArray(list.decisions) || !list.decisions.length || list.decisions.length > MAX_EDIT_SEGMENTS ||
       !list.tracks || Object.keys(list.tracks).length !== 4 ||
