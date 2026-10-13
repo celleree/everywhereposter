@@ -11,7 +11,7 @@ async function search(page: Page, username: string) {
 }
 async function switchAccount(page: Page, info: TestInfo, index: number) {
   if ((page.viewportSize()?.width || 1440) <= 1025) await page.getByRole('combobox', { name: 'Channels', exact: true }).selectOption(String(index));
-  else await page.getByRole('button', { name: index ? 'Discovery actor two' : 'Discovery actor one', exact: true }).click();
+  else await page.getByRole('button', { name: index ? /Discovery actor two/ : /Discovery actor one/ }).click();
 }
 test.beforeEach(async ({ page }) => {
   expect((await page.request.post(`${browserOrigin}/backend-api/__discovery/reset`)).ok()).toBe(true);
@@ -59,6 +59,7 @@ test('Discovery shows empty, invalid, unavailable, permission, expiry, rate and 
   }
   await page.setViewportSize({ width: 320, height: 740 });
   await noHorizontalOverflow(page);
+  expect((await input(page).boundingBox())!.width).toBeGreaterThan(200);
   await capture(page, info, 'discovery-errors-narrow');
 });
 
@@ -67,6 +68,7 @@ test('Discovery isolates late responses across account switches and starts fresh
   await search(page, 'slowtarget');
   await expect(region(page).getByRole('status')).toContainText('Loading public');
   await expect(page.getByRole('button', { name: 'Search public account', exact: true })).toBeDisabled();
+  await expect.poll(async () => (await evidence(page)).calls.some((call: any) => call.fields.includes('username(slowtarget)'))).toBe(true);
   await switchAccount(page, info, 1);
   await expect(input(page)).toHaveValue('');
   await search(page, 'secondtarget');

@@ -100,7 +100,7 @@ export function BusinessDiscovery({
         public results are separate from your private owner insights. They do
         not establish ownership or permission to reuse content.
       </p>
-      <form onSubmit={submit} className="flex flex-wrap gap-[12px] items-end">
+      <form onSubmit={submit} className="flex flex-wrap gap-[12px] items-end mobile:flex-col mobile:items-stretch">
         <label
           className="flex min-w-0 flex-1 flex-col gap-[6px]"
           htmlFor="discovery-username"
