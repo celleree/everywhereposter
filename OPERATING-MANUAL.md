@@ -159,6 +159,67 @@ Explain:
 - Public-domain/local-Docker-DB guardrail must stay respected.
 - Managed PostgreSQL is preferred before onboarding real users.
 
+### Schema preparation and application startup
+
+Routine startup (`start-postiz.sh`, package `pm2`/`pm2-run`, and service
+`start` scripts) never runs Prisma schema synchronization. Application data
+writes still occur normally; this is not a read-only database connection.
+The database must already be prepared for the selected application version.
+`SKIP_PRISMA_DB_PUSH` and `RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE` are retained in
+existing Compose configuration for compatibility but no longer affect startup.
+The public-domain/local-Docker-database refusal remains active; its deliberate
+`ALLOW_PUBLIC_DOMAIN_WITH_LOCAL_DB=true` override does not enable schema writes.
+
+The supported release procedure remains `scripts/deploy-production.sh` via
+the [manual production workflow](docs/GITHUB-HOSTED-DEPLOYMENT.md). It uses the
+exact full-SHA image and explicitly runs the following operator action before
+recreating only `postiz` (reference only; requires release/migration approval):
+
+```bash
+docker compose run --rm --no-deps --entrypoint /bin/sh postiz -lc \
+  'cd /app && pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma'
+```
+
+This bypasses the application entrypoint and applies checked-in migrations;
+ordinary restart/recreation does neither. The deployment script does not take
+or validate a backup. Before an approved schema operation:
+
+1. Confirm the intended database host/name without printing credentials,
+   exact target image/SHA, server checkout/config revision (the startup script
+   is bind-mounted), migration history/status, and old/new app compatibility.
+2. Take a fresh backup of that actual target with restricted permissions and
+   protected storage. Record completion, nonempty size, checksum, and a
+   successful restore/schema/data check in an isolated database. The existing
+   `scripts/backup-postgres.sh` dumps only bundled `postiz-postgres` /
+   `postiz-db-local`; it does not back up a managed `DATABASE_URL` or verify
+   restoration. Use the target's approved backup procedure; protect the dump
+   with a restrictive umask and never commit it.
+3. Review pending SQL and recovery expectations. Empty local/test databases
+   need all checked-in migrations applied explicitly before startup. Existing
+   databases without migration history need a separately reviewed baseline
+   plan: only resolve `20260808000000_existing_schema_baseline` as applied
+   after verifying its schema already exists and the backup is valid. Never
+   resolve it on an empty database or mark unapplied feature migrations done.
+4. After migration, use the same image's `prisma migrate status` with the schema
+   path above, inspect migration results, and verify representative preserved
+   data. Then verify exact runtime image, healthy container with zero restarts,
+   public readiness, and affected app behavior through the existing workflow.
+
+Explicit `pnpm run prisma-db-push` remains accessible from `postiz-app/` for
+deliberate disposable local schema work. It includes `--accept-data-loss`;
+it is not the supported production migration procedure. Prisma client
+generation during installation/build does not change database schema.
+
+An image rollback does not undo migrations. Retain the previous runtime image
+and verified database backup; use an old image only after confirming it can
+operate against the current schema. The normal rollback deployment also runs
+`migrate deploy`. A failed migration can leave partial database changes even
+when the previous app container is still running: stop, inspect the recorded
+state, and obtain a separate recovery approval before retrying, migration
+repair, or restoring a backup. Restore plans must account for intervening data
+writes and downtime. No automatic down migration, reset, volume change, or
+destructive restore is part of startup or this change.
+
 ## Server And Environment Notes
 
 - Usual live repo path: /home/arund/publish-everywhere-git
