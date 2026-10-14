@@ -1,5 +1,5 @@
 'use client';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useUser } from '../layout/user.context';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
@@ -8,6 +8,22 @@ import { ResumableTransfers, Transfer } from './resumable-transfer';
 
 const TransfersContext = createContext<ResumableTransfers | null>(null);
 export const useResumableTransfers = () => useContext(TransfersContext);
+
+function RetryUpload({ transfers, item }: { transfers: ResumableTransfers; item: Transfer }) {
+  const input = useRef<HTMLInputElement>(null);
+  return <>
+    <button type="button" className="min-h-[44px] px-[8px]" onClick={() => {
+      if (transfers.hasFile(item.id)) void transfers.resume(item.id).catch(() => {});
+      else input.current?.click();
+    }}>Retry upload</button>
+    {!transfers.hasFile(item.id) && <p className="text-[12px]">Select the original video to resume saved progress.</p>}
+    <input hidden ref={input} aria-label={`Resume ${item.name}`} type="file" accept=".mp4,.mov,video/mp4,video/quicktime" onChange={event => {
+      const file = event.target.files?.[0];
+      if (file) void transfers.resume(item.id, file).catch(() => {});
+      event.target.value = '';
+    }} />
+  </>;
+}
 
 export function ResumableUploadProvider({ children }: { children: React.ReactNode }) {
   const fetch = useFetch();
@@ -64,7 +80,7 @@ export function ResumableUploadProvider({ children }: { children: React.ReactNod
         {item.quickError && <p role="alert">{item.quickError}</p>}
         {item.state === 'Transfer complete' ? <p>Safe to leave. Your video is saved in Media Library.</p> : <>
           {item.error && <p role="alert">{item.error}</p>}
-        {item.state === 'Uploading' ? <button className="min-h-[44px] px-[8px]" onClick={() => transfers.pause(item.id)}>Pause</button> : <label className="block min-h-[44px]">Resume with original video<input aria-label={`Resume ${item.name}`} type="file" accept=".mp4,.mov,video/mp4,video/quicktime" onChange={event => { const file = event.target.files?.[0]; if (file) void transfers.resume(item.id, file).catch(() => {}); event.target.value = ''; }} /></label>}
+        {item.state === 'Uploading' ? <button className="min-h-[44px] px-[8px]" onClick={() => transfers.pause(item.id)}>Pause</button> : <RetryUpload transfers={transfers} item={item} />}
           <button className="min-h-[44px] px-[8px]" onClick={() => void transfers.cancel(item.id).catch(error => setActionError(error.message))}>Cancel upload</button>
         </>}
       </div>)}

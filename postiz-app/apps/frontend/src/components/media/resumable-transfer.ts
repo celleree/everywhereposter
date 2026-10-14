@@ -128,7 +128,9 @@ export class ResumableTransfers {
     void this.run(id);
     return receipt;
   }
+  hasFile(id: string) { return this.files.has(id); }
   async resume(id: string, file?: File) {
+    if (this.disposed || this.controllers.has(id) || !this.items.has(id) || this.items.get(id)?.state === 'Transfer complete') return;
     if (file) this.files.set(id, file);
     if (!this.files.has(id)) throw new Error('Select the original video to resume.');
     await this.run(id);

@@ -42,9 +42,12 @@ it('resumes acknowledged parts after interruption without a second session', asy
   const f = fixture(); f.fail(1); const original = file(); const receipt = f.transfers.start(original);
   await waitFor(() => expect(current(f).state).toBe('Resume needed'));
   expect(current(f).sent).toBe(CHUNK_BYTES);
-  await f.transfers.resume(current(f).id, original); await receipt;
+  expect(f.transfers.hasFile(current(f).id)).toBe(true);
+  await Promise.all([f.transfers.resume(current(f).id), f.transfers.resume(current(f).id, file(CHUNK_BYTES + 4, 2))]); await receipt;
   expect(f.requests.filter(request => request.options?.method === 'POST' && request.url === '/media/uploads')).toHaveLength(1);
   expect(f.requests.filter(request => request.url.endsWith('/parts/0'))).toHaveLength(1);
+  expect(f.requests.filter(request => request.url.endsWith('/parts/1'))).toHaveLength(2);
+  expect(f.transfers.hasFile(current(f).id)).toBe(false);
 });
 it('rejects same metadata and uploaded prefix with a different tail', async () => {
   const f = fixture(); f.fail(1); f.transfers.start(file());
@@ -59,6 +62,7 @@ it('rediscovers server sessions after browser termination and requires the origi
   f.transfers.dispose();
   const returned = new ResumableTransfers((f.transfers as any).fetch, f.changed, 'org'); await returned.refresh();
   expect(current(f).state).toBe('Resume needed');
+  expect(returned.hasFile('server-session')).toBe(false);
   await expect(returned.resume('server-session')).rejects.toThrow('original video');
   await returned.resume('server-session', file()); expect(current(f).state).toBe('Transfer complete');
 });
