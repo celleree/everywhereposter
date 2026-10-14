@@ -182,3 +182,13 @@ it('routes completed resumable media through one server consent and fails closed
   session.quickIntent = undefined; disabled = true;
   await expect(transfers.tryCompletedQuickUpload('media', body)).rejects.toThrow('disabled'); expect(enrollments).toBe(1);
 });
+
+it.each([['empty.mp4', 0], ['wrong.txt', 4]])('allows original-file reselection after rejecting %s', async (name, size) => {
+  const f = fixture(); f.fail(1); f.transfers.start(file());
+  await waitFor(() => expect(current(f).state).toBe('Resume needed'));
+  await f.transfers.resume(current(f).id, new NodeFile([Buffer.alloc(size)], name) as unknown as File);
+  expect(current(f).error).toContain('Choose an MP4 or MOV');
+  expect(f.transfers.hasFile(current(f).id)).toBe(false);
+  await f.transfers.resume(current(f).id, file());
+  expect(current(f).state).toBe('Transfer complete');
+});

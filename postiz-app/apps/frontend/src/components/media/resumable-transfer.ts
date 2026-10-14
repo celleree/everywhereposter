@@ -167,7 +167,10 @@ export class ResumableTransfers {
     this.controllers.set(id, controller);
     this.update({ ...item, state: 'Uploading', error: undefined });
     try {
-      if (!/\.(mp4|mov)$/i.test(file.name) || !file.size) throw new Error('Choose an MP4 or MOV video.');
+      if (!/\.(mp4|mov)$/i.test(file.name) || !file.size) {
+        this.files.delete(id);
+        throw new Error('Choose an MP4 or MOV video.');
+      }
       const manifest = await fileManifest(file, controller.signal);
       let session: UploadSession;
       if (item.session) {
