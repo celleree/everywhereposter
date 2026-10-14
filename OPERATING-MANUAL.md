@@ -296,3 +296,9 @@ List known stale/conflicting docs:
 - Add analytics metric definitions.
 - Add smoke tests for fragile flows.
 - Resolve dirty-tree protocol.
+
+### Optional Spotlight debugging
+
+Spotlight runs only with the `debug` Compose profile: `docker compose --profile debug up -d spotlight`. Enable the commented Spotlight SDK settings only when using that debug service. It is excluded from the normal application stack so its retained debug events do not consume the fixed production RAM budget.
+
+Adding a profile does not stop an existing Spotlight container. Removing a running production debug service remains part of an explicitly approved deployment/configuration change; the full required-service and OS memory budget still needs validation.
