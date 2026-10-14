@@ -1,3 +1,3 @@
-const nxPreset = require('@nx/jest/preset').default;
+const { defaults } = require('ts-jest/presets');
 
-module.exports = { ...nxPreset };
+module.exports = { ...defaults, testEnvironment: 'node' };
