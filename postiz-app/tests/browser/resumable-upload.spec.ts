@@ -77,6 +77,9 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
     return route.fulfill({ json: session });
   });
   await page.route('**/backend-api/integrations/list', route => route.fulfill({ json: { integrations: [{ id: 'fixture', name: 'Fixture account', identifier: 'x', type: 'social', editor: 'normal', additionalSettings: '[]', time: [] }] } }));
+  // Bootstrap the client route before holding a transfer; navigation assertions
+  // measure transfer persistence, not a cold development chunk download.
+  await openApp(page, '/settings'); await page.waitForLoadState('load');
   await openApp(page, '/media');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('complementary', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);
