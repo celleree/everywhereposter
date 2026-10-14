@@ -79,6 +79,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify default Jest configuration loads
+        run: |
+          node -e "require('./jest.preset.js')"
+          pnpm test --showConfig > /dev/null
+
+      - name: Test default Jest entrypoint
+        run: pnpm test --runInBand --runTestsByPath tests/sentry/initialize.sentry.spec.ts
+
       - name: Test packaged runtime service supervision
         working-directory: .
         run: node --test scripts/test-start-postiz.mjs
