@@ -80,6 +80,11 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   // Bootstrap the client route before holding a transfer; navigation assertions
   // measure transfer persistence, not a cold development chunk download.
   await openApp(page, '/settings'); await page.waitForLoadState('load');
+  const reloadApp = async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    // Match openApp's bootstrap budget before asserting restored transfer state.
+    await expect(page.locator('.mobile-app-shell')).toBeVisible({ timeout: 60_000 });
+  };
   await openApp(page, '/media');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('complementary', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);
@@ -92,8 +97,8 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   } else await page.locator('#left-menu').getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page).toHaveURL(/settings/); continueTransfer = true; release!();
   await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
-  intent.status = 'PUBLISHING'; session.quickIntent = intent; await page.reload();
+  intent.status = 'PUBLISHING'; session.quickIntent = intent; await reloadApp();
   await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Publishing');
-  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }]; session.quickIntent = intent; await page.reload();
+  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }]; session.quickIntent = intent; await reloadApp();
   await expect(tray.getByText('Fixture account: Published')).toBeVisible();
 });
