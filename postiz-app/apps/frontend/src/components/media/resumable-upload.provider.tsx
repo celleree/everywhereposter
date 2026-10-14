@@ -36,8 +36,8 @@ export function ResumableUploadProvider({ children }: { children: React.ReactNod
     // Snapshot explicit settings. The server skips destinations needing additional choices.
     await transfers.optIntoQuickUpload(item.id, { confirmNoIndividualReview: true, destinations: accounts.map(account => ({ id: account.id, settings: { ...(account.identifier === 'x' ? { who_can_reply_post: 'everyone' } : account.identifier.startsWith('instagram') ? { post_type: 'reel', post_type_explicit: false } : {}), ...settings.get(account.id) } })) });
   };
-  const problem = items.find(item => item.error || item.quickError);
-  const visibleError = actionError || problem?.error || problem?.quickError;
+  const problem = [...items].reverse().find(item => item.error || item.quickError);
+  const visibleError = problem ? `${problem.name}: ${problem.error || problem.quickError}` : actionError;
   const active = items.find(item => item.state !== 'Transfer complete');
   return <TransfersContext.Provider value={transfers}>
     {children}

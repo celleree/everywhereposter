@@ -132,14 +132,18 @@ test('Resumable upload: restored completed transfers do not cover the phone pick
 test('Resumable upload: admission errors remain visible with transfer details closed', async ({ page }) => {
   let creations = 0;
   await page.route('**/backend-api/media/uploads**', route => {
-    if (route.request().method() === 'GET') return route.fulfill({ json: { sessions: [] } });
+    if (route.request().method() === 'GET') return route.fulfill({ json: { sessions: [{
+      id: 'older-upload', originalName: 'older.mp4', byteSize: 1000, status: 'UPLOADING',
+      parts: [], manifest: [], error: 'Older connection failed.',
+    }] } });
     creations++;
     return route.fulfill({ status: 409, json: { message: 'Daily upload session quota reached.' } });
   });
   await openApp(page, '/media');
+  await expect(page.getByRole('complementary', { name: 'Video transfers' }).getByRole('alert')).toHaveText('older.mp4: Older connection failed.');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quota.mp4', mimeType: 'video/mp4', buffer: readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')) });
   const tray = page.getByRole('complementary', { name: 'Video transfers' });
-  await expect(tray.getByRole('alert')).toHaveText('Daily upload session quota reached.');
+  await expect(tray.getByRole('alert')).toHaveText('quota.mp4: Daily upload session quota reached.');
   await expect(tray.getByRole('button', { name: /Show video transfers/ })).toHaveAttribute('aria-expanded', 'false');
   expect(creations).toBe(1);
 });
