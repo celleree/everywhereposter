@@ -59,6 +59,8 @@ it('lists only Instagram connections and starts with the selected id and organiz
   await screen.findByRole('option', { name: 'Creator account' });
   expect(screen.getByRole('option', { name: 'Standalone' })).toBeTruthy();
   expect(screen.queryByRole('option', { name: 'facebook' })).toBeNull();
+  expect(screen.getByText('Accounts must be connected to this workspace before they appear here.')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Connect another Instagram account' }).getAttribute('href')).toBe('/launches');
   fireEvent.change(screen.getByLabelText('Instagram connection'), { target: { value: 'ig-1' } });
   fireEvent.click(screen.getByRole('button', { name: 'Start audit' }));
   await waitFor(() => expect(mockFetch).toHaveBeenCalledWith('/creator-audit/connected', expect.objectContaining({

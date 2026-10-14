@@ -2,6 +2,7 @@ import { CreatorAuditController } from '../../apps/backend/src/api/routes/creato
 import { auditAssertion, auditRouteAllowed, creatorAuditConfig } from '../../apps/backend/src/api/routes/creator-audit.proxy';
 import { AuthMiddleware } from '../../apps/backend/src/services/auth/auth.middleware';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
+import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { verify } from 'jsonwebtoken';
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
@@ -130,6 +131,25 @@ it('actual AuthMiddleware derives allowed membership even when caller requests f
   await rejected(req, 409);
   req.headers['x-audit-organization'] = org;
   await controller.proxy(req, response()); expect(upstream).toHaveBeenCalledTimes(1);
+});
+
+it.each(['ADMIN', 'USER'])('loads an audit document using the real membership projection for %s', async role => {
+  const membership = { userId: actor, disabled: false, role };
+  const findMany = jest.fn(async query => [{ id: org, apiKey: 'fixture', users: [Object.fromEntries(
+    Object.keys(query.include.users.select).map(key => [key, membership[key as keyof typeof membership]]))] }]);
+  const repository = new OrganizationRepository({ model: { organization: { findMany } } } as any, {} as any, {} as any);
+  const middleware = new AuthMiddleware({ getOrgsByUserId: (id: string) => repository.getOrgsByUserId(id) } as any, {} as any);
+  const req = request('GET', '/audit'); delete req.user; delete req.org;
+  delete req.headers['x-audit-organization'];
+  req.headers.auth = AuthService.signJWT({ id: actor, activated: true });
+  const next = jest.fn(); await middleware.use(req, response(), next);
+  expect(next).toHaveBeenCalled();
+  expect(findMany.mock.calls[0][0].include.users.where).toEqual({ userId: actor });
+  upstream.mockResolvedValue(new Response('<html>Saved report fixture</html>', { headers: { 'Content-Type': 'text/html' } }));
+  const res = response(); await controller.proxy(req, res);
+  expect(res.status).toHaveBeenCalledWith(200);
+  const claims: any = verify(upstream.mock.calls[0][1].headers.Authorization.slice(7), secret);
+  expect(claims).toMatchObject({ org, sub: actor, writable: role === 'ADMIN', path: '/audit' });
 });
 
 it('keeps the private snapshot route outside the browser proxy allowlist', async () => {
