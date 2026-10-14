@@ -79,6 +79,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test packaged runtime service supervision
+        working-directory: .
+        run: node --test scripts/test-start-postiz.mjs
+
       - name: Install pinned Chromium and browser system dependencies
         run: |
           pnpm exec playwright install --with-deps chromium

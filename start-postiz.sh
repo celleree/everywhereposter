@@ -99,11 +99,13 @@ BACKEND_PID=$!
 
 wait_for_tcp 127.0.0.1 3000 "Backend" 90
 
-cd /app
-pnpm --filter ./apps/frontend start &
+# Keep each package's working directory and dotenv behavior without resident pnpm wrappers.
+cd /app/apps/frontend
+/app/node_modules/.bin/dotenv -e ../../../.env -- /app/node_modules/.bin/next start -p 4200 &
 FRONTEND_PID=$!
 
-pnpm --filter ./apps/orchestrator start &
+cd /app/apps/orchestrator
+/app/node_modules/.bin/dotenv -e ../../../.env -- node --experimental-require-module ./dist/apps/orchestrator/src/main.js &
 ORCHESTRATOR_PID=$!
 
 cleanup() {
