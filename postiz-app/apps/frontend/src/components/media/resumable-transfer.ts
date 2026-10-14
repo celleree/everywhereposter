@@ -172,7 +172,10 @@ export class ResumableTransfers {
       let session: UploadSession;
       if (item.session) {
         session = await this.request('/' + item.session.id, { signal: controller.signal });
-        if (file.size !== session.byteSize || JSON.stringify(manifest) !== JSON.stringify(session.manifest)) throw new Error('This is not the original file. Select the original video.');
+        if (file.size !== session.byteSize || JSON.stringify(manifest) !== JSON.stringify(session.manifest)) {
+          this.files.delete(id);
+          throw new Error('This is not the original file. Select the original video.');
+        }
       } else {
         this.pendingCreations.add(id);
         session = await this.request('', { method: 'POST', body: JSON.stringify({ organizationId: this.organizationId, clientId: id, originalName: file.name, byteSize: file.size, manifest }), signal: controller.signal });

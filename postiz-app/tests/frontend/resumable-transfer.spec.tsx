@@ -56,6 +56,10 @@ it('rejects same metadata and uploaded prefix with a different tail', async () =
   await f.transfers.resume(current(f).id, file(CHUNK_BYTES + 4, 2));
   expect(current(f).error).toContain('not the original');
   expect(f.requests.filter(request => request.url.includes('/parts/'))).toHaveLength(before);
+  expect(f.transfers.hasFile(current(f).id)).toBe(false);
+  await expect(f.transfers.resume(current(f).id)).rejects.toThrow('original video');
+  await f.transfers.resume(current(f).id, file());
+  expect(current(f).state).toBe('Transfer complete');
 });
 it('rediscovers server sessions after browser termination and requires the original file', async () => {
   const f = fixture(); f.fail(1); f.transfers.start(file()); await waitFor(() => expect(current(f).state).toBe('Resume needed'));
