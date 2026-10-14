@@ -193,7 +193,9 @@ it('retains checkpoint progress and binds resume to cap, connection and organiza
   expect(await jobs.start(org, otherActor, { ...input, resume_task_id: started.id })).toEqual(started);
   await settled(started.id);
   const resumedMeta = upstream.mock.calls.slice(previousCalls).filter(([url]) => new URL(url).origin !== origin);
-  expect(resumedMeta.map(([url]) => new URL(url).searchParams.get('metric'))).toEqual(['shares', 'saved', 'likes', 'comments']);
+  expect(resumedMeta.map(([url]) => new URL(url).searchParams.get('metric'))).toEqual(['shares', 'saved', 'likes', 'comments',
+    'ig_reels_avg_watch_time', 'ig_reels_video_view_total_time', 'reels_skip_rate', 'reposts', 'total_interactions',
+    'follows', 'profile_visits', 'profile_activity', 'facebook_views', 'crossposted_views']);
   const options = receiverCalls()[1][1], body = JSON.parse(options.body);
   expect(body.collect_only).toBeUndefined(); expect(body.snapshot.records[0].metrics.views.value).toBe(0);
   expect(body.snapshot.coverage.partial_reason).toBeNull(); expect(jobs.submitted(started.id, org)).toBe(true);

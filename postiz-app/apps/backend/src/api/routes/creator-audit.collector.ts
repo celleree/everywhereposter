@@ -1,6 +1,6 @@
 // Isolated beta pin: live Meta capability/version support still requires an authorized probe.
+import { CORE_METRICS, EXTRA_METRICS, METRICS, FOLLOWER_FIELD, MetricName, MetricUnit, metricName, metricUnit } from './creator-audit.metrics';
 const API_VERSION = 'v25.0';
-const METRICS = ['views', 'reach', 'shares', 'saved', 'likes', 'comments'] as const;
 const MAX_RECORDS = 300, MAX_PAGES = 10, MAX_REQUESTS = 1900, TIMEOUT_MS = 15000;
 type Status = 'available' | 'not_returned' | 'unsupported' | 'not_authorized' | 'error' | 'not_requested';
 type Reason = 'auth_required' | 'rate_limited' | 'request_budget' | 'time_budget' | 'timeout' | 'error' | 'metadata_limit' | 'page_limit' | 'challenge_required' | 'redirect_blocked' | 'invalid_response' | 'no_owned_reel' | 'invalid_core_metric' | 'not_authorized' | 'response_budget';
@@ -9,9 +9,10 @@ export interface InstagramAuditConnection {
   providerIdentifier: string; token: string;
 }
 interface Measurement {
-  value: number | null; status: Status; unit: 'count'; definition: string;
-  source: 'instagram_media_insights'; api_version: string; observed_at: string;
-  period: 'lifetime'; since: null; until: null;
+  value: number | null; status: Status; unit: MetricUnit | null; definition: string;
+  source: 'instagram_media_insights' | 'instagram_account_metadata'; api_version: string; observed_at: string;
+  period: 'lifetime' | 'snapshot'; since: null; until: null;
+  provider_definition?: string | null;
 }
 interface AuditRecord {
   media_id: string; account_id: string; shortcode: string; permalink: string; published_at: string;
@@ -25,13 +26,14 @@ interface State {
   since: string; until: string; after: string | null; pages: number; discoveryDone: boolean;
   records: AuditRecord[]; assets: Asset[]; capabilities: Record<string, Status>; profileDone: boolean;
   truncated: boolean; terminalReason: Reason | null;
+  accountMetrics?: Record<string, Measurement>;
 }
 // Transient SERVER-only state, including expiring CDN URLs. Never send or log this checkpoint.
 export interface InstagramAuditCheckpoint { version: 1; state: State }
 export interface InstagramAuditOptions {
   fetcher?: typeof fetch; now?: () => Date; checkpoint?: InstagramAuditCheckpoint;
   /** Server-only capability probe; its fixed limits cannot be overridden. */
-  capabilityProbe?: { targetMediaId?: string };
+  capabilityProbe?: { targetMediaId?: string; metrics?: readonly MetricName[] };
 }
 export interface InstagramProbeEvidence {
   requested_version: string; provider: string; request_count: number;
@@ -39,7 +41,7 @@ export interface InstagramProbeEvidence {
   status: 'complete' | 'stopped'; stop_reason: Reason | null;
   login_verified: boolean; primary_owned_reel_verified: boolean; asset_url_present: boolean | null;
   metrics: Record<string, { value: number | null; status: Status; returned_metric_name: string | null; returned_period: string | null;
-    unit: string | null; definition: string | null; collector_unit_label: 'count' }>;
+    unit: string | null; definition: string | null; collector_unit_label: MetricUnit | null }>;
 }
 class Stop extends Error { constructor(readonly reason: Reason) { super(reason); } }
 function invalid() { return new Error('instagram_audit_invalid_identity_or_response'); }
@@ -66,8 +68,9 @@ function trustedAsset(value: unknown, token: string): string | null {
     return url.protocol === 'https:' && allowed && !url.username && !url.password && !url.hash && !url.port ? url.href : null;
   } catch { return null; }
 }
-function measurement(name: string, status: Status, observedAt: string, value: number | null = null): Measurement {
-  return { value, status, unit: 'count',
+function measurement(name: string, status: Status, observedAt: string, value: number | null = null,
+  unit: MetricUnit | null = metricUnit(name, null), definition: string | null = null): Measurement {
+  return { value, status, unit, provider_definition: definition,
     definition: `instagram-${name.replace(/_/g, '-')}-lifetime-${API_VERSION}`,
     source: 'instagram_media_insights', api_version: API_VERSION, observed_at: observedAt,
     period: 'lifetime', since: null, until: null };
@@ -79,7 +82,11 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
   if (!safeLabel(id) || !safeLabel(organizationId) || !numericId(internalId) || !safeLabel(runId) ||
       !['instagram', 'instagram-standalone'].includes(provider) || typeof token !== 'string' || !token || /[\r\n]/.test(token)) throw invalid();
   const probe = options.capabilityProbe;
-  if (probe && (options.checkpoint || (probe.targetMediaId !== undefined && !numericId(probe.targetMediaId)))) throw invalid();
+  if (probe && (options.checkpoint || (probe.targetMediaId !== undefined && !numericId(probe.targetMediaId)) ||
+      (probe.metrics && (!probe.metrics.length || probe.metrics.length > 6 || new Set(probe.metrics).size !== probe.metrics.length ||
+        probe.metrics.some(name => !METRICS.includes(name)))))) throw invalid();
+  const passes = probe ? [probe.metrics || CORE_METRICS] : [CORE_METRICS, EXTRA_METRICS];
+  const requestedMetrics = passes.flat();
   const evidence: InstagramProbeEvidence | undefined = probe ? { requested_version: API_VERSION, provider,
     request_count: 0, ledger: [], status: 'stopped', stop_reason: null, login_verified: false,
     primary_owned_reel_verified: false, asset_url_present: null, metrics: {} } : undefined;
@@ -241,13 +248,26 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
         state.discoveryDone = true;
       } else state.discoveryDone = !hasNext;
     }
-    for (const record of state.records) {
-      for (const name of METRICS) {
+    if (!probe && !state.accountMetrics?.followers_count) {
+      const observed = timestamp();
+      const data = await request(provider === 'instagram' ? internalId : 'me', {
+        fields: (provider === 'instagram' ? 'id,' : 'user_id,') + FOLLOWER_FIELD });
+      const value = data.followers_count;
+      const accountId = provider === 'instagram' ? data.id : data.user_id;
+      const status: Status = data.failure || (accountId !== internalId ? 'error' :
+        typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? 'available' : 'not_returned');
+      state.accountMetrics = { followers_count: { ...measurement('followers_count', status, observed, status === 'available' ? value : null),
+        source: 'instagram_account_metadata', period: 'snapshot', definition: `instagram-followers-count-snapshot-${API_VERSION}` } };
+    }
+    // Finish the core distribution counters across the cohort before optional
+    // metrics consume the existing time/request budget. Resume reuses both.
+    for (const names of passes) for (const record of state.records) {
+      for (const name of names) {
         if (record.metrics[name]) continue;
         if (record.relationship === 'unknown') { record.metrics[name] = measurement(name, 'not_requested', timestamp()); continue; }
         const cached = state.capabilities[name];
         if (cached === 'not_authorized') { record.metrics[name] = measurement(name, cached, timestamp()); continue; }
-        const payload = await request(`${record.media_id}/insights`, { metric: name, period: 'lifetime' });
+        const payload = await request(`${record.media_id}/insights`, { metric: metricName(name), period: 'lifetime' });
         let status: Status = payload.failure || 'not_returned', value: number | null = null;
         let returnedName: string | null = null, returnedPeriod: string | null = null, unit: string | null = null, definition: string | null = null;
         if (!payload.failure) {
@@ -257,7 +277,7 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
             if (rows.length > 1) status = 'error';
             else if (rows.length === 1) {
               const row = rows[0];
-              if (evidence) {
+              {
                 returnedName = row.name;
                 returnedPeriod = ['lifetime', 'day', 'week', 'days_28', 'total_over_range'].includes(row.period) ? row.period : null;
                 // Only provider-returned metadata can establish a unit or definition.
@@ -269,14 +289,19 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
               const values = row.values;
               const observed = row.total_value?.value ?? (Array.isArray(values) && values.length === 1 ? values[0]?.value : undefined);
               if (row.period && row.period !== 'lifetime') status = 'error';
-              else if (typeof observed === 'number' && Number.isFinite(observed) && observed >= 0) { value = observed; status = 'available'; }
+              else if (typeof observed === 'number' && Number.isFinite(observed) && observed >= 0) {
+                const resolvedUnit = metricUnit(name, { unit, description: definition });
+                if (!resolvedUnit || (name === 'reels_skip_rate' && observed > (resolvedUnit === 'ratio' ? 1 : 100))) status = 'error';
+                else { value = observed; status = 'available'; }
+              }
               else status = 'not_returned';
             }
           }
         }
-        record.metrics[name] = measurement(name, status, timestamp(), value);
+        const resolvedUnit = metricUnit(name, { unit, description: definition });
+        record.metrics[name] = measurement(name, status, timestamp(), value, resolvedUnit, definition);
         if (evidence) {
-          evidence.metrics[name] = { value, status, returned_metric_name: returnedName, returned_period: returnedPeriod, unit, definition, collector_unit_label: 'count' };
+          evidence.metrics[name] = { value, status, returned_metric_name: returnedName, returned_period: returnedPeriod, unit, definition, collector_unit_label: resolvedUnit };
           if (name === 'views' && status !== 'available') throw new Stop('invalid_core_metric');
         }
         // A media-specific unsupported response cannot suppress later media or erase observed support.
@@ -290,19 +315,20 @@ export async function collectInstagramAudit(connection: InstagramAuditConnection
     reason = error instanceof Stop ? error.reason : 'invalid_response';
   }
   const records = state.records.map(record => ({ ...record, metrics: Object.fromEntries(
-    METRICS.map(name => [name, record.metrics[name] || measurement(name, 'not_requested', state.collectedAt)])) }));
-  const incomplete = !state.discoveryDone || state.records.some(record => METRICS.some(name => !record.metrics[name]));
+    requestedMetrics.map(name => [name, record.metrics[name] || measurement(name, 'not_requested', state.collectedAt)])) }));
+  const incomplete = !state.discoveryDone || state.records.some(record => requestedMetrics.some(name => !record.metrics[name]));
   const collectedAt = new Date(Math.max(Date.parse(timestamp()), Date.parse(state.until),
     ...records.flatMap(record => Object.values(record.metrics).map(metric => Date.parse(metric.observed_at))))).toISOString();
   const snapshot = freeze({ schema_version: 1, organization_id: organizationId, connection_id: id, provider,
     account_id: internalId, run_id: runId, collected_at: collectedAt, api_version: API_VERSION,
     window: { since: state.since, until: state.until }, coverage: { discovered: records.length, truncated: state.truncated || incomplete, partial_reason: reason },
-    capabilities: { ...state.capabilities, ig_reels_avg_watch_time: 'not_requested', ig_reels_video_view_total_time: 'not_requested' }, records });
+    ...(!probe ? { account_metrics: state.accountMetrics || {} } : {}),
+    capabilities: Object.fromEntries(METRICS.map(name => [name, state.capabilities[name] || 'not_requested'])), records });
   if (evidence) {
     evidence.stop_reason = reason;
-    evidence.status = !reason && Object.keys(evidence.metrics).length === METRICS.length ? 'complete' : 'stopped';
-    for (const name of METRICS) evidence.metrics[name] ||= { value: null, status: 'not_requested',
-      returned_metric_name: null, returned_period: null, unit: null, definition: null, collector_unit_label: 'count' };
+    evidence.status = !reason && Object.keys(evidence.metrics).length === requestedMetrics.length ? 'complete' : 'stopped';
+    for (const name of requestedMetrics) evidence.metrics[name] ||= { value: null, status: 'not_requested',
+      returned_metric_name: null, returned_period: null, unit: null, definition: null, collector_unit_label: metricUnit(name, null) };
   }
   return { ...(evidence ? { probeEvidence: freeze(evidence) } : {}), snapshot, account: freeze(copy(state.account)), assets: freeze(copy(state.assets)),
     checkpoint: freeze({ version: 1 as const, state: copy(state) }) };
