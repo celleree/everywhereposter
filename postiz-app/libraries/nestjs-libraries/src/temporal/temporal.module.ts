@@ -35,9 +35,12 @@ export const getTemporalModule = (
                 .filter((f) => f.identifier.indexOf('-') === -1)
                 .map((integration) => ({
                   taskQueue: integration.identifier.split('-')[0],
-                  ...(workflowBundle
-                    ? { workflowBundle: workflowBundle as any }
-                    : { workflowsPath: path! }),
+                  // Workflows run on main; provider queues execute their activities only.
+                  ...(integration.identifier === 'main'
+                    ? workflowBundle
+                      ? { workflowBundle: workflowBundle as any }
+                      : { workflowsPath: path! }
+                    : {}),
                   activityClasses: activityClasses!,
                   autoStart: true,
                   ...(integration.maxConcurrentJob
