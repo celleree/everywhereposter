@@ -112,6 +112,7 @@ the outcome is unknown: inspect the media library before deliberately retrying.
 Process admission does not coordinate multiple replicas. Long-running/restartable
 jobs, draft persistence and stronger admission controls require a separate design.
 
-Dependency order: merge the engine PR first only after its gates and human approval;
-retarget/synchronize the API PR onto main, then rerun affected checks and obtain a
-fresh exact-HEAD review. The API PR can be tested/reviewed on its engine base now.
+Dependency order: engine #172, source/storage #174, API #175. Each merge requires
+human approval. After a parent merges, retarget/synchronize the next selected PR
+onto main, rerun affected checks and obtain fresh exact-HEAD review. The waiting
+PRs stay frozen. The API PR can be tested/reviewed on its storage base now.
