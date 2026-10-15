@@ -76,6 +76,8 @@ jest.mock('@gitroom/frontend/components/layout/drop.files', () => ({
     <div className={className}>{children}</div>
   ),
 }));
+// Layout-owned transfers are covered separately from media library behavior.
+jest.mock('@gitroom/frontend/components/media/resumable-upload.provider', () => ({ UploadTransfers: () => null }));
 jest.mock('@uppy/react', () => ({ Dashboard: () => null }));
 jest.mock('@gitroom/react/helpers/video.frame', () => ({
   VideoFrame: () => <div data-testid="video-frame" />,
