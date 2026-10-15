@@ -492,9 +492,10 @@ export class PostsRepository {
   }
 
   updatePost(id: string, postId: string, releaseURL: string) {
-    return this._post.model.post.update({
+    return this._post.model.post.updateMany({
       where: {
         id,
+        state: { not: 'DELETED_REMOTE' },
       },
       data: {
         state: 'PUBLISHED',
@@ -536,12 +537,13 @@ export class PostsRepository {
       where: {
         organizationId: orgId,
         integrationId,
-        deletedAt: null,
+
         OR: or,
       },
       select: {
         id: true,
         parentPostId: true,
+        state: true,
         releaseId: true,
         releaseURL: true,
       },

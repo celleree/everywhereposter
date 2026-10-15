@@ -1,4 +1,4 @@
-import { test, expect, openApp, mobileProject } from './fixtures';
+import { test, expect, openApp, mobileProject, capture } from './fixtures';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -36,7 +36,9 @@ test('Resumable upload: navigation, browser return and safe completion', async (
   await openApp(page, '/media');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'resume.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('complementary', { name: 'Video transfers' });
-  await expect(tray).toBeVisible(); await expect.poll(() => interrupted).toBe(true);
+  await expect(tray).toBeVisible();
+  await tray.getByRole('button', { name: /Show video transfers/ }).click();
+  await expect.poll(() => interrupted).toBe(true);
   await expect(tray.getByText('Safe to leave.', { exact: false })).toHaveCount(0);
   if (mobileProject(info)) {
     await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name: 'More', exact: true }).click();
@@ -46,7 +48,13 @@ test('Resumable upload: navigation, browser return and safe completion', async (
   released = true; resolveChunk!();
   await expect(tray.getByRole('status')).toContainText('Resume needed');
   // Reload ends the layout controller, equivalent to returning with no in-memory File handle.
-  await page.reload(); await expect(tray.getByRole('status')).toContainText('Resume needed');
+  await page.reload();
+  await tray.getByRole('button', { name: /Show video transfers/ }).click();
+  await expect(tray.getByRole('status')).toContainText('Resume needed');
+  await expect(tray.getByText('Select the original video to resume saved progress.')).toBeVisible();
+  const chooser = page.waitForEvent('filechooser');
+  await tray.getByRole('button', { name: 'Retry upload', exact: true }).click();
+  await chooser;
   await page.getByLabel('Resume resume.mp4').setInputFiles({ name: 'resume.mp4', mimeType: 'video/mp4', buffer: bytes });
   await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
   expect(chunks.filter(index => index === 0)).toHaveLength(1);
@@ -54,7 +62,9 @@ test('Resumable upload: navigation, browser return and safe completion', async (
 });
 
 test('Resumable upload: persisted Quick Upload choice before completion survives navigation and return', async ({ page }, info) => {
-  const bytes = Buffer.concat([readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')), Buffer.alloc(17 * 1024 * 1024)]);
+  // Holding the first part establishes unfinished upload consent; multi-part
+  // recovery is covered separately without bloating this navigation trace.
+  const bytes = readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4'));
   let session: any, release: () => void, held = false, continueTransfer = false;
   const hold = new Promise<void>(resolve => { release = resolve; });
   let intent: any;
@@ -88,6 +98,7 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   await openApp(page, '/media');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('complementary', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);
+  await tray.getByRole('button', { name: /Show video transfers/ }).click();
   await tray.getByRole('button', { name: 'Quick Upload without individual review' }).click();
   await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Uploading'); expect(intent.id).toBe('quick-intent');
   await expect(tray.getByText('Safe to leave.', { exact: false })).toHaveCount(0);
@@ -98,7 +109,95 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   await expect(page).toHaveURL(/settings/); continueTransfer = true; release!();
   await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
   intent.status = 'PUBLISHING'; session.quickIntent = intent; await reloadApp();
+  await tray.getByRole('button', { name: /Show video transfers/ }).click();
   await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Publishing');
   intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }]; session.quickIntent = intent; await reloadApp();
+  await tray.getByRole('button', { name: /Show video transfers/ }).click();
   await expect(tray.getByText('Fixture account: Published')).toBeVisible();
+});
+
+test('Resumable upload: restored completed transfers do not cover the phone picker', async ({ page }, info) => {
+  // Account for the viewport consumed by phone browser controls.
+  await page.setViewportSize({ width: 390, height: 580 });
+  await page.route('**/backend-api/media/uploads**', route => route.fulfill({ json: { sessions: [0, 1].map(index => ({
+    id: `completed-${index}`, originalName: `synthetic-${index}.mp4`, byteSize: 128 * 1024 * 1024,
+    status: 'COMPLETE', parts: [], manifest: [], media: { id: `media-${index}` },
+  })) } }));
+  await openApp(page, '/create');
+  const choose = page.getByRole('button', { name: 'Choose files', exact: true });
+  await expect(page.getByRole('complementary', { name: 'Video transfers' })).toBeVisible();
+  await expect.poll(() => choose.evaluate(element => {
+    const r = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!hit && (hit === element || element.contains(hit));
+  })).toBe(true);
+  await capture(page, info, 'compact-transfers-phone-picker');
+  // A real click must reach the picker, even with restored transfer history.
+  const chooser = page.waitForEvent('filechooser');
+  await choose.click({ timeout: 5000 });
+  await chooser;
+  const tray = page.getByRole('complementary', { name: 'Video transfers' });
+  await tray.getByRole('button', { name: /Show video transfers/ }).click();
+  await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toBeVisible();
+  await tray.getByRole('button', { name: 'Hide video transfers' }).click();
+  await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toHaveCount(0);
+});
+
+test('Resumable upload: admission errors remain visible with transfer details closed', async ({ page }) => {
+  let creations = 0;
+  await page.route('**/backend-api/media/uploads**', route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { sessions: [{
+      id: 'older-upload', originalName: 'older.mp4', byteSize: 1000, status: 'UPLOADING',
+      parts: [], manifest: [], error: 'Older connection failed.',
+    }] } });
+    creations++;
+    return route.fulfill({ status: 409, json: { message: 'Daily upload session quota reached.' } });
+  });
+  await openApp(page, '/media');
+  await expect(page.getByRole('complementary', { name: 'Video transfers' }).getByRole('alert')).toHaveText('older.mp4: Older connection failed.');
+  await page.locator('input[type=file]').first().setInputFiles({ name: 'quota.mp4', mimeType: 'video/mp4', buffer: readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')) });
+  const tray = page.getByRole('complementary', { name: 'Video transfers' });
+  await expect(tray.getByRole('alert')).toHaveText('quota.mp4: Daily upload session quota reached.');
+  await expect(tray.getByRole('button', { name: /Show video transfers/ })).toHaveAttribute('aria-expanded', 'false');
+  expect(creations).toBe(1);
+});
+
+test('Resumable upload: one-tap retry reconciles a lost chunk acknowledgement', async ({ page }, info) => {
+  const bytes = Buffer.concat([readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')), Buffer.alloc(9 * 1024 * 1024)]);
+  let session: any, lost = false, resumeReads = 0, completions = 0, creations = 0;
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const chunks: number[] = [];
+  await page.route('**/backend-api/media/uploads**', async route => {
+    const req = route.request(), pathname = new URL(req.url()).pathname;
+    if (pathname === '/backend-api/media/uploads' && req.method() === 'GET') return route.fulfill({ json: { sessions: session ? [session] : [] } });
+    if (pathname === '/backend-api/media/uploads' && req.method() === 'POST') {
+      creations++; session = { ...req.postDataJSON(), id: 'retry-session', status: 'UPLOADING', parts: [] };
+    } else if (pathname.includes('/parts/')) {
+      const index = Number(pathname.split('/').pop()); chunks.push(index);
+      session.parts.push({ index, digest: session.manifest[index], byteSize: Math.min(8 * 1024 * 1024, bytes.length - index * 8 * 1024 * 1024) });
+      if (!lost) { lost = true; return route.abort('failed'); }
+    } else if (pathname.endsWith('/complete')) {
+      completions++; session = { ...session, status: 'COMPLETE', media: { id: 'retry-media', type: 'video', name: 'retry.mp4', path: '/audit-fixtures/retry.mp4' } };
+    } else if (req.method() === 'GET') { resumeReads++; await hold; }
+    return route.fulfill({ json: session });
+  });
+  await openApp(page, '/media');
+  await page.locator('input[type=file]').first().setInputFiles({ name: 'retry.mp4', mimeType: 'video/mp4', buffer: bytes });
+  const tray = page.getByRole('complementary', { name: 'Video transfers' });
+  await tray.getByRole('button', { name: /Show video transfers/ }).click();
+  await expect(tray.getByRole('status')).toContainText('Resume needed');
+  await expect(tray.getByText('Select the original video to resume saved progress.')).toHaveCount(0);
+  await capture(page, info, 'retry-upload');
+  let pickers = 0; page.on('filechooser', () => { pickers++; });
+  // Dispatch two clicks in one turn, before React can hide the retry control.
+  await tray.getByRole('button', { name: 'Retry upload', exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+  await expect.poll(() => resumeReads).toBe(1);
+  await expect(tray.getByRole('button', { name: 'Retry upload', exact: true })).toHaveCount(0);
+  await expect(tray.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  release();
+  await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
+  expect(pickers).toBe(0); expect(creations).toBe(1); expect(completions).toBe(1);
+  expect(chunks).toEqual([0, 1]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

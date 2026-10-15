@@ -1,3 +1,4 @@
+import { suppressTracing } from '@sentry/nestjs';
 import {
   Body,
   Controller,
@@ -63,6 +64,9 @@ export class NoAuthIntegrationsController {
     const integrationProvider =
       this._integrationManager.getSocialIntegration(integration);
 
+    const runProvider = <T>(callback: () => Promise<T>) =>
+      integration === 'instagram' ? suppressTracing(callback) : callback();
+
     const providerError =
       body.error_description || body.errorMessage || body.message || body.error;
     if (providerError) {
@@ -124,14 +128,14 @@ export class NoAuthIntegrationsController {
       // eslint-disable-next-line no-async-promise-executor
     } = await new Promise<AuthTokenDetails>(async (res) => {
       try {
-        const auth = await integrationProvider.authenticate(
+        const auth = await runProvider(() => integrationProvider.authenticate(
           {
             code: body.code,
             codeVerifier: getCodeVerifier,
             refresh: body.refresh,
           },
           details ? JSON.parse(details) : undefined
-        );
+        ));
 
         if (typeof auth === 'string') {
           return res({
@@ -148,15 +152,17 @@ export class NoAuthIntegrationsController {
         if (refresh && integrationProvider.reConnect) {
           console.log('reconnect');
           try {
-            const newAuth = await integrationProvider.reConnect(
+            const newAuth = await runProvider(() => integrationProvider.reConnect!(
               auth.id,
               refresh,
               auth.accessToken
-            );
-            return res({ ...newAuth, refreshToken: body.refresh });
+            ));
+            return res(integration === 'instagram'
+              ? { ...auth, ...newAuth, refreshToken: auth.refreshToken, expiresIn: auth.expiresIn }
+              : { ...newAuth, refreshToken: body.refresh });
           } catch (err: any) {
             return res({
-              error: err.message,
+              error: integration === 'instagram' ? 'Instagram reconnection failed. Retry Facebook Login and select the linked Page.' : err.message,
               accessToken: '',
               id: '',
               name: '',
@@ -169,6 +175,9 @@ export class NoAuthIntegrationsController {
 
         return res(auth);
       } catch (err: any) {
+        if (integration === 'instagram') {
+          return res({ error: 'Instagram authorization failed. Retry Facebook Login and grant the required permissions.', accessToken: '', id: '', name: '', picture: '', username: '', additionalSettings: [] });
+        }
         console.error(`Authentication failed for ${integration}`, err);
         if (err instanceof NotEnoughScopes) {
           return res({
@@ -281,10 +290,10 @@ export class NoAuthIntegrationsController {
 
         if (fetchMethod) {
           // @ts-ignore - dynamic method call
-          pages = await integrationProvider[fetchMethod](accessToken);
+          pages = await runProvider(() => integrationProvider[fetchMethod](accessToken));
         }
       } catch (err) {
-        console.log('Failed to fetch pages:', err);
+        if (integration !== 'instagram') console.log('Failed to fetch pages:', err);
       }
     }
 
@@ -319,8 +328,13 @@ export class NoAuthIntegrationsController {
         })
       : undefined;
 
+    // The Facebook Login Instagram lifecycle retains both User and Page credentials.
+    // Neither belongs in the browser callback response.
+    const publicIntegration = integration === 'instagram'
+      ? (({ token: _token, refreshToken: _refreshToken, customInstanceDetails: _details, ...publicFields }) => publicFields)(createUpdate)
+      : createUpdate;
     return {
-      ...createUpdate,
+      ...publicIntegration,
       onboarding: onboarding === 'true',
       pages,
       ...(returnURL ? { returnURL } : {}),

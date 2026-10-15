@@ -1,3 +1,4 @@
+import { BusinessDiscoveryService } from '@gitroom/nestjs-libraries/analytics/business-discovery.service';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuthController } from '@gitroom/backend/api/routes/auth.controller';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
@@ -87,6 +88,7 @@ const authenticatedController = [
     ...authenticatedController,
   ],
   providers: [
+    BusinessDiscoveryService,
     AuthService,
     StripeService,
     OpenaiService,

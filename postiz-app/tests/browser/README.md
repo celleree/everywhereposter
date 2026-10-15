@@ -31,3 +31,16 @@ The user also authorized a bounded UI repair: Scheduled removes its Channels sid
 Automatic video playback is suppressed in the standalone Upload composer preview subtree, including otherwise hidden general/provider previews. The shared renderer context defaults to allowing its existing autoplay prop outside that subtree. Explicit picker preview videos have manual controls. The attachment regression checks every mounted video, including hidden previews, so a secondary renderer cannot silently auto-play after Add selected media.
 
 Cold development route compilation/hydration is handled as test bootstrap: the runtime prewarms the Settings route used by More, and `openApp` permits up to 60 seconds for the app shell. Product-state and interaction assertions retain the 15-second expect timeout, with zero retries. This is a development readiness budget, not a production performance claim.
+
+
+## Business Discovery
+
+```sh
+EP_DISCOVERY_BROWSER=1 BROWSER_FRONTEND_PORT=4417 BROWSER_API_PORT=4418 pnpm exec playwright test tests/browser/business-discovery.spec.ts
+```
+
+The dedicated adapter mounts the actual Nest AnalyticsController, BusinessDiscoveryService, and throttle guard over HTTP. Only membership/session, integration repository, throttle storage, and external Graph responses are synthetic. It does not claim OAuth/AuthMiddleware, Redis, database, Meta permission, or live account acceptance. It refuses preconfigured service credentials, stores no real data, starts no workers, and never forwards Graph requests. The frontend still uses the guarded offline Next runtime. Test controls reset synthetic fixture state only.
+
+Coverage includes owner-insights HTTP failure, public zero/unknown values, missing previews, empty results, invalid/unavailable/authorization/rate/upstream states, submit-driven search, explicit pagination, account switching and stale response isolation, reload state, keyboard submission, narrow overflow, and real HTTP guard/tenant/input rejection. Browser projects cover desktop Chromium, Pixel Chromium and iPhone WebKit emulation; a 320px viewport is also exercised. These are not physical-device tests. On WSL, `GIO_USE_PROXY_RESOLVER=dummy` may be required for WebKit loopback access.
+
+PR CI explicitly runs all Discovery phone-Chromium cases. Discovery diagnostics use `browser-results/discovery` and `browser-report/discovery` so they preserve the preceding smoke-suite artifacts. Captures include the actual revision and changed-file source hashes.

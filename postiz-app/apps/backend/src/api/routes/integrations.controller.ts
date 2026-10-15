@@ -1,3 +1,4 @@
+import { isExposedProviderFunction } from '@gitroom/nestjs-libraries/integrations/provider-function-exposure';
 import {
   Body,
   Controller,
@@ -367,6 +368,7 @@ export class IntegrationsController {
     @GetOrgFromRequest() org: Organization,
     @Body() body: IntegrationFunctionDto
   ): Promise<any> {
+    if (!isExposedProviderFunction(body.name)) throw new Error('Function is not exposed');
     const getIntegration = await this._integrationService.getIntegrationById(
       org.id,
       body.id
@@ -415,7 +417,10 @@ export class IntegrationsController {
 
           return {
             ...load,
-            results: load.results.map((item: any) => {
+            results: load.results.filter((item: any) => {
+              const post = postsByReleaseId.get(String(item.id || '')) || postsByReleaseURL.get(String(item.url || ''));
+              return post?.state !== 'DELETED_REMOTE';
+            }).map((item: any) => {
               const post =
                 postsByReleaseId.get(String(item.id || '')) ||
                 postsByReleaseURL.get(String(item.url || ''));

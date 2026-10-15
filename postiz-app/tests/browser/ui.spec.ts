@@ -3,9 +3,9 @@ import { test, expect, capture, noHorizontalOverflow, mobileProject, openApp, re
 test('Fixture safety: rejects mutations and unauthenticated identity', async ({ playwright, context }) => {
   const anonymous = await playwright.request.newContext();
   try {
-    expect((await anonymous.get('http://127.0.0.1:4218/user/self')).status()).toBe(401);
-    expect((await anonymous.post('http://127.0.0.1:4218/posts', { data: { content: 'Must never be published' } })).status()).toBe(405);
-    expect((await context.request.get('http://127.0.0.1:4218/user/self')).status()).toBe(200);
+    expect((await anonymous.get(`http://127.0.0.1:${process.env.BROWSER_API_PORT || '4218'}/user/self`)).status()).toBe(401);
+    expect((await anonymous.post(`http://127.0.0.1:${process.env.BROWSER_API_PORT || '4218'}/posts`, { data: { content: 'Must never be published' } })).status()).toBe(405);
+    expect((await context.request.get(`http://127.0.0.1:${process.env.BROWSER_API_PORT || '4218'}/user/self`)).status()).toBe(200);
   } finally { await anonymous.dispose(); }
 });
 

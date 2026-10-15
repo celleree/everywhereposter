@@ -1,3 +1,4 @@
+import { suppressTracing } from '@sentry/nestjs';
 import {
   forwardRef,
   HttpException,
@@ -370,10 +371,12 @@ export class IntegrationService {
       );
     }
 
-    const getIntegrationInformation = await provider.fetchPageInformation(
-      getIntegration.token,
-      data
-    );
+    const fetchPage = () => provider.fetchPageInformation!(getIntegration.token, data);
+    const getIntegrationInformation = getIntegration.providerIdentifier === 'instagram'
+      ? await suppressTracing(fetchPage).catch(() => {
+          throw new HttpException('Instagram Page selection failed. Retry Facebook Login and select the linked Page.', HttpStatus.BAD_REQUEST);
+        })
+      : await fetchPage();
 
     await this.checkForDeletedOnceAndUpdate(
       org,
@@ -387,6 +390,11 @@ export class IntegrationService {
       inBetweenSteps: false,
       token: getIntegrationInformation.access_token,
       profile: getIntegrationInformation.username,
+      ...(getIntegration.providerIdentifier === 'instagram' ? {
+        refreshToken: getIntegration.refreshToken,
+        tokenExpiration: getIntegration.tokenExpiration,
+        refreshNeeded: false,
+      } : {}),
     });
 
     return { success: true };
