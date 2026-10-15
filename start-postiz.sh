@@ -28,14 +28,10 @@ EOF
   exit 1
 fi
 
-if [ "${SKIP_PRISMA_DB_PUSH:-false}" = "true" ]; then
-  echo "Skipping Prisma db push because SKIP_PRISMA_DB_PUSH=true"
-elif [ "$PUBLIC_DOMAIN_MODE" = "true" ] && [ "${RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE:-false}" != "true" ]; then
-  echo "Skipping Prisma db push in public-domain mode. Set RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE=true to run it intentionally."
-else
-  echo "WARNING: Running Prisma db push against DATABASE_URL. Set SKIP_PRISMA_DB_PUSH=true to skip."
-  pnpm run prisma-db-push
-fi
+# Schema preparation is a separate operator action; see OPERATING-MANUAL.md.
+# Legacy SKIP_PRISMA_DB_PUSH / RUN_PRISMA_DB_PUSH_IN_PUBLIC_MODE flags no
+# longer enable schema changes during startup, including local startup.
+echo "Starting against the prepared database; startup does not synchronize the Prisma schema."
 
 wait_for_tcp() {
   HOST="$1"
@@ -99,11 +95,13 @@ BACKEND_PID=$!
 
 wait_for_tcp 127.0.0.1 3000 "Backend" 90
 
-cd /app
-pnpm --filter ./apps/frontend start &
+# Keep each package's working directory and dotenv behavior without resident pnpm wrappers.
+cd /app/apps/frontend
+/app/node_modules/.bin/dotenv -e ../../../.env -- /app/node_modules/.bin/next start -p 4200 &
 FRONTEND_PID=$!
 
-pnpm --filter ./apps/orchestrator start &
+cd /app/apps/orchestrator
+/app/node_modules/.bin/dotenv -e ../../../.env -- node --experimental-require-module ./dist/apps/orchestrator/src/main.js &
 ORCHESTRATOR_PID=$!
 
 cleanup() {

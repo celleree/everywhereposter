@@ -155,6 +155,7 @@ services:
 
   # For Application Monitoring / Debugging
   spotlight:
+    profiles: [debug]
     pull_policy: always
     container_name: spotlight
     ports:

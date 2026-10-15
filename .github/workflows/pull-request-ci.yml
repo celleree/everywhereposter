@@ -96,6 +96,18 @@ jobs:
           DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
         run: pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
 
+      - name: Verify default Jest configuration loads
+        run: |
+          node -e "require('./jest.preset.js')"
+          pnpm test --showConfig > /dev/null
+
+      - name: Test default Jest entrypoint
+        run: pnpm test --runInBand --runTestsByPath tests/sentry/initialize.sentry.spec.ts
+
+      - name: Test packaged runtime service supervision
+        working-directory: .
+        run: node --test scripts/test-start-postiz.mjs
+
       - name: Install pinned Chromium and browser system dependencies
         run: |
           pnpm exec playwright install --with-deps chromium

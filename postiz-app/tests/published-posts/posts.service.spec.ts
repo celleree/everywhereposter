@@ -52,6 +52,7 @@ jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import dayjs from 'dayjs';
 
 const createProvider = (overrides: Record<string, any> = {}) => ({
   identifier: 'x',
@@ -899,5 +900,48 @@ describe('opt-in durable submission routing and existing provider validation', (
     expect(mapped.submissionId).toBe(body.submissionId);
     expect(mapped.posts[0].value[0].content).toBe('Description');
     expect(mapped.posts[0].settings).toMatchObject({ __type: 'youtube', type: 'private', title: 'Grounded title' });
+  });
+});
+
+describe('posting slot search memory safety', () => {
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-13T07:00:37.500Z'));
+  });
+  afterEach(() => jest.useRealTimers());
+
+  const slotService = (times: number[]) => {
+    const fixture = createService();
+    const findTimes = jest.fn().mockResolvedValue(times);
+    const queryDays = jest.fn().mockImplementation(() => {
+      throw new Error('Unexpected posting-day query');
+    });
+    Object.assign(fixture.integrationService, { findFreeDateTime: findTimes });
+    Object.assign(fixture.postRepository, { getPostsCountsByDates: queryDays });
+    return { ...fixture, findTimes, queryDays };
+  };
+
+  it('resolves repeated empty schedules without starting unbounded day searches', async () => {
+    const { service, queryDays, workflowStart } = slotService([]);
+    const dates = await Promise.all(Array.from({ length: 100 }, () => service.findFreeDateTime('org')));
+    expect(dates).toEqual(Array(100).fill('2026-10-13T07:01:00'));
+    expect(dayjs.utc(dates[0]).isAfter(dayjs.utc())).toBe(true);
+    expect(queryDays).not.toHaveBeenCalled();
+    expect(workflowStart).not.toHaveBeenCalled();
+  });
+
+  it('keeps the earliest configured available time and integration scope', async () => {
+    const { service, findTimes, queryDays } = slotService([600, 540]);
+    queryDays.mockResolvedValue([600, 540]);
+    await expect(service.findFreeDateTime('org', 'integration')).resolves.toBe('2026-10-13T09:00:00');
+    expect(findTimes).toHaveBeenCalledWith('org', 'integration');
+    expect(queryDays).toHaveBeenCalledTimes(1);
+  });
+
+  it('still advances past a day whose configured slots are unavailable', async () => {
+    const { service, queryDays } = slotService([540]);
+    queryDays.mockResolvedValueOnce([]).mockResolvedValueOnce([540]);
+    await expect(service.findFreeDateTime('org')).resolves.toBe('2026-10-14T09:00:00');
+    expect(queryDays).toHaveBeenCalledTimes(2);
+    expect(queryDays.mock.calls[1][2].format('YYYY-MM-DD')).toBe('2026-10-14');
   });
 });

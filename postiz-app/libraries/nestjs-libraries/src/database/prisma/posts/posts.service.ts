@@ -2038,6 +2038,11 @@ export class PostsService {
       orgId,
       integrationId
     );
+    // Channel-less workspaces still need a composer date. With no posting times,
+    // searching successive days can never find a slot and retains a promise chain.
+    if (!findTimes.length) {
+      return dayjs.utc().add(1, 'minute').format('YYYY-MM-DDTHH:mm:00');
+    }
     return this.findFreeDateTimeRecursive(
       orgId,
       findTimes,
