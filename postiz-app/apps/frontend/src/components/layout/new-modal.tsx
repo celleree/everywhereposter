@@ -31,7 +31,7 @@ interface OpenModalInterface {
   classNames?: {
     modal?: string;
   };
-  contentClassName?: 'upload-media-picker' | 'upload-media-preview';
+  contentClassName?: 'upload-media-picker' | 'upload-media-preview' | 'add-channel-modal';
   size?: string | number;
   height?: string | number;
   id?: string;

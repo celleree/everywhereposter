@@ -39,7 +39,7 @@
     "postinstall": "pnpm run prisma-generate",
     "test": "jest --coverage --detectOpenHandles --reporters=default --reporters=jest-junit",
     "test:browser": "playwright test",
-    "test:browser:ci": "playwright test --project=phone-chromium --grep \"Fixture safety|Scheduled:|Upload picker: viewport|Resumable upload:\" --global-timeout=900000"
+    "test:browser:ci": "playwright test --project=phone-chromium --grep \"Fixture safety|Scheduled:|Upload picker: viewport|Resumable upload:|Mobile channels:\" --global-timeout=900000"
   },
   "dependencies": {
     "@ag-ui/mastra": "^1.0.1",
