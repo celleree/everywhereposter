@@ -128,7 +128,9 @@ export class ResumableTransfers {
     void this.run(id);
     return receipt;
   }
+  hasFile(id: string) { return this.files.has(id); }
   async resume(id: string, file?: File) {
+    if (this.disposed || this.controllers.has(id) || !this.items.has(id) || this.items.get(id)?.state === 'Transfer complete') return;
     if (file) this.files.set(id, file);
     if (!this.files.has(id)) throw new Error('Select the original video to resume.');
     await this.run(id);
@@ -165,12 +167,18 @@ export class ResumableTransfers {
     this.controllers.set(id, controller);
     this.update({ ...item, state: 'Uploading', error: undefined });
     try {
-      if (!/\.(mp4|mov)$/i.test(file.name) || !file.size) throw new Error('Choose an MP4 or MOV video.');
+      if (!/\.(mp4|mov)$/i.test(file.name) || !file.size) {
+        this.files.delete(id);
+        throw new Error('Choose an MP4 or MOV video.');
+      }
       const manifest = await fileManifest(file, controller.signal);
       let session: UploadSession;
       if (item.session) {
         session = await this.request('/' + item.session.id, { signal: controller.signal });
-        if (file.size !== session.byteSize || JSON.stringify(manifest) !== JSON.stringify(session.manifest)) throw new Error('This is not the original file. Select the original video.');
+        if (file.size !== session.byteSize || JSON.stringify(manifest) !== JSON.stringify(session.manifest)) {
+          this.files.delete(id);
+          throw new Error('This is not the original file. Select the original video.');
+        }
       } else {
         this.pendingCreations.add(id);
         session = await this.request('', { method: 'POST', body: JSON.stringify({ organizationId: this.organizationId, clientId: id, originalName: file.name, byteSize: file.size, manifest }), signal: controller.signal });

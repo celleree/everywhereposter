@@ -15,7 +15,7 @@
     "dev-backend": "pnpm run --filter ./apps/backend --filter ./apps/frontend --parallel dev",
     "pm2": "pnpm run pm2-run",
     "publish-sdk": "pnpm run --filter ./apps/sdk publish",
-    "pm2-run": "pm2 delete all || true && pnpm run prisma-db-push && pnpm run --parallel pm2 && pm2 logs",
+    "pm2-run": "pm2 delete all || true && pnpm --filter ./apps/backend --filter ./apps/frontend --filter ./apps/orchestrator --parallel run pm2 && pm2 logs",
     "dev:stripe": "pnpm dlx concurrently \"stripe listen --forward-to localhost:3000/stripe\" \"pnpm run dev\"",
     "build": "pnpm -r --workspace-concurrency=1 --filter ./apps/frontend --filter ./apps/backend --filter ./apps/orchestrator run build",
     "build:backend": "node -e \"require('fs').rmSync('apps/backend/dist',{recursive:true,force:true})\" && pnpm --filter ./apps/backend run build",
@@ -39,7 +39,7 @@
     "postinstall": "pnpm run prisma-generate",
     "test": "jest --coverage --detectOpenHandles --reporters=default --reporters=jest-junit",
     "test:browser": "playwright test",
-    "test:browser:ci": "playwright test --project=phone-chromium --grep \"Fixture safety|Scheduled:|Upload picker: viewport|Resumable upload:|Video Editor: navigation\" --global-timeout=900000"
+    "test:browser:ci": "playwright test --project=phone-chromium --grep \"Facebook management:|Fixture safety|Scheduled:|Upload picker: viewport|Resumable upload:|Video Editor: navigation\" --global-timeout=900000"
   },
   "dependencies": {
     "@ag-ui/mastra": "^1.0.1",

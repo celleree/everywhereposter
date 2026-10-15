@@ -15,7 +15,7 @@ async function fixtures(page: Page, mode: Mode = {}) {
     if (request.method() !== 'GET') return route.fallback();
     if (url.pathname === '/backend-api/media') {
       if (mode.library === 'error') return route.fulfill({ status: 503, json: {} });
-      return route.fulfill({ json: { pages: mode.library === 'empty' ? 0 : 1, results: mode.library === 'empty' ? [] : videos } });
+      return route.fulfill({ json: { pages: mode.library === 'empty' ? 0 : 1, results: mode.library === 'empty' ? [] : [...videos, { id: 'editor-image', path: '/audit-fixtures/image.jpg', originalName: 'Synthetic image.jpg', type: 'image' }] } });
     }
     const source = videos.find((item) => url.pathname === `/backend-api/media/${item.id}`);
     if (source) {
@@ -34,7 +34,7 @@ async function choose(page: Page, name = 'Synthetic talking head.mp4') {
   await page.getByRole('button', { name: 'Choose video', exact: true }).click();
   const picker = page.getByRole('dialog', { name: 'Media Library', exact: true });
   await expect(picker.getByRole('button', { name: 'Upload', exact: true })).toBeVisible();
-  await expect(picker.locator('input[type="file"]')).toHaveAttribute('accept', 'video/mp4,video/quicktime,video/mov');
+  await expect(picker.getByRole('button', { name: 'Select Synthetic image.jpg', exact: true })).toHaveCount(0);
   await picker.getByRole('button', { name: `Select ${name}`, exact: true }).click({ position: { x: 10, y: 10 } });
   await picker.getByRole('button', { name: 'Add selected media', exact: true }).click();
   await expect(picker).toHaveCount(0);

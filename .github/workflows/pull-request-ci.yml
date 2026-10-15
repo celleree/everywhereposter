@@ -33,6 +33,18 @@ jobs:
   quality:
     name: Type checks and stable unit tests
     runs-on: ubuntu-latest
+    services:
+      publication-fixtures:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: isolated
+          POSTGRES_PASSWORD: isolated
+          POSTGRES_DB: isolated
+        ports:
+          - 55462:5432
+        options: >-
+          --health-cmd "pg_isready -U isolated -d isolated"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       NODE_OPTIONS: --max-old-space-size=4096
     defaults:
@@ -79,6 +91,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare disposable publication fixture database
+        env:
+          DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
+        run: pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
+
+      - name: Verify default Jest configuration loads
+        run: |
+          node -e "require('./jest.preset.js')"
+          pnpm test --showConfig > /dev/null
+
+      - name: Test default Jest entrypoint
+        run: pnpm test --runInBand --runTestsByPath tests/sentry/initialize.sentry.spec.ts
+
+      - name: Test packaged runtime service supervision
+        working-directory: .
+        run: node --test scripts/test-start-postiz.mjs
+
       - name: Install pinned Chromium and browser system dependencies
         run: |
           pnpm exec playwright install --with-deps chromium
@@ -87,7 +116,17 @@ jobs:
           fi
 
       - name: Run offline Chromium regression smoke
+        env:
+          EP_FACEBOOK_BROWSER: '1'
+          EP_SUBMISSION_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
         run: pnpm run test:browser:ci
+
+      - name: Run isolated Business Discovery Chromium regressions
+        env:
+          EP_DISCOVERY_BROWSER: '1'
+          BROWSER_FRONTEND_PORT: '4417'
+          BROWSER_API_PORT: '4418'
+        run: pnpm exec playwright test tests/browser/business-discovery.spec.ts --project=phone-chromium --global-timeout=900000
 
       - name: Upload offline browser diagnostics
         if: always()
@@ -185,7 +224,12 @@ jobs:
         run: pnpm exec jest --config jest.knowledge-base.config.cjs --runInBand
 
       - name: Run published-posts tests
+        env:
+          EP_SUBMISSION_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
         run: pnpm exec jest --config jest.published-posts.config.cjs --runInBand
+
+      - name: Test private connected Creator Audit
+        run: pnpm exec jest --config jest.published-posts.config.cjs --testMatch '**/tests/creator-audit/**/*.spec.ts' --runInBand
 
   classify-docker-build:
     name: Classify Docker build requirement

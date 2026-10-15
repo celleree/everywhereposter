@@ -1,3 +1,4 @@
+import { BusinessDiscoveryService } from '@gitroom/nestjs-libraries/analytics/business-discovery.service';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuthController } from '@gitroom/backend/api/routes/auth.controller';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
@@ -47,7 +48,10 @@ import { FarcasterProvider } from '@gitroom/backend/services/auth/providers/farc
 import { WalletProvider } from '@gitroom/backend/services/auth/providers/wallet.provider';
 import { OauthProvider } from '@gitroom/backend/services/auth/providers/oauth.provider';
 
+import { CreatorAuditController } from './routes/creator-audit.controller';
+
 const authenticatedController = [
+  CreatorAuditController,
   UsersController,
   AnalyticsController,
   IntegrationsController,
@@ -84,6 +88,7 @@ const authenticatedController = [
     ...authenticatedController,
   ],
   providers: [
+    BusinessDiscoveryService,
     AuthService,
     StripeService,
     OpenaiService,
