@@ -22,11 +22,12 @@ export const TALKING_HEAD_EDIT_DEFAULTS = {
 
 const FFPROBE_TIMEOUT_MS = 30_000;
 const SILENCE_ANALYSIS_TIMEOUT_MS = 60_000;
-const VIDEO_RENDER_TIMEOUT_MS = 160_000;
+const VIDEO_RENDER_TIMEOUT_MS = 120_000;
 const MEDIA_COMMAND_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 
 interface MediaProbeResult {
   durationMs: number;
+  startTimesMs: number[];
   hasVideo: boolean;
   hasAudio: boolean;
   videoWidth: number;
@@ -64,6 +65,11 @@ export class VideoEditingError extends Error {
 
 const formatSeconds = (milliseconds: number) =>
   (milliseconds / 1000).toFixed(3);
+
+const parseStartTimeMs = (value: unknown) =>
+  (typeof value === 'number' || (typeof value === 'string' && value.trim()))
+    ? Number(value) * 1000
+    : NaN;
 
 const parseFrameRate = (value: unknown) => {
   if (typeof value === 'number') {
@@ -360,7 +366,7 @@ export class FfmpegVideoEditorService {
           'error',
           '-protocol_whitelist', 'file',
           '-show_entries',
-          'format=duration:stream=codec_type,width,height,avg_frame_rate',
+          'format=duration,start_time:stream=codec_type,width,height,avg_frame_rate,start_time',
           '-of',
           'json',
           inputPath,
@@ -371,12 +377,13 @@ export class FfmpegVideoEditorService {
         }
       );
       const parsed = JSON.parse(String(stdout || '{}')) as {
-        format?: { duration?: string | number };
+        format?: { duration?: string | number; start_time?: string | number };
         streams?: Array<{
           codec_type?: string;
           width?: number;
           height?: number;
           avg_frame_rate?: string | number;
+          start_time?: string | number;
         }>;
       };
       const durationSeconds = Number(parsed.format?.duration);
@@ -387,9 +394,13 @@ export class FfmpegVideoEditorService {
       const videoStream = parsed.streams?.find(
         (stream) => stream.codec_type === 'video'
       );
+      const audioStream = parsed.streams?.find(
+        (stream) => stream.codec_type === 'audio'
+      );
 
       return {
         durationMs: Math.round(durationSeconds * 1000),
+        startTimesMs: [parsed.format?.start_time, videoStream?.start_time, audioStream?.start_time].map(parseStartTimeMs),
         hasVideo: !!videoStream,
         hasAudio:
           parsed.streams?.some((stream) => stream.codec_type === 'audio') ||
@@ -414,6 +425,14 @@ export class FfmpegVideoEditorService {
       throw new VideoEditingError(
         'UNSUPPORTED_SOURCE',
         'Talking-head editing requires a video with an audio track.'
+      );
+    }
+    // Independent PTS resets are safe only for a known common zero origin.
+    // Until offset-aware rendering exists, reject shifted/unknown timestamps.
+    if (probe.startTimesMs.some((time) => !Number.isFinite(time) || Math.abs(time) > 1)) {
+      throw new VideoEditingError(
+        'UNSUPPORTED_SOURCE',
+        'This renderer requires audio and video starting at zero; shifted or unknown timestamps are not supported.'
       );
     }
     if (probe.durationMs > TALKING_HEAD_EDIT_DEFAULTS.maxDurationMs) {
