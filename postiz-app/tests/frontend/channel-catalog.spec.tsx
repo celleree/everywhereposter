@@ -29,7 +29,10 @@ it('orders and labels the ten supported connection choices without duplicates', 
 
 it('keeps upcoming entries separate from connectable providers', () => {
   const upcoming = [...initialUpcomingChannels, ...additionalUpcomingChannels];
-  expect(initialUpcomingChannels).toEqual(['Reddit', 'Discord', 'Twitch']);
+  expect(initialUpcomingChannels).toEqual(['Reddit', 'Discord', 'Twitch', 'Whop']);
+  expect(additionalUpcomingChannels).toEqual([
+    'Slack', 'Kick', 'Bluesky', 'Mastodon', 'Telegram', 'Skool', 'WordPress', 'Moltbook',
+  ]);
   expect(new Set(upcoming).size).toBe(upcoming.length);
   expect(availableChannels(upcoming.map(name => ({ identifier: name.toLowerCase(), name })))).toEqual([]);
 });

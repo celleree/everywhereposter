@@ -13,7 +13,7 @@ export function availableChannels<T extends { identifier: string; name: string }
   });
 }
 
-export const initialUpcomingChannels = ['Reddit', 'Discord', 'Twitch'];
+export const initialUpcomingChannels = ['Reddit', 'Discord', 'Twitch', 'Whop'];
 export const additionalUpcomingChannels = [
-  'Slack', 'Kick', 'Bluesky', 'Mastodon', 'Telegram', 'WordPress',
+  'Slack', 'Kick', 'Bluesky', 'Mastodon', 'Telegram', 'Skool', 'WordPress', 'Moltbook',
 ];

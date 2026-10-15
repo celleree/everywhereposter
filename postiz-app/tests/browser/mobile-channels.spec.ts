@@ -57,8 +57,8 @@ for (const width of [375, 390, 430, 1440]) {
       await expect(dialog.getByText('Unrecognized provider')).toHaveCount(0);
       await expect(page.getByRole('button', { name: /Send Invite Link/ })).toHaveCount(0);
       const disabled = dialog.locator('button:disabled:visible');
-      await expect(disabled).toHaveCount(3);
-      for (const name of ['Reddit', 'Discord', 'Twitch']) {
+      await expect(disabled).toHaveCount(4);
+      for (const name of ['Reddit', 'Discord', 'Twitch', 'Whop']) {
         await expect(dialog.getByRole('button', { name: `${name} Coming soon`, exact: true })).toBeDisabled();
       }
       await expect(dialog.getByRole('button', { name: 'Slack Coming soon', exact: true })).not.toBeVisible();
@@ -67,8 +67,15 @@ for (const width of [375, 390, 430, 1440]) {
       const toggle = dialog.getByRole('button', { name: 'View all upcoming platforms' });
       await reachable(toggle); await toggle.focus(); await page.keyboard.press('Enter');
       await expect(dialog.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
-      await expect(disabled).toHaveCount(9);
-      const last = dialog.getByRole('button', { name: 'WordPress Coming soon', exact: true });
+      await expect(disabled).toHaveCount(12);
+      for (const name of ['Reddit', 'Discord', 'Twitch', 'Whop', 'Slack', 'Kick', 'Bluesky', 'Mastodon', 'Telegram', 'Skool', 'WordPress', 'Moltbook']) {
+        const upcoming = dialog.getByRole('button', { name: `${name} Coming soon`, exact: true });
+        await expect(upcoming).toBeDisabled();
+        const box = await upcoming.boundingBox();
+        expect(box!.height).toBeGreaterThanOrEqual(44);
+      }
+      await noHorizontalOverflow(page);
+      const last = dialog.getByRole('button', { name: 'Moltbook Coming soon', exact: true });
       await reachable(last); await expect(last).toBeDisabled();
       await dialog.locator('button:disabled').evaluateAll(elements => elements.forEach(element => (element as HTMLButtonElement).click()));
       await expect(dialog.locator('a')).toHaveCount(0);
