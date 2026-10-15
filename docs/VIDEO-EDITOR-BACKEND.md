@@ -31,6 +31,10 @@ Unknown versions fail closed. Never silently ignore requested features.
 
 MP4/MOV with audio, at most 60 seconds, 100 MiB, 1080p pixel count (portrait is
 supported), dimension <=2160, <=60 fps, and <=200 total decisions. Rendering
+requires observed container/video/audio start times at zero (within 1 ms).
+Shifted or unknown stream timestamps are rejected as `UNSUPPORTED_SOURCE` during
+analysis and direct rendering, so independent timestamp resets cannot silently
+remove a valid A/V offset. Offset-aware rendering is a later slice. Rendering
 always creates a separate H.264/AAC MP4. Commands use argument arrays, local-file
 protocols only, two codec threads, one filter thread, bounded stderr buffers,
 30s probing, 60s analysis, and 120s rendering. Output must contain A/V, stay
