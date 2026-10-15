@@ -3,6 +3,11 @@ import { mkdirSync, unlink, writeFileSync } from 'fs';
 // @ts-ignore
 import mime from 'mime';
 import { extname } from 'path';
+import { randomUUID } from 'crypto';
+import { copyFile, mkdir, rm } from 'fs/promises';
+import { constants } from 'fs';
+import { join } from 'path';
+import { assertRenderedVideoFile } from './rendered-video-file';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { fromBuffer } = require('file-type');
 
@@ -19,6 +24,23 @@ const LOCAL_STORAGE_ALLOWED_MIME = new Set<string>([
 ]);
 export class LocalStorage implements IUploadProvider {
   constructor(private uploadDirectory: string) {}
+
+  async uploadFromPath(path: string, originalName: string) {
+    await assertRenderedVideoFile(path);
+    const now = new Date();
+    const innerPath = `/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+    const filename = `${randomUUID()}.mp4`;
+    const destination = join(this.uploadDirectory, innerPath, filename);
+    await mkdir(join(this.uploadDirectory, innerPath), { recursive: true });
+    const rollback = () => rm(destination, { force: true });
+    try { await copyFile(path, destination, constants.COPYFILE_EXCL); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') await rollback();
+      throw error;
+    }
+    return { filename, originalname: originalName, mimetype: 'video/mp4' as const,
+      path: `${process.env.FRONTEND_URL}/uploads${innerPath}/${filename}`, rollback };
+  }
 
   async uploadSimple(path: string) {
     const loadImage = await fetch(path);

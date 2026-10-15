@@ -1,4 +1,7 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { createReadStream } from 'fs';
+import { randomUUID } from 'crypto';
+import { assertRenderedVideoFile } from './rendered-video-file';
 import 'multer';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import mime from 'mime-types';
@@ -94,6 +97,25 @@ class CloudflareStorage implements IUploadProvider {
     await this._client.send(command);
 
     return `${this._uploadUrl}/${id}.${extension}`;
+  }
+
+  async uploadFromPath(path: string, originalName: string) {
+    const size = await assertRenderedVideoFile(path);
+    const filename = `${randomUUID()}.mp4`;
+    const body = createReadStream(path);
+    const rollback = async () => {
+      await this._client.send(new DeleteObjectCommand({ Bucket: this._bucketName, Key: filename }), { abortSignal: AbortSignal.timeout(30_000) });
+    };
+    try {
+      await this._client.send(new PutObjectCommand({ Bucket: this._bucketName, Key: filename,
+        Body: body, ContentLength: size, ContentType: 'video/mp4' }), { abortSignal: AbortSignal.timeout(30_000) });
+    } catch (error) {
+      // A failed request may have written the unique generated key.
+      await rollback().catch(() => console.warn('Rendered video rollback failed for generated key', filename));
+      throw error;
+    } finally { body.destroy(); }
+    return { filename, originalname: originalName, mimetype: 'video/mp4' as const,
+      path: `${this._uploadUrl}/${filename}`, rollback };
   }
 
   async uploadFile(file: Express.Multer.File): Promise<any> {
