@@ -9,6 +9,8 @@ const frontendPort = Number(process.env.BROWSER_FRONTEND_PORT || 4217);
 const apiPort = Number(process.env.BROWSER_API_PORT || 4218);
 if (![frontendPort, apiPort].every(port => Number.isInteger(port) && port > 1024 && port < 65536) || frontendPort === apiPort) throw new Error('Invalid owned fixture ports');
 const origin = `http://127.0.0.1:${frontendPort}`;
+if (process.env.EP_FACEBOOK_BROWSER === '1' && process.env.EP_DISCOVERY_BROWSER === '1') throw new Error('Select only one isolated browser fixture mode per process');
+const facebook = process.env.EP_FACEBOOK_BROWSER === '1' ? require('./facebook-runtime.cjs')() : undefined;
 const token = 'synthetic-playwright-session';
 const branding = path.join(root, 'apps/frontend/public/branding');
 const brandingSource = path.resolve(root, '../site/branding');
@@ -55,6 +57,10 @@ let createdBranding = false;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${apiPort}`);
   if (discovery && await discovery.handle(req, res, url, token)) return;
+  if (facebook) {
+    try { if (await facebook.handle(req, res, url, token)) return; }
+    catch (error) { res.writeHead(error.getStatus?.() || 500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ message: error.getStatus ? error.message : 'Fixture adapter failure' })); }
+  }
   if (req.method !== 'GET') { res.writeHead(405); return res.end('Fixture mutations are disabled'); }
   if (url.pathname === '/__ready') { res.writeHead(ready ? 200 : 503); return res.end('synthetic fixture readiness'); }
   const auth = req.headers.auth || /(?:^|;\s*)auth=([^;]+)/.exec(req.headers.cookie || '')?.[1];
@@ -79,13 +85,13 @@ function startFrontend() {
   // No .env loader, real API credentials, DB URL, workers, or migrations.
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME,
+    BROWSER_FRONTEND_PORT: String(frontendPort), BROWSER_API_PORT: String(apiPort),
     NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1',
     FRONTEND_URL: origin, MAIN_URL: origin, NOT_SECURED: 'true',
     BACKEND_INTERNAL_URL: `http://127.0.0.1:${apiPort}`, NEXT_PUBLIC_BACKEND_URL: '/backend-api',
     DISABLE_REGISTRATION: 'true', STORAGE_PROVIDER: 'local',
     NEXT_PUBLIC_GUIDED_COMPOSER_SHELL: 'true',
     NEXT_FONT_GOOGLE_MOCKED_RESPONSES: path.join(__dirname, 'fonts.cjs'),
-    BROWSER_FRONTEND_PORT: String(frontendPort), BROWSER_API_PORT: String(apiPort),
     NODE_OPTIONS: '--require=' + path.join(__dirname, 'network-guard.cjs'),
   };
   frontend = spawn(process.execPath, [require.resolve('next/dist/bin/next'), 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(frontendPort)], { cwd: path.join(root, 'apps/frontend'), env, stdio: ['ignore', 'pipe', 'pipe'] });

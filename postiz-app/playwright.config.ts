@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 const discoveryMode = process.env.EP_DISCOVERY_BROWSER === '1';
 const results = discoveryMode ? 'browser-results/discovery' : 'browser-results';
 const report = discoveryMode ? 'browser-report/discovery' : 'browser-report';
+const frontendPort = process.env.BROWSER_FRONTEND_PORT || '4217';
+const apiPort = process.env.BROWSER_API_PORT || '4218';
 
 export default defineConfig({
   testDir: './tests/browser',
@@ -14,7 +16,7 @@ export default defineConfig({
   outputDir: results,
   reporter: [['list'], ['html', { outputFolder: report, open: 'never' }], ['json', { outputFile: `${results}/results.json` }]],
   use: {
-    baseURL: `http://127.0.0.1:${process.env.BROWSER_FRONTEND_PORT || '4217'}`,
+    baseURL: `http://127.0.0.1:${frontendPort}`,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     serviceWorkers: 'block',
@@ -26,7 +28,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'node tests/browser/runtime.cjs',
-    url: `http://127.0.0.1:${process.env.BROWSER_API_PORT || '4218'}/__ready`,
+    url: `http://127.0.0.1:${apiPort}/__ready`,
     reuseExistingServer: false,
     gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
     timeout: 360_000,
