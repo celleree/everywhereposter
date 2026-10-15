@@ -46,3 +46,73 @@ Review order: decision contract, renderer, decision tests, synthetic render test
 The engine and its verification form one coherent slice; storage/API integration
 is a separate dependent slice. No dependency, migration, billing or deployment
 change is required.
+
+## Frontend API
+
+`POST /media/:id/video-edits` uses the normal backend base URL and authenticated
+organization from the request. The existing `Create / AI` policy applies, as in
+PR #83. Do not send organization IDs, source URLs, prompts or arbitrary EDLs.
+
+Request:
+
+```json
+{"schemaVersion":1,"pacingPreset":"balanced"}
+```
+
+`schemaVersion` is required; `pacingPreset` is optional and defaults to balanced.
+Only tight/balanced/relaxed are accepted. Unsupported request keys are rejected.
+The synchronous success response has HTTP 201 and this shape:
+
+```typescript
+{
+  schemaVersion: 1;
+  outputMedia: {
+    id: string; name: string; originalName: string | null; path: string;
+    type: 'video'; thumbnail: string | null; alt: string | null;
+  };
+  editDecisionList: VideoEditDecisionListV1;
+  render: {
+    status: 'completed'; durationMs: number;
+    container: 'mp4'; videoCodec: 'h264'; audioCodec: 'aac';
+  };
+}
+```
+
+Use `outputMedia.id/path` for preview or subsequent media selection; keep the
+source selected until a complete success response arrives. No publishing occurs.
+The output is an ordinary media record connected to the requesting organization.
+Its file uses existing local/R2 storage and URL visibility; this does not add
+private blob access control. Local outputs are copied with exclusive creation;
+R2 outputs are streamed with known length to a unique generated key.
+
+Errors use Nest's HTTP envelope. Service errors include `code` and `message`:
+
+| HTTP | Code / meaning |
+| --- | --- |
+| 400 | INVALID_EDIT_REQUEST; invalid schema/preset/unsupported keys (DTO validation may return Nest validation messages) |
+| 401/403 | Existing authentication or capability policy |
+| 404 | MEDIA_NOT_FOUND; foreign/deleted source or removal during rendering |
+| 429 | RENDER_BUSY; one active edit per backend process |
+| 422 | SOURCE_UNAVAILABLE, UNSUPPORTED_SOURCE, SOURCE_TOO_LONG, ANALYSIS_FAILED, NO_USEFUL_SEGMENTS, TOO_MANY_SEGMENTS, INVALID_EDIT_DECISIONS, RENDER_FAILED, INVALID_OUTPUT |
+| 500 | EDIT_FAILED; storage/database failure |
+
+This operation reads existing transcription metadata only; missing, processing,
+failed or empty transcription does not block acoustic silence editing and does
+not start a transcription/provider request. It never derives semantic timing.
+
+The source and prepared local files are preserved. Temporary downloaded/rendered
+files are cleaned after success/failure; database-save failure rolls back only the
+newly uploaded artifact. Cleanup failures are logged and may leave an orphan.
+Database and storage are not transactional. A process crash can leave temporary
+or uploaded files; durable jobs/reconciliation are a later slice.
+
+There is no job polling, EDL persistence, idempotency key or automatic retry in this
+baseline. A repeated POST makes another output. After a network timeout/disconnect,
+the outcome is unknown: inspect the media library before deliberately retrying.
+Process admission does not coordinate multiple replicas. Long-running/restartable
+jobs, draft persistence and stronger admission controls require a separate design.
+
+Dependency order: engine #172, source/storage #174, API #175. Each merge requires
+human approval. After a parent merges, retarget/synchronize the next selected PR
+onto main, rerun affected checks and obtain fresh exact-HEAD review. The waiting
+PRs stay frozen. The API PR can be tested/reviewed on its storage base now.
