@@ -136,6 +136,12 @@ jest.mock('react-dropzone', () => ({
     open: mockOpenFiles,
   }),
 }));
+// Transfer UI has its own component tests; keep publishing tests independent of Uppy.
+jest.mock('@gitroom/frontend/components/media/resumable-upload.provider', () => ({
+  ...jest.requireActual('@gitroom/frontend/components/media/resumable-upload.provider'),
+  UploadTransfers: () => null,
+}));
+jest.mock('@gitroom/frontend/components/media/inline-upload-progress', () => ({ InlineUploadProgress: () => null }));
 jest.mock('@uppy/react', () => ({ Dashboard: () => null }));
 jest.mock('@copilotkit/react-core', () => ({ useCopilotReadable: jest.fn(), useCopilotAction: jest.fn() }));
 jest.mock('@copilotkit/react-ui', () => ({ CopilotPopup: () => null }));
