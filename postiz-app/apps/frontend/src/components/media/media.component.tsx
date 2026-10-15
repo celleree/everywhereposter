@@ -35,6 +35,7 @@ import { AiVideo } from '@gitroom/frontend/components/launches/ai.video';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { ThirdPartyMediaLibrary } from '@gitroom/frontend/components/third-parties/third-party.media-library';
 import { Dashboard } from '@uppy/react';
+import { UploadTransfers } from './resumable-upload.provider';
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -668,6 +669,7 @@ export const MediaBox: FC<{
           </div>
           <div className="w-full h-[46px] uppyChange" />
         </div>
+        {!postedMedia && <UploadTransfers />}
         <div
           ref={gridRef}
           className={clsx(

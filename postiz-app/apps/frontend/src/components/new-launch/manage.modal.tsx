@@ -54,7 +54,8 @@ import {
   useUppyUploader,
 } from '@gitroom/frontend/components/media/new.uploader';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
-import { Dashboard } from '@uppy/react';
+import { UploadTransfers } from '../media/resumable-upload.provider';
+import { InlineUploadProgress } from '../media/inline-upload-progress';
 import { MediaAutoplayContext, VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 import {
@@ -2048,20 +2049,8 @@ const ComposerUploadCard: FC<{
     >
       <input {...getInputProps()} />
       {uploadIssue && <p role="alert" className="mb-[12px] text-[13px] text-textColor">{uploadIssue}</p>}
-      {guidedTranscription && (
-        <div className="mobile-upload-intro hidden">
-          <div className="mobile-upload-icon" aria-hidden="true">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="4" />
-              <circle cx="8.5" cy="8.5" r="1.5" /><path d="m3 17 5-5 4 4 4-6 5 7" />
-            </svg>
-          </div>
-          <h2>Choose photo or video</h2>
-          <p>Select files from your device to upload.</p>
-        </div>
-      )}
       <div className="flex min-w-0 flex-col items-center justify-center gap-[10px] text-center">
-        <div className="composer-upload-controls flex min-w-0 flex-wrap items-center justify-center gap-[10px] mobile:w-full mobile:flex-col">
+        <div className="composer-upload-controls flex min-w-0 flex-wrap items-center justify-center gap-[8px]">
           <button
             type="button"
             disabled={disabled || loading}
@@ -2070,7 +2059,7 @@ const ComposerUploadCard: FC<{
               event.stopPropagation();
               open();
             }}
-            className="rounded-[12px] bg-btnPrimary px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
+            className="!min-h-[44px] rounded-[8px] bg-btnPrimary px-[14px] py-[8px] text-[14px] font-[700] text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:opacity-90"
           >
             Choose files
           </button>
@@ -2078,61 +2067,26 @@ const ComposerUploadCard: FC<{
             type="button"
             disabled={disabled || loading}
             onClick={openMediaLibrary}
-            className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:border-ai mobile:w-full"
+            className="!min-h-[44px] rounded-[8px] border border-newBorder bg-newBgColorInner px-[14px] py-[8px] text-[14px] font-[700] text-newTextColor transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:border-ai"
           >
             {t('media_library', 'Media Library')}
           </button>
-          {loading && (
-            <button
-              type="button"
-              onClick={cancelUpload}
-              className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-ai mobile:w-full"
-            >
-              {t('cancel_upload', 'Cancel upload')}
-            </button>
-          )}
         </div>
         <div className="upload-drop-hint break-words text-[13px] leading-[1.4] text-textColor/65">
           Drop files here or browse from your device.
         </div>
       </div>
 
-      {loading && (
-        <div className="pointer-events-none mt-[16px] min-h-[46px] w-full overflow-hidden rounded-[12px] bg-newBgColorInner uppyChange">
-          <Dashboard
-            height={46}
-            uppy={uppy}
-            id="composer-uploader-progress"
-            showProgressDetails={true}
-            hideUploadButton={true}
-            hideRetryButton={true}
-            hidePauseResumeButton={true}
-            hideCancelButton={true}
-            hideProgressAfterFinish={true}
-          />
-        </div>
-      )}
+      <UploadTransfers />
+      <InlineUploadProgress uppy={uppy} onCancel={cancelUpload} />
 
       <div
         className={clsx(
           'composer-media-preview mt-[16px] min-w-0 max-w-full overflow-x-hidden rounded-[16px] border border-newBorder bg-newBgColorInner p-[14px]',
-          !media.length &&
-            'flex min-h-[150px] items-center justify-center mobile:min-h-[120px]'
+          !media.length && 'hidden'
         )}
       >
-        {!media.length ? (
-          <div className="text-center">
-            {loading ? (
-              <div className="text-[15px] font-[700] text-white">
-                {t('drop_files_here_to_upload', 'Drop your files here to upload')}
-              </div>
-            ) : (
-              <div className="text-[13px] text-textColor/65">
-                Images and video are supported.
-              </div>
-            )}
-          </div>
-        ) : (
+        {media.length > 0 && (
           <div className="flex min-w-0 flex-col gap-[14px]">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-[12px]">
               <div className="composer-media-label text-[14px] font-[700] text-white">
