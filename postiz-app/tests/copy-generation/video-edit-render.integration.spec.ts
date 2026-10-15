@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { promisify } from 'util';
 import { FfmpegVideoEditorService } from '@gitroom/nestjs-libraries/media-editing/ffmpeg-video-editor.service';
-import { getKeptDurationMs } from '@gitroom/nestjs-libraries/media-editing/video-edit-decision';
+import { buildVideoEditDecisionList, getKeptDurationMs } from '@gitroom/nestjs-libraries/media-editing/video-edit-decision';
 import { readFile } from 'fs/promises';
 import { createHash } from 'crypto';
 const execFileAsync = promisify(execFile);
@@ -76,11 +76,12 @@ describe('talking-head FFmpeg render integration', () => {
         Math.abs(rendered.durationMs - getKeptDurationMs(decisionList))
       ).toBeLessThan(250);
 
-      const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,codec_type:format=format_name', '-of', 'json', rendered.outputPath]);
+      const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,codec_type,start_time:format=format_name', '-of', 'json', rendered.outputPath]);
       expect(JSON.parse(stdout).streams).toEqual(expect.arrayContaining([
         expect.objectContaining({ codec_name: 'h264', codec_type: 'video' }),
         expect.objectContaining({ codec_name: 'aac', codec_type: 'audio' }),
       ]));
+      for (const stream of JSON.parse(stdout).streams) expect(Math.abs(Number(stream.start_time))).toBeLessThanOrEqual(0.001);
       expect(createHash('sha256').update(await readFile(sourcePath)).digest('hex')).toBe(sourceHash);
       const renderedPath = rendered.outputPath;
       await rendered.cleanup();
@@ -91,5 +92,22 @@ describe('talking-head FFmpeg render integration', () => {
       await rendered?.cleanup();
       await rm(workingDirectory, { recursive: true, force: true });
     }
+  });
+  it('rejects a real delayed-audio source in analysis and direct rendering without changing it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'postiz-video-offset-test-'));
+    const sourcePath = join(directory, 'delayed.mp4');
+    try {
+      await execFileAsync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=4', '-itsoffset', '0.5', '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=48000:duration=3.5', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', sourcePath]);
+      const before = await readFile(sourcePath);
+      const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,start_time', '-of', 'json', sourcePath]);
+      const streams = JSON.parse(stdout).streams;
+      expect(Number(streams.find((s: { codec_type: string }) => s.codec_type === 'audio').start_time)).toBeGreaterThan(0.45);
+      expect(Number(streams.find((s: { codec_type: string }) => s.codec_type === 'video').start_time)).toBe(0);
+      const editor = new FfmpegVideoEditorService();
+      await expect(editor.analyzeTalkingHeadVideo({ inputPath: sourcePath, mediaId: 'delayed', pacingPreset: 'balanced' })).rejects.toMatchObject({ code: 'UNSUPPORTED_SOURCE' });
+      const decisions = buildVideoEditDecisionList({ mediaId: 'delayed', durationMs: 4000, pacingPreset: 'balanced', detectedSilence: [] });
+      await expect(editor.render(sourcePath, decisions)).rejects.toMatchObject({ code: 'UNSUPPORTED_SOURCE' });
+      expect(await readFile(sourcePath)).toEqual(before);
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });
