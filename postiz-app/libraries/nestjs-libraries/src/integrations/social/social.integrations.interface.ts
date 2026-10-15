@@ -206,7 +206,13 @@ export interface ISocialMediaIntegration {
   ): Promise<PublishedCommentActionResponse>;
 }
 
+export type FacebookTextReceipt = {
+  version: 1; pageId: string; appId: string; message: string; revision: number;
+  mutation: null | { id: string; action: 'edit' | 'delete'; message?: string; phase: 'IN_FLIGHT' | 'UNCERTAIN' | 'CONFIRMED' };
+};
+
 export type PostResponse = {
+  facebookText?: FacebookTextReceipt;
   id: string; // The db internal id of the post
   postId: string; // The ID of the scheduled post returned by the platform
   releaseURL: string; // The URL of the post on the platform
