@@ -1,3 +1,9 @@
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { Request } from 'express';
+import { User } from '@prisma/client';
+import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
+import { BusinessDiscoveryService } from '@gitroom/nestjs-libraries/analytics/business-discovery.service';
+import { BusinessDiscoveryQuery, BusinessDiscoveryResult } from '@gitroom/nestjs-libraries/dtos/analytics/business-discovery.dto';
 import {
   Body,
   Controller,
@@ -6,6 +12,8 @@ import {
   Param,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import { Organization } from '@prisma/client';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
@@ -18,7 +26,8 @@ import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/po
 export class AnalyticsController {
   constructor(
     private _integrationService: IntegrationService,
-    private _postsService: PostsService
+    private _postsService: PostsService,
+    private readonly discovery: BusinessDiscoveryService
   ) {}
 
   @Get('/post/:postId')
@@ -88,6 +97,20 @@ export class AnalyticsController {
       postId,
       commentId
     );
+  }
+
+  @Get('/:integration/business-discovery')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async businessDiscovery(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Param('integration') integration: string,
+    @Query() query: BusinessDiscoveryQuery,
+    @Req() request: Request
+  ): Promise<BusinessDiscoveryResult> {
+    const session = request.headers.auth || request.cookies?.auth;
+    return this.discovery.search(org.id, user.id, typeof session === 'string' ? session : '', integration, query);
   }
 
   @Get('/:integration')
