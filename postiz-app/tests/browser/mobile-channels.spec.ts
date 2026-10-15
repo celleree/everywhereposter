@@ -101,3 +101,24 @@ test('Mobile channels: missing endpoint providers are never presented as connect
   await expect(dialog.getByRole('button', { name: 'Reddit Coming soon', exact: true })).toBeDisabled();
   await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible();
 });
+
+test('Mobile channels: available X button keeps the existing connection dispatch', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/backend-api/integrations', route => route.fulfill({ json: {
+    social: [{ identifier: 'x', name: 'X', isExternal: false, isWeb3: false }], article: [],
+  } }));
+  const connections: string[] = [];
+  await page.route('**/backend-api/integrations/social/x', route => {
+    connections.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 400, json: { err: 'Synthetic connection disabled' } });
+  });
+  await openApp(page, '/create');
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('dialog', { name: 'More menu' }).getByRole('button', { name: 'Add Channel', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add Channel', exact: true });
+  const connect = dialog.getByRole('button', { name: 'X', exact: true });
+  await connect.focus(); await page.keyboard.press('Enter');
+  await expect.poll(() => connections).toEqual(['/backend-api/integrations/social/x']);
+  await expect(page).toHaveURL(/\/create$/);
+  await expect(dialog).toBeVisible();
+});
