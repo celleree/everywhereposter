@@ -22,6 +22,8 @@ for (const width of [375, 390, 430, 1440]) {
     await capture(page, info, `upload-empty-${width}`);
     restored = true;
     await page.reload();
+    // Reload must finish the same composer bootstrap as the initial openApp visit.
+    await expect(choose).toBeVisible({ timeout: 60_000 });
     const transfers = card.getByRole('region', { name: 'Video transfers' });
     await expect(transfers.getByRole('progressbar')).toHaveAttribute('value', '48');
     await expect(transfers.getByText('You can browse Everywhere Poster while uploading. Keep this website open.')).toBeVisible();
@@ -30,6 +32,7 @@ for (const width of [375, 390, 430, 1440]) {
     for (const theme of ['light', 'dark']) {
       await context.addCookies([{ name: 'mode', value: theme, url: 'http://127.0.0.1:4217' }]);
       await page.reload();
+      await expect(choose).toBeVisible({ timeout: 60_000 });
       await expect(page.locator('body')).toHaveClass(new RegExp(`(?:^| )${theme}(?: |$)`));
       await expect(transfers.getByRole('progressbar')).toHaveAttribute('value', '48');
       await noHorizontalOverflow(page);
