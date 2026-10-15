@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const frontendPort = process.env.BROWSER_FRONTEND_PORT || '4217';
+const apiPort = process.env.BROWSER_API_PORT || '4218';
+
 export default defineConfig({
   testDir: './tests/browser',
   testMatch: '*.spec.ts',
@@ -10,7 +13,7 @@ export default defineConfig({
   outputDir: 'browser-results',
   reporter: [['list'], ['html', { outputFolder: 'browser-report', open: 'never' }], ['json', { outputFile: 'browser-results/results.json' }]],
   use: {
-    baseURL: 'http://127.0.0.1:4217',
+    baseURL: `http://127.0.0.1:${frontendPort}`,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     serviceWorkers: 'block',
@@ -22,7 +25,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'node tests/browser/runtime.cjs',
-    url: 'http://127.0.0.1:4218/__ready',
+    url: `http://127.0.0.1:${apiPort}/__ready`,
     reuseExistingServer: false,
     gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
     timeout: 360_000,
