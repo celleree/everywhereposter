@@ -4,6 +4,7 @@ import {
   HistoricalMediaItem,
   HistoricalMediaPage,
   PublishedComment,
+  PublishedDeleteResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
@@ -49,9 +50,9 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       editMode: 'none',
       canDeletePublished: false,
       reason:
-        'Facebook Page published post editing and deletion are still disabled until we verify stable support for the exact post types this app publishes.',
+        'Open an eligible new text/feed post to manage its message or deletion. Media, links, imported and legacy posts remain read-only.',
       constraints: [
-        'Use native Facebook tools for live post changes until this capability is implemented here.',
+        'Facebook text/feed actions require a confirmed app publication receipt and administrator access.',
       ],
     });
   }
@@ -552,7 +553,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         ...all
       } = await (
         await this.fetch(
-          `https://graph.facebook.com/v20.0/${id}/feed?access_token=${accessToken}&fields=id,permalink_url`,
+          `https://graph.facebook.com/v25.0/${id}/feed?access_token=${accessToken}&fields=id,permalink_url`,
           {
             method: 'POST',
             headers: {
@@ -571,7 +572,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         )
       ).json();
 
-      finalUrl = permalink_url;
+      finalUrl = permalink_url || `https://www.facebook.com/${postId}`;
       finalId = postId;
     }
 
@@ -581,8 +582,55 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         postId: finalId,
         releaseURL: finalUrl,
         status: 'success',
+        ...(!firstPost.media?.length && !firstPost.settings?.url && !/https?:\/\/|www\./i.test(firstPost.message) && /^\d+_\d+$/.test(finalId) && finalId.startsWith(`${id}_`) && process.env.FACEBOOK_APP_ID ? {
+          facebookText: { version: 1, pageId: id, appId: process.env.FACEBOOK_APP_ID, message: firstPost.message, revision: 0, mutation: null },
+        } : {}),
       },
     ];
+  }
+
+  // These operations are only exposed through the server-owned publication ledger.
+  // Do not use SocialAbstract.fetch here: mutations must never be auto-retried.
+  private async publishedRequest(token: string, releaseId: string, method: string, message?: string) {
+    const response = await fetch(`https://graph.facebook.com/v25.0/${releaseId}${method === 'GET' ? '?fields=id,message,permalink_url' : ''}`, {
+      method,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      ...(message === undefined ? {} : { body: JSON.stringify({ message }) }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const result = await response.json();
+    if (!response.ok || result?.error) {
+      // Never expose token-bearing Graph errors or interpret inaccessible as deleted.
+      throw new Error('Facebook could not confirm the operation. Check authorization and reconcile before trying again.');
+    }
+    return result;
+  }
+
+  async readPublishedText(pageId: string, token: string, releaseId: string) {
+    if (!/^\d+_\d+$/.test(releaseId) || !releaseId.startsWith(`${pageId}_`))
+      throw new Error('Invalid Facebook Page post identity.');
+    const result = await this.publishedRequest(token, releaseId, 'GET');
+    if (result?.id !== releaseId || typeof result.message !== 'string')
+      throw new Error('Facebook did not confirm the original post identity and message.');
+    return { id: result.id as string, message: result.message as string };
+  }
+
+  async update(pageId: string, token: string, releaseId: string, posts: PostDetails[]): Promise<PostResponse[]> {
+    if (posts.length !== 1 || posts[0].media?.length || Object.keys(posts[0].settings || {}).length)
+      throw new Error('Only the Facebook feed message can be edited.');
+    await this.readPublishedText(pageId, token, releaseId);
+    const accepted = await this.publishedRequest(token, releaseId, 'POST', posts[0].message);
+    if (accepted?.success !== true) throw new Error('Facebook did not confirm the edit.');
+    const verified = await this.readPublishedText(pageId, token, releaseId);
+    if (verified.message !== posts[0].message) throw new Error('The edited message is not yet confirmed. Reconcile this operation.');
+    return [{ id: posts[0].id, postId: releaseId, releaseURL: `https://www.facebook.com/${releaseId}`, status: 'success' }];
+  }
+
+  async deletePublished(pageId: string, token: string, releaseId: string): Promise<PublishedDeleteResponse> {
+    await this.readPublishedText(pageId, token, releaseId);
+    const result = await this.publishedRequest(token, releaseId, 'DELETE');
+    if (result?.success !== true) throw new Error('Facebook did not confirm deletion.');
+    return { status: 'deleted' };
   }
 
   async comment(
