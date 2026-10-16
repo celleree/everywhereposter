@@ -347,7 +347,7 @@ export class SubscriptionRepository {
   private async persistLifetimeSubscriptionWithClient(
     client: Pick<
       Prisma.TransactionClient,
-      'organization' | 'subscription' | 'usedCodes'
+      'organization' | 'subscription' | 'usedCodes' | '$queryRaw'
     >,
     isTrailing: boolean,
     identifier: string,
@@ -359,6 +359,16 @@ export class SubscriptionRepository {
     code: string,
     org?: { id: string }
   ) {
+    // Serialize claims for this code across organizations without requiring a
+    // uniqueness migration over historical data. The claim check and writes
+    // must share the transaction that owns this lock.
+    await client.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${code}, 0))::text
+    `;
+    if (await client.usedCodes.findFirst({ where: { code } })) {
+      throw new Error('Lifetime code has already been redeemed.');
+    }
+
     const findOrg =
       org ||
       (await client.organization.findFirst({
@@ -478,25 +488,7 @@ export class SubscriptionRepository {
       );
     }
 
-    return this.persistLifetimeSubscriptionWithClient(
-      {
-        organization: this._organization.model.organization,
-        subscription: this._subscription.model.subscription,
-        usedCodes: this._usedCodes.model.usedCodes,
-      } as unknown as Pick<
-        Prisma.TransactionClient,
-        'organization' | 'subscription' | 'usedCodes'
-      >,
-      isTrailing,
-      identifier,
-      customerId,
-      totalChannels,
-      billing,
-      period,
-      cancelAt,
-      code,
-      org
-    );
+    throw new Error('Lifetime subscriptions require a claim transaction.');
   }
 
   getSubscriptionByIdentifier(identifier: string) {

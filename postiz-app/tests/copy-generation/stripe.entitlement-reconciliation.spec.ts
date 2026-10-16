@@ -302,6 +302,7 @@ const makeReconciliationHarness = (
           subscription: stagedSubscriptionModel,
           organization: stagedOrganizationModel,
           usedCodes: usedCodesModel,
+          $queryRaw: jest.fn(async () => []),
         });
 
         if (transactionShouldFail) {
