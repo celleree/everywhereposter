@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { validateSync } from 'class-validator';
@@ -90,6 +92,14 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     await expect(create()).rejects.toThrow('configured test');
     expect(sdk.checkout.sessions.create).not.toHaveBeenCalled();
     expect(await db.aiWalletTopup.count({ where: { organizationId: org } })).toBe(0);
+  });
+
+  it('keeps both Compose paths as optional host pass-through rather than injecting a disabling override', () => {
+    for (const path of ['../docker-compose.yaml', 'docker-compose.yaml']) {
+      const source = readFileSync(resolve(process.cwd(), path), 'utf8');
+      expect(source).toMatch(/AI_WALLET_TEST_OFFERS: # Host pass-through;/);
+      expect(source).not.toContain('${AI_WALLET_TEST_OFFERS:-');
+    }
   });
 
   it('offers only approved manual packs by default without granting trial or return-page credit', async () => {
