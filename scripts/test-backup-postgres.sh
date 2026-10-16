@@ -66,4 +66,8 @@ for BACKUP_CASE in failure empty stopped checksum-failure; do
   fi
   [ "$(find "$TEST_ROOT/repo/backups" -type f | wc -l)" -eq 4 ]
 done
-echo 'PASS: backup permissions, checksum, repeat preservation, failure/empty/stopped cleanup'
+# Backup artifacts must not dirty the production checkout and block deploy guards.
+for artifact in backups/postiz-fixture.ABC123.sql backups/postiz-fixture.ABC123.sql.DEF456.sha256; do
+  git -C "$SCRIPT_DIR/.." check-ignore --no-index -q "$artifact"
+done
+echo 'PASS: backup permissions, checksum, repeat preservation, failure cleanup, Git exclusions'
