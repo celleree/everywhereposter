@@ -1,5 +1,6 @@
 import { LUNA_CHAT, SOL_CHAT } from '@gitroom/nestjs-libraries/openai/model-config';
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { execFile } from 'child_process';
 import { mkdtemp, readFile, rm } from 'fs/promises';
 import { basename, join } from 'path';
@@ -326,6 +327,19 @@ Rules:
         timeout: TRANSCRIPTION_TIMEOUT_MS,
       }
     );
+  }
+
+  async preparePrepaidTranscription(params: { inputPath: string; originalName?: string | null }) {
+    const audio = await this.extractAudio(params.inputPath);
+    return { audioSha256: createHash('sha256').update(audio).digest('hex'),
+      file: await toFile(audio, `${basename(params.originalName || 'uploaded-video', '.mp4')}.mp3`, { type: 'audio/mpeg' }) };
+  }
+
+  transcribePrepaidAudio(file: Awaited<ReturnType<typeof toFile>>) {
+    // Omitted chunking_strategy is documented as one single block. Enabling auto
+    // chunking would invalidate the full-model quote and requires another meter.
+    return openai.audio.transcriptions.create({ file, model: 'gpt-4o-mini-transcribe' },
+      { timeout: TRANSCRIPTION_TIMEOUT_MS, maxRetries: 0 }).withResponse();
   }
 
   private async extractAudio(inputPath: string) {

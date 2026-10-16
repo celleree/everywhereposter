@@ -235,6 +235,17 @@ export class AiWalletService {
     return { reservation, row };
   }
 
+  async dispatchTranscription(organizationId: string, reservationId: string, transcriptionId: string, generation: number) {
+    this.enabled();
+    return this.transact(organizationId, async tx => {
+      const { reservation, row } = await this.transcription(tx, organizationId, reservationId, transcriptionId, generation);
+      if (row.status !== 'PROCESSING') throw new Error('Transcription is no longer active.');
+      if ((await this.wallet(tx, organizationId)).status !== 'ACTIVE') throw new Error('Wallet requires reconciliation.');
+      if (reservation.state !== 'RESERVED') return { dispatch: false, reservation };
+      return { dispatch: true, reservation: await tx.aiWalletReservation.update({ where: { id: reservationId }, data: { state: 'DISPATCHED' } }) };
+    });
+  }
+
   /** First commit: receipt and recoverable business output together, still held.
    * Text stays on MediaTranscription, never in wallet metadata or ledger. */
   async stageTranscription(organizationId: string, reservationId: string, transcriptionId: string,
