@@ -107,6 +107,7 @@ jobs:
       - name: Test prepaid wallet transactions against PostgreSQL
         env:
           AI_WALLET_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
+          LAUNCH_ENTITLEMENT_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
         run: pnpm exec jest --config jest.ai-wallet.config.cjs --runInBand
 
       - name: Verify default Jest configuration loads

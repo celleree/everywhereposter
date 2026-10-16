@@ -241,7 +241,7 @@ describe('OAuth accounts:read boundary', () => {
     const previousBilling = process.env.BILLING_ENABLED;
     process.env.BILLING_ENABLED = billing;
     try {
-      const orgs = { getOrgByApiKey: jest.fn().mockResolvedValue({ id: 'org', subscription: {} }) };
+      const orgs = { getOrgByApiKey: jest.fn().mockResolvedValue({ id: 'org', subscription: { subscriptionTier: 'STANDARD' } }) };
       const middleware = new PublicAuthMiddleware(orgs as any);
       const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
       const next = jest.fn();
