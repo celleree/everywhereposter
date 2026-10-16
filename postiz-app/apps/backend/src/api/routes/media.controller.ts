@@ -33,6 +33,8 @@ import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
+import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
+import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 import { validateVideoOnDisk } from '@gitroom/nestjs-libraries/upload/resumable-video.validation';
 import { rm } from 'fs/promises';
@@ -95,6 +97,7 @@ export class MediaController {
   }
 
   @Post('/generate-video')
+  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
   generateVideo(
     @GetOrgFromRequest() org: Organization,
     @Body() body: VideoDto
