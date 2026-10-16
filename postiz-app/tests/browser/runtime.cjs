@@ -10,6 +10,8 @@ const apiPort = Number(process.env.BROWSER_API_PORT || 4218);
 if (![frontendPort, apiPort].every(port => Number.isInteger(port) && port > 1024 && port < 65536) || frontendPort === apiPort) throw new Error('Invalid owned fixture ports');
 const origin = `http://127.0.0.1:${frontendPort}`;
 if (process.env.EP_FACEBOOK_BROWSER === '1' && process.env.EP_DISCOVERY_BROWSER === '1') throw new Error('Select only one isolated browser fixture mode per process');
+const walletMode = process.env.EP_WALLET_BROWSER === '1';
+if (walletMode && (process.env.EP_FACEBOOK_BROWSER === '1' || process.env.EP_DISCOVERY_BROWSER === '1')) throw new Error('Select only one fixture mode');
 const facebook = process.env.EP_FACEBOOK_BROWSER === '1' ? require('./facebook-runtime.cjs')() : undefined;
 const token = 'synthetic-playwright-session';
 const branding = path.join(root, 'apps/frontend/public/branding');
@@ -50,6 +52,16 @@ const values = {
   '/billing/check': {},
   '/auth/can-register': { register: false },
 };
+if (walletMode) Object.assign(values, {
+  '/user/subscription/tiers': {}, '/user/subscription': { subscription: null },
+  '/billing/ai-wallet': { organizationId: user.orgId, currency: 'usd', status: 'ACTIVE',
+    balanceNanos: '1230000000', heldNanos: '5000000', availableNanos: '1225000000',
+    operations: [{ id: 'pending', provider: 'openai', model: 'synthetic-model', state: 'UNKNOWN',
+      ceilingNanos: '5000000', chargedNanos: null, createdAt: '2035-01-01T00:00:00Z' },
+      { id: 'settled', provider: 'openai', model: 'synthetic-model', state: 'SETTLED',
+      ceilingNanos: '10000', chargedNanos: '1', createdAt: '2035-01-01T00:00:00Z' }],
+    entries: [{ id: 'usage', kind: 'USAGE', amountNanos: '1', createdAt: '2035-01-01T00:00:00Z' }] },
+});
 let frontend;
 let ready = false;
 let stopping = false;
@@ -87,6 +99,7 @@ function startFrontend() {
     PATH: process.env.PATH, HOME: process.env.HOME,
     BROWSER_FRONTEND_PORT: String(frontendPort), BROWSER_API_PORT: String(apiPort),
     NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1',
+    ...(walletMode ? { BILLING_ENABLED: 'true', STRIPE_SECRET_KEY: 'sk_test_synthetic_fixture_not_a_credential' } : {}),
     FRONTEND_URL: origin, MAIN_URL: origin, NOT_SECURED: 'true',
     BACKEND_INTERNAL_URL: `http://127.0.0.1:${apiPort}`, NEXT_PUBLIC_BACKEND_URL: '/backend-api',
     DISABLE_REGISTRATION: 'true', STORAGE_PROVIDER: 'local',
@@ -111,7 +124,7 @@ function startFrontend() {
 }
 async function warmRoutes() {
   const deadline = Date.now() + 330_000;
-  for (const route of (discovery ? ['/auth/login', '/analytics'] : ['/auth/login', '/media', '/launches', '/create', '/settings'])) {
+  for (const route of (walletMode ? ['/auth/login', '/billing'] : discovery ? ['/auth/login', '/analytics'] : ['/auth/login', '/media', '/launches', '/create', '/settings'])) {
     let loaded = false;
     while (!stopping && !loaded && Date.now() < deadline) {
       try {
