@@ -126,9 +126,15 @@ services:
       API_LIMIT: 30
 
       # === Payment / Stripe Settings
+      BILLING_ENABLED: '${BILLING_ENABLED:-false}'
+      AI_WALLET_ENABLED: '${AI_WALLET_ENABLED:-false}'
+      AI_WALLET_TRANSCRIPTION_ENABLED: '${AI_WALLET_TRANSCRIPTION_ENABLED:-false}'
+      AI_WALLET_TRANSCRIPTION_RATE_CARD: # Optional host pass-through; no cost defaults.
+      AI_WALLET_TEST_OFFERS: # Host pass-through; absence uses approved packs, [] disables.
       FEE_AMOUNT: 0.05
       STRIPE_PUBLISHABLE_KEY: ''
       STRIPE_SECRET_KEY: ''
+      STRIPE_LAUNCH_PORTAL_CONFIGURATION:
       STRIPE_SIGNING_KEY: ''
       STRIPE_SIGNING_KEY_CONNECT: ''
 

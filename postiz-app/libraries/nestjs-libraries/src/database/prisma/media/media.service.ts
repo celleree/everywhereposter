@@ -14,6 +14,8 @@ import {
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
+
 @Injectable()
 export class MediaService {
   private storage = UploadFactory.createStorage();
@@ -49,6 +51,14 @@ export class MediaService {
     isVertical = false,
     isHorizontal = false
   ) {
+    const subscription = await this._subscriptionService.getSubscription(org.id);
+    if (subscription?.subscriptionTier === 'LAUNCH_V1') {
+      throw new SubscriptionException({
+        action: AuthorizationActions.Create,
+        section: Sections.AI,
+      });
+    }
+
     const generate = async () => {
       if (generatePromptFirst) {
         prompt = await this._openAi.generatePromptForPicture(prompt);
@@ -62,7 +72,7 @@ export class MediaService {
       );
     };
 
-    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+    if (!isBillingEnabled()) {
       return this._subscriptionService.useCredit(org, 'ai_images', generate);
     }
 

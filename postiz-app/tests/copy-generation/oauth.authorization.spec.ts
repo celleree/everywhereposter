@@ -237,15 +237,23 @@ describe('OAuth accounts:read boundary', () => {
     expect(getIntegrationsList).toHaveBeenCalledWith('empty-org');
     expect(() => tool.inputSchema.parse({ organizationId: 'other' })).toThrow();
   });
-  it('denies a read token on the public API while preserving API-key auth', async () => {
-    const orgs = { getOrgByApiKey: jest.fn().mockResolvedValue({ id: 'org' }) };
-    const middleware = new PublicAuthMiddleware(orgs as any);
-    const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
-    const next = jest.fn();
-    await middleware.use({ headers: { authorization: 'pos_token' } } as any, response as any, next);
-    expect(next).not.toHaveBeenCalled();
-    expect(orgs.getOrgByApiKey).not.toHaveBeenCalled();
-    await middleware.use({ headers: { authorization: 'api-key' } } as any, response as any, next);
-    expect(next).toHaveBeenCalledTimes(1);
+  it.each(['false', 'true'])('denies a read token on the public API with billing %s while preserving API-key auth', async (billing) => {
+    const previousBilling = process.env.BILLING_ENABLED;
+    process.env.BILLING_ENABLED = billing;
+    try {
+      const orgs = { getOrgByApiKey: jest.fn().mockResolvedValue({ id: 'org', subscription: { subscriptionTier: 'STANDARD' } }) };
+      const middleware = new PublicAuthMiddleware(orgs as any);
+      const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+      const next = jest.fn();
+      await middleware.use({ headers: { authorization: 'pos_token' } } as any, response as any, next);
+      expect(next).not.toHaveBeenCalled();
+      expect(orgs.getOrgByApiKey).not.toHaveBeenCalled();
+      expect(response.status).toHaveBeenCalledWith(401);
+      await middleware.use({ headers: { authorization: 'api-key' } } as any, response as any, next);
+      expect(next).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousBilling === undefined) delete process.env.BILLING_ENABLED;
+      else process.env.BILLING_ENABLED = previousBilling;
+    }
   });
 });
