@@ -113,6 +113,14 @@ export class OrganizationService {
     return this._organizationRepository.deleteTeamMember(org.id, userId);
   }
 
+  enforceSingleEnabledOwner(orgId: string) {
+    return this._organizationRepository.enforceSingleEnabledOwner(orgId);
+  }
+
+  assertAdvancedAutomationAllowed(orgId: string) {
+    return this._organizationRepository.assertAdvancedAutomationAllowed(orgId);
+  }
+
   disableOrEnableNonSuperAdminUsers(orgId: string, disable: boolean) {
     return this._organizationRepository.disableOrEnableNonSuperAdminUsers(
       orgId,

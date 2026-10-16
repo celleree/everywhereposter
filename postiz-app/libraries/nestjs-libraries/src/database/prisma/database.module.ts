@@ -1,9 +1,14 @@
+import { AiWalletTextService } from '@gitroom/nestjs-libraries/services/ai-wallet-text.service';
+import { PrepaidCopyContextService } from '@gitroom/nestjs-libraries/services/prepaid-copy-context.service';
 import { Global, Module } from '@nestjs/common';
 import { PrismaRepository, PrismaService, PrismaTransaction } from './prisma.service';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
 import { UsersRepository } from '@gitroom/nestjs-libraries/database/prisma/users/users.repository';
+import { AiWalletService } from './ai-wallet/ai-wallet.service';
+import { AiWalletTranscriptionService } from '@gitroom/nestjs-libraries/services/ai-wallet-transcription.service';
+import { AiWalletDispatchService } from '@gitroom/nestjs-libraries/services/ai-wallet-dispatch.service';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
@@ -77,6 +82,11 @@ import { ResumableUploadService } from '../../upload/resumable-upload.service';
     OrganizationService,
     OrganizationRepository,
     SubscriptionService,
+    AiWalletService,
+    AiWalletDispatchService,
+    AiWalletTranscriptionService,
+    AiWalletTextService,
+    PrepaidCopyContextService,
     SubscriptionRepository,
     NotificationService,
     NotificationsRepository,

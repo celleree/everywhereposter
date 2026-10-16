@@ -8,6 +8,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
 import { Organization } from '@prisma/client';
 import { ApiTags } from '@nestjs/swagger';
@@ -21,7 +22,7 @@ import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/p
 @ApiTags('Webhooks')
 @Controller('/webhooks')
 export class WebhookController {
-  constructor(private _webhooksService: WebhooksService) {}
+  constructor(private _webhooksService: WebhooksService, private _organizationService: OrganizationService) {}
 
   @Get('/')
   async getStatistics(@GetOrgFromRequest() org: Organization) {
@@ -34,6 +35,7 @@ export class WebhookController {
     @GetOrgFromRequest() org: Organization,
     @Body() body: WebhooksDto
   ) {
+    await this._organizationService.assertAdvancedAutomationAllowed(org.id);
     return this._webhooksService.createWebhook(org.id, body);
   }
 
@@ -42,6 +44,7 @@ export class WebhookController {
     @GetOrgFromRequest() org: Organization,
     @Body() body: UpdateDto
   ) {
+    await this._organizationService.assertAdvancedAutomationAllowed(org.id);
     return this._webhooksService.createWebhook(org.id, body);
   }
 
@@ -54,7 +57,8 @@ export class WebhookController {
   }
 
   @Post('/send')
-  async sendWebhook(@Body() body: any, @Query() query: OnlyURL) {
+  async sendWebhook(@GetOrgFromRequest() org: Organization, @Body() body: any, @Query() query: OnlyURL) {
+    await this._organizationService.assertAdvancedAutomationAllowed(org.id);
     try {
       await fetch(query.url, {
         method: 'POST',

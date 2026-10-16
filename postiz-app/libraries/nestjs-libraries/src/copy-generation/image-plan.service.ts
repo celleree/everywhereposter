@@ -1,3 +1,4 @@
+import { PrepaidCopyContextService } from '@gitroom/nestjs-libraries/services/prepaid-copy-context.service';
 import { SOL_CHAT } from '@gitroom/nestjs-libraries/openai/model-config';
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
@@ -87,12 +88,13 @@ const DEFAULT_ASPECT_RATIO: Record<CopyPlatform, ImagePlanAspectRatio> = {
 export class ImagePlanService {
   private readonly _logger = new Logger(ImagePlanService.name);
 
-  constructor(private readonly _referenceImageService?: ReferenceImageService) {}
+  constructor(private readonly _referenceImageService?: ReferenceImageService, private readonly prepaid?: PrepaidCopyContextService) {}
 
   async generate(
     sourceBrief: SourceBriefResult,
     platforms: CopyPlatform[]
   ): Promise<ImagePlanItem[]> {
+    if (this.prepaid?.active) throw Error('Prepaid image planning is unavailable.');
     if (sourceBrief.media.mediaType !== 'video' || platforms.length === 0) {
       return [];
     }
