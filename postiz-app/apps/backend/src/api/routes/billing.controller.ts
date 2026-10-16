@@ -11,6 +11,8 @@ import { Request } from 'express';
 import { Nowpayments } from '@gitroom/nestjs-libraries/crypto/nowpayments';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
+import { AiWalletTopupDto } from '@gitroom/nestjs-libraries/dtos/billing/ai-wallet-topup.dto';
+import { AiWalletCheckoutService } from '@gitroom/nestjs-libraries/services/ai-wallet-checkout.service';
 
 @ApiTags('Billing')
 @Controller('/billing')
@@ -19,13 +21,33 @@ export class BillingController {
     private _subscriptionService: SubscriptionService,
     private _stripeService: StripeService,
     private _notificationService: NotificationService,
-    private _nowpayments: Nowpayments
+    private _nowpayments: Nowpayments,
+    private walletCheckout: AiWalletCheckoutService
   ) {}
 
   private assertBillingEnabled() {
     if (!isBillingEnabled()) {
       throw new HttpException('Billing is disabled', 503);
     }
+  }
+
+  @Get('/ai-wallet')
+  walletBalance(@GetOrgFromRequest() org: Organization) {
+    return this.walletCheckout.balance(org.id);
+  }
+
+  @Get('/ai-wallet/offers')
+  walletOffers() { return this.walletCheckout.offers(); }
+
+  @Post('/ai-wallet/topups')
+  createWalletTopup(
+    @GetOrgFromRequest() org: Organization & { users: { role: string }[] },
+    @Body() body: AiWalletTopupDto
+  ) {
+    if (!org.users?.[0] || !['ADMIN', 'SUPERADMIN'].includes(org.users[0].role)) {
+      throw new HttpException('Organization billing administrator required', 403);
+    }
+    return this.walletCheckout.createCheckout(org.id, body.offerId, body.operationKey);
   }
 
   @Get('/check/:id')
