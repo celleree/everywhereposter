@@ -309,7 +309,7 @@ export const MenuComponent: FC<
       <div
         // @ts-ignore
         ref={drag}
-        {...(integration.disabled &&
+        {...(integration.disabled && !user?.unlimitedChannels &&
         totalNonDisabledChannels === user?.totalChannels
           ? {
               'data-tooltip-id': 'tooltip',
@@ -335,7 +335,7 @@ export const MenuComponent: FC<
         onChange={update}
         id={integration.id}
         canEnable={
-          user?.totalChannels! > totalNonDisabledChannels &&
+          (user?.unlimitedChannels || user?.totalChannels! > totalNonDisabledChannels) &&
           integration.disabled
         }
         canDisable={!integration.disabled}

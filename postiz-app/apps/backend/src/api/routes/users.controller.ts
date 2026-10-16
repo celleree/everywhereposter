@@ -73,10 +73,12 @@ export class UsersController {
 
     const impersonate = req.cookies.impersonate || req.headers.impersonate;
     const billingEnabled = isBillingEnabled();
+    const launchPlan = String((organization as any).subscription?.subscriptionTier) === 'LAUNCH_V1';
     // @ts-ignore
     return {
       ...user,
       orgId: organization.id,
+      unlimitedChannels: launchPlan,
       // @ts-ignore
       totalChannels: !billingEnabled ? 10000 : organization?.subscription?.totalChannels || pricing.FREE.channel,
       // @ts-ignore
@@ -91,7 +93,7 @@ export class UsersController {
       allowTrial: organization?.allowTrial,
       streakSince: organization?.streakSince || null,
       // @ts-ignore
-      publicApi: organization?.users[0]?.role === 'SUPERADMIN' || organization?.users[0]?.role === 'ADMIN' ? organization?.apiKey : '',
+      publicApi: !launchPlan && (organization?.users[0]?.role === 'SUPERADMIN' || organization?.users[0]?.role === 'ADMIN') ? organization?.apiKey : '',
     };
   }
 
@@ -163,6 +165,7 @@ export class UsersController {
   @Post('/api-key/rotate')
   @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
   async rotateApiKey(@GetOrgFromRequest() organization: Organization) {
+    await this._orgService.assertAdvancedAutomationAllowed(organization.id);
     return this._orgService.updateApiKey(organization.id);
   }
 
