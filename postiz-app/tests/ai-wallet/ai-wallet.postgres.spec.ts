@@ -33,7 +33,10 @@ databaseSuite('prepaid AI wallet against isolated PostgreSQL', () => {
     await db?.$disconnect();
   });
 
-  const topup = async (cents = 1) => service.createTopup(org, randomUUID(), 'cus_synthetic', cents);
+  const topup = async (cents = 1) => {
+    const intent = await service.createTopup(org, randomUUID(), 'cus_synthetic', cents);
+    return service.bindTopupSession(org, intent.id, `cs_${intent.id}`);
+  };
   const paid = (intent: any, overrides: any = {}) => ({
     eventId: `evt_${intent.id}`, organizationId: org, topupId: intent.id,
     sessionId: `cs_${intent.id}`, paymentId: `pi_${intent.id}`, customerId: 'cus_synthetic',
@@ -51,6 +54,17 @@ databaseSuite('prepaid AI wallet against isolated PostgreSQL', () => {
     process.env.AI_WALLET_ENABLED = 'true'; process.env.BILLING_ENABLED = 'false';
     await expect(reserve()).rejects.toThrow('disabled');
     expect(await db.aiWallet.count({ where: { organizationId: org } })).toBe(0);
+  });
+
+  it('rejects funding until the server binds one immutable session to the correct org', async () => {
+    const intent = await service.createTopup(org, randomUUID(), 'cus_synthetic', 1);
+    await expect(service.applyVerifiedTopupEvent(paid(intent))).rejects.toThrow('does not match');
+    await expect(service.bindTopupSession('other-org', intent.id, `cs_${intent.id}`)).rejects.toThrow('not found');
+    const bound = await service.bindTopupSession(org, intent.id, `cs_${intent.id}`);
+    expect((await service.bindTopupSession(org, intent.id, bound.sessionId!)).id).toBe(bound.id);
+    await expect(service.bindTopupSession(org, intent.id, 'cs_changed')).rejects.toThrow('identity changed');
+    await service.applyVerifiedTopupEvent(paid(bound));
+    expect((await wallet()).balanceNanos).toBe(10000000n);
   });
 
   it('funds exactly once across duplicate event and payment identities', async () => {
