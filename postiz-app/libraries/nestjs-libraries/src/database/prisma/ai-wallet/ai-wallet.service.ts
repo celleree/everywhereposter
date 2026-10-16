@@ -223,6 +223,46 @@ export class AiWalletService {
     });
   }
 
+  async existingTextRequest(organizationId: string, requestKey: string) {
+    return this.transact(organizationId, tx => tx.aiWalletReservation.findFirst({ where: {
+      organizationId, operationKey: { startsWith: `guided-text:${requestKey}:` },
+    } }));
+  }
+
+  /** Stage the receipt and recoverable output before the debit. No provider retry
+   * may follow a dispatch claim, including when this local write fails. */
+  async stageText(organizationId: string, id: string, output: Prisma.InputJsonValue, receipt: MeasuredUsage) {
+    const usage = usageSnapshot(receipt), usageFingerprint = snapshotFingerprint(usage);
+    const resultFingerprint = snapshotFingerprint(output);
+    return this.transact(organizationId, async tx => {
+      const row = await this.reservation(tx, organizationId, id);
+      if (!row.operationKey.startsWith('guided-text:') || !this.storedQuote(row) ||
+          !['DISPATCHED', 'UNKNOWN'].includes(row.state) ||
+          (row.providerRequestId && row.providerRequestId !== receipt.providerRequestId) ||
+          (row.usageFingerprint && row.usageFingerprint !== usageFingerprint) ||
+          (row.resultFingerprint && row.resultFingerprint !== resultFingerprint)) throw Error('Text receipt or result changed.');
+      quotedCharge(row.quoteSnapshot, receipt);
+      await tx.aiTextResult.upsert({ where: { reservationId: id }, create: { reservationId: id, output }, update: { output } });
+      return tx.aiWalletReservation.update({ where: { id }, data: { state: 'UNKNOWN',
+        providerRequestId: receipt.providerRequestId, usageSnapshot: usage, usageFingerprint, resultFingerprint } });
+    });
+  }
+
+  async finishText(organizationId: string, id: string) {
+    return this.transact(organizationId, async tx => {
+      const row = await this.reservation(tx, organizationId, id);
+      const result = await tx.aiTextResult.findUnique({ where: { reservationId: id } });
+      if (!row.operationKey.startsWith('guided-text:') || !result || !row.usageSnapshot ||
+          snapshotFingerprint(result.output) !== row.resultFingerprint ||
+          snapshotFingerprint(row.usageSnapshot) !== row.usageFingerprint) throw Error('Text result integrity check failed.');
+      const usage = measuredSnapshot(row.usageSnapshot);
+      const settled = await this.settleInTransaction(tx, organizationId, id,
+        quotedCharge(row.quoteSnapshot, usage), usage.providerRequestId, usage);
+      if (settled.state !== 'SETTLED') throw Error('Text usage requires reconciliation.');
+      return result.output;
+    });
+  }
+
   private async transcription(tx: Prisma.TransactionClient, organizationId: string, reservationId: string,
     transcriptionId: string, generation: number) {
     const reservation = await this.reservation(tx, organizationId, reservationId);
