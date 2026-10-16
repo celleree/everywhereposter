@@ -1531,7 +1531,7 @@ export const ManageModal: FC<
                     </ComposerSection>
 
                     <ComposerSection
-                      title="Add Caption"
+                      title={props.guidedComposerActive && !guidedReview ? (globalMedia.length ? "Caption" : "Post text") : "Add Caption"}
                       mobileTitle={props.guidedComposerActive ? "Platform comments / posts" : undefined}
                       description={props.guidedComposerActive && guidedReview ? 'Add comments or follow-up posts to the shared version or a platform.' : 'Edit the shared post or a platform version.'}
                       guidedComposerSection="editor"

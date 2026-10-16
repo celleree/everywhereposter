@@ -293,7 +293,7 @@ export const GuidedComposerUploadDetails: FC<{
       )}
 
       {!attachedMedia.length && (
-        <div className="mobile-text-post mx-auto w-full max-w-[1600px] px-[40px] pt-[12px] mobile:px-[15px]">
+        <div className="mobile-text-post hidden mx-auto w-full max-w-[1600px] px-[40px] pt-[12px] mobile:px-[15px]">
           <button type="button" className="!min-h-[44px] rounded-[10px] border border-newBorder bg-newBgColorInner px-[16px] py-[10px] text-[14px] font-[700] text-newTextColor" disabled={disabled} aria-expanded={textPostOpen}
             aria-controls="mobile-post-text-fields" onClick={() => setTextPostOpen((open) => !open)}>
             {textPostOpen ? 'Close text post' : 'Write a text post'}

@@ -1,4 +1,4 @@
-import { test, expect, openApp, noHorizontalOverflow, capture, reachable } from './fixtures';
+import { test, expect, openApp, noHorizontalOverflow, capture, reachable, mobileProject } from './fixtures';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -59,13 +59,23 @@ test('Resumable upload: text mode is explicit and preview errors preserve attach
   const a = await choose.boundingBox(), b = await library.boundingBox();
   expect(Math.abs((a!.y + a!.height / 2) - (b!.y + b!.height / 2))).toBeLessThan(2);
   const write = page.getByRole('button', { name: 'Write a text post', exact: true });
-  await reachable(write);
-  await write.click();
-  await page.getByRole('textbox', { name: 'Post text', exact: true }).fill('Synthetic text post preserved when media attaches.');
-  await expect(page.getByText('This is the text you will publish.', { exact: false })).toBeVisible();
-  await page.getByRole('button', { name: 'Close text post', exact: true }).click();
-  await write.click();
-  await expect(page.getByRole('textbox', { name: 'Post text', exact: true })).toHaveValue('Synthetic text post preserved when media attaches.');
+  const text = 'Synthetic text post preserved when media attaches.';
+  if (mobileProject(info)) {
+    await reachable(write);
+    await write.click();
+    await page.getByRole('textbox', { name: 'Post text', exact: true }).fill(text);
+    await expect(page.getByText('This is the text you will publish.', { exact: false })).toBeVisible();
+    await page.getByRole('button', { name: 'Close text post', exact: true }).click();
+    await write.click();
+    await expect(page.getByRole('textbox', { name: 'Post text', exact: true })).toHaveValue(text);
+    await expect(page.locator('[contenteditable="true"]:visible')).toHaveCount(0);
+  } else {
+    await expect(write).toBeHidden();
+    await expect(page.getByText('Post text', { exact: true })).toBeVisible();
+    const editor = page.locator('[contenteditable="true"]:visible');
+    await expect(editor).toHaveCount(1);
+    await editor.fill(text);
+  }
   await library.click();
   const picker = page.getByRole('dialog', { name: 'Media Library', exact: true });
   await picker.getByRole('button', { name: `Select ${media.originalName}`, exact: true }).click({ position: { x: 10, y: 10 } });
