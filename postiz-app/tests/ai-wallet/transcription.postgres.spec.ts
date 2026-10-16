@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
+import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
 import { PREPAID_AI_POLICY, PricingQuote, quotedCharge } from '@gitroom/nestjs-libraries/services/ai-wallet-pricing';
 const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
 (fixtureUrl ? describe : describe.skip)('durable paid transcription result boundary', () => {
@@ -48,6 +49,23 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     expect(reservation?.state).toBe('SETTLED'); expect(JSON.stringify(reservation?.usageSnapshot)).not.toContain('transcript');
     expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(1);
   });
+  it('rejects text corruption after the staging commit before any debit', async () => {
+    const r = await reserve(); await wallet.stageTranscription(org, r.id, job, 1, 'original', receipt());
+    await db.mediaTranscription.update({ where: { id: job }, data: { text: 'corrupted' } });
+    await expect(wallet.finishTranscription(org, r.id, job, 1)).rejects.toThrow('integrity');
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(0);
+  });
+  it('preserves staged output after lease expiry and blocks explicit retry generation reset', async () => {
+    const r = await reserve(); await wallet.stageTranscription(org, r.id, job, 1, 'recoverable', receipt());
+    await db.mediaTranscription.update({ where: { id: job }, data: { startedAt: new Date(0) } });
+    const repository = new MediaTranscriptionRepository(db as any);
+    expect(await repository.ensurePendingForActiveMedia(org, mediaId)).toMatchObject({ generation: 1, text: 'recoverable' });
+    await db.mediaTranscription.update({ where: { id: job }, data: { status: 'FAILED' } });
+    expect(await repository.retryFailedForActiveMedia(org, mediaId)).toMatchObject({ generation: 1, text: 'recoverable', status: 'FAILED' });
+    await db.mediaTranscription.update({ where: { id: job }, data: { status: 'PROCESSING' } });
+    expect((await wallet.finishTranscription(org, r.id, job, 1)).state).toBe('SETTLED');
+  });
+
   it('holds an ambiguous dispatch without a staged result; a new generation cannot reserve a new operation', async () => {
     const r = await reserve(); await wallet.markUnknown(org, r.id);
     await expect(wallet.finishTranscription(org, r.id, job, 1)).rejects.toThrow('no staged');

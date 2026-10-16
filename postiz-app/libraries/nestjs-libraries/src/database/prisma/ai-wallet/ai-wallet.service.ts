@@ -241,15 +241,17 @@ export class AiWalletService {
     generation: number, text: string, receipt: MeasuredUsage) {
     if (typeof text !== 'string') throw new Error('Invalid transcription result.');
     const usage = usageSnapshot(receipt), usageFingerprint = snapshotFingerprint(usage);
+    const resultFingerprint = createHash('sha256').update(text).digest('hex');
     return this.transact(organizationId, async tx => {
       const { reservation, row } = await this.transcription(tx, organizationId, reservationId, transcriptionId, generation);
       quotedCharge(reservation.quoteSnapshot, receipt);
       if (row.status !== 'PROCESSING' || !['DISPATCHED', 'UNKNOWN'].includes(reservation.state) ||
           (reservation.providerRequestId && reservation.providerRequestId !== receipt.providerRequestId) ||
           (reservation.usageFingerprint && reservation.usageFingerprint !== usageFingerprint) ||
-          (row.text !== null && row.text !== text)) throw new Error('Transcription receipt or result changed.');
+          (row.text !== null && row.text !== text) ||
+          (reservation.resultFingerprint && reservation.resultFingerprint !== resultFingerprint)) throw new Error('Transcription receipt or result changed.');
       await tx.aiWalletReservation.update({ where: { id: reservationId }, data: { state: 'UNKNOWN',
-        providerRequestId: receipt.providerRequestId, usageSnapshot: usage, usageFingerprint } });
+        providerRequestId: receipt.providerRequestId, usageSnapshot: usage, usageFingerprint, resultFingerprint } });
       await tx.mediaTranscription.update({ where: { id: transcriptionId }, data: { text } });
     });
   }
@@ -262,6 +264,9 @@ export class AiWalletService {
       if (row.status === 'READY' && reservation.state === 'SETTLED') return reservation;
       if (row.status !== 'PROCESSING' || row.text === null || !reservation.usageSnapshot) {
         throw new Error('Transcription has no staged provider result.');
+      }
+      if (createHash('sha256').update(row.text).digest('hex') !== reservation.resultFingerprint) {
+        throw new Error('Staged transcription result integrity check failed.');
       }
       const usage = measuredSnapshot(reservation.usageSnapshot);
       const settled = await this.settleInTransaction(tx, organizationId, reservationId,
