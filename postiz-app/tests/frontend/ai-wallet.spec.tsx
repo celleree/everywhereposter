@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import { AiWalletComponent, walletDollars } from '../../apps/frontend/src/components/billing/ai-wallet.component';
 
@@ -78,14 +78,16 @@ it('clears previous tenant data while a different organization is loading', asyn
   complete(response({ ...snapshot('org-b'), status: 'REVIEW', operations: [], entries: [] }));
   expect(await screen.findByText('Usage needs reconciliation. Pending amounts remain reserved.')).toBeTruthy();
 });
-it.each([
-  ['non-administrator', 'USER' as const, true],
-  ['plan without prepaid AI', 'ADMIN' as const, false],
-])('hides offers from a %s', async (_case, role, prepaid_ai) => {
-  mockUser = { id: 'user', orgId: 'org-a', role, tier: { prepaid_ai } }; api(); mount();
+it('keeps the eligible wallet read-only for a non-administrator', async () => {
+  mockUser = { id: 'user', orgId: 'org-a', role: 'USER', tier: { prepaid_ai: true } }; api(); mount();
   expect(await screen.findByText('$1.225')).toBeTruthy();
   expect(screen.queryByText('Add test balance')).toBeNull();
   expect(mockFetch.mock.calls.some(([path]) => path === '/billing/ai-wallet/offers')).toBe(false);
+});
+it('does not request or render a wallet for a plan without prepaid AI', async () => {
+  mockUser = { id: 'user', orgId: 'org-a', role: 'ADMIN', tier: { prepaid_ai: false } }; api(); mount();
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Prepaid AI balance' })).toBeNull());
+  expect(mockFetch).not.toHaveBeenCalled();
 });
 it('rejects unsafe redirects and reuses one operation key after ambiguous failures', async () => {
   const bodies: any[] = []; let attempt = 0;
@@ -106,6 +108,25 @@ it('rejects unsafe redirects and reuses one operation key after ambiguous failur
   await waitFor(() => expect(navigate).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/synthetic'));
   expect(new Set(bodies.map((value) => value.operationKey)).size).toBe(1);
   expect(bodies[0].offerId).toBe('usd_5');
+});
+it('ignores a checkout response that completes after the organization changes', async () => {
+  let resolveCheckout!: (value: any) => void; let responseRead = false;
+  api(snapshot(), () => new Promise((resolve) => { resolveCheckout = resolve; }));
+  const mounted = mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Add $5.00 test balance' }));
+  await waitFor(() => expect(resolveCheckout).toBeDefined());
+  mockFetch.mockImplementation(async (path: string) => path === '/billing/ai-wallet'
+    ? response({ ...snapshot('org-b'), availableNanos: '2225000000' })
+    : path === '/billing/ai-wallet/offers' ? response(offers) : Promise.reject());
+  mockUser = { id: 'user', orgId: 'org-b', role: 'ADMIN', tier: { prepaid_ai: true } };
+  mounted.view.rerender(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <AiWalletComponent navigate={mounted.navigate} /></SWRConfig>);
+  await act(async () => resolveCheckout({ ok: true, json: async () => { responseRead = true; return {
+    topupId: 'old-org', status: 'open', url: 'https://checkout.stripe.com/c/pay/old-org',
+  }; } }));
+  expect(await screen.findByText('$2.225')).toBeTruthy();
+  expect(responseRead).toBe(false); expect(mounted.navigate).not.toHaveBeenCalled();
+  expect(screen.queryByText('Could not open secure test checkout. Retry uses the same purchase request.')).toBeNull();
 });
 it('keeps one key through cancellation, return and an ambiguous server state', async () => {
   const bodies: any[] = [];

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
@@ -55,13 +55,15 @@ export function AiWalletComponent({ navigate = (url) => window.location.assign(u
   const user = useUser();
   const org = user?.orgId;
   const admin = user?.role === 'ADMIN' || user?.role === 'SUPERADMIN';
-  const canPurchase = admin && !!user?.tier && 'prepaid_ai' in user.tier &&
-    user.tier.prepaid_ai === true;
+  const hasWalletPlan = !!user?.tier && 'prepaid_ai' in user.tier && user.tier.prepaid_ai === true;
+  const canPurchase = hasWalletPlan && admin;
+  const activeOrg = useRef(org);
+  activeOrg.current = org;
   const [purchasing, setPurchasing] = useState<string>();
   const [purchaseError, setPurchaseError] = useState('');
   const [purchaseStatus, setPurchaseStatus] = useState('');
   const { data, error, isLoading, isValidating, mutate } = useSWR<Snapshot>(
-    user?.id && org ? ['/billing/ai-wallet', user.id, org] : null,
+    hasWalletPlan && user?.id && org ? ['/billing/ai-wallet', user.id, org] : null,
     async ([path]) => {
       const response = await fetch(path);
       if (!response.ok) throw Error('Wallet unavailable');
@@ -81,7 +83,11 @@ export function AiWalletComponent({ navigate = (url) => window.location.assign(u
   );
 
   useEffect(() => {
-    if (!org) return;
+    setPurchasing(undefined); setPurchaseError(''); setPurchaseStatus('');
+  }, [org]);
+
+  useEffect(() => {
+    if (!org || !hasWalletPlan) return;
     const result = new URLSearchParams(window.location.search).get('wallet');
     if (result === 'return') {
       setPurchaseStatus('Payment return received. Refreshing the server balance…');
@@ -89,23 +95,26 @@ export function AiWalletComponent({ navigate = (url) => window.location.assign(u
     } else if (result === 'cancel') {
       setPurchaseStatus('Test checkout canceled. You can reopen the same purchase safely.');
     }
-  }, [org, mutate]);
+  }, [org, hasWalletPlan, mutate]);
 
   const purchase = async (offer: Offer) => {
     if (!org || !canPurchase || purchasing) return;
+    const purchaseOrg = org;
     setPurchasing(offer.id); setPurchaseError(''); setPurchaseStatus('');
     try {
-      const key = operationKey(org, offer.id);
-      sessionStorage.setItem(storedActiveOffer(org), offer.id);
+      const key = operationKey(purchaseOrg, offer.id);
+      sessionStorage.setItem(storedActiveOffer(purchaseOrg), offer.id);
       const response = await fetch('/billing/ai-wallet/topups', { method: 'POST',
         body: JSON.stringify({ offerId: offer.id, operationKey: key }) });
+      if (activeOrg.current !== purchaseOrg) return;
       if (!response.ok) throw Error('Checkout unavailable');
       const value = await response.json() as Checkout;
+      if (activeOrg.current !== purchaseOrg) return;
       if (!value || typeof value.topupId !== 'string' || typeof value.status !== 'string' ||
           !(value.url === null || typeof value.url === 'string')) throw Error('Checkout unavailable');
       if (value.status === 'funded' && value.url === null) {
-        sessionStorage.removeItem(storedOperation(org, offer.id));
-        sessionStorage.removeItem(storedActiveOffer(org));
+        sessionStorage.removeItem(storedOperation(purchaseOrg, offer.id));
+        sessionStorage.removeItem(storedActiveOffer(purchaseOrg));
         setPurchaseStatus('Payment is already recorded. Refreshing the server balance…');
         await mutate();
       } else {
@@ -114,11 +123,16 @@ export function AiWalletComponent({ navigate = (url) => window.location.assign(u
         navigate(url);
       }
     } catch {
-      setPurchaseError('Could not open secure test checkout. Retry uses the same purchase request.');
-    } finally { setPurchasing(undefined); }
+      if (activeOrg.current === purchaseOrg) {
+        setPurchaseError('Could not open secure test checkout. Retry uses the same purchase request.');
+      }
+    } finally {
+      if (activeOrg.current === purchaseOrg) setPurchasing(undefined);
+    }
   };
 
-  if (!org || isLoading) return <p role="status">Loading prepaid AI balance…</p>;
+  if (!org || !hasWalletPlan) return null;
+  if (isLoading) return <p role="status">Loading prepaid AI balance…</p>;
   if (error || !data || data.organizationId !== org) return <div role="alert">
     Prepaid AI balance is unavailable. <button type="button" onClick={() => void mutate()}>Retry balance</button>
   </div>;
