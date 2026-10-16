@@ -82,12 +82,14 @@ export class BillingController {
   @Post('/apply-discount')
   async applyDiscount(@GetOrgFromRequest() org: Organization) {
     this.assertBillingEnabled();
+    this.assertBillingAdministrator(org);
     await this._stripeService.applyDiscount(org.paymentId);
   }
 
   @Post('/finish-trial')
   async finishTrial(@GetOrgFromRequest() org: Organization) {
     this.assertBillingEnabled();
+    this.assertBillingAdministrator(org);
     try {
       await this._stripeService.finishTrial(org.paymentId);
     } catch (err) {}
@@ -144,6 +146,7 @@ export class BillingController {
   @Get('/portal')
   async modifyPayment(@GetOrgFromRequest() org: Organization) {
     this.assertBillingEnabled();
+    this.assertBillingAdministrator(org);
     const customer = await this._stripeService.getCustomerByOrganizationId(
       org.id
     );
@@ -165,14 +168,18 @@ export class BillingController {
     @Body() body: { feedback: string }
   ) {
     this.assertBillingEnabled();
-    await this._notificationService.sendEmail(
-      process.env.EMAIL_FROM_ADDRESS,
-      'Subscription Cancelled',
-      `Organization ${org.name} has cancelled their subscription because: ${body.feedback}`,
-      user.email
-    );
-
-    return this._stripeService.setToCancel(org.id);
+    this.assertBillingAdministrator(org);
+    const result = await this._stripeService.setToCancel(org.id);
+    // Billing cancellation must not depend on notification delivery.
+    try {
+      await this._notificationService.sendEmail(
+        process.env.EMAIL_FROM_ADDRESS,
+        'Subscription Cancelled',
+        `Organization ${org.name} has cancelled their subscription because: ${body.feedback}`,
+        user.email
+      );
+    } catch {}
+    return result;
   }
 
   @Post('/prorate')
@@ -191,6 +198,7 @@ export class BillingController {
     @Body() body: { code: string }
   ) {
     this.assertBillingEnabled();
+    this.assertBillingAdministrator(org);
     return this._stripeService.lifetimeDeal(org.id, body.code);
   }
 
@@ -254,6 +262,11 @@ export class BillingController {
   @Get('/crypto')
   async crypto(@GetOrgFromRequest() org: Organization) {
     this.assertBillingEnabled();
+    this.assertBillingAdministrator(org);
+    const subscription = await this._subscriptionService.getSubscription(org.id);
+    if (!['STANDARD', 'TEAM', 'PRO', 'ULTIMATE'].includes(subscription?.subscriptionTier || '')) {
+      throw new HttpException('This payment method is unavailable for this plan', 403);
+    }
     return this._nowpayments.createPaymentPage(org.id);
   }
 }

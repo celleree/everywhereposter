@@ -429,10 +429,37 @@ export class StripeService {
     return org.paymentId;
   }
 
+  private isLaunchSubscription(subscription: Stripe.Subscription) {
+    return subscription.metadata?.billing === 'LAUNCH_V1' || subscription.items.data.some(item =>
+      item.price.metadata?.plan_version === 'LAUNCH_V1' ||
+      item.price.lookup_key?.startsWith('everywhereposter_launch_v1_'));
+  }
+
   async createBillingPortalLink(customer: string) {
     this.assertBillingEnabled();
+    // Cancelled subscriptions retain their version at Stripe after local
+    // entitlement deletion. Do not expose them to an unrestricted portal.
+    const history = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
+    let configuration: string | undefined;
+    if (history.has_more || history.data.some(subscription => this.isLaunchSubscription(subscription))) {
+      configuration = process.env.STRIPE_LAUNCH_PORTAL_CONFIGURATION;
+      if (!configuration || !/^bpc_[a-zA-Z0-9]+$/.test(configuration)) {
+        throw new ServiceUnavailableException('Billing management is temporarily unavailable');
+      }
+      const config = await stripe.billingPortal.configurations.retrieve(configuration);
+      const features = config.features;
+      if (!config.active || config.metadata?.plan_version !== 'LAUNCH_V1' ||
+          features.subscription_update.enabled !== false ||
+          features.payment_method_update.enabled !== true ||
+          features.subscription_cancel.enabled !== true ||
+          features.subscription_cancel.mode !== 'at_period_end' ||
+          features.subscription_cancel.proration_behavior !== 'none' ||
+          (features.subscription_cancel as any).retention) {
+        throw new ServiceUnavailableException('Billing management is temporarily unavailable');
+      }
+    }
     return stripe.billingPortal.sessions.create({
-      customer,
+      customer, ...(configuration ? { configuration } : {}),
       return_url: process.env['FRONTEND_URL'] + '/billing',
     });
   }
@@ -652,7 +679,7 @@ export class StripeService {
       ).data.find((f) => f.status === 'active' || f.status === 'trialing'),
     };
 
-    if (!currentUserSubscription) {
+    if (!currentUserSubscription.data || this.isLaunchSubscription(currentUserSubscription.data)) {
       return false;
     }
 
@@ -669,7 +696,7 @@ export class StripeService {
 
   async applyDiscount(customer: string) {
     this.assertBillingEnabled();
-    const check = this.checkDiscount(customer);
+    const check = await this.checkDiscount(customer);
     if (!check) {
       return false;
     }
@@ -683,6 +710,9 @@ export class StripeService {
         })
       ).data.find((f) => f.status === 'active' || f.status === 'trialing'),
     };
+
+    // The provider subscription can change between eligibility and mutation.
+    if (!currentUserSubscription.data || this.isLaunchSubscription(currentUserSubscription.data)) return false;
 
     await stripe.subscriptions.update(currentUserSubscription.data.id, {
       discounts: [
