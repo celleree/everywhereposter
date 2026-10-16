@@ -1,47 +1,23 @@
-# Video Editor frontend foundation
+# Video Editor integration
 
-`/video-editor` uses the existing authenticated site layout and navigation. Mobile
-keeps Upload, Scheduled, Media and More; the editor is inside More.
+`/video-editor` reuses the reviewed engine/storage/API candidates172/174/175 and workspace173. Desktop navigation and mobile More open the same authenticated tab. Select exactly one existing video or upload through the existing MediaBox picker. The confirmed organization-scoped source starts one automatic edit with explicit `relaxed` (Natural) pacing. Balanced/Brisk can be applied deliberately as another edit. No style prompt, paid provider call, transcription request or publishing action is added.
 
-The workspace reuses `MediaBox` with `type="video"`, `compactPicker` and the normal
-upload workflow. It requires exactly one selected media ID and reads the existing
-organization-scoped `GET /media/:id`. The returned ID, path and video type are
-checked before previewing. Browser metadata supplies duration and dimensions;
-unknown values remain unknown. Playback is manual. Removing a source only clears
-the page selection. Pacing and style notes are local, unsaved preferences.
+The existing synchronous `POST /media/:id/video-edits` receives only `{schemaVersion:1,pacingPreset}`. The frontend reuses the pure shared decision validator and checks source identity, preset, separate output identity, render codecs/duration and bounded decisions. Organization-scoped `GET /media/:outputId` confirms the media record before preview. Source and output remain separate, with manual playback.
 
-## Backend integration boundary
+Download uses native fetch with omitted credentials, no application headers, redirects disabled and an enforced100MiB streaming ceiling. Buffering for the browser download is bounded but costs client memory. Actual R2 CORS/download acceptance remains a live gate. The source is never deleted. Use in composer rechecks the output, loads current accounts and opens the existing AddEditModal with the output as `onlyValues` media. It creates no post and leaves the separate saved Create draft in browser storage.
 
-This PR has no rendering endpoint dependency and issues no editing/transcription
-mutation. Create edit, export, timeline, transcript cuts, captions, overlays and
-inspection are disabled. A source preview is never presented as an edited output.
+## Recovery and concurrency
 
-The engine contract in PR #172 at `5b04c2e90d983dbc6537b01e875a27616cd8fdc2`
-declares schema version 1, source media identity/duration, source-time keep/cut
-decisions, and reserved output-time tracks. Its pacing presets are `relaxed`,
-`balanced`, `tight` (displayed here as Natural, Balanced, Brisk). No shared backend
-type is imported before that change lands. V1 has no transcript alignment and
-rejects nonempty caption/overlay/transition/override tracks.
+Versioned user/organization-scoped receipts are saved before POST. The last source/applied pacing is restored after refresh. Pending, network/server-uncertain and malformed-success outcomes never automatically resubmit. Confirmed output receipts recover through GET only. Known rejections require deliberate retry. An unknown outcome requires checking Media Library and explicit confirmation before another copy.
 
-Before enabling editing, verify the final API PR and deployed capability: exact
-request/response/error shapes, source and output media identities, decision schema
-version, supported presets, request lifetime/retry behavior and render limits.
-Wire submission and failure recovery to that verified contract; preview/export the
-separate saved output only after confirmed success. Freeform style interpretation,
-word-aligned transcript cuts and visual tracks need their own verified support.
+Same-origin browser tabs use a scope-wide Web Lock with `ifAvailable`; unsupported/insecure browsers fail closed before POST. See [LockManager.request](https://developer.mozilla.org/en-US/docs/Web/API/LockManager/request). A synchronous ref/class guard also blocks repeated in-page submissions. Storage failure prevents a new render. Source and pacing changes are disabled while work is pending. Organization changes/unmount discard stale UI responses and abort local waiting. "Stop waiting" does not claim server cancellation; the saved output may still arrive in Media Library.
 
-## Focused verification
+This API has no durable job ID, server cancellation, cross-browser idempotency or replica-wide admission. Browser receipts do not create those guarantees. The existing backend permits one active render per process. Repeated deliberate POSTs create separate outputs; unknown results must be reconciled manually. Durable jobs/cancellation would be a separate backend design.
 
-From `postiz-app`:
+## Acceptance and activation gates
 
-```sh
-pnpm exec tsc -p apps/frontend/tsconfig.json --noEmit --incremental false
-pnpm exec jest --config jest.post-set-review.config.cjs --runInBand tests/frontend/video.editor.workspace.spec.tsx tests/frontend/mobile.upload.navigation.spec.tsx tests/frontend/media.library.guided.transcription.spec.tsx
-pnpm exec playwright test tests/browser/video-editor.spec.ts tests/browser/picker-regressions.spec.ts --project=desktop-chromium --project=phone-chromium
-```
+V1 supports acoustic long-pause trimming only, preserving source order, with separate H.264/AAC output. It requires MP4/MOV with audio, <=60 seconds, <=100MiB,1080p pixel count, dimension<=2160,60fps and<=200 decisions. Two codec threads/one filter thread and bounded probe/analyze/render timeouts remain unchanged. Real synthetic FFmpeg verification covers output codecs/duration, source preservation, cleanup and admission; it does not prove safe combined load on the shared4GB host.
 
-Browser evidence uses the repository's isolated synthetic API and video fixture,
-including 390×844 portrait and 844×390 landscape. It proves frontend interactions
-and real browser decoding of synthetic bytes, not live upload/storage/render or
-physical-device acceptance. The existing Upload picker tests cover cancellation,
-pagination, preview containment and attachment without autoplay.
+Existing Create/AI authorization remains unchanged. The proposed LAUNCH_V1 policy in paused billing work denies AI; a narrow local-editor entitlement decision is needed before promising this editor to that plan. Do not enable general unmetered AI to grant FFmpeg access.
+
+Before live completion: exact-HEAD CI/review, scoped merge/deploy approval, production upload/storage/download and physical-mobile acceptance, server request-lifetime/recovery checks and4GB shared-resource acceptance. No production data, paid provider call or external social publishing is used in offline verification. A browser fixture does not establish production auth/OAuth or R2 acceptance.

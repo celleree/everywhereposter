@@ -27,3 +27,5 @@
   .workspace h2 { font-size: 21px; }
   .preview video { height: min(45vh, 360px); min-height: 150px; }
 }
+
+.link { display: inline-flex; align-items: center; min-height: 44px; text-decoration: underline; }
