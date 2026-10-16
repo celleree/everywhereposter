@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Organization, User } from '@prisma/client';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
@@ -11,6 +11,7 @@ import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { TrackService } from '@gitroom/nestjs-libraries/track/track.service';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
 import { TrackEnum } from '@gitroom/nestjs-libraries/user/track.enum';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_nothing');
 
@@ -22,6 +23,57 @@ export class StripeService {
     private _userService: UsersService,
     private _trackService: TrackService
   ) {}
+
+  private assertBillingEnabled() {
+    if (!isBillingEnabled()) {
+      throw new ServiceUnavailableException('Billing is disabled');
+    }
+  }
+
+  private async assertSaleEligible(organizationId: string, body: BillingSubscribeDto) {
+    const current = await this._subscriptionService.getSubscription(organizationId);
+    if (current?.isLifetime) throw new ForbiddenException('Lifetime subscriptions cannot purchase an ordinary subscription');
+    const legacy = ['STANDARD', 'TEAM', 'PRO', 'ULTIMATE'].includes(current?.subscriptionTier || '');
+    if (body.billing !== 'LAUNCH_V1' && !legacy) {
+      throw new ForbiddenException('This subscription is available only to existing legacy subscribers');
+    }
+    if (body.billing === 'LAUNCH_V1' && legacy) {
+      throw new ForbiddenException('Legacy subscription conversion requires an explicit migration');
+    }
+  }
+
+  private validLaunchPrice(price: Stripe.Price, period: 'MONTHLY' | 'YEARLY') {
+    const monthly = period === 'MONTHLY';
+    return price.currency === 'usd' && price.type === 'recurring' &&
+      price.unit_amount === (monthly ? 900 : 9000) &&
+      price.recurring?.interval === (monthly ? 'month' : 'year') &&
+      price.recurring?.interval_count === 1 && price.billing_scheme === 'per_unit' &&
+      price.lookup_key === (monthly ? 'everywhereposter_launch_v1_monthly' : 'everywhereposter_launch_v1_yearly') &&
+      price.metadata?.plan_version === 'LAUNCH_V1';
+  }
+
+  private async launchPrice(period: 'MONTHLY' | 'YEARLY') {
+    const lookupKey = period === 'MONTHLY' ? 'everywhereposter_launch_v1_monthly' : 'everywhereposter_launch_v1_yearly';
+    const prices = await stripe.prices.list({ active: true, lookup_keys: [lookupKey], limit: 2 });
+    if (prices.data.length !== 1 || !prices.data[0].active || !this.validLaunchPrice(prices.data[0], period)) {
+      throw new ServiceUnavailableException('The approved launch price is not configured');
+    }
+    return prices.data[0];
+  }
+
+  private assertLaunchEvent(event: Stripe.CustomerSubscriptionCreatedEvent | Stripe.CustomerSubscriptionUpdatedEvent) {
+    const subscription = event.data.object;
+    const items = subscription.items?.data || [];
+    const launchPrice = items.some(item => item.price.metadata?.plan_version === 'LAUNCH_V1' || item.price.lookup_key?.startsWith('everywhereposter_launch_v1_'));
+    if (subscription.metadata.billing !== 'LAUNCH_V1' && !launchPrice) return;
+    if (subscription.metadata.billing !== 'LAUNCH_V1') throw new ForbiddenException('Launch price requires launch subscription metadata');
+    const period = subscription.metadata.period;
+    if ((period !== 'MONTHLY' && period !== 'YEARLY') || items.length !== 1 ||
+        items[0].quantity !== 1 || !this.validLaunchPrice(items[0].price, period)) {
+      throw new ForbiddenException('Subscription does not match the approved launch price');
+    }
+  }
+
   validateRequest(rawBody: Buffer, signature: string, endpointSecret: string) {
     return stripe.webhooks.constructEvent(rawBody, signature, endpointSecret);
   }
@@ -31,6 +83,10 @@ export class StripeService {
       | Stripe.CustomerSubscriptionCreatedEvent
       | Stripe.CustomerSubscriptionUpdatedEvent
   ) {
+    if (!isBillingEnabled()) {
+      return true;
+    }
+
     if (event.data.object.status === 'incomplete') {
       return false;
     }
@@ -100,12 +156,13 @@ export class StripeService {
   }
 
   async createSubscription(event: Stripe.CustomerSubscriptionCreatedEvent) {
+    this.assertLaunchEvent(event);
     const {
       uniqueId,
       billing,
       period,
     } = event.data.object.metadata as {
-      billing: 'STANDARD' | 'PRO';
+      billing: 'STANDARD' | 'PRO' | 'TEAM' | 'ULTIMATE' | 'LAUNCH_V1';
       period: 'MONTHLY' | 'YEARLY';
       uniqueId: string;
     };
@@ -130,12 +187,13 @@ export class StripeService {
     );
   }
   async updateSubscription(event: Stripe.CustomerSubscriptionUpdatedEvent) {
+    this.assertLaunchEvent(event);
     const {
       uniqueId,
       billing,
       period,
     } = event.data.object.metadata as {
-      billing: 'STANDARD' | 'PRO';
+      billing: 'STANDARD' | 'PRO' | 'TEAM' | 'ULTIMATE' | 'LAUNCH_V1';
       period: 'MONTHLY' | 'YEARLY';
       uniqueId: string;
     };
@@ -163,6 +221,7 @@ export class StripeService {
   }
 
   async createOrGetCustomer(organization: Organization) {
+    this.assertBillingEnabled();
     if (organization.paymentId) {
       return organization.paymentId;
     }
@@ -204,9 +263,13 @@ export class StripeService {
   }
 
   async prorate(organizationId: string, body: BillingSubscribeDto) {
+    this.assertBillingEnabled();
     const org = await this._organizationService.getOrgById(organizationId);
-    const customer = await this.createOrGetCustomer(org!);
+    await this.assertSaleEligible(organizationId, body);
     const priceData = pricing[body.billing];
+    const findPrice = body.billing === 'LAUNCH_V1'
+      ? await this.launchPrice(body.period)
+      : await (async () => {
     const allProducts = await stripe.products.list({
       active: true,
       expand: ['data.prices'],
@@ -251,6 +314,9 @@ export class StripeService {
           interval: body.period === 'MONTHLY' ? 'month' : 'year',
         },
       }));
+    return findPrice;
+    })();
+    const customer = await this.createOrGetCustomer(org!);
 
     const proration_date = Math.floor(Date.now() / 1000);
 
@@ -299,6 +365,7 @@ export class StripeService {
   }
 
   async setToCancel(organizationId: string) {
+    this.assertBillingEnabled();
     const id = makeId(10);
     const org = await this._organizationService.getOrgById(organizationId);
     const customer = await this.createOrGetCustomer(org!);
@@ -362,9 +429,37 @@ export class StripeService {
     return org.paymentId;
   }
 
+  private isLaunchSubscription(subscription: Stripe.Subscription) {
+    return subscription.metadata?.billing === 'LAUNCH_V1' || subscription.items.data.some(item =>
+      item.price.metadata?.plan_version === 'LAUNCH_V1' ||
+      item.price.lookup_key?.startsWith('everywhereposter_launch_v1_'));
+  }
+
   async createBillingPortalLink(customer: string) {
+    this.assertBillingEnabled();
+    // Cancelled subscriptions retain their version at Stripe after local
+    // entitlement deletion. Do not expose them to an unrestricted portal.
+    const history = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
+    let configuration: string | undefined;
+    if (history.has_more || history.data.some(subscription => this.isLaunchSubscription(subscription))) {
+      configuration = process.env.STRIPE_LAUNCH_PORTAL_CONFIGURATION;
+      if (!configuration || !/^bpc_[a-zA-Z0-9]+$/.test(configuration)) {
+        throw new ServiceUnavailableException('Billing management is temporarily unavailable');
+      }
+      const config = await stripe.billingPortal.configurations.retrieve(configuration);
+      const features = config.features;
+      if (!config.active || config.metadata?.plan_version !== 'LAUNCH_V1' ||
+          features.subscription_update.enabled !== false ||
+          features.payment_method_update.enabled !== true ||
+          features.subscription_cancel.enabled !== true ||
+          features.subscription_cancel.mode !== 'at_period_end' ||
+          features.subscription_cancel.proration_behavior !== 'none' ||
+          (features.subscription_cancel as any).retention) {
+        throw new ServiceUnavailableException('Billing management is temporarily unavailable');
+      }
+    }
     return stripe.billingPortal.sessions.create({
-      customer,
+      customer, ...(configuration ? { configuration } : {}),
       return_url: process.env['FRONTEND_URL'] + '/billing',
     });
   }
@@ -448,7 +543,7 @@ export class StripeService {
 
     // Check for auto-apply promotion code (only for monthly plans)
     let autoApplyPromoCode: string | null = null;
-    if (body.period === 'MONTHLY') {
+    if (body.period === 'MONTHLY' && body.billing !== 'LAUNCH_V1') {
       autoApplyPromoCode = await this.findAutoApplyPromotionCode();
     }
 
@@ -460,6 +555,8 @@ export class StripeService {
         process.env['FRONTEND_URL'] +
         `/launches?onboarding=true&check=${uniqueId}${isUtm}`,
       mode: 'subscription',
+      payment_method_collection: 'always',
+      payment_method_types: ['card'],
       subscription_data: {
         ...(allowTrial ? { trial_period_days: 7 } : {}),
         metadata: {
@@ -478,7 +575,7 @@ export class StripeService {
             },
           }
         : {}),
-      allow_promotion_codes: body.period === 'MONTHLY',
+      allow_promotion_codes: body.period === 'MONTHLY' && body.billing !== 'LAUNCH_V1',
       line_items: [
         {
           price,
@@ -521,6 +618,8 @@ export class StripeService {
         process.env['FRONTEND_URL'] +
         `/launches?onboarding=true&check=${uniqueId}${isUtm}`,
       mode: 'subscription',
+      payment_method_collection: 'always',
+      payment_method_types: ['card'],
       subscription_data: {
         ...(allowTrial ? { trial_period_days: 7 } : {}),
         metadata: {
@@ -531,7 +630,7 @@ export class StripeService {
           ud,
         },
       },
-      allow_promotion_codes: body.period === 'MONTHLY',
+      allow_promotion_codes: body.period === 'MONTHLY' && body.billing !== 'LAUNCH_V1',
       line_items: [
         {
           price,
@@ -544,6 +643,7 @@ export class StripeService {
   }
 
   async finishTrial(paymentId: string) {
+    this.assertBillingEnabled();
     const list = (
       await stripe.subscriptions.list({
         customer: paymentId,
@@ -579,7 +679,7 @@ export class StripeService {
       ).data.find((f) => f.status === 'active' || f.status === 'trialing'),
     };
 
-    if (!currentUserSubscription) {
+    if (!currentUserSubscription.data || this.isLaunchSubscription(currentUserSubscription.data)) {
       return false;
     }
 
@@ -595,7 +695,8 @@ export class StripeService {
   }
 
   async applyDiscount(customer: string) {
-    const check = this.checkDiscount(customer);
+    this.assertBillingEnabled();
+    const check = await this.checkDiscount(customer);
     if (!check) {
       return false;
     }
@@ -609,6 +710,9 @@ export class StripeService {
         })
       ).data.find((f) => f.status === 'active' || f.status === 'trialing'),
     };
+
+    // The provider subscription can change between eligibility and mutation.
+    if (!currentUserSubscription.data || this.isLaunchSubscription(currentUserSubscription.data)) return false;
 
     await stripe.subscriptions.update(currentUserSubscription.data.id, {
       discounts: [
@@ -656,10 +760,14 @@ export class StripeService {
     body: BillingSubscribeDto,
     allowTrial: boolean
   ) {
+    this.assertBillingEnabled();
     const id = makeId(10);
     const priceData = pricing[body.billing];
     const org = await this._organizationService.getOrgById(organizationId);
-    const customer = await this.createOrGetCustomer(org!);
+    await this.assertSaleEligible(organizationId, body);
+    const findPrice = body.billing === 'LAUNCH_V1'
+      ? await this.launchPrice(body.period)
+      : await (async () => {
     const allProducts = await stripe.products.list({
       active: true,
       expand: ['data.prices'],
@@ -703,6 +811,9 @@ export class StripeService {
           interval: body.period === 'MONTHLY' ? 'month' : 'year',
         },
       }));
+    return findPrice;
+    })();
+    const customer = await this.createOrGetCustomer(org!);
 
     return this.createEmbeddedCheckout(
       uniqueId,
@@ -722,10 +833,14 @@ export class StripeService {
     body: BillingSubscribeDto,
     allowTrial: boolean
   ) {
+    this.assertBillingEnabled();
     const id = makeId(10);
     const priceData = pricing[body.billing];
     const org = await this._organizationService.getOrgById(organizationId);
-    const customer = await this.createOrGetCustomer(org!);
+    await this.assertSaleEligible(organizationId, body);
+    const findPrice = body.billing === 'LAUNCH_V1'
+      ? await this.launchPrice(body.period)
+      : await (async () => {
     const allProducts = await stripe.products.list({
       active: true,
       expand: ['data.prices'],
@@ -769,6 +884,9 @@ export class StripeService {
           interval: body.period === 'MONTHLY' ? 'month' : 'year',
         },
       }));
+    return findPrice;
+    })();
+    const customer = await this.createOrGetCustomer(org!);
 
     const getCurrentSubscriptions =
       await this._subscriptionService.getSubscription(organizationId);
@@ -802,6 +920,7 @@ export class StripeService {
           ...body,
           userId,
           id,
+          uniqueId: id,
           ud: uniqueId,
         },
         proration_behavior: 'always_invoice',
@@ -897,6 +1016,7 @@ export class StripeService {
   }
 
   async refundCharges(organizationId: string, chargeIds: string[]) {
+    this.assertBillingEnabled();
     const org = await this._organizationService.getOrgById(organizationId);
     if (!org?.paymentId) {
       throw new Error('No payment customer found for this organization');
@@ -918,6 +1038,7 @@ export class StripeService {
   }
 
   async cancelSubscription(organizationId: string) {
+    this.assertBillingEnabled();
     const org = await this._organizationService.getOrgById(organizationId);
     if (!org?.paymentId) {
       throw new Error('No payment customer found for this organization');
@@ -943,6 +1064,7 @@ export class StripeService {
   }
 
   async lifetimeDeal(organizationId: string, code: string) {
+    this.assertBillingEnabled();
     const getCurrentSubscription =
       await this._subscriptionService.getSubscriptionByOrganizationId(
         organizationId
@@ -953,13 +1075,6 @@ export class StripeService {
 
     try {
       const testCode = AuthService.fixedDecryption(code);
-      const findCode = await this._subscriptionService.getCode(testCode);
-      if (findCode) {
-        return {
-          success: false,
-        };
-      }
-
       const nextPackage = !getCurrentSubscription ? 'STANDARD' : 'PRO';
       const findPricing = pricing[nextPackage];
 
@@ -974,7 +1089,8 @@ export class StripeService {
         'MONTHLY',
         null,
         testCode,
-        organizationId
+        organizationId,
+        getCurrentSubscription || null
       );
       return {
         success: true,

@@ -3,6 +3,7 @@ import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database
 
 const createRepository = () => {
   const transaction = {
+    aiWalletReservation: { findUnique: jest.fn().mockResolvedValue(null) },
     $queryRaw: jest.fn().mockResolvedValue([{ id: 'media-1' }]),
     media: {
       update: jest.fn().mockResolvedValue({ id: 'media-1' }),
