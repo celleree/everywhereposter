@@ -87,6 +87,7 @@ services:
       API_LIMIT: 30
 
       # === Payment / Stripe Settings
+      BILLING_ENABLED: '${BILLING_ENABLED:-false}'
       FEE_AMOUNT: 0.05
       STRIPE_PUBLISHABLE_KEY: ''
       STRIPE_SECRET_KEY: ''
