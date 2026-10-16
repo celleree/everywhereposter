@@ -2,17 +2,31 @@ import { test, expect, capture, noHorizontalOverflow, openApp, reachable, mobile
 import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { buildVideoEditDecisionList } from '../../libraries/nestjs-libraries/src/media-editing/video-edit-decision';
 
 const bytes = readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4'));
 const videos = [
   { id: 'editor-video', path: '/audit-fixtures/editor.mp4', originalName: 'Synthetic talking head.mp4', type: 'video' },
   { id: 'invalid-video', path: '/audit-fixtures/invalid.mp4', originalName: 'Unavailable video.mp4', type: 'video' },
 ];
-type Mode = { library?: 'empty' | 'error'; source?: 'error' | 'invalid'; release?: Promise<void>; requested?: boolean };
+const output = { id: 'editor-output', path: '/audit-fixtures/edited.mp4', originalName: 'Synthetic talking head-edited.mp4', type: 'video' };
+type Mode = { renders?: number; render?: 'lost' | 'held' | 'busy'; renderRelease?: Promise<void>; library?: 'empty' | 'error'; source?: 'error' | 'invalid'; release?: Promise<void>; requested?: boolean };
 async function fixtures(page: Page, mode: Mode = {}) {
   await page.route('**/backend-api/media**', async (route) => {
     const request = route.request(), url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname.endsWith('/video-edits')) {
+      mode.renders = (mode.renders || 0) + 1;
+      expect(request.postDataJSON().schemaVersion).toBe(1);
+      if (mode.render === 'held') await mode.renderRelease;
+      if (mode.render === 'lost' || mode.render === 'held') return route.abort('failed').catch(() => {});
+      if (mode.render === 'busy') return route.fulfill({ status: 429, json: { code: 'RENDER_BUSY', message: 'Another render is running. Try again later.' } });
+      if (url.pathname.includes('invalid-video')) return route.fulfill({ status: 422, json: { message: 'The source video is unsupported.' } });
+      return route.fulfill({ status: 201, json: { schemaVersion: 1, outputMedia: output,
+        editDecisionList: buildVideoEditDecisionList({ mediaId: 'editor-video', durationMs: 1000, pacingPreset: request.postDataJSON().pacingPreset, detectedSilence: [] }),
+        render: { status: 'completed', durationMs: 1000, container: 'mp4', videoCodec: 'h264', audioCodec: 'aac' } } });
+    }
     if (request.method() !== 'GET') return route.fallback();
+    if (url.pathname === '/backend-api/media/editor-output') return route.fulfill({ json: output });
     if (url.pathname === '/backend-api/media') {
       if (mode.library === 'error') return route.fulfill({ status: 503, json: {} });
       return route.fulfill({ json: { pages: mode.library === 'empty' ? 0 : 1, results: mode.library === 'empty' ? [] : [...videos, { id: 'editor-image', path: '/audit-fixtures/image.jpg', originalName: 'Synthetic image.jpg', type: 'image' }] } });
@@ -41,7 +55,8 @@ async function choose(page: Page, name = 'Synthetic talking head.mp4') {
 }
 
 test('Video Editor: navigation, manual playback and responsive workspace', async ({ page }, info) => {
-  await fixtures(page);
+  const mode: Mode = {};
+  await fixtures(page, mode);
   await openApp(page, '/media');
   if (mobileProject(info)) {
     const nav = page.getByRole('navigation', { name: 'Mobile navigation' });
@@ -56,22 +71,28 @@ test('Video Editor: navigation, manual playback and responsive workspace', async
   const preview = page.getByLabel('Original video preview');
   await expect.poll(() => preview.evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThanOrEqual(1);
   expect(await preview.evaluate((video: HTMLVideoElement) => video.paused && !video.autoplay && video.controls && video.playsInline)).toBe(true);
-  await expect(page.getByText('160 × 120')).toBeVisible();
+  await expect(page.getByText('160 × 120').first()).toBeVisible();
+  await expect(page.getByLabel('Edited video preview')).toBeVisible();
   await preview.evaluate((video: HTMLVideoElement) => video.play());
   await expect.poll(() => preview.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0);
   await preview.evaluate((video: HTMLVideoElement) => video.pause());
   await page.getByLabel('Pacing', { exact: true }).selectOption('tight');
-  await page.getByLabel('Style notes').fill('Keep original footage and restrained motion.');
-  for (const name of ['Create edit', 'Export MP4', 'Clip timeline', 'Transcript cuts', 'Caption styles', 'B-roll / image overlays', 'Inspect edit']) {
-    await expect(page.getByRole('button', { name, exact: true })).toBeDisabled();
-  }
+  expect(mode.renders).toBe(1);
+  await page.getByRole('button', { name: 'Create another edit', exact: true }).click();
+  await expect(page.getByText('Applied pacing: Brisk', { exact: false })).toBeVisible();
+  expect(mode.renders).toBe(2);
+  const saved = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download MP4', exact: true }).click();
+  const download = await saved;
+  const destination = info.outputPath('edited-video.mp4'); await download.saveAs(destination);
+  expect(readFileSync(destination)).toEqual(bytes);
   await capture(page, info, 'video-editor-source');
   for (const size of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(size);
     await noHorizontalOverflow(page);
     for (const name of ['Choose video', 'Remove source']) await reachable(page.getByRole('button', { name, exact: true }));
     await reachable(page.getByLabel('Pacing', { exact: true }));
-    await reachable(page.getByLabel('Style notes'));
+    await reachable(page.getByRole('button', { name: 'Use in composer', exact: true }));
     await page.getByRole('button', { name: 'Choose video', exact: true }).click();
     const picker = page.getByRole('dialog', { name: 'Media Library', exact: true });
     for (const name of ['Upload', 'Cancel', 'Add selected media']) await reachable(picker.getByRole('button', { name, exact: true }));
@@ -117,9 +138,27 @@ test('Video Editor: loading, source failure, invalid selection and unavailable p
   await page.getByRole('button', { name: 'Retry source' }).click();
   await expect(page.getByLabel('Original video preview')).toBeVisible();
   await choose(page, 'Unavailable video.mp4');
-  await expect(workspace.getByRole('alert')).toContainText('could not be played');
+  await expect(workspace.getByRole('alert').filter({ hasText: 'could not be played' })).toBeVisible();
   await page.getByRole('button', { name: 'Retry preview' }).click();
-  await expect(workspace.getByRole('alert')).toContainText('could not be played');
-  await expect(page.getByRole('button', { name: 'Create edit', exact: true })).toBeDisabled();
+  await expect(workspace.getByRole('alert').filter({ hasText: 'could not be played' })).toBeVisible();
+  await expect(page.getByLabel('Edited video preview')).toHaveCount(0);
   await capture(page, info, 'video-editor-preview-failure');
+});
+
+
+test('Video Editor: stopped or lost requests stay uncertain after reload without automatic retry', async ({ page }) => {
+  let release!: () => void;
+  const mode: Mode = { render: 'held', renderRelease: new Promise<void>(resolve => { release = resolve; }) };
+  await fixtures(page, mode); await openApp(page, '/video-editor'); await choose(page);
+  await expect(page.getByRole('status').filter({ hasText: 'Editing your video' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Choose video' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Stop waiting', exact: true }).click(); release();
+  await expect(page.getByRole('alert')).toContainText('will not retry automatically');
+  expect(mode.renders).toBe(1);
+  await page.reload();
+  await expect(page.getByRole('alert')).toContainText('may still finish');
+  expect(mode.renders).toBe(1);
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.getByRole('button', { name: 'Create another edit', exact: true }).click();
+  expect(mode.renders).toBe(1);
 });
