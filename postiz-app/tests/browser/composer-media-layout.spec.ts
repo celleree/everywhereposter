@@ -42,7 +42,7 @@ for (const [width, height] of [[180, 320], [320, 180], [240, 300], [240, 240]]) 
     expect(await page.getByText('Transcript ready', { exact: true }).evaluate(e => !!e.closest('button'))).toBe(false);
     await noHorizontalOverflow(page);
     await capture(page, info, `composer-full-frame-${width}x${height}`);
-    await video.evaluate(v => (v as HTMLVideoElement).play());
+    await video.evaluate(v => { const player = v as HTMLVideoElement; player.muted = true; return player.play(); });
     await expect.poll(() => video.evaluate(v => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0);
   });
 }
