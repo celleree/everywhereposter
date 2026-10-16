@@ -51,6 +51,14 @@ export class MediaService {
     isVertical = false,
     isHorizontal = false
   ) {
+    const subscription = await this._subscriptionService.getSubscription(org.id);
+    if (subscription?.subscriptionTier === 'LAUNCH_V1') {
+      throw new SubscriptionException({
+        action: AuthorizationActions.Create,
+        section: Sections.AI,
+      });
+    }
+
     const generate = async () => {
       if (generatePromptFirst) {
         prompt = await this._openAi.generatePromptForPicture(prompt);
