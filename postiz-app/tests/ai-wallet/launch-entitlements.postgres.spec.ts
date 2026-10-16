@@ -23,7 +23,7 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     ...(tier ? { subscription: { create: { subscriptionTier: tier as any, period: 'MONTHLY', totalChannels: 0 } } } : {}),
   } });
   const addMember = async (org: string, role: 'SUPERADMIN' | 'ADMIN', disabled: boolean, createdAt: Date) =>
-    db.userOrganization.create({ data: { organizationId: org, role, disabled, createdAt,
+    db.userOrganization.create({ data: { organization: { connect: { id: org } }, role, disabled, createdAt,
       user: { create: { email: randomUUID() + '@fixture.invalid', providerName: 'LOCAL', timezone: 0 } },
     } });
   it.each(['LAUNCH_V1', 'PRO', undefined])('filters current persisted plan without hiding legacy/no-subscription rows (%s)', async (tier) => {
