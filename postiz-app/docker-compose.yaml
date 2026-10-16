@@ -88,6 +88,7 @@ services:
 
       # === Payment / Stripe Settings
       BILLING_ENABLED: '${BILLING_ENABLED:-false}'
+      AI_WALLET_ENABLED: '${AI_WALLET_ENABLED:-false}'
       FEE_AMOUNT: 0.05
       STRIPE_PUBLISHABLE_KEY: ''
       STRIPE_SECRET_KEY: ''
