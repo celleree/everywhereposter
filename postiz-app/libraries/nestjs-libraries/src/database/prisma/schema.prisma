@@ -1364,6 +1364,10 @@ model AiWalletReservation {
   ceilingNanos BigInt
   reportedNanos BigInt?
   chargedNanos BigInt?
+  quoteSnapshot Json?
+  quoteFingerprint String?
+  usageSnapshot Json?
+  usageFingerprint String?
   state AiWalletReservationState @default(RESERVED)
   providerRequestId String?
   createdAt DateTime @default(now())
