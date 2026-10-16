@@ -92,6 +92,22 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     expect(await db.aiWalletTopup.count({ where: { organizationId: org } })).toBe(0);
   });
 
+  it('offers only approved manual packs by default without granting trial or return-page credit', async () => {
+    delete process.env.AI_WALLET_TEST_OFFERS;
+    expect(checkout.offers()).toEqual([500, 1000, 2500].map(amountCents => ({ id: `usd_${amountCents}`, amountCents })));
+    for (const amountCents of [500, 1000, 2500]) {
+      await billing.createWalletTopup({ id: org, users: [{ role: 'ADMIN' }] } as any,
+        { offerId: `usd_${amountCents}`, operationKey: `approved_${amountCents}` });
+      const payload = sdk.checkout.sessions.create.mock.calls.at(-1)[0];
+      expect(payload).toMatchObject({ mode: 'payment', line_items: [{ price_data: { currency: 'usd', unit_amount: amountCents }, quantity: 1 }] });
+      expect(payload.subscription_data).toBeUndefined();
+    }
+    expect((await checkout.balance(org)).balanceNanos).toBe('0');
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(0);
+    process.env.AI_WALLET_TEST_OFFERS = '[]'; expect(checkout.offers()).toEqual([]);
+    process.env.AI_WALLET_TEST_OFFERS = ''; expect(() => checkout.offers()).toThrow('Invalid test');
+  });
+
   it.each(['not-json', '[{"id":"a","amountCents":1.5}]',
     '[{"id":"a","amountCents":100},{"id":"a","amountCents":200}]'])('rejects invalid catalogue %s', (catalogue) => {
     process.env.AI_WALLET_TEST_OFFERS = catalogue;

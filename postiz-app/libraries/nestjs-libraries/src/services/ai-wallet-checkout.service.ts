@@ -3,12 +3,13 @@ import Stripe from 'stripe';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
+import { PREPAID_AI_POLICY } from './ai-wallet-pricing';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 export const AI_WALLET_TEST_SERVICE = 'everywhereposter-ai-wallet-test';
 type Offer = { id: string; amountCents: number };
 
-/** Test-mode adapter only. No default offers or live Stripe account is accepted. */
+/** Test-mode adapter only. Approved manual packs; live Stripe accounts are rejected. */
 @Injectable()
 export class AiWalletCheckoutService {
   constructor(private readonly db: PrismaService, private readonly wallet: AiWalletService) {}
@@ -31,7 +32,9 @@ export class AiWalletCheckoutService {
   offers(): Offer[] {
     this.assertPurchasesEnabled();
     let values: unknown;
-    try { values = JSON.parse(process.env.AI_WALLET_TEST_OFFERS || '[]'); }
+    try { values = process.env.AI_WALLET_TEST_OFFERS === undefined
+      ? PREPAID_AI_POLICY.topupCents.map(amountCents => ({ id: `usd_${amountCents}`, amountCents }))
+      : JSON.parse(process.env.AI_WALLET_TEST_OFFERS); }
     catch { throw new ServiceUnavailableException('Invalid test top-up catalogue.'); }
     if (!Array.isArray(values) || values.some((v) => !v || typeof v.id !== 'string' ||
         !/^[a-zA-Z0-9_-]{1,100}$/.test(v.id) || !Number.isSafeInteger(v.amountCents) ||
