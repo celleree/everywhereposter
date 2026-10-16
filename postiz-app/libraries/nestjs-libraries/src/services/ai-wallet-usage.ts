@@ -27,7 +27,10 @@ export function normalizeOpenAiTokens(kind: 'chat' | 'responses', raw: unknown):
   const cached = count(
     (kind === 'responses' ? u.input_tokens_details?.cached_tokens : u.prompt_tokens_details?.cached_tokens));
   if ((u.prompt_tokens_details?.audio_tokens || u.completion_tokens_details?.audio_tokens) ||
-      (kind === 'responses' && (!Array.isArray(r.output) || r.output.some((item: any) => !['message', 'reasoning'].includes(item.type))))) {
+      (kind === 'chat' && r.choices[0]?.message?.audio != null) ||
+      (kind === 'responses' && (!Array.isArray(r.output) || r.output.some((item: any) =>
+        !['message', 'reasoning'].includes(item.type) || (item.type === 'message' &&
+          (!Array.isArray(item.content) || item.content.some((part: any) => !['output_text', 'refusal'].includes(part.type)))))))) {
     throw Error('Provider usage requires an additional meter.');
   }
   if (cached > input || count(u.total_tokens) !== input + output) throw Error('Inconsistent provider token usage.');
@@ -48,6 +51,7 @@ export function normalizeOpenAiMedia(kind: 'transcription' | 'image', raw: unkno
       (kind === 'transcription' && u.type !== 'tokens')) throw Error('Missing token-based media usage.');
   const input = count(u.input_tokens), output = count(u.output_tokens);
   const d = kind === 'transcription' ? u.input_token_details : u.input_tokens_details;
+  if (d?.cached_tokens !== undefined && count(d.cached_tokens) !== BigInt(0)) throw Error('Cached media requires its own meter.');
   const inputText = count(d?.text_tokens);
   const inputMedia = count(kind === 'transcription' ? d?.audio_tokens : d?.image_tokens);
   if (inputText + inputMedia !== input || count(u.total_tokens) !== input + output) throw Error('Inconsistent media usage.');

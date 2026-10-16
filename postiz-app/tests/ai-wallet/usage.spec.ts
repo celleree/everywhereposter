@@ -12,7 +12,7 @@ it('partitions cached input and includes reasoning in output exactly once', () =
 });
 it('normalizes completed Responses usage without retaining content', () => {
   const u = normalizeOpenAiTokens('responses', { id: 'resp_synthetic', model: 'fixture-model', status: 'completed',
-    output: [{ type: 'reasoning' }, { type: 'message' }],
+    output: [{ type: 'reasoning' }, { type: 'message', content: [{ type: 'output_text' }] }],
     usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120, input_tokens_details: { cached_tokens: 40 } } });
   expect(priceUsage(u, rates)).toBe(260n);
   expect(Object.keys(u).sort()).toEqual(['model', 'provider', 'providerRequestId', 'units']);
@@ -30,6 +30,10 @@ it('rejects missing cache detail, inconsistent totals, nonfinal streams and unsu
     expect(() => normalizeOpenAiTokens('chat', { ...chat(), ...update })).toThrow();
   }
   expect(() => normalizeOpenAiTokens('responses', { ...chat(), status: 'incomplete' })).toThrow();
+  expect(() => normalizeOpenAiTokens('chat', { ...chat(), choices: [{ finish_reason: 'stop', message: { audio: {} } }] })).toThrow();
+  expect(() => normalizeOpenAiTokens('responses', { id: 'r', model: 'm', status: 'completed',
+    output: [{ type: 'message', content: [{ type: 'output_audio' }] }],
+    usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2, input_tokens_details: { cached_tokens: 0 } } })).toThrow();
 });
 it('rounds only the combined integer amount and rejects an absent/invalid tariff', () => {
   const u = normalizeOpenAiTokens('chat', chat());
@@ -54,6 +58,7 @@ it('separates image/text usage and refuses guessed per-image or auto-quality cha
     output_tokens_details: { text_tokens: 0, image_tokens: 20 } };
   expect(normalizeOpenAiMedia('image', { usage }, 'fixture-image', 'req_synthetic').units)
     .toEqual({ inputText: 10n, inputImage: 90n, outputText: 0n, outputImage: 20n });
+  expect(() => normalizeOpenAiMedia('image', { usage: { ...usage, input_tokens_details: { ...usage.input_tokens_details, cached_tokens: 5 } } }, 'model', 'req_synthetic')).toThrow();
   expect(() => normalizeOpenAiMedia('image', { data: [{ b64_json: 'synthetic' }] }, 'model', 'req_synthetic')).toThrow();
   expect(() => normalizeOpenAiMedia('image', { usage: { ...usage, output_tokens_details: undefined } }, 'model', 'req_synthetic')).toThrow();
 });
