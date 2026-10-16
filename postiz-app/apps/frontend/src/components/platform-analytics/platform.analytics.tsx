@@ -1,6 +1,7 @@
 'use client';
 
 import useSWR from 'swr';
+import { BusinessDiscovery } from './business.discovery';
 import { useCallback, useMemo, useState } from 'react';
 import { capitalize, orderBy } from 'lodash';
 import clsx from 'clsx';
@@ -292,6 +293,9 @@ export const PlatformAnalytics = () => {
         </div>
       </div>
       <div className="analytics-panel bg-newBgColorInner min-w-0 flex-1 flex-col flex p-[20px] mobile:p-[16px] gap-[12px]">
+        {currentIntegration?.identifier === 'instagram' && (
+          <BusinessDiscovery key={currentIntegration.id} integrationId={currentIntegration.id} />
+        )}
         {!!options.length && (
           <div className="flex-1 flex flex-col gap-[14px]">
             <div className="max-w-[200px]">

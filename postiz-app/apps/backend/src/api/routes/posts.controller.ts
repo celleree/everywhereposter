@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpException,
+  ForbiddenException,
   Param,
   Post,
   Put,
@@ -45,6 +46,32 @@ export class PostsController {
     private _copyGenerationService: CopyGenerationService,
     private _historicalImportService: HistoricalImportService
   ) {}
+
+  private assertPublishedManager(org: Organization) {
+    // Membership comes from AuthMiddleware; billing policies do not enforce roles
+    // when Stripe is disabled, so destructive actions check it explicitly.
+    const member = (org as Organization & { users?: { role: string; disabled?: boolean }[] }).users?.[0];
+    if (!member || member.disabled || !['ADMIN', 'SUPERADMIN'].includes(member.role))
+      throw new ForbiddenException('An administrator must manage published Facebook posts.');
+  }
+
+  @Get('/:id/facebook-published')
+  facebookPublishedStatus(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
+    this.assertPublishedManager(org);
+    return this._postsService.facebookPublishedStatus(org.id, id);
+  }
+
+  @Post('/:id/facebook-published')
+  mutateFacebookPublished(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Body() body: any) {
+    this.assertPublishedManager(org);
+    return this._postsService.mutateFacebookPublished(org.id, id, body);
+  }
+
+  @Post('/:id/facebook-published/reconcile')
+  reconcileFacebookPublished(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
+    this.assertPublishedManager(org);
+    return this._postsService.reconcileFacebookPublished(org.id, id);
+  }
 
   @Get('/:id/statistics')
   async getStatistics(

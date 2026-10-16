@@ -1,5 +1,6 @@
 'use client';
 
+import { FacebookPublishedManagement } from './facebook.published.management';
 import { quickUploadProviderReason, QuickUploadSkip } from './guided.composer.quick-upload';
 import { useComposerDraftRecovery } from './composer.draft.recovery';
 
@@ -31,7 +32,7 @@ import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
-import { capitalize } from 'lodash';
+import { capitalize, escape } from 'lodash';
 import { SelectCustomer } from '@gitroom/frontend/components/launches/select.customer';
 import { CopilotPopup } from '@copilotkit/react-ui';
 import { useCopilotReadable } from '@copilotkit/react-core';
@@ -53,7 +54,8 @@ import {
   useUppyUploader,
 } from '@gitroom/frontend/components/media/new.uploader';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
-import { Dashboard } from '@uppy/react';
+import { UploadTransfers } from '../media/resumable-upload.provider';
+import { InlineUploadProgress } from '../media/inline-upload-progress';
 import { MediaAutoplayContext, VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 import {
@@ -149,6 +151,7 @@ export const ManageModal: FC<
   const guidedReview = useGuidedComposerStore((state) => state.composerStep === 'review');
   const guidedStep = useGuidedComposerStore((state) => state.composerStep);
   const [loading, setLoading] = useState(false);
+  const [facebookDeletedPostId, setFacebookDeletedPostId] = useState<string>();
   const toaster = useToaster();
   const modal = useModals();
   const [showSettings, setShowSettings] = useState(false);
@@ -287,6 +290,15 @@ export const ManageModal: FC<
       posts[0]
     );
   }, [current, existingData.integration, existingData.posts]);
+  const confirmFacebookPreview = useCallback((message: string, deleted: boolean) => {
+    if (!existingRootPost?.integrationId) return;
+    upsertInternalValueText(
+      existingRootPost.integrationId,
+      0,
+      escape(message).replace(/\n/g, '<br>')
+    );
+    setFacebookDeletedPostId(deleted ? existingRootPost.id : undefined);
+  }, [existingRootPost?.id, existingRootPost?.integrationId, upsertInternalValueText]);
   const previewPostIdsByIntegration = useMemo(() => {
     return (existingData?.posts || []).reduce<Record<string, string>>(
       (acc, post) => {
@@ -313,8 +325,12 @@ export const ManageModal: FC<
   );
   const publishedCapabilities = existingIntegration?.publishedCapabilities;
   const isPublishedPost = existingRootPost?.state === 'PUBLISHED';
-  const isRemoteDeletedPost = existingRootPost?.state === 'DELETED_REMOTE';
-  const isPublishedManagementView = isPublishedPost;
+  const isRemoteDeletedPost = existingRootPost?.state === 'DELETED_REMOTE' ||
+    (!!existingRootPost?.id && facebookDeletedPostId === existingRootPost.id);
+  const isPublishedManagementView = isPublishedPost ||
+    (existingIntegration?.identifier === 'facebook' && isRemoteDeletedPost);
+  const isFacebookPublishedManagement =
+    existingIntegration?.identifier === 'facebook' && isPublishedManagementView;
   const showPublishedActions =
     !!existingData?.integration && (isPublishedPost || isRemoteDeletedPost);
   const missingPublishedReleaseId =
@@ -1193,6 +1209,14 @@ export const ManageModal: FC<
               setLoading(false);
               return { ok: false, kind: 'preflight', ambiguous: false, message: 'The publishing attempt could not be saved safely. Keep this page open and restore browser storage before trying again.' };
             }
+            // New immediate, single-destination Facebook text posts use the existing
+            // durable publication receipt so later mutations have trusted provenance.
+            if (type === 'now' && !data.shortLink && !data.inter && data.posts.length === 1 &&
+                integrations.find((integration) => integration.id === data.posts[0].integration.id)?.identifier === 'facebook' && !existingData.integration &&
+                data.posts[0].value.length === 1 && !data.posts[0].value[0].image.length &&
+                !data.posts[0].settings.url && !Object.keys(data.posts[0].settings).some((key) => key.startsWith('plug-'))) {
+              (data as any).submissionId = crypto.randomUUID();
+            }
             const response = await fetch('/posts', {
               method: 'POST',
               body: JSON.stringify(data),
@@ -1412,6 +1436,9 @@ export const ManageModal: FC<
                 id="social-content"
                 className="flex w-full min-w-0 max-w-full flex-col gap-[24px] overflow-x-hidden p-[20px] mobile:gap-[16px] mobile:px-[12px] mobile:py-[12px]"
               >
+                {showPublishedActions && existingIntegration?.identifier === 'facebook' && existingRootPost?.id && (
+                  <FacebookPublishedManagement postId={existingRootPost.id} onConfirmed={confirmFacebookPreview} />
+                )}
                 {!isPublishedManagementView && (
                   <>
                     <ComposerSection
@@ -1523,7 +1550,7 @@ export const ManageModal: FC<
                   </>
                 )}
 
-                {current !== 'global' && (
+                {current !== 'global' && !(isPublishedManagementView && existingIntegration?.identifier === 'facebook') && (
                   <ComposerSection
                     step={isPublishedManagementView ? undefined : '5'}
                     title={
@@ -1607,12 +1634,16 @@ export const ManageModal: FC<
             </div>
             <div className="min-w-0 overflow-x-hidden p-[20px] mobile:w-full mobile:min-h-[220px] mobile:px-[12px] mobile:py-[12px]">
               <div id="composer-preview-content" className="min-w-0 max-w-full overflow-x-hidden">
+                {existingIntegration?.identifier === 'facebook' && isRemoteDeletedPost ? (
+                  <p role="status">Deleted on Facebook. This post is no longer published.</p>
+                ) : (
                   <MediaAutoplayContext.Provider value={!standaloneCreate}>
                     <ShowAllProviders
                       ref={ref}
                       previewPostIdsByIntegration={previewPostIdsByIntegration}
                     />
                   </MediaAutoplayContext.Provider>
+                )}
               </div>
             </div>
           </div>
@@ -1620,7 +1651,7 @@ export const ManageModal: FC<
 
         <div className="flex min-h-[84px] min-w-0 items-center border-t border-newBorder py-[16px] select-none mobile:relative mobile:flex-col mobile:items-stretch mobile:gap-[12px] mobile:overflow-x-hidden mobile:py-[12px]">
           <div className="flex min-w-0 flex-1 gap-[8px] ps-[20px] mobile:flex-col mobile:px-[12px] mobile:[&>*]:ml-0 mobile:[&>*]:w-full">
-            {!dummy && (
+            {!dummy && !isFacebookPublishedManagement && (
               <TagsComponent
                 name="tags"
                 label={t('tags', 'Tags')}
@@ -1631,13 +1662,13 @@ export const ManageModal: FC<
               />
             )}
 
-            {!dummy && (
+            {!dummy && !isFacebookPublishedManagement && (
               <RepeatComponent repeat={repeater} onChange={setRepeater} />
             )}
           </div>
           <div className="flex min-w-0 max-w-full flex-col items-end gap-[8px] pe-[20px] mobile:items-stretch mobile:px-[12px]">
             <div className="flex min-w-0 max-w-full items-center justify-end gap-[8px] mobile:flex-col mobile:items-stretch">
-              {showPublishedActions && (
+              {showPublishedActions && !isFacebookPublishedManagement && (
                 <span
                   className="mobile:w-full"
                   title={deleteOnPlatformDisabledReason || undefined}
@@ -1675,12 +1706,12 @@ export const ManageModal: FC<
                   </div>
                 </button>
               )}
-              {(!showPublishedActions || isRemoteDeletedPost) && (
+              {!isFacebookPublishedManagement && (!showPublishedActions || isRemoteDeletedPost) && (
                 <div className="mobile:w-full mobile:min-w-0 mobile:[&>*]:w-full">
                   <DatePicker onChange={setDate} date={date} />
                 </div>
               )}
-              {!addEditSets && (
+              {!addEditSets && !isFacebookPublishedManagement && (
                 <button
                   disabled={
                     selectedIntegrations.length === 0 || loading || locked || recovery.publishLocked
@@ -1727,7 +1758,7 @@ export const ManageModal: FC<
                   </div>
                 </button>
               )}
-              {!addEditSets && (
+              {!addEditSets && !isFacebookPublishedManagement && (
                 <div className="group relative min-w-0 cursor-pointer mobile:w-full">
                   <button
                     disabled={
@@ -1790,7 +1821,7 @@ export const ManageModal: FC<
                 </div>
               )}
             </div>
-            {!!publishedActionHint && (
+            {!!publishedActionHint && !isFacebookPublishedManagement && (
               <div className="max-w-[420px] text-end text-[12px] text-[#A3A3A3] mobile:max-w-none mobile:text-start">
                 {publishedActionHint}
               </div>
@@ -2018,20 +2049,8 @@ const ComposerUploadCard: FC<{
     >
       <input {...getInputProps()} />
       {uploadIssue && <p role="alert" className="mb-[12px] text-[13px] text-textColor">{uploadIssue}</p>}
-      {guidedTranscription && (
-        <div className="mobile-upload-intro hidden">
-          <div className="mobile-upload-icon" aria-hidden="true">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="4" />
-              <circle cx="8.5" cy="8.5" r="1.5" /><path d="m3 17 5-5 4 4 4-6 5 7" />
-            </svg>
-          </div>
-          <h2>Choose photo or video</h2>
-          <p>Select files from your device to upload.</p>
-        </div>
-      )}
       <div className="flex min-w-0 flex-col items-center justify-center gap-[10px] text-center">
-        <div className="composer-upload-controls flex min-w-0 flex-wrap items-center justify-center gap-[10px] mobile:w-full mobile:flex-col">
+        <div className="composer-upload-controls flex min-w-0 flex-wrap items-center justify-center gap-[8px]">
           <button
             type="button"
             disabled={disabled || loading}
@@ -2040,7 +2059,7 @@ const ComposerUploadCard: FC<{
               event.stopPropagation();
               open();
             }}
-            className="rounded-[12px] bg-btnPrimary px-[22px] py-[13px] text-[14px] font-[700] text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:opacity-90 mobile:w-full"
+            className="!min-h-[44px] rounded-[8px] bg-btnPrimary px-[14px] py-[8px] text-[14px] font-[700] text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:opacity-90"
           >
             Choose files
           </button>
@@ -2048,61 +2067,26 @@ const ComposerUploadCard: FC<{
             type="button"
             disabled={disabled || loading}
             onClick={openMediaLibrary}
-            className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:border-ai mobile:w-full"
+            className="!min-h-[44px] rounded-[8px] border border-newBorder bg-newBgColorInner px-[14px] py-[8px] text-[14px] font-[700] text-newTextColor transition-colors disabled:cursor-not-allowed disabled:opacity-60 [@media(hover:hover)]:hover:border-ai"
           >
             {t('media_library', 'Media Library')}
           </button>
-          {loading && (
-            <button
-              type="button"
-              onClick={cancelUpload}
-              className="rounded-[12px] border border-newBorder bg-newBgColorInner px-[22px] py-[13px] text-[14px] font-[700] text-white transition-colors [@media(hover:hover)]:hover:border-ai mobile:w-full"
-            >
-              {t('cancel_upload', 'Cancel upload')}
-            </button>
-          )}
         </div>
         <div className="upload-drop-hint break-words text-[13px] leading-[1.4] text-textColor/65">
           Drop files here or browse from your device.
         </div>
       </div>
 
-      {loading && (
-        <div className="pointer-events-none mt-[16px] min-h-[46px] w-full overflow-hidden rounded-[12px] bg-newBgColorInner uppyChange">
-          <Dashboard
-            height={46}
-            uppy={uppy}
-            id="composer-uploader-progress"
-            showProgressDetails={true}
-            hideUploadButton={true}
-            hideRetryButton={true}
-            hidePauseResumeButton={true}
-            hideCancelButton={true}
-            hideProgressAfterFinish={true}
-          />
-        </div>
-      )}
+      <UploadTransfers />
+      <InlineUploadProgress uppy={uppy} onCancel={cancelUpload} />
 
       <div
         className={clsx(
           'composer-media-preview mt-[16px] min-w-0 max-w-full overflow-x-hidden rounded-[16px] border border-newBorder bg-newBgColorInner p-[14px]',
-          !media.length &&
-            'flex min-h-[150px] items-center justify-center mobile:min-h-[120px]'
+          !media.length && 'hidden'
         )}
       >
-        {!media.length ? (
-          <div className="text-center">
-            {loading ? (
-              <div className="text-[15px] font-[700] text-white">
-                {t('drop_files_here_to_upload', 'Drop your files here to upload')}
-              </div>
-            ) : (
-              <div className="text-[13px] text-textColor/65">
-                Images and video are supported.
-              </div>
-            )}
-          </div>
-        ) : (
+        {media.length > 0 && (
           <div className="flex min-w-0 flex-col gap-[14px]">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-[12px]">
               <div className="composer-media-label text-[14px] font-[700] text-white">

@@ -502,6 +502,7 @@ Rules:
         facts: [],
         unknowns: [],
         coreMessage: transcript.slice(0, 180),
+        voiceProfile: null,
       })
     );
   }
