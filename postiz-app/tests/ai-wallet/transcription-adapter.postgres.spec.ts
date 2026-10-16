@@ -14,7 +14,7 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
   const before = Object.fromEntries(Object.keys(env).map(k => [k, process.env[k]]));
   const response = () => ({ request_id: randomUUID(), data: { text: ' Synthetic transcript. ', usage: { type: 'tokens',
     input_tokens: 10, output_tokens: 2, total_tokens: 12, input_token_details: { text_tokens: 0, audio_tokens: 10 } } } });
-  const run = () => adapter.run(org, job, 1, prepare);
+  const run = (allowNewReservation = true) => adapter.run(org, job, 1, allowNewReservation, prepare);
   beforeAll(async () => {
     const url = new URL(fixtureUrl!);
     if (!['localhost', '127.0.0.1'].includes(url.hostname) || url.pathname !== '/ep_ai_wallet_test') throw Error('Isolated fixture required');
@@ -37,16 +37,18 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
   it('routes the real media lifecycle through accounting before any legacy paid method', async () => {
     const lifecycleModel = { transcribeVideo: jest.fn() }, accounted = { run: jest.fn(async () => ({ state: 'UNKNOWN' })) };
     const repository = { claimForProcessing: jest.fn(), getActiveWorkerInput: jest.fn(async () => ({
-      media: { organizationId: org, path: '/offline/fixture.mp4', name: 'fixture.mp4' },
+      media: { organizationId: org, path: '/offline/fixture.mp4', name: 'fixture.mp4',
+        organization: { subscription: { subscriptionTier: 'LAUNCH_V1' } } },
     })) };
     const lifecycle = new MediaTranscriptionService(repository as any, {} as any, lifecycleModel as any, accounted as any);
     expect(await lifecycle.processTranscription(job, 1)).toMatchObject({ status: 'PROCESSING' });
-    expect(accounted.run).toHaveBeenCalledWith(org, job, 1, expect.any(Function));
+    expect(accounted.run).toHaveBeenCalledWith(org, job, 1, true, expect.any(Function));
     expect(lifecycleModel.transcribeVideo).not.toHaveBeenCalled();
   });
 
   it('preserves flags-off legacy and fails closed when adapter/rates/balance are unavailable', async () => {
-    process.env.AI_WALLET_ENABLED = 'false'; expect(await run()).toBeUndefined();
+    process.env.AI_WALLET_ENABLED = 'false'; expect(await run(false)).toBeUndefined();
+    await expect(run()).rejects.toThrow('disabled');
     process.env.AI_WALLET_ENABLED = 'true'; process.env.AI_WALLET_TRANSCRIPTION_ENABLED = 'false';
     await expect(run()).rejects.toThrow('disabled');
     process.env.AI_WALLET_TRANSCRIPTION_ENABLED = 'true'; delete process.env.AI_WALLET_TRANSCRIPTION_RATE_CARD;
@@ -64,6 +66,27 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     expect(await db.mediaTranscription.findUnique({ where: { id: job } })).toMatchObject({ status: 'READY', text: 'Synthetic transcript.' });
     expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(1);
   });
+  it('resumes a held reservation through real accounting after flags and plan authorization pause', async () => {
+    const dispatchFailure = jest.spyOn(wallet, 'dispatchTranscription')
+      .mockRejectedValueOnce(Error('synthetic pre-claim local failure'));
+    await expect(run()).rejects.toThrow('pre-claim local failure');
+    dispatchFailure.mockRestore();
+    expect(await wallet.quotedOperation(org, `media-transcription:${job}`)).toMatchObject({ state: 'RESERVED' });
+    expect(model.transcribePrepaidAudio).not.toHaveBeenCalled();
+
+    process.env.AI_WALLET_ENABLED = 'false';
+    process.env.AI_WALLET_TRANSCRIPTION_ENABLED = 'false';
+    expect((await run(false))?.state).toBe('SETTLED');
+    expect((await run(false))?.state).toBe('SETTLED');
+
+    expect(model.transcribePrepaidAudio).toHaveBeenCalledTimes(1);
+    expect(await wallet.quotedOperation(org, `media-transcription:${job}`)).toMatchObject({ state: 'SETTLED', chargedNanos: 168n });
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(1);
+    expect(await db.mediaTranscription.findUnique({ where: { id: job } })).toMatchObject({
+      status: 'READY', text: 'Synthetic transcript.',
+    });
+  });
+
   it('recovers a crash after receipt staging without another paid call, even after flags pause', async () => {
     jest.spyOn(wallet, 'finishTranscription').mockRejectedValueOnce(Error('synthetic local commit failure'));
     await expect(run()).rejects.toThrow('commit failure');

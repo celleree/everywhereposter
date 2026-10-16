@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import Stripe from 'stripe';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
@@ -13,6 +13,16 @@ type Offer = { id: string; amountCents: number };
 @Injectable()
 export class AiWalletCheckoutService {
   constructor(private readonly db: PrismaService, private readonly wallet: AiWalletService) {}
+
+  async assertPrepaidPlan(organizationId: string) {
+    const subscription = await this.db.subscription.findFirst({
+      where: { organizationId, deletedAt: null },
+      select: { subscriptionTier: true },
+    });
+    if (String(subscription?.subscriptionTier || '') !== 'LAUNCH_V1') {
+      throw new ForbiddenException('Prepaid AI is not included in this plan.');
+    }
+  }
 
   private assertTestAccount() {
     if (!/^(sk|rk)_test_/.test(process.env.STRIPE_SECRET_KEY || '')) {
@@ -29,7 +39,7 @@ export class AiWalletCheckoutService {
 
   protected client() { this.assertTestAccount(); return new Stripe(process.env.STRIPE_SECRET_KEY!); }
 
-  offers(): Offer[] {
+  private configuredOffers(): Offer[] {
     this.assertPurchasesEnabled();
     let values: unknown;
     try { values = process.env.AI_WALLET_TEST_OFFERS === undefined
@@ -45,7 +55,13 @@ export class AiWalletCheckoutService {
     return values.map(({ id, amountCents }) => ({ id, amountCents }));
   }
 
+  async offers(organizationId: string): Promise<Offer[]> {
+    await this.assertPrepaidPlan(organizationId);
+    return this.configuredOffers();
+  }
+
   async balance(organizationId: string) {
+    await this.assertPrepaidPlan(organizationId);
     this.assertTestAccount();
     const [balance, entries, operations] = await this.db.$transaction([
       this.db.aiWallet.findUnique({ where: { organizationId } }),
@@ -66,6 +82,7 @@ export class AiWalletCheckoutService {
     const org = await this.db.organization.findUnique({ where: { id: organizationId }, select: { paymentId: true } });
     if (!org) throw new BadRequestException('Organization not found.');
     if (org.paymentId) return org.paymentId;
+    await this.assertPrepaidPlan(organizationId);
     const customer = await this.client().customers.create({ metadata: { organizationId } },
       { idempotencyKey: `ai-wallet-test-customer:${organizationId}` });
     if (customer.livemode !== false) throw new Error('Live billing customer is not supported.');
@@ -76,17 +93,21 @@ export class AiWalletCheckoutService {
   }
 
   async createCheckout(organizationId: string, offerId: string, operationKey: string) {
+    await this.assertPrepaidPlan(organizationId);
     this.assertPurchasesEnabled();
     if (typeof operationKey !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(operationKey)) {
       throw new BadRequestException('Invalid top-up operation key.');
     }
-    const offer = this.offers().find((value) => value.id === offerId);
+    const offer = this.configuredOffers().find((value) => value.id === offerId);
     if (!offer) throw new BadRequestException('Select a configured test top-up.');
     const customerId = await this.customer(organizationId);
     const intent = await this.wallet.createTopup(organizationId, operationKey, customerId, offer.amountCents);
     if (intent.fundedAt) return { topupId: intent.id, status: 'funded', url: null };
     const callback = new URL('/billing', process.env.FRONTEND_URL);
     if (!['http:', 'https:'].includes(callback.protocol)) throw new ServiceUnavailableException('Invalid Checkout return URL.');
+    // Re-read the durable plan immediately before contacting Stripe. The
+    // controller/UI decision may have raced a subscription change.
+    await this.assertPrepaidPlan(organizationId);
     const session = intent.sessionId
       ? await this.client().checkout.sessions.retrieve(intent.sessionId)
       : await this.client().checkout.sessions.create({ mode: 'payment', customer: intent.customerId,

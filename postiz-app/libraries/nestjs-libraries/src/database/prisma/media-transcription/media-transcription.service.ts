@@ -13,6 +13,7 @@ import { promisify } from 'util';
 import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.model.service';
 import { prepareVideoMediaFile } from '@gitroom/nestjs-libraries/copy-generation/video-media-file';
 import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 export type TranscriptionLifecycleCode =
   | 'TRANSCRIPTION_PENDING'
@@ -204,16 +205,28 @@ export class MediaTranscriptionService {
       return { discarded: true };
     }
 
+    const subscriptionTier = String(
+      active.media.organization?.subscription?.subscriptionTier || ''
+    );
+    const requiresPrepaid = subscriptionTier === 'LAUNCH_V1';
+    const hasLegacyBundledAi =
+      ['STANDARD', 'TEAM', 'PRO', 'ULTIMATE'].includes(subscriptionTier) ||
+      (!isBillingEnabled() && !requiresPrepaid);
+
     if (this._prepaid) {
-      const accounted = await this._prepaid.run(active.media.organizationId, transcriptionId, generation, async () => {
+      const accounted = await this._prepaid.run(active.media.organizationId, transcriptionId, generation, requiresPrepaid, async () => {
         const prepared = await prepareVideoMediaFile(active.media.path, active.media.originalName || active.media.name);
         try { return await this._copyGenerationModelService.preparePrepaidTranscription({ inputPath: prepared.inputPath,
           originalName: active.media.originalName || active.media.name }); }
         finally { await prepared.cleanup(); }
       });
       if (accounted) return { discarded: false, status: accounted.state === 'SETTLED' ? 'READY' as const : 'PROCESSING' as const };
-    } else if (process.env.AI_WALLET_ENABLED?.trim().toLowerCase() === 'true') {
+    }
+    if (requiresPrepaid) {
       throw new Error('Prepaid transcription adapter is unavailable.');
+    }
+    if (!hasLegacyBundledAi) {
+      throw new Error('AI transcription is not included in this plan.');
     }
 
     let preparedVideo:

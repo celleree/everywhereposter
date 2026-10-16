@@ -40,6 +40,7 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     await db.organization.create({ data: { id: org, name: 'Synthetic Checkout fixture', paymentId: 'cus_synthetic' } });
     wallet = new AiWalletService({ model: db } as any);
     checkout = new AiWalletCheckoutService(db as any, wallet);
+    jest.spyOn(checkout, 'assertPrepaidPlan').mockResolvedValue(undefined);
     sessions = new Map();
     sdk = { customers: { create: jest.fn(async (_body: any, options: any) => ({ id: `cus_test_${options.idempotencyKey}`, livemode: false })) }, checkout: { sessions: {
       create: jest.fn(async (params: any, options: any) => {
@@ -104,7 +105,7 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
 
   it('offers only approved manual packs by default without granting trial or return-page credit', async () => {
     delete process.env.AI_WALLET_TEST_OFFERS;
-    expect(checkout.offers()).toEqual([500, 1000, 2500].map(amountCents => ({ id: `usd_${amountCents}`, amountCents })));
+    await expect(checkout.offers(org)).resolves.toEqual([500, 1000, 2500].map(amountCents => ({ id: `usd_${amountCents}`, amountCents })));
     for (const amountCents of [500, 1000, 2500]) {
       await billing.createWalletTopup({ id: org, users: [{ role: 'ADMIN' }] } as any,
         { offerId: `usd_${amountCents}`, operationKey: `approved_${amountCents}` });
@@ -114,14 +115,14 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     }
     expect((await checkout.balance(org)).balanceNanos).toBe('0');
     expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(0);
-    process.env.AI_WALLET_TEST_OFFERS = '[]'; expect(checkout.offers()).toEqual([]);
-    process.env.AI_WALLET_TEST_OFFERS = ''; expect(() => checkout.offers()).toThrow('Invalid test');
+    process.env.AI_WALLET_TEST_OFFERS = '[]'; await expect(checkout.offers(org)).resolves.toEqual([]);
+    process.env.AI_WALLET_TEST_OFFERS = ''; await expect(checkout.offers(org)).rejects.toThrow('Invalid test');
   });
 
   it.each(['not-json', '[{"id":"a","amountCents":1.5}]',
-    '[{"id":"a","amountCents":100},{"id":"a","amountCents":200}]'])('rejects invalid catalogue %s', (catalogue) => {
+    '[{"id":"a","amountCents":100},{"id":"a","amountCents":200}]'])('rejects invalid catalogue %s', async (catalogue) => {
     process.env.AI_WALLET_TEST_OFFERS = catalogue;
-    expect(() => checkout.offers()).toThrow('Invalid test top-up');
+    await expect(checkout.offers(org)).rejects.toThrow('Invalid test top-up');
   });
 
   it('uses server org/customer/amount, requires an administrator, and ignores forged body amounts', async () => {
