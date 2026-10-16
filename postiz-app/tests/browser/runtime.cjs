@@ -9,7 +9,7 @@ const frontendPort = Number(process.env.BROWSER_FRONTEND_PORT || 4217);
 const apiPort = Number(process.env.BROWSER_API_PORT || 4218);
 if (![frontendPort, apiPort].every(port => Number.isInteger(port) && port > 1024 && port < 65536) || frontendPort === apiPort) throw new Error('Invalid owned fixture ports');
 const origin = `http://127.0.0.1:${frontendPort}`;
-if (process.env.EP_FACEBOOK_BROWSER === '1' && process.env.EP_DISCOVERY_BROWSER === '1') throw new Error('Select only one isolated browser fixture mode per process');
+if (['EP_FACEBOOK_BROWSER', 'EP_DISCOVERY_BROWSER', 'EP_VIDEO_EDITOR_BROWSER'].filter(key => process.env[key] === '1').length > 1) throw new Error('Select only one isolated browser fixture mode per process');
 const facebook = process.env.EP_FACEBOOK_BROWSER === '1' ? require('./facebook-runtime.cjs')() : undefined;
 const token = 'synthetic-playwright-session';
 const branding = path.join(root, 'apps/frontend/public/branding');
@@ -23,6 +23,7 @@ for (const dir of [root, path.dirname(root), path.join(root, 'apps/frontend')]) 
   }
 }
 const discovery = process.env.EP_DISCOVERY_BROWSER === '1' ? require('./discovery-runtime.cjs')() : undefined;
+const videoEditor = process.env.EP_VIDEO_EDITOR_BROWSER === '1' ? require('./video-editor-runtime.cjs')() : undefined;
 const user = { id: 'synthetic-user', orgId: 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
 const posts = Array.from({ length: 18 }, (_, index) => ({ id: `synthetic-post-${index}`, group: `synthetic-group-${index}`, state: 'QUEUE', content: `Synthetic scheduled post ${index + 1}: a long caption for responsive scrolling and reachability checks.`, publishDate: '2035-01-01T18:00:00.000Z', tags: [], intervalInDays: null, integration: { id: 'synthetic-channel', name: 'Synthetic channel', providerIdentifier: 'x', picture: '/icons/platforms/x.png' } }));
 const values = {
@@ -57,6 +58,7 @@ let createdBranding = false;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${apiPort}`);
   if (discovery && await discovery.handle(req, res, url, token)) return;
+  if (videoEditor && await videoEditor.handle(req, res, url, token)) return;
   if (facebook) {
     try { if (await facebook.handle(req, res, url, token)) return; }
     catch (error) { res.writeHead(error.getStatus?.() || 500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ message: error.getStatus ? error.message : 'Fixture adapter failure' })); }
@@ -107,11 +109,11 @@ function startFrontend() {
     }
   });
   frontend.stderr.on('data', data => process.stderr.write(data));
-  frontend.on('exit', code => { stopping = true; cleanupBranding(); server.close(); process.exitCode = process.exitCode || code || 0; });
+  frontend.on('exit', code => { stopping = true; cleanupEditor(); cleanupBranding(); server.close(); process.exitCode = process.exitCode || code || 0; });
 }
 async function warmRoutes() {
   const deadline = Date.now() + 330_000;
-  for (const route of (discovery ? ['/auth/login', '/analytics'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
+  for (const route of (discovery ? ['/auth/login', '/analytics'] : videoEditor ? ['/auth/login', '/video-editor', '/create'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
     let loaded = false;
     while (!stopping && !loaded && Date.now() < deadline) {
       try {
@@ -137,6 +139,8 @@ function cleanupBranding() {
     fs.unlinkSync(branding); createdBranding = false;
   }
 }
-function stop() { stopping = true; ready = false; if (reservation.listening) reservation.close(); frontend?.kill('SIGTERM'); cleanupBranding(); server.close(); }
+let editorCleaned = false;
+function cleanupEditor() { if (videoEditor && !editorCleaned) { try { videoEditor.cleanup(); editorCleaned = true; } catch (error) { console.error(error.message); } } }
+function stop() { cleanupEditor(); stopping = true; ready = false; if (reservation.listening) reservation.close(); frontend?.kill('SIGTERM'); cleanupBranding(); server.close(); }
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
