@@ -63,7 +63,9 @@ test('Resumable upload: navigation, browser return and safe completion', async (
 
 test('Resumable upload: persisted Quick Upload choice before completion survives navigation and return', async ({ page }, info) => {
   test.skip(info.project.name.includes('webkit'), 'WebKit request interception does not expose Blob chunk bodies; Chromium covers the transfer protocol.');
-  const bytes = Buffer.concat([readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')), Buffer.alloc(17 * 1024 * 1024)]);
+  // Holding the first part establishes unfinished upload consent; multi-part
+  // recovery is covered separately without bloating this navigation trace.
+  const bytes = readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4'));
   let session: any, release: () => void, held = false, continueTransfer = false;
   const hold = new Promise<void>(resolve => { release = resolve; });
   let intent: any;
@@ -86,6 +88,14 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
     return route.fulfill({ json: session });
   });
   await page.route('**/backend-api/integrations/list', route => route.fulfill({ json: { integrations: [{ id: 'fixture', name: 'Fixture account', identifier: 'x', type: 'social', editor: 'normal', additionalSettings: '[]', time: [] }] } }));
+  // Bootstrap the client route before holding a transfer; navigation assertions
+  // measure transfer persistence, not a cold development chunk download.
+  await openApp(page, '/settings'); await page.waitForLoadState('load');
+  const reloadApp = async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    // Match openApp's bootstrap budget before asserting restored transfer state.
+    await expect(page.locator('.mobile-app-shell')).toBeVisible({ timeout: 60_000 });
+  };
   await openApp(page, '/media');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('region', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);
@@ -99,9 +109,9 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   await expect(page).toHaveURL(/settings/); await expect(tray).toHaveCount(0); continueTransfer = true; release!();
   await page.goBack();
   await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
-  intent.status = 'PUBLISHING'; session.quickIntent = intent; await page.reload();
+  intent.status = 'PUBLISHING'; session.quickIntent = intent; await reloadApp();
   await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Publishing');
-  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }]; session.quickIntent = intent; await page.reload();
+  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }]; session.quickIntent = intent; await reloadApp();
   await expect(tray.getByText('Fixture account: Published')).toBeVisible();
 });
 

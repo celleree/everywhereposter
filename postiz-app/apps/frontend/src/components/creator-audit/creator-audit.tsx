@@ -225,13 +225,14 @@ export function CreatorAudit() {
     <div key={orgId} className="p-6">
       {source && sourceOrg === orgId ? (
         <>
-          <section className="mb-6 rounded-lg border p-4" aria-label="Connected Instagram audit">
+          <section className="creator-audit-controls mb-6 rounded-lg border p-4" aria-label="Connected Instagram audit">
             <h2 className="text-lg font-semibold">Instagram account audit</h2>
             <p className="mt-1">
-              Review an Instagram professional connection. Discovery covers the default 180 days,
+              Choose a connected Instagram professional account to audit. Discovery covers the default 180 days,
               with up to 300 items and 30 analysis items; unsupported or unavailable account data
               may leave parts of the audit incomplete.
             </p>
+            <p className="mt-2 text-sm">Accounts must be connected to this workspace before they appear here.</p>
             {needsConnection ? (
               <div className="mt-3">
                 <p>No ready Instagram connection is available. Add or reconnect one to continue.</p>
@@ -239,22 +240,24 @@ export function CreatorAudit() {
               </div>
             ) : (
               <div className="mt-3 flex flex-wrap items-center gap-3">
-                <label>
+                <label className="flex min-w-0 max-w-full flex-col gap-2">
                   Instagram connection{' '}
                   <select
                     aria-label="Instagram connection"
+                    className="min-h-[44px] w-full min-w-0 rounded-[8px] border border-newTableBorder bg-newBgColorInner px-3 text-textColor focus-visible:outline focus-visible:outline-2"
                     value={selectedIntegration}
                     onChange={(event) => setSelectedIntegration(event.target.value)}
                   >
-                    <option value="">Choose a connection</option>
+                    <option className="bg-newBgColorInner text-textColor" value="">Choose a connection</option>
                     {readyIntegrations.map((integration) => (
-                      <option key={integration.id} value={integration.id}>{integration.name}</option>
+                      <option className="bg-newBgColorInner text-textColor" key={integration.id} value={integration.id}>{integration.name}</option>
                     ))}
                   </select>
                 </label>
                 <button type="button" disabled={!selectedIntegration || !allowedToStart || busy || visibleTask?.status === 'running' || visibleTask?.resumable === false} onClick={() => startAudit()}>
                   {busy ? 'Starting…' : visibleTask?.status === 'running' ? 'Audit running…' : 'Start audit'}
                 </button>
+                <a className="underline" href="/launches">Connect another Instagram account</a>
               </div>
             )}
             {!allowedToStart && <p className="mt-2">An organization admin must start the audit.</p>}
