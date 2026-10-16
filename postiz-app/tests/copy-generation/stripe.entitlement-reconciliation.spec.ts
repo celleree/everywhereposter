@@ -3,7 +3,7 @@ import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/s
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
 
-type Tier = 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE';
+type Tier = 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1';
 
 type StoredSubscription = {
   id: string;
@@ -261,6 +261,7 @@ const makeReconciliationHarness = (
   };
 
   const organizationService = {
+    enforceSingleEnabledOwner: jest.fn().mockResolvedValue({ count: 1 }),
     disableOrEnableNonSuperAdminUsers: jest.fn(
       async (_orgId: string, disabled: boolean) => {
         if (teamFailure) {
@@ -389,6 +390,24 @@ describe('Stripe S1 authoritative entitlement reconciliation', () => {
     } else {
       process.env.BILLING_ENABLED = originalBillingEnabled;
     }
+  });
+
+  it('launch reconciliation restores only billing-disabled channels without a finite cap and enforces one owner', async () => {
+    const harness = makeReconciliationHarness(ordinary('LAUNCH_V1', 0), 0);
+    harness.setIntegrations([
+      { id: 'enabled', disabled: false, disabledByBilling: false },
+      { id: 'billing_disabled', disabled: true, disabledByBilling: true },
+      { id: 'manual_disabled', disabled: true, disabledByBilling: false },
+    ]);
+    await harness.subscriptionService.modifySubscriptionByOrg('org_1', 0, 'LAUNCH_V1');
+    expect(harness.getIntegrations()).toEqual([
+      { id: 'enabled', disabled: false, disabledByBilling: false },
+      { id: 'billing_disabled', disabled: false, disabledByBilling: false },
+      { id: 'manual_disabled', disabled: true, disabledByBilling: false },
+    ]);
+    expect(harness.organizationService.enforceSingleEnabledOwner).toHaveBeenCalledWith('org_1');
+    expect(harness.organizationService.disableOrEnableNonSuperAdminUsers).not.toHaveBeenCalled();
+    expect(harness.integrationService.changeActiveCron).toHaveBeenCalledWith('org_1');
   });
 
   it('a lifetime retry after post-commit failure reconciles without redeeming twice', async () => {

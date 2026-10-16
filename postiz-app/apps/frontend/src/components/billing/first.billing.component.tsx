@@ -11,7 +11,7 @@ import { AttachToFeedbackIcon } from '@gitroom/frontend/components/new-layout/se
 import NotificationComponent from '@gitroom/frontend/components/notifications/notification.component';
 import dynamic from 'next/dynamic';
 import { LogoTextComponent } from '@gitroom/frontend/components/ui/logo-text.component';
-import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
+import { pricing, LAUNCH_PLAN, purchasePlans } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { capitalize } from 'lodash';
 import clsx from 'clsx';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
@@ -51,7 +51,7 @@ export const FirstBillingComponent = () => {
   const user = useUser();
   const dub = useDubClickId();
   const [stripe, setStripe] = useState<null | Promise<Stripe>>(null);
-  const [tier, setTier] = useState('STANDARD');
+  const [tier, setTier] = useState<string>(LAUNCH_PLAN);
   const [period, setPeriod] = useState('MONTHLY');
   const fetch = useFetch();
   const modals = useModals();
@@ -107,7 +107,7 @@ export const FirstBillingComponent = () => {
   );
 
   const price = useMemo(
-    () => Object.entries(pricing).filter(([key, value]) => key !== 'FREE'),
+    () => purchasePlans(),
     []
   );
 
@@ -267,7 +267,7 @@ export const FirstBillingComponent = () => {
                     )}
                   >
                     <div className="text-[20px] mobile:text-[18px] font-[500]">
-                      {capitalize(key)}
+                      {key === LAUNCH_PLAN ? 'Launch' : capitalize(key)}
                     </div>
                     <div className="text-[24px] mobile:text-[18px] font-[400]">
                       <span className="text-[44px] mobile:text-[30px] font-[600]">
@@ -314,6 +314,8 @@ export const BillingFeatures: FC<{ tier: string }> = ({ tier }) => {
   const t = useT();
   const features = useMemo(() => {
     const currentPricing = pricing[tier];
+    if (tier === LAUNCH_PLAN) return ['Unlimited connected accounts', 'Unlimited publishing and scheduling', 'One user', 'AI uses a separate prepaid balance']
+      .map((defaultValue, index) => ({ key: 'launch_feature_' + index, defaultValue }));
     const channelsOr = currentPricing.channel;
     const list: FeatureItem[] = [];
 
