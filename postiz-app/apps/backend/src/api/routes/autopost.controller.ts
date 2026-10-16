@@ -8,6 +8,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
 import { Organization } from '@prisma/client';
 import { ApiTags } from '@nestjs/swagger';
@@ -20,7 +21,7 @@ import { OnlyURL } from '@gitroom/nestjs-libraries/dtos/webhooks/webhooks.dto';
 @ApiTags('Autopost')
 @Controller('/autopost')
 export class AutopostController {
-  constructor(private _autopostsService: AutopostService) {}
+  constructor(private _autopostsService: AutopostService, private _organizationService: OrganizationService) {}
 
   @Get('/')
   async getAutoposts(@GetOrgFromRequest() org: Organization) {
@@ -33,6 +34,7 @@ export class AutopostController {
     @GetOrgFromRequest() org: Organization,
     @Body() body: AutopostDto
   ) {
+    await this._organizationService.assertAdvancedAutomationAllowed(org.id);
     return this._autopostsService.createAutopost(org.id, body);
   }
 
@@ -42,6 +44,7 @@ export class AutopostController {
     @Body() body: AutopostDto,
     @Param('id') id: string
   ) {
+    await this._organizationService.assertAdvancedAutomationAllowed(org.id);
     return this._autopostsService.createAutopost(org.id, body, id);
   }
 
@@ -59,11 +62,13 @@ export class AutopostController {
     @Param('id') id: string,
     @Body('active') active: boolean
   ) {
+    await this._organizationService.assertAdvancedAutomationAllowed(org.id);
     return this._autopostsService.changeActive(org.id, id, active);
   }
 
   @Post('/send')
-  async sendWebhook(@Query() query: OnlyURL) {
+  async sendWebhook(@GetOrgFromRequest() org: Organization, @Query() query: OnlyURL) {
+    await this._organizationService.assertAdvancedAutomationAllowed(org.id);
     return this._autopostsService.loadXML(query.url);
   }
 }

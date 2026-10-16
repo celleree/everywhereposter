@@ -1176,6 +1176,7 @@ enum State {
 }
 
 enum SubscriptionTier {
+  LAUNCH_V1
   STANDARD
   PRO
   TEAM

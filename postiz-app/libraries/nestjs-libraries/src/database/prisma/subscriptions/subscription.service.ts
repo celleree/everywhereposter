@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
+import { pricing, channelAllowance } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { LifetimeSubscriptionSnapshot, SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
@@ -134,7 +134,8 @@ export class SubscriptionService {
         createdAt: subscription?.createdAt || null,
         updatedAt: subscription?.updatedAt || null,
       }),
-      totalChannels: subscription?.totalChannels ?? 0,
+      totalChannels: channelAllowance(subscription),
+      singleOwner: tier === 'LAUNCH_V1',
       teamMembers: !!plan.team_members,
       autoPost: !!plan.autoPost,
     };
@@ -205,10 +206,14 @@ export class SubscriptionService {
         continue;
       }
 
-      await this._organizationService.disableOrEnableNonSuperAdminUsers(
-        organizationId,
-        !desired.teamMembers
-      );
+      if (desired.singleOwner) {
+        await this._organizationService.enforceSingleEnabledOwner(organizationId);
+      } else {
+        await this._organizationService.disableOrEnableNonSuperAdminUsers(
+          organizationId,
+          !desired.teamMembers
+        );
+      }
       if (
         !(await this.isEntitlementStateCurrent(
           organizationId,
@@ -242,7 +247,7 @@ export class SubscriptionService {
   async modifySubscriptionByOrg(
     organizationId: string,
     _totalChannels: number,
-    _billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE'
+    _billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1'
   ) {
     if (!organizationId) {
       return false;
@@ -260,7 +265,7 @@ export class SubscriptionService {
     identifier: string,
     customerId: string,
     totalChannels: number,
-    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null,
     code?: string,
@@ -268,6 +273,7 @@ export class SubscriptionService {
     expectedSubscription?: LifetimeSubscriptionSnapshot | null
   ) {
     if (code) {
+      if (billing === 'LAUNCH_V1') throw new Error('Launch subscriptions do not accept lifetime coupons');
       if (!isBillingEnabled()) {
         return false;
       }
