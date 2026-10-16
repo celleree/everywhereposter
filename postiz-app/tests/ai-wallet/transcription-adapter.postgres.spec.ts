@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
 import { AiWalletTranscriptionService } from '@gitroom/nestjs-libraries/services/ai-wallet-transcription.service';
@@ -71,6 +72,24 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     process.env.AI_WALLET_ENABLED = 'false'; process.env.AI_WALLET_TRANSCRIPTION_ENABLED = 'false';
     expect((await run())?.state).toBe('SETTLED'); expect(model.transcribePrepaidAudio).toHaveBeenCalledTimes(1);
   });
+  it('preserves staged output after all three local settlement failures and terminal workflow failure', async () => {
+    const failure = jest.spyOn(wallet, 'finishTranscription').mockRejectedValue(Error('synthetic persistent DB failure'));
+    for (let i = 0; i < 3; i++) await expect(run()).rejects.toThrow('DB failure');
+    const repository = new MediaTranscriptionRepository(db as any);
+    const lifecycle = new MediaTranscriptionService(repository, {} as any, model, adapter);
+    await lifecycle.failTranscription(job, 1);
+    expect(await repository.failIfActive(job, 1, 'FAILED', 'offline')).toBe(false);
+    expect(await db.mediaTranscription.findUnique({ where: { id: job } })).toMatchObject({ status: 'PROCESSING', text: 'Synthetic transcript.' });
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(0);
+    failure.mockRestore();
+    expect((await run())?.state).toBe('SETTLED'); expect(model.transcribePrepaidAudio).toHaveBeenCalledTimes(1);
+  });
+  it('still fails ordinary unpaid jobs through the existing workflow failure handler', async () => {
+    const repository = new MediaTranscriptionRepository(db as any);
+    expect(await repository.failIfPendingOrProcessing(job, 1, 'FAILED', 'offline')).toBe(true);
+    expect(await db.mediaTranscription.findUnique({ where: { id: job } })).toMatchObject({ status: 'FAILED', text: null });
+  });
+
   it.each(['timeout', 'usage', 'identity'])('keeps ambiguous %s held and never falls through to legacy/retries', async failure => {
     model.transcribePrepaidAudio.mockImplementation(async () => {
       if (failure === 'timeout') throw Error('synthetic post-acceptance connection loss');

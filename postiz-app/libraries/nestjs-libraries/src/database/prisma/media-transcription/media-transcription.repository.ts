@@ -213,6 +213,12 @@ export class MediaTranscriptionRepository {
     return result.count === 1;
   }
 
+  private withoutPaidAttempt(transcriptionId: string): Prisma.MediaTranscriptionWhereInput {
+    return { NOT: { media: { organization: { aiWallet: { is: {
+      reservations: { some: { operationKey: 'media-transcription:' + transcriptionId } },
+    } } } } } };
+  }
+
   async failIfActive(
     transcriptionId: string,
     generation: number,
@@ -223,6 +229,7 @@ export class MediaTranscriptionRepository {
       where: {
         id: transcriptionId,
         generation,
+        ...this.withoutPaidAttempt(transcriptionId),
         status: MediaTranscriptionStatus.PROCESSING,
         media: { deletedAt: null },
       },
@@ -248,6 +255,7 @@ export class MediaTranscriptionRepository {
       where: {
         id: transcriptionId,
         generation,
+        ...this.withoutPaidAttempt(transcriptionId),
         status: {
           in: [
             MediaTranscriptionStatus.PENDING,
