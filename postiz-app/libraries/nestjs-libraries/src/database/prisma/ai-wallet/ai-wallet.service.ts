@@ -4,6 +4,9 @@ import { createHash } from 'crypto';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 import { PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 
+import { PricingQuote, quotedCharge, validatePricingQuote, snapshotFingerprint, usageSnapshot, measuredSnapshot } from '../../../services/ai-wallet-pricing';
+import { MeasuredUsage } from '../../../services/ai-wallet-usage';
+
 const MAX_NANOS = 9223372036854775807n;
 const NANOS_PER_CENT = 10000000n;
 
@@ -70,17 +73,33 @@ export class AiWalletService {
     return reservation;
   }
 
-  async reserve(organizationId: string, operationKey: string, provider: string, model: string, ceilingNanos: bigint) {
+  private storedQuote(reservation: { quoteSnapshot: unknown; quoteFingerprint: string | null; ceilingNanos: bigint }) {
+    if (reservation.quoteSnapshot === null && reservation.quoteFingerprint === null) return undefined;
+    const quote = validatePricingQuote(reservation.quoteSnapshot);
+    if (snapshotFingerprint(quote) !== reservation.quoteFingerprint || quotedCharge(quote) !== reservation.ceilingNanos) {
+      throw new Error('Stored quote integrity check failed.');
+    }
+    return quote;
+  }
+
+  async reserve(organizationId: string, operationKey: string, provider: string, model: string, ceilingNanos: bigint, pricingQuote?: PricingQuote) {
     this.enabled();
     [operationKey, provider, model].forEach((value) => this.key(value));
     this.amount(ceilingNanos);
+    const quote = pricingQuote ? validatePricingQuote(pricingQuote) : undefined;
+    const quoteFingerprint = quote ? snapshotFingerprint(quote) : null;
+    if (quote && (quote.provider !== provider || quote.model !== model || quotedCharge(quote) !== ceilingNanos)) {
+      throw new Error('Reservation does not match its pricing quote.');
+    }
     return this.transact(organizationId, async (tx) => {
       const wallet = await this.wallet(tx, organizationId);
       const existing = await tx.aiWalletReservation.findUnique({
         where: { organizationId_operationKey: { organizationId, operationKey } },
       });
       if (existing) {
-        if (existing.provider !== provider || existing.model !== model || existing.ceilingNanos !== ceilingNanos) {
+        this.storedQuote(existing);
+        if (existing.provider !== provider || existing.model !== model || existing.ceilingNanos !== ceilingNanos ||
+            existing.quoteFingerprint !== quoteFingerprint) {
           throw new Error('Wallet operation was reused with different parameters.');
         }
         return existing;
@@ -88,7 +107,8 @@ export class AiWalletService {
       if (wallet.status !== 'ACTIVE') throw new Error('Wallet requires reconciliation.');
       if (wallet.balanceNanos - wallet.heldNanos < ceilingNanos) throw new Error('Insufficient prepaid AI balance.');
       const reservation = await tx.aiWalletReservation.create({
-        data: { organizationId, operationKey, provider, model, ceilingNanos },
+        data: { organizationId, operationKey, provider, model, ceilingNanos,
+          ...(quote ? { quoteSnapshot: quote, quoteFingerprint } : {}) },
       });
       await tx.aiWallet.update({ where: { organizationId }, data: { heldNanos: { increment: ceilingNanos } } });
       return reservation;
@@ -101,6 +121,7 @@ export class AiWalletService {
       const wallet = await this.wallet(tx, organizationId);
       if (wallet.status !== 'ACTIVE') throw new Error('Wallet requires reconciliation.');
       const reservation = await this.reservation(tx, organizationId, id);
+      this.storedQuote(reservation);
       if (reservation.state !== 'RESERVED') return { dispatch: false, reservation };
       return { dispatch: true, reservation: await tx.aiWalletReservation.update({
         where: { id }, data: { state: 'DISPATCHED' },
@@ -135,7 +156,7 @@ export class AiWalletService {
     });
   }
 
-  async settle(organizationId: string, id: string, chargedNanos: bigint, providerRequestId: string) {
+  async settle(organizationId: string, id: string, chargedNanos: bigint, providerRequestId: string, measured?: MeasuredUsage) {
     this.amount(chargedNanos, true);
     this.key(providerRequestId);
     return this.transact(organizationId, async (tx) => {
@@ -143,6 +164,17 @@ export class AiWalletService {
       if (reservation.providerRequestId && reservation.providerRequestId !== providerRequestId) {
         throw new Error('Provider receipt identity changed.');
       }
+      const quote = this.storedQuote(reservation);
+      const usage = measured ? usageSnapshot(measured) : undefined;
+      const usageFingerprint = usage ? snapshotFingerprint(usage) : null;
+      if (quote && (!measured || measured.providerRequestId !== providerRequestId ||
+          quotedCharge(quote, measured) !== chargedNanos)) {
+        throw new Error('Settlement requires the quoted provider usage.');
+      }
+      if (reservation.usageFingerprint && reservation.usageFingerprint !== usageFingerprint) {
+        throw new Error('Provider usage changed.');
+      }
+      const usageData = usage ? { usageSnapshot: usage, usageFingerprint } : {};
       if (reservation.state === 'SETTLED') {
         if (reservation.chargedNanos !== chargedNanos) throw new Error('Settled usage amount changed.');
         return reservation;
@@ -153,7 +185,7 @@ export class AiWalletService {
       if (chargedNanos > reservation.ceilingNanos) {
         await tx.aiWallet.update({ where: { organizationId }, data: { status: 'REVIEW' } });
         return tx.aiWalletReservation.update({ where: { id }, data: {
-          state: 'UNKNOWN', reportedNanos: chargedNanos, providerRequestId,
+          state: 'UNKNOWN', reportedNanos: chargedNanos, providerRequestId, ...usageData,
         } });
       }
       await tx.aiWallet.update({ where: { organizationId }, data: {
@@ -163,9 +195,20 @@ export class AiWalletService {
         organizationId, externalKey: `usage:${id}`, kind: 'USAGE', amountNanos: chargedNanos, reservationId: id,
       } });
       return tx.aiWalletReservation.update({ where: { id }, data: {
-        state: 'SETTLED', chargedNanos, reportedNanos: chargedNanos, providerRequestId,
+        state: 'SETTLED', chargedNanos, reportedNanos: chargedNanos, providerRequestId, ...usageData,
       } });
     });
+  }
+
+  /** Reconciliation uses the persisted quote, including when purchases pause.
+   * Only trusted normalized provider receipts may reach this internal method. */
+  async reconcileQuoted(organizationId: string, id: string, receipt?: MeasuredUsage) {
+    const reservation = await this.transact(organizationId, tx => this.reservation(tx, organizationId, id));
+    const quote = this.storedQuote(reservation);
+    if (!quote) throw new Error('Reservation has no pricing quote.');
+    const usage = receipt ?? (reservation.usageSnapshot ? measuredSnapshot(reservation.usageSnapshot) : undefined);
+    if (!usage) throw new Error('Reconciliation requires provider usage.');
+    return this.settle(organizationId, id, quotedCharge(quote, usage), usage.providerRequestId, usage);
   }
 
   /** Internal server-created intent. The eventual Checkout adapter must accept
