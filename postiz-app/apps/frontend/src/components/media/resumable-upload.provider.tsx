@@ -62,18 +62,18 @@ export function ResumableUploadProvider({ children }: { children: React.ReactNod
 
 // The layout keeps the controller alive; each upload surface owns its presentation.
 export function UploadTransfers() {
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, { message: string; cancellation: boolean } | undefined>>({});
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const busy = useRef(new Set<string>());
   const transfers = useResumableTransfers();
   useEffect(() => { setErrors({}); setPending({}); busy.current.clear(); }, [transfers]);
-  const action = async (id: string, run: () => Promise<void>) => {
+  const action = async (id: string, run: () => Promise<void>, cancellation = false) => {
     if (busy.current.has(id)) return;
     busy.current.add(id);
-    setErrors(value => ({ ...value, [id]: '' }));
+    setErrors(value => ({ ...value, [id]: undefined }));
     setPending(value => ({ ...value, [id]: true }));
     try { await run(); }
-    catch (error) { setErrors(value => ({ ...value, [id]: (error as Error).message })); }
+    catch (error) { setErrors(value => ({ ...value, [id]: { message: (error as Error).message, cancellation } })); }
     finally { busy.current.delete(id); setPending(value => ({ ...value, [id]: false })); }
   };
   const view = useContext(TransferViewContext);
@@ -82,7 +82,7 @@ export function UploadTransfers() {
   return <section aria-label="Video transfers" className="mt-[16px] min-w-0 text-newTextColor">
       {items.some(item => item.state === 'Uploading') && <p className="text-[12px] hidden mobile:block">Keep this browser open and on screen while uploading.</p>}
       {items.map(item => <div key={item.id} className="mt-[8px] border-t border-newBorder pt-[8px]">
-        {errors[item.id] && <p role="alert">{errors[item.id]}</p>}
+        {errors[item.id] && !(errors[item.id]?.cancellation && item.state === 'Transfer complete') && <p role="alert">{errors[item.id]?.message}</p>}
         <p className="break-all text-[13px] font-[600]">{item.name}</p>
         <p role="status" className="text-[12px]">{item.state}</p>
         <progress aria-label={`Upload progress for ${item.name}`} value={item.sent} max={Math.max(1, item.bytes)} className="my-[8px] block h-[8px] w-full accent-btnPrimary" />
@@ -100,7 +100,7 @@ export function UploadTransfers() {
         {item.state === 'Transfer complete' ? transfers.canDismiss(item) && <button type="button" className="!min-h-[44px] px-[8px]" onClick={() => transfers.dismiss(item.id)}>Dismiss transfer</button> : <>
           {item.error && <p role="alert">{item.error}</p>}
         {!pending[item.id] && item.state !== 'Uploading' && <RetryUpload transfers={transfers} item={item} />}
-          <button className="!min-h-[44px] px-[8px]" disabled={pending[item.id] || item.state === 'Finalizing'} onClick={() => void action(item.id, () => transfers.cancel(item.id))}>{pending[item.id] ? 'Cancelling…' : 'Cancel upload'}</button>
+          <button className="!min-h-[44px] px-[8px]" disabled={pending[item.id] || item.state === 'Finalizing'} onClick={() => void action(item.id, () => transfers.cancel(item.id), true)}>{pending[item.id] ? 'Cancelling…' : 'Cancel upload'}</button>
         </>}
       </div>)}
   </section>;

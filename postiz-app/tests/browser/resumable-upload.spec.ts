@@ -268,3 +268,27 @@ test('Resumable upload: cancel settles before a fresh upload and leaves no stale
   await expect(tray.getByText('Keep this browser open and on screen while uploading.')).toHaveCount(0);
   expect(creations).toBe(2); expect(deletes).toBe(1);
 });
+
+
+test('Resumable upload: server completion clears a prior cancellation warning without deleting media', async ({ page }) => {
+  let deletes = 0;
+  const session: any = { id: 'busy-restored', originalName: 'busy.mp4', byteSize: 100, status: 'UPLOADING', parts: [], manifest: [] };
+  await page.route('**/backend-api/media/uploads**', route => {
+    if (route.request().method() === 'DELETE') {
+      deletes++;
+      return route.fulfill({ status: 409, json: { message: 'Wait for the current request to finish before cancellation.' } });
+    }
+    const list = new URL(route.request().url()).pathname === '/backend-api/media/uploads';
+    return route.fulfill({ json: list ? { sessions: [session] } : session });
+  });
+  await openApp(page, '/media');
+  const tray = page.getByRole('region', { name: 'Video transfers' });
+  await tray.getByRole('button', { name: 'Cancel upload', exact: true }).click();
+  await expect(tray.getByRole('alert')).toContainText('Wait for the current request');
+  session.status = 'COMPLETE'; session.media = { id: 'saved-busy-media' };
+  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
+  await expect(tray.getByRole('alert')).toHaveCount(0);
+  await tray.getByRole('button', { name: 'Dismiss transfer' }).click();
+  await expect(tray).toHaveCount(0);
+  expect(deletes).toBe(1);
+});
