@@ -154,6 +154,10 @@ export class PermissionsService {
         continue;
       }
 
+      if (section === Sections.GUIDED_COPY && (options.ai || options.prepaid_ai)) {
+        can(action, section);
+        continue;
+      }
       if (section === Sections.AI && options.ai) {
         can(action, section);
         continue;

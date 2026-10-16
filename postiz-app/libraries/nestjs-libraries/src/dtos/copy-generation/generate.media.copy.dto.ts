@@ -106,6 +106,11 @@ export class PlatformControlDto {
 }
 
 export class GenerateMediaCopyDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-zA-Z0-9_-]{16,80}$/)
+  requestKey?: string;
+
   @IsString()
   mediaId: string;
 

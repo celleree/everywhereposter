@@ -1,3 +1,4 @@
+import { PrepaidCopyContextService } from '@gitroom/nestjs-libraries/services/prepaid-copy-context.service';
 import { LUNA_CHAT, SOL_CHAT } from '@gitroom/nestjs-libraries/openai/model-config';
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
@@ -120,6 +121,13 @@ export const findNearestTimestamp = (timestamp: number, timestamps: number[]) =>
 
 @Injectable()
 export class CopyGenerationModelService {
+  constructor(private readonly prepaid?: PrepaidCopyContextService) {}
+  private completion(stage: 'summary' | 'draft' | 'rewrite', request: any): Promise<any> {
+    return this.prepaid?.active
+      ? this.prepaid.complete(stage, request, bounded => openai.chat.completions.parse(bounded, { maxRetries: 0, timeout: 60000 }))
+      : openai.chat.completions.parse(request);
+  }
+
   async analyzeImage(params: {
     buffer: Buffer;
     mimeType: string;
@@ -127,6 +135,7 @@ export class CopyGenerationModelService {
     altText?: string | null;
     originalName?: string | null;
   }) {
+    if (this.prepaid?.active) throw Error('Prepaid visual analysis is unavailable.');
     const imageUrl = `data:${params.mimeType};base64,${params.buffer.toString(
       'base64'
     )}`;
@@ -184,6 +193,7 @@ Associated transcript: ${params.transcriptText?.slice(0, 4000) || 'none'}`,
     altText?: string | null;
     originalName?: string | null;
   }) {
+    if (this.prepaid?.active) throw Error('Prepaid visual analysis is unavailable.');
     const frames = await this.extractVideoFrames(params.inputPath);
 
     if (!frames.length) {
@@ -483,8 +493,8 @@ Rules:
     return execFileAsync(command, args, options);
   }
 
-  async summarizeTranscript(transcript: string) {
-    const summary = await openai.chat.completions.parse({
+  async summarizeTranscript(transcript: string): Promise<z.infer<typeof TranscriptInsightsSchema>> {
+    const summary = await this.completion('summary', {
       ...LUNA_CHAT,
       messages: [
         {
@@ -525,8 +535,8 @@ Rules:
     brief: CopyGenerationBrief,
     systemPrompt: string,
     promptConstraints: string
-  ) {
-    const response = await openai.chat.completions.parse({
+  ): Promise<z.infer<typeof PlatformDraftSchema>> {
+    const response = await this.completion('draft', {
       ...SOL_CHAT,
       messages: [
         {
@@ -563,8 +573,8 @@ Return a JSON object with draft, angle, hook, and cta.`,
     reasons: string[];
     targetCharacters: number;
     hardCap: number;
-  }) {
-    const response = await openai.chat.completions.parse({
+  }): Promise<z.infer<typeof RewriteDraftSchema>> {
+    const response = await this.completion('rewrite', {
       ...SOL_CHAT,
       messages: [
         {

@@ -1,3 +1,4 @@
+import { PrepaidCopyContextService } from '@gitroom/nestjs-libraries/services/prepaid-copy-context.service';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { uniq, uniqBy } from 'lodash';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
@@ -145,14 +146,20 @@ export class CopyGenerationService {
     private readonly _sourceBriefService: SourceBriefService,
     private readonly _antiGenericService: AntiGenericService,
     private readonly _copyGenerationModelService: CopyGenerationModelService,
-    private readonly _imagePlanService?: ImagePlanService
+    private readonly _imagePlanService?: ImagePlanService,
+    private readonly _prepaid?: PrepaidCopyContextService
   ) {}
 
-  async *generate(
+  generate(orgId: string, body: GenerateMediaCopyDto): AsyncGenerator<CopyGenerationStreamEvent> {
+    const create = () => this.generateInternal(orgId, body);
+    return this._prepaid ? this._prepaid.scope(orgId, body, create) : create();
+  }
+
+  private async *generateInternal(
     orgId: string,
     body: GenerateMediaCopyDto
   ): AsyncGenerator<CopyGenerationStreamEvent> {
-    const requestId = makeId(12);
+    const requestId = body.requestKey || makeId(12);
     const captionMode: CaptionMode = body.captionMode || 'generate';
     const platforms = uniq(body.platforms);
     yield {
@@ -666,7 +673,8 @@ export class CopyGenerationService {
     }
 
     let imagePlans: ImagePlanItem[] = [];
-    if (sourceBrief.media.mediaType === 'video' && this._imagePlanService) {
+    if (this._prepaid?.active) topLevelWarnings.push({ code: 'IMAGE_PLANNING_UNAVAILABLE', message: 'Image planning and generation are unavailable for prepaid copy.' });
+    if (sourceBrief.media.mediaType === 'video' && this._imagePlanService && !this._prepaid?.active) {
       yield {
         name: 'image-plan-started',
         data: {
