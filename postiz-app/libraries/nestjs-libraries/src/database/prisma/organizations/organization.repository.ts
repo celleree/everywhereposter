@@ -1,6 +1,6 @@
-import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { PrismaRepository, PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { Role, ShortLinkPreference, SubscriptionTier } from '@prisma/client';
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
@@ -11,7 +11,8 @@ export class OrganizationRepository {
   constructor(
     private _organization: PrismaRepository<'organization'>,
     private _userOrg: PrismaRepository<'userOrganization'>,
-    private _user: PrismaRepository<'user'>
+    private _user: PrismaRepository<'user'>,
+    private _transaction: PrismaTransaction
   ) {}
 
   createMaxUser(id: string, name: string, saasName: string, email: string) {
@@ -231,9 +232,9 @@ export class OrganizationRepository {
       });
 
     if (
-      isBillingEnabled() &&
-      checkForSubscription?.subscription?.subscriptionTier ===
-        SubscriptionTier.STANDARD
+      String(checkForSubscription?.subscription?.subscriptionTier) === 'LAUNCH_V1' ||
+      (isBillingEnabled() &&
+        checkForSubscription?.subscription?.subscriptionTier === SubscriptionTier.STANDARD)
     ) {
       return false;
     }
@@ -383,6 +384,29 @@ export class OrganizationRepository {
         },
       },
     });
+  }
+
+  async assertAdvancedAutomationAllowed(orgId: string) {
+    const org = await this._organization.model.organization.findUnique({
+      where: { id: orgId }, select: { subscription: { select: { subscriptionTier: true } } },
+    });
+    if (!org || String(org.subscription?.subscriptionTier) === 'LAUNCH_V1') {
+      throw new ForbiddenException('Advanced automation is unavailable on this plan');
+    }
+  }
+
+  async enforceSingleEnabledOwner(orgId: string) {
+    return this._transaction.model.$transaction(async (tx) => {
+      const owner = await tx.userOrganization.findFirst({
+        where: { organizationId: orgId, role: Role.SUPERADMIN, disabled: false },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true },
+      });
+      if (!owner) throw new Error('Single-user plan requires an enabled owner');
+      return tx.userOrganization.updateMany({
+        where: { organizationId: orgId, id: { not: owner.id }, disabled: false },
+        data: { disabled: true },
+      });
+    }, { isolationLevel: 'Serializable' });
   }
 
   disableOrEnableNonSuperAdminUsers(orgId: string, disable: boolean) {

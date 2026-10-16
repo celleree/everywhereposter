@@ -14,6 +14,7 @@ export const UserContext = createContext<
       publicApi: string;
       role: 'USER' | 'ADMIN' | 'SUPERADMIN';
       totalChannels: number;
+    unlimitedChannels?: boolean;
       isLifetime?: boolean;
       impersonate: boolean;
       allowTrial: boolean;
@@ -24,17 +25,18 @@ export const UserContext = createContext<
 export const ContextWrapper: FC<{
   user: User & {
     orgId: string;
-    tier: 'FREE' | 'STANDARD' | 'PRO' | 'ULTIMATE' | 'TEAM';
+    tier: 'FREE' | 'STANDARD' | 'PRO' | 'ULTIMATE' | 'TEAM' | 'LAUNCH_V1';
     role: 'USER' | 'ADMIN' | 'SUPERADMIN';
     publicApi: string;
     totalChannels: number;
+    unlimitedChannels?: boolean;
   };
   children: ReactNode;
 }> = ({ user, children }) => {
   const values = user
     ? {
         ...user,
-        tier: pricing[user.tier],
+        tier: pricing[user.tier as keyof typeof pricing],
       }
     : ({} as any);
   return <UserContext.Provider value={values}>{children}</UserContext.Provider>;
