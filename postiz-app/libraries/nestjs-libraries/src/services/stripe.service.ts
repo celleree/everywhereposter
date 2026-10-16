@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Organization, User } from '@prisma/client';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
@@ -27,6 +27,49 @@ export class StripeService {
   private assertBillingEnabled() {
     if (!isBillingEnabled()) {
       throw new ServiceUnavailableException('Billing is disabled');
+    }
+  }
+
+  private async assertSaleEligible(organizationId: string, body: BillingSubscribeDto) {
+    const current = await this._subscriptionService.getSubscription(organizationId);
+    const legacy = ['STANDARD', 'TEAM', 'PRO', 'ULTIMATE'].includes(current?.subscriptionTier || '');
+    if (body.billing !== 'LAUNCH_V1' && !legacy) {
+      throw new ForbiddenException('This subscription is available only to existing legacy subscribers');
+    }
+    if (body.billing === 'LAUNCH_V1' && legacy) {
+      throw new ForbiddenException('Legacy subscription conversion requires an explicit migration');
+    }
+  }
+
+  private validLaunchPrice(price: Stripe.Price, period: 'MONTHLY' | 'YEARLY') {
+    const monthly = period === 'MONTHLY';
+    return price.currency === 'usd' && price.type === 'recurring' &&
+      price.unit_amount === (monthly ? 900 : 9000) &&
+      price.recurring?.interval === (monthly ? 'month' : 'year') &&
+      price.recurring?.interval_count === 1 && price.billing_scheme === 'per_unit' &&
+      price.lookup_key === (monthly ? 'everywhereposter_launch_v1_monthly' : 'everywhereposter_launch_v1_yearly') &&
+      price.metadata?.plan_version === 'LAUNCH_V1';
+  }
+
+  private async launchPrice(period: 'MONTHLY' | 'YEARLY') {
+    const lookupKey = period === 'MONTHLY' ? 'everywhereposter_launch_v1_monthly' : 'everywhereposter_launch_v1_yearly';
+    const prices = await stripe.prices.list({ active: true, lookup_keys: [lookupKey], limit: 2 });
+    if (prices.data.length !== 1 || !prices.data[0].active || !this.validLaunchPrice(prices.data[0], period)) {
+      throw new ServiceUnavailableException('The approved launch price is not configured');
+    }
+    return prices.data[0];
+  }
+
+  private assertLaunchEvent(event: Stripe.CustomerSubscriptionCreatedEvent | Stripe.CustomerSubscriptionUpdatedEvent) {
+    const subscription = event.data.object;
+    const items = subscription.items?.data || [];
+    const launchPrice = items.some(item => item.price.metadata?.plan_version === 'LAUNCH_V1' || item.price.lookup_key?.startsWith('everywhereposter_launch_v1_'));
+    if (subscription.metadata.billing !== 'LAUNCH_V1' && !launchPrice) return;
+    if (subscription.metadata.billing !== 'LAUNCH_V1') throw new ForbiddenException('Launch price requires launch subscription metadata');
+    const period = subscription.metadata.period;
+    if ((period !== 'MONTHLY' && period !== 'YEARLY') || items.length !== 1 ||
+        items[0].quantity !== 1 || !this.validLaunchPrice(items[0].price, period)) {
+      throw new ForbiddenException('Subscription does not match the approved launch price');
     }
   }
 
@@ -112,12 +155,13 @@ export class StripeService {
   }
 
   async createSubscription(event: Stripe.CustomerSubscriptionCreatedEvent) {
+    this.assertLaunchEvent(event);
     const {
       uniqueId,
       billing,
       period,
     } = event.data.object.metadata as {
-      billing: 'STANDARD' | 'PRO';
+      billing: 'STANDARD' | 'PRO' | 'TEAM' | 'ULTIMATE' | 'LAUNCH_V1';
       period: 'MONTHLY' | 'YEARLY';
       uniqueId: string;
     };
@@ -142,12 +186,13 @@ export class StripeService {
     );
   }
   async updateSubscription(event: Stripe.CustomerSubscriptionUpdatedEvent) {
+    this.assertLaunchEvent(event);
     const {
       uniqueId,
       billing,
       period,
     } = event.data.object.metadata as {
-      billing: 'STANDARD' | 'PRO';
+      billing: 'STANDARD' | 'PRO' | 'TEAM' | 'ULTIMATE' | 'LAUNCH_V1';
       period: 'MONTHLY' | 'YEARLY';
       uniqueId: string;
     };
@@ -219,8 +264,11 @@ export class StripeService {
   async prorate(organizationId: string, body: BillingSubscribeDto) {
     this.assertBillingEnabled();
     const org = await this._organizationService.getOrgById(organizationId);
-    const customer = await this.createOrGetCustomer(org!);
+    await this.assertSaleEligible(organizationId, body);
     const priceData = pricing[body.billing];
+    const findPrice = body.billing === 'LAUNCH_V1'
+      ? await this.launchPrice(body.period)
+      : await (async () => {
     const allProducts = await stripe.products.list({
       active: true,
       expand: ['data.prices'],
@@ -265,6 +313,9 @@ export class StripeService {
           interval: body.period === 'MONTHLY' ? 'month' : 'year',
         },
       }));
+    return findPrice;
+    })();
+    const customer = await this.createOrGetCustomer(org!);
 
     const proration_date = Math.floor(Date.now() / 1000);
 
@@ -464,7 +515,7 @@ export class StripeService {
 
     // Check for auto-apply promotion code (only for monthly plans)
     let autoApplyPromoCode: string | null = null;
-    if (body.period === 'MONTHLY') {
+    if (body.period === 'MONTHLY' && body.billing !== 'LAUNCH_V1') {
       autoApplyPromoCode = await this.findAutoApplyPromotionCode();
     }
 
@@ -496,7 +547,7 @@ export class StripeService {
             },
           }
         : {}),
-      allow_promotion_codes: body.period === 'MONTHLY',
+      allow_promotion_codes: body.period === 'MONTHLY' && body.billing !== 'LAUNCH_V1',
       line_items: [
         {
           price,
@@ -551,7 +602,7 @@ export class StripeService {
           ud,
         },
       },
-      allow_promotion_codes: body.period === 'MONTHLY',
+      allow_promotion_codes: body.period === 'MONTHLY' && body.billing !== 'LAUNCH_V1',
       line_items: [
         {
           price,
@@ -682,7 +733,10 @@ export class StripeService {
     const id = makeId(10);
     const priceData = pricing[body.billing];
     const org = await this._organizationService.getOrgById(organizationId);
-    const customer = await this.createOrGetCustomer(org!);
+    await this.assertSaleEligible(organizationId, body);
+    const findPrice = body.billing === 'LAUNCH_V1'
+      ? await this.launchPrice(body.period)
+      : await (async () => {
     const allProducts = await stripe.products.list({
       active: true,
       expand: ['data.prices'],
@@ -726,6 +780,9 @@ export class StripeService {
           interval: body.period === 'MONTHLY' ? 'month' : 'year',
         },
       }));
+    return findPrice;
+    })();
+    const customer = await this.createOrGetCustomer(org!);
 
     return this.createEmbeddedCheckout(
       uniqueId,
@@ -749,7 +806,10 @@ export class StripeService {
     const id = makeId(10);
     const priceData = pricing[body.billing];
     const org = await this._organizationService.getOrgById(organizationId);
-    const customer = await this.createOrGetCustomer(org!);
+    await this.assertSaleEligible(organizationId, body);
+    const findPrice = body.billing === 'LAUNCH_V1'
+      ? await this.launchPrice(body.period)
+      : await (async () => {
     const allProducts = await stripe.products.list({
       active: true,
       expand: ['data.prices'],
@@ -793,6 +853,9 @@ export class StripeService {
           interval: body.period === 'MONTHLY' ? 'month' : 'year',
         },
       }));
+    return findPrice;
+    })();
+    const customer = await this.createOrGetCustomer(org!);
 
     const getCurrentSubscriptions =
       await this._subscriptionService.getSubscription(organizationId);

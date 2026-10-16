@@ -2,6 +2,7 @@ import { HttpStatus, Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
+import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 @Injectable()
@@ -34,6 +35,11 @@ export class PublicAuthMiddleware implements NestMiddleware {
           res
             .status(HttpStatus.UNAUTHORIZED)
             .json({ msg: 'No subscription found' });
+          return;
+        }
+
+        if (org.subscription?.subscriptionTier === 'LAUNCH_V1' || (isBillingEnabled() && !pricing[org.subscription?.subscriptionTier || 'FREE']?.public_api)) {
+          res.status(HttpStatus.FORBIDDEN).json({ msg: 'Public API access is not included in this plan' });
           return;
         }
 

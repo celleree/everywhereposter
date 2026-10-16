@@ -141,7 +141,7 @@ export class SubscriptionRepository {
     identifier: string,
     customerId: string,
     totalChannels: number,
-    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null
   ) {
@@ -229,7 +229,7 @@ export class SubscriptionRepository {
     identifier: string,
     customerId: string,
     totalChannels: number,
-    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null
   ) {
@@ -492,7 +492,7 @@ export class SubscriptionRepository {
     identifier: string,
     customerId: string,
     totalChannels: number,
-    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null,
     code?: string,
