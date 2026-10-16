@@ -1,0 +1,29 @@
+.workspace { flex: 1; min-width: 0; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.workspace h2 { font-size: 24px; font-weight: 600; }
+.workspace h3 { font-size: 17px; font-weight: 600; }
+.eyebrow { font-size: 11px; letter-spacing: .1em; color: var(--new-textItemBlur); margin-bottom: 8px; }
+.muted { color: var(--new-textItemBlur); font-size: 13px; line-height: 1.6; }
+.notice { padding: 12px 16px; border: 1px solid var(--new-table-border); border-radius: 10px; font-size: 13px; }
+.columns { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(260px, 1fr); gap: 20px; }
+.panel { min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 20px; border: 1px solid var(--new-table-border); border-radius: 12px; }
+.empty { min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; }
+.preview { background: #08090b; border-radius: 8px; overflow: hidden; }
+.preview video { display: block; width: 100%; height: min(44vh, 400px); object-fit: contain; }
+.details { display: flex; flex-wrap: wrap; gap: 16px 32px; font-size: 13px; }
+.details div { min-width: 0; }
+.details dt { color: var(--new-textItemBlur); }
+.details dd { overflow-wrap: anywhere; }
+.workspace select, .workspace textarea { width: 100%; min-height: 44px; border: 1px solid var(--new-table-border); border-radius: 8px; padding: 10px; background: var(--new-bgColorInner); color: inherit; }
+.workspace textarea { resize: vertical; }
+.workspace label { font-size: 13px; font-weight: 600; }
+.tools { display: flex; flex-wrap: wrap; gap: 10px; }
+.workspace .button { min-height: 44px; height: auto; padding: 10px 16px; border-radius: 8px; white-space: normal; }
+.workspace :focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+@media (max-width: 1025px) {
+  .workspace { padding: 12px; gap: 16px; }
+  .columns { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .panel { padding: 16px; }
+  .workspace h2 { font-size: 21px; }
+  .preview video { height: min(45vh, 360px); min-height: 150px; }
+}

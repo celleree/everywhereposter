@@ -10,7 +10,7 @@ let mockTier = 'STANDARD';
 let mockOrganizations = [{ id: 'org-1', name: 'Current workspace' }, { id: 'org-2', name: 'Other workspace' }];
 const mockFetch = jest.fn(async (path?: string) => ({ ok: true, json: async () => path === '/creator-audit/status' ? { enabled: mockAuditEnabled } : mockOrganizations }));
 jest.mock('next/navigation', () => ({ usePathname: () => mockPath }));
-jest.mock('next/link', () => ({ __esModule: true, default: ({ children, prefetch, ...props }: any) => <a {...props}>{children}</a> }));
+jest.mock('next/link', () => ({ __esModule: true, default: ({ children, prefetch, onClick, ...props }: any) => <a {...props} onClick={(event) => { event.preventDefault(); onClick?.(event); }}>{children}</a> }));
 jest.mock('@gitroom/frontend/components/layout/user.context', () => ({ useUser: () => ({ role: mockRole, orgId: 'org-1', tier: { current: mockTier } }) }));
 jest.mock('@gitroom/react/helpers/variable.context', () => ({ useVariables: () => ({ isGeneral: true, billingEnabled: mockBilling }) }));
 jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({ useT: () => (_key: string, fallback: string) => fallback }));
@@ -35,7 +35,7 @@ it('has four mobile destinations and exposes the existing routes through More', 
   expect(dialog.overflowY).toBe('auto');
   expect(dialog.overflowX).toBe('hidden');
   expect(dialog.maxHeight).toBe('calc(100dvh - env(safe-area-inset-top))');
-  for (const [name, route] of [['Agent', '/agents'], ['Analytics', '/analytics'], ['Settings', '/settings']]) {
+  for (const [name, route] of [['Agent', '/agents'], ['Analytics', '/analytics'], ['Settings', '/settings'], ['Video Editor', '/video-editor']]) {
     expect(screen.getByRole('link', { name }).getAttribute('href')).toBe(route);
   }
   expect(screen.getByRole('button', { name: 'Add Channel' })).toBeTruthy();
@@ -51,21 +51,25 @@ it('has four mobile destinations and exposes the existing routes through More', 
 it('keeps the More dialog named and closes it with the accessible close control or Escape', async () => {
   render(<TopMenu mobileNav />);
   const moreButton = screen.getByRole('button', { name: 'More' });
+  moreButton.focus();
   fireEvent.click(moreButton);
   expect(screen.getByRole('dialog', { name: 'More menu' })).toBeTruthy();
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close More' })));
   fireEvent.click(screen.getByRole('button', { name: 'Close More' }));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More menu' })).toBeNull());
   expect(moreButton.getAttribute('aria-expanded')).toBe('false');
+  await waitFor(() => expect(document.activeElement).toBe(moreButton));
 
   moreButton.focus();
   fireEvent.click(moreButton);
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close More' })));
   fireEvent.keyDown(
     screen.getByRole('dialog', { name: 'More menu' }).querySelector('[tabindex="-1"]')!,
     { key: 'Escape' }
   );
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More menu' })).toBeNull());
   expect(moreButton.getAttribute('aria-expanded')).toBe('false');
-  expect(document.activeElement).toBe(moreButton);
+  await waitFor(() => expect(document.activeElement).toBe(moreButton));
 });
 
 it('retains the existing role filter for Settings', () => {
@@ -79,6 +83,7 @@ it('keeps desktop destinations directly available without a More control', () =>
   render(<TopMenu />);
   expect(screen.getByRole('link', { name: 'Agent' }).getAttribute('href')).toBe('/agents');
   expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('/settings');
+  expect(screen.getByRole('link', { name: 'Video Editor' }).getAttribute('href')).toBe('/video-editor');
   expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
 });
 
@@ -144,6 +149,17 @@ it('scopes a visible keyboard focus ring to More buttons and links', () => {
   expect(focusRule.nodes.find((node: any) => node.prop === 'box-shadow').value).toBe('0 0 0 2px var(--new-btn-text)');
 });
 
+it('marks More and the editor destination active on the editor route', () => {
+  mockPath = '/video-editor';
+  render(<TopMenu mobileNav />);
+  const more = screen.getByRole('button', { name: 'More' });
+  expect(more.className).toContain('mobile-nav-active');
+  fireEvent.click(more);
+  const editor = screen.getByRole('link', { name: 'Video Editor' });
+  expect(editor.getAttribute('aria-current')).toBe('page');
+  fireEvent.click(editor);
+  expect(more.getAttribute('aria-expanded')).toBe('false');
+});
 
 it('shows configured Creator Audit directly on desktop and inside mobile More', async () => {
   mockAuditEnabled = true;
