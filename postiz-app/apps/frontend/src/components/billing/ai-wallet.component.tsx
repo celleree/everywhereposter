@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
@@ -9,6 +10,8 @@ type Operation = { id: string; provider: string; model: string; state: string;
 type Snapshot = { organizationId: string; currency: string; status: string;
   balanceNanos: string; heldNanos: string; availableNanos: string;
   entries: { id: string; kind: string; amountNanos: string; createdAt: string }[]; operations: Operation[] };
+type Offer = { id: string; amountCents: number };
+type Checkout = { topupId: string; status: string; url: string | null };
 
 export function walletDollars(nanos: string) {
   if (typeof nanos !== 'string' || !/^\d{1,19}$/.test(nanos)) return 'Unavailable';
@@ -18,12 +21,45 @@ export function walletDollars(nanos: string) {
 }
 const status = (state: string) => ({ RESERVED: 'Reserved', DISPATCHED: 'Pending', UNKNOWN: 'Pending reconciliation',
   SETTLED: 'Settled', RELEASED: 'Released' }[state] || 'Pending reconciliation');
+const offerDollars = (cents: number) => `$${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}`;
+const storedOperation = (org: string, offer: string) => `ai-wallet-topup:${org}:${offer}`;
+const storedActiveOffer = (org: string) => `ai-wallet-topup-active:${org}`;
+const readOffers = (value: unknown): Offer[] => {
+  if (!Array.isArray(value) || value.some((offer) => !offer || typeof offer.id !== 'string' ||
+      !/^[a-zA-Z0-9_-]{1,100}$/.test(offer.id) || !Number.isSafeInteger(offer.amountCents) ||
+      offer.amountCents < 1) || new Set(value.map((offer) => offer.id)).size !== value.length) {
+    throw Error('Test top-ups unavailable');
+  }
+  return value;
+};
+const safeCheckoutUrl = (value: unknown) => {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.origin === 'https://checkout.stripe.com' && !url.username && !url.password ? url.href : null;
+  } catch { return null; }
+};
+const operationKey = (org: string, offer: string) => {
+  const storageKey = storedOperation(org, offer), existing = sessionStorage.getItem(storageKey);
+  if (existing && /^[a-zA-Z0-9_-]{1,100}$/.test(existing)) return existing;
+  const random = new Uint32Array(4); crypto.getRandomValues(random);
+  const key = 'wallet_' + Array.from(random, (value) => value.toString(36)).join('_');
+  sessionStorage.setItem(storageKey, key);
+  return key;
+};
 
-/** Read-only test-wallet view; no offer, pricing or purchase policy is selected. */
-export function AiWalletComponent() {
+/** Test-wallet view. Offers and purchase availability always come from the server. */
+export function AiWalletComponent({ navigate = (url) => window.location.assign(url) }:
+    { navigate?: (url: string) => void } = {}) {
   const fetch = useFetch();
   const user = useUser();
   const org = user?.orgId;
+  const admin = user?.role === 'ADMIN' || user?.role === 'SUPERADMIN';
+  const canPurchase = admin && !!user?.tier && 'prepaid_ai' in user.tier &&
+    user.tier.prepaid_ai === true;
+  const [purchasing, setPurchasing] = useState<string>();
+  const [purchaseError, setPurchaseError] = useState('');
+  const [purchaseStatus, setPurchaseStatus] = useState('');
   const { data, error, isLoading, isValidating, mutate } = useSWR<Snapshot>(
     user?.id && org ? ['/billing/ai-wallet', user.id, org] : null,
     async ([path]) => {
@@ -35,6 +71,53 @@ export function AiWalletComponent() {
       return value;
     }, { shouldRetryOnError: false, keepPreviousData: false, refreshInterval: 15000 }
   );
+  const { data: offers, error: offersError, isLoading: offersLoading, mutate: retryOffers } = useSWR<Offer[]>(
+    canPurchase && user?.id && org ? ['/billing/ai-wallet/offers', user.id, org] : null,
+    async ([path]) => {
+      const response = await fetch(path);
+      if (!response.ok) throw Error('Test top-ups unavailable');
+      return readOffers(await response.json());
+    }, { shouldRetryOnError: false, keepPreviousData: false }
+  );
+
+  useEffect(() => {
+    if (!org) return;
+    const result = new URLSearchParams(window.location.search).get('wallet');
+    if (result === 'return') {
+      setPurchaseStatus('Payment return received. Refreshing the server balance…');
+      void mutate();
+    } else if (result === 'cancel') {
+      setPurchaseStatus('Test checkout canceled. You can reopen the same purchase safely.');
+    }
+  }, [org, mutate]);
+
+  const purchase = async (offer: Offer) => {
+    if (!org || !canPurchase || purchasing) return;
+    setPurchasing(offer.id); setPurchaseError(''); setPurchaseStatus('');
+    try {
+      const key = operationKey(org, offer.id);
+      sessionStorage.setItem(storedActiveOffer(org), offer.id);
+      const response = await fetch('/billing/ai-wallet/topups', { method: 'POST',
+        body: JSON.stringify({ offerId: offer.id, operationKey: key }) });
+      if (!response.ok) throw Error('Checkout unavailable');
+      const value = await response.json() as Checkout;
+      if (!value || typeof value.topupId !== 'string' || typeof value.status !== 'string' ||
+          !(value.url === null || typeof value.url === 'string')) throw Error('Checkout unavailable');
+      if (value.status === 'funded' && value.url === null) {
+        sessionStorage.removeItem(storedOperation(org, offer.id));
+        sessionStorage.removeItem(storedActiveOffer(org));
+        setPurchaseStatus('Payment is already recorded. Refreshing the server balance…');
+        await mutate();
+      } else {
+        const url = safeCheckoutUrl(value.url);
+        if (!url) throw Error('Checkout unavailable');
+        navigate(url);
+      }
+    } catch {
+      setPurchaseError('Could not open secure test checkout. Retry uses the same purchase request.');
+    } finally { setPurchasing(undefined); }
+  };
+
   if (!org || isLoading) return <p role="status">Loading prepaid AI balance…</p>;
   if (error || !data || data.organizationId !== org) return <div role="alert">
     Prepaid AI balance is unavailable. <button type="button" onClick={() => void mutate()}>Retry balance</button>
@@ -53,6 +136,20 @@ export function AiWalletComponent() {
     </dl>
     <p className="text-sm">All amounts are USD. Pending holds are maximum reserved amounts, not final charges.</p>
     {data.status !== 'ACTIVE' ? <p role="status">Usage needs reconciliation. Pending amounts remain reserved.</p> : null}
+    {canPurchase ? <div className="mt-4 rounded-lg border border-white/15 p-3">
+      <h3 className="font-semibold">Add test balance</h3>
+      <p className="text-sm">Stripe test mode only. Balance changes only after the server verifies payment.</p>
+      {offersLoading ? <p role="status">Loading test top-ups…</p>
+        : offersError ? <p role="alert">Test top-ups are unavailable. <button type="button" onClick={() => void retryOffers()}>Retry test top-ups</button></p>
+        : offers?.length ? <div className="mt-3 flex flex-wrap gap-2">{offers.map((offer) =>
+          <button key={offer.id} type="button" disabled={!!purchasing || data.status !== 'ACTIVE'}
+            onClick={() => void purchase(offer)} className="min-h-11 rounded border px-3 py-2 focus-visible:outline focus-visible:outline-2">
+            {purchasing === offer.id ? 'Opening test checkout…' : `Add ${offerDollars(offer.amountCents)} test balance`}
+          </button>)}</div>
+        : <p>Test top-ups are unavailable.</p>}
+      {purchaseError ? <p role="alert" className="mt-2">{purchaseError}</p> : null}
+      {purchaseStatus ? <p role="status" className="mt-2">{purchaseStatus}</p> : null}
+    </div> : null}
     <h3 className="mt-4 font-semibold">Recent operations (up to 20)</h3>
     {!data.operations.length ? <p>No AI operations yet.</p> : <ul className="divide-y divide-white/10">
       {data.operations.map((operation) => <li key={operation.id} className="py-3 break-words">
