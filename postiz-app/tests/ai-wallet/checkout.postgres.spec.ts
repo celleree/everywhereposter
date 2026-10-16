@@ -194,4 +194,28 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     const other = await db.organization.create({ data: { name: 'Other synthetic org' } });
     expect((await checkout.balance(other.id)).balanceNanos).toBe('0');
   });
+  it('returns consistent org-only pending and settled history without payment/provider receipt IDs', async () => {
+    await create(); await deliver(paid());
+    const pending = await wallet.reserve(org, randomUUID(), 'openai', 'fixture-model', 5000000n);
+    await wallet.dispatch(org, pending.id); await wallet.markUnknown(org, pending.id, `request_${pending.id}`);
+    const settled = await wallet.reserve(org, randomUUID(), 'openai', 'fixture-model', 4000000n);
+    await wallet.dispatch(org, settled.id); await wallet.settle(org, settled.id, 2000000n, `request_${settled.id}`);
+    const other = `view-other-${randomUUID()}`; await db.organization.create({ data: { id: other, name: 'Other tenant' } });
+    const otherTopup = await wallet.createTopup(other, randomUUID(), 'cus_other', 1);
+    await wallet.bindTopupSession(other, otherTopup.id, `cs_${otherTopup.id}`);
+    await wallet.applyVerifiedTopupEvent({ eventId: `evt_${otherTopup.id}`, organizationId: other, topupId: otherTopup.id,
+      sessionId: `cs_${otherTopup.id}`, paymentId: `pi_${otherTopup.id}`, customerId: 'cus_other', amountCents: 1,
+      currency: 'usd', mode: 'payment', paymentStatus: 'paid' });
+    const otherHold = await wallet.reserve(other, randomUUID(), 'openai', 'other-model', 1n);
+    process.env.AI_WALLET_ENABLED = 'false'; process.env.BILLING_ENABLED = 'false';
+    const value = await checkout.balance(org);
+    expect(value).toMatchObject({ organizationId: org, heldNanos: '5000000', balanceNanos: '1228000000', availableNanos: '1223000000' });
+    expect(value.operations).toHaveLength(2);
+    expect(value.operations.find((operation) => operation.id === pending.id)).toMatchObject({ state: 'UNKNOWN', chargedNanos: null });
+    expect(value.operations.find((operation) => operation.id === settled.id)).toMatchObject({ state: 'SETTLED', chargedNanos: '2000000' });
+    expect(JSON.stringify(value)).not.toMatch(/paymentId|providerRequestId|customerId|operationKey|cs_test|pi_cs/);
+    expect((await checkout.balance(other)).operations.map((operation) => operation.id)).toEqual([otherHold.id]);
+    expect(value.operations.map((operation) => operation.id)).not.toContain(otherHold.id);
+  });
+
 });

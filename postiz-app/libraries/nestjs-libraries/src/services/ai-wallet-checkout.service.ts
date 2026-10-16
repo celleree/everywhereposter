@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import Stripe from 'stripe';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
@@ -43,13 +44,19 @@ export class AiWalletCheckoutService {
 
   async balance(organizationId: string) {
     this.assertTestAccount();
-    const balance = await this.db.aiWallet.findUnique({ where: { organizationId } });
-    const entries = await this.db.aiWalletLedger.findMany({ where: { organizationId },
-      orderBy: { createdAt: 'desc' }, take: 20, select: { id: true, kind: true, amountNanos: true, createdAt: true } });
-    return { currency: 'usd', status: balance?.status || 'ACTIVE',
+    const [balance, entries, operations] = await this.db.$transaction([
+      this.db.aiWallet.findUnique({ where: { organizationId } }),
+      this.db.aiWalletLedger.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 20, select: { id: true, kind: true, amountNanos: true, createdAt: true } }),
+      this.db.aiWalletReservation.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 20, select: { id: true, provider: true, model: true, state: true, ceilingNanos: true, chargedNanos: true, createdAt: true } }),
+    ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return { organizationId, currency: 'usd', status: balance?.status || 'ACTIVE',
       balanceNanos: (balance?.balanceNanos || 0n).toString(), heldNanos: (balance?.heldNanos || 0n).toString(),
       availableNanos: ((balance?.balanceNanos || 0n) - (balance?.heldNanos || 0n)).toString(),
-      entries: entries.map(({ amountNanos, ...entry }) => ({ ...entry, amountNanos: amountNanos.toString() })) };
+      entries: entries.map(({ amountNanos, ...entry }) => ({ ...entry, amountNanos: amountNanos.toString() })),
+      operations: operations.map(({ ceilingNanos, chargedNanos, ...operation }) => ({ ...operation,
+        ceilingNanos: ceilingNanos.toString(), chargedNanos: chargedNanos?.toString() ?? null })) };
   }
 
   private async customer(organizationId: string) {

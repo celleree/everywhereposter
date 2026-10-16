@@ -5,7 +5,8 @@ import useSWR from 'swr';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { MainBillingComponent } from './main.billing.component';
-export const BillingComponent = () => {
+import { AiWalletComponent } from './ai-wallet.component';
+export const BillingComponent = ({ walletAvailable = false }: { walletAvailable?: boolean }) => {
   const fetch = useFetch();
   const load = useCallback(async (path: string) => {
     return await (await fetch(path)).json();
@@ -18,8 +19,8 @@ export const BillingComponent = () => {
     '/user/subscription',
     load
   );
-  if (isLoadingSubscription || isLoadingTier) {
-    return <LoadingComponent />;
-  }
-  return <MainBillingComponent sub={subscription?.subscription} />;
+  return <>
+    {walletAvailable ? <AiWalletComponent /> : null}
+    {isLoadingSubscription || isLoadingTier ? <LoadingComponent /> : <MainBillingComponent sub={subscription?.subscription} />}
+  </>;
 };
