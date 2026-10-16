@@ -26,7 +26,7 @@ for (const width of [375, 390, 430, 1440]) {
     await expect(choose).toBeVisible({ timeout: 60_000 });
     const transfers = card.getByRole('region', { name: 'Video transfers' });
     await expect(transfers.getByRole('progressbar')).toHaveAttribute('value', '48');
-    await expect(transfers.getByText('You can browse Everywhere Poster while uploading. Keep this website open.')).toBeVisible();
+    await expect(transfers.getByText('Keep this browser open and on screen while uploading.')).toHaveCount(0);
     await expect(transfers.getByText(/%/)).toHaveCount(0);
     expect(await transfers.evaluate(element => getComputedStyle(element).position)).toBe('static');
     for (const theme of ['light', 'dark']) {
