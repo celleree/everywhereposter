@@ -38,6 +38,9 @@ test('Resumable upload: navigation, browser return and safe completion', async (
   await page.locator('input[type=file]').first().setInputFiles({ name: 'resume.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('region', { name: 'Video transfers' });
   await expect(tray).toBeVisible();
+  const guidance = tray.getByText('Keep this browser open and on screen while uploading.');
+  if (mobileProject(info)) await expect(guidance).toBeVisible();
+  else await expect(guidance).toBeHidden();
   await expect.poll(() => interrupted).toBe(true);
   await expect(tray.getByText('Safe to leave.', { exact: false })).toHaveCount(0);
   if (mobileProject(info)) {
@@ -56,7 +59,7 @@ test('Resumable upload: navigation, browser return and safe completion', async (
   await tray.getByRole('button', { name: 'Retry upload', exact: true }).click();
   await chooser;
   await page.getByLabel('Resume resume.mp4').setInputFiles({ name: 'resume.mp4', mimeType: 'video/mp4', buffer: bytes });
-  await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
+  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
   expect(chunks.filter(index => index === 0)).toHaveLength(1);
   expect(session.status).toBe('COMPLETE');
 });
@@ -98,11 +101,12 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   } else await page.locator('#left-menu').getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page).toHaveURL(/settings/); await expect(tray).toHaveCount(0); continueTransfer = true; release!();
   await page.goBack();
-  await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
+  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
   intent.status = 'PUBLISHING'; session.quickIntent = intent; await page.reload();
   await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Publishing');
-  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }]; session.quickIntent = intent; await page.reload();
+  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }, { integrationId: 'failed-x', name: 'X account', state: 'Failed', reason: 'Synthetic rejection' }]; session.quickIntent = intent; await page.reload();
   await expect(tray.getByText('Fixture account: Published')).toBeVisible();
+  await expect(tray.getByText('X account: Failed — Synthetic rejection')).toBeVisible();
 });
 
 test('Resumable upload: restored completed transfers stay inline and do not cover the phone picker', async ({ page }, info) => {
@@ -128,6 +132,11 @@ test('Resumable upload: restored completed transfers stay inline and do not cove
   const tray = page.getByRole('region', { name: 'Video transfers' });
   await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toBeVisible();
   expect(await tray.evaluate(element => getComputedStyle(element).position)).toBe('static');
+  await tray.getByRole('button', { name: 'Dismiss transfer' }).first().click();
+  await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toHaveCount(0);
+  await expect(tray.getByText('synthetic-1.mp4', { exact: true })).toBeVisible();
 });
 
 test('Resumable upload: admission errors remain visible inline', async ({ page }) => {
@@ -182,8 +191,80 @@ test('Resumable upload: one-tap retry reconciles a lost chunk acknowledgement', 
   await expect(tray.getByRole('button', { name: 'Retry upload', exact: true })).toHaveCount(0);
   await expect(tray.getByRole('button', { name: 'Cancel upload', exact: true })).toBeVisible();
   release();
-  await expect(tray.getByText('Safe to leave.', { exact: false })).toBeVisible();
+  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
   expect(pickers).toBe(0); expect(creations).toBe(1); expect(completions).toBe(1);
   expect(chunks).toEqual([0, 1]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+
+test('Resumable upload: recovered publishing acknowledgement and discard keep Create usable', async ({ page }, info) => {
+  let posts = 0;
+  await page.route('**/backend-api/posts**', route => {
+    if (route.request().method() !== 'GET') posts++;
+    return route.fallback();
+  });
+  await openApp(page, '/create');
+  const mobile = mobileProject(info);
+  if (mobile) await page.getByRole('button', { name: 'Write a text post', exact: true }).click();
+  const text = mobile ? page.getByRole('textbox', { name: 'Post text', exact: true }) : page.locator('[contenteditable="true"]').first();
+  await text.fill('Synthetic previous draft');
+  await page.evaluate(() => {
+    const key = 'everywhereposter:create-draft:v1:synthetic-user:synthetic-org';
+    const draft = JSON.parse(localStorage.getItem(key)!);
+    draft.journal = { attemptId: 'synthetic-previous-attempt', destinationIds: ['youtube', 'x'], startedAt: Date.now() };
+    localStorage.setItem(key, JSON.stringify(draft));
+  });
+  await page.reload();
+  const recovery = page.getByRole('region', { name: 'Publishing recovery' });
+  await expect(recovery).toBeVisible();
+  await expect(recovery.getByRole('link', { name: 'Open Schedule' })).toBeVisible();
+  await recovery.getByRole('button', { name: 'Acknowledge notice' }).click();
+  await expect(recovery.getByText('Publishing remains locked until you start a new draft.')).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await recovery.getByRole('button', { name: 'Start a new draft' }).click();
+  await expect(recovery).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Choose files', exact: true })).toBeVisible();
+  if (mobile) await page.getByRole('button', { name: 'Write a text post', exact: true }).click();
+  await text.fill('Synthetic fresh draft');
+  await page.reload();
+  if (mobile && !(await text.isVisible())) await page.getByRole('button', { name: 'Write a text post', exact: true }).click();
+  if (mobile) await expect(text).toHaveValue('Synthetic fresh draft');
+  else await expect(text).toHaveText('Synthetic fresh draft');
+  expect(posts).toBe(0);
+  await capture(page, info, 'composer-after-recovery-discard');
+});
+
+
+test('Resumable upload: cancel settles before a fresh upload and leaves no stale warning', async ({ page }, info) => {
+  test.skip(info.project.name.includes('webkit'), 'Chromium covers Blob request interception.');
+  let session: any, creations = 0, deletes = 0, held = false, release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/backend-api/media/uploads**', async route => {
+    const req = route.request(), pathname = new URL(req.url()).pathname;
+    if (pathname === '/backend-api/media/uploads' && req.method() === 'GET') return route.fulfill({ json: { sessions: session && session.status !== 'CANCELLED' ? [session] : [] } });
+    if (pathname === '/backend-api/media/uploads' && req.method() === 'POST') {
+      creations++; session = { ...req.postDataJSON(), id: 'session-' + creations, status: 'UPLOADING', parts: [] };
+    } else if (pathname.includes('/parts/')) {
+      if (creations === 1) { held = true; await hold; return route.abort('failed').catch(() => {}); }
+      session.parts.push({ index: 0, byteSize: req.postDataBuffer()!.length, digest: session.manifest[0] });
+    } else if (req.method() === 'DELETE') {
+      deletes++; session.status = 'CANCELLED'; return route.fulfill({ json: { cancelled: true } });
+    } else if (pathname.endsWith('/complete')) session = { ...session, status: 'COMPLETE', media: { id: 'second-media', name: 'fresh.mp4', path: '/audit-fixtures/fresh.mp4', type: 'video' } };
+    return route.fulfill({ json: session });
+  });
+  await openApp(page, '/media');
+  const picker = page.locator('input[type=file]').first();
+  const upload = { name: 'cancel.mp4', mimeType: 'video/mp4', buffer: readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')) };
+  await picker.setInputFiles(upload);
+  await expect.poll(() => held).toBe(true);
+  const tray = page.getByRole('region', { name: 'Video transfers' });
+  await tray.getByRole('button', { name: 'Cancel upload', exact: true }).click();
+  release();
+  await expect(tray).toHaveCount(0);
+  await picker.setInputFiles({ ...upload, name: 'fresh.mp4' });
+  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
+  await expect(tray.getByRole('alert')).toHaveCount(0);
+  await expect(tray.getByText('Keep this browser open and on screen while uploading.')).toHaveCount(0);
+  expect(creations).toBe(2); expect(deletes).toBe(1);
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, fireEvent } from '@testing-library/react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { ResumableUploadProvider } from '../../apps/frontend/src/components/media/resumable-upload.provider';
 
@@ -32,5 +32,34 @@ it('renders restored recovery inline only where the upload surface mounts it', a
   expect(view.queryByRole('region', { name: 'Video transfers' })).toBeNull();
   view.rerender(<ResumableUploadProvider><UploadTransfers /></ResumableUploadProvider>);
   expect(view.getByText('original.mp4')).toBeTruthy();
+  view.unmount();
+});
+
+it('scopes cancellation errors to their row and clears them after a successful cancellation', async () => {
+  let sessions = ['first', 'second'].map(id => ({ id, originalName: id + '.mp4', byteSize: 10, status: 'UPLOADING', parts: [], manifest: [] }));
+  let conflict = true, deletes = 0;
+  const fetch = jest.fn(async (url, options) => {
+    const id = url.split('/').pop();
+    if (options?.method === 'DELETE') {
+      deletes++;
+      if (conflict) return { ok: false, status: 409, json: async () => ({ message: 'Wait for the current request to finish before cancellation.' }) };
+      sessions = sessions.filter(item => item.id !== id);
+      return { ok: true, json: async () => ({ cancelled: true }) };
+    }
+    return { ok: true, json: async () => url === '/media/uploads' ? { sessions } : sessions.find(item => item.id === id) };
+  });
+  (useFetch as jest.Mock).mockReturnValue(fetch);
+  const { UploadTransfers } = require('../../apps/frontend/src/components/media/resumable-upload.provider');
+  const view = render(<ResumableUploadProvider><UploadTransfers /></ResumableUploadProvider>);
+  await waitFor(() => expect(view.getAllByRole('button', { name: 'Cancel upload' })).toHaveLength(2));
+  fireEvent.click(view.getAllByRole('button', { name: 'Cancel upload' })[0]);
+  await view.findByRole('alert');
+  expect(view.getByText('first.mp4')).toBeTruthy();
+  conflict = false;
+  fireEvent.click(view.getAllByRole('button', { name: 'Cancel upload' })[0]);
+  await waitFor(() => expect(view.queryByText('first.mp4')).toBeNull());
+  expect(view.getByText('second.mp4')).toBeTruthy();
+  expect(view.queryByRole('alert')).toBeNull();
+  expect(deletes).toBe(2);
   view.unmount();
 });

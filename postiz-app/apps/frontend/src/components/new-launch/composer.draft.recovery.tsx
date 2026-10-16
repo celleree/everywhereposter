@@ -528,6 +528,7 @@ export function ComposerDraftRecovery({
   const [foreignLock, setForeignLock] = useState(false);
   const foreignLockRef = useRef(false);
   const [message, setMessage] = useState('');
+  const [acknowledged, setAcknowledged] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [restored, setRestored] = useState<ComposerDraft | null>(null);
   const [timing, setTiming] = useState<ComposerDraft['timing']>('now');
@@ -542,6 +543,7 @@ export function ComposerDraftRecovery({
     let active = true;
     readyRef.current = false;
     setPhase('loading');
+    setAcknowledged(false);
     setRestored(null);
     completedRef.current = false;
     journalRef.current = null;
@@ -762,6 +764,7 @@ export function ComposerDraftRecovery({
       return;
     }
     readyRef.current = false;
+    setPhase('loading');
     resetComposerState();
     setAttempt((value) => value + 1);
   };
@@ -805,13 +808,17 @@ export function ComposerDraftRecovery({
     >
       {!!message && <div role="alert">{message}</div>}
       {(!!restored?.journal || foreignLock || ownPostStarted) && (
-        <div role="alert">
-          A previous publishing request may already have been accepted. Check
-          Schedule and connected accounts before starting another post.{' '}
-          <button type="button" onClick={startBlank}>
-            Start a new draft
-          </button>
-        </div>
+        <section aria-label="Publishing recovery" className="mb-[16px] rounded-[12px] border border-newBorder bg-newBgColorInner p-[16px]">
+          {acknowledged ? <p role="status">Publishing remains locked until you start a new draft.</p> : <div role="alert">
+            <h2 className="font-[600]">Check your previous publishing request</h2>
+            <p>A previous publishing request may already have been accepted. Check Schedule and connected accounts before starting another post.</p>
+          </div>}
+          <div className="mt-[8px] flex flex-wrap gap-[12px]">
+            <a href="/launches" className="inline-flex min-h-[44px] items-center underline">Open Schedule</a>
+            <button type="button" className="min-h-[44px] underline" onClick={() => setAcknowledged(value => !value)}>{acknowledged ? 'Show recovery details' : 'Acknowledge notice'}</button>
+            <button type="button" className="min-h-[44px] underline" onClick={startBlank}>Start a new draft</button>
+          </div>
+        </section>
       )}
       <React.Fragment key={attempt}>{children}</React.Fragment>
     </RecoveryContext.Provider>
