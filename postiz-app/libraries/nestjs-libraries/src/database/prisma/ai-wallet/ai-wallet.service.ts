@@ -192,6 +192,17 @@ export class AiWalletService {
     });
   }
 
+  async bindTopupSession(organizationId: string, id: string, sessionId: string) {
+    this.key(id); this.key(sessionId);
+    return this.transact(organizationId, async (tx) => {
+      const topup = await tx.aiWalletTopup.findFirst({ where: { id, organizationId } });
+      if (!topup) throw new Error('Topup not found.');
+      if (topup.sessionId === sessionId) return topup;
+      if (topup.sessionId) throw new Error('Topup session identity changed.');
+      return tx.aiWalletTopup.update({ where: { id }, data: { sessionId } });
+    });
+  }
+
   /** Only a signature-verified, normalized Stripe Checkout event may call this.
    * Credit comes from our persisted intent, never from webhook credit metadata. */
   async applyVerifiedTopupEvent(event: VerifiedTopupEvent) {
@@ -210,7 +221,7 @@ export class AiWalletService {
       const topup = await tx.aiWalletTopup.findFirst({ where: { id: event.topupId, organizationId: event.organizationId } });
       if (!topup || topup.customerId !== event.customerId || topup.amountCents !== event.amountCents ||
           topup.currency !== event.currency || event.mode !== 'payment' ||
-          (topup.sessionId && topup.sessionId !== event.sessionId) ||
+          topup.sessionId !== event.sessionId ||
           (event.paymentStatus === 'paid' && topup.paymentId && topup.paymentId !== event.paymentId)) {
         throw new Error('Payment does not match the server-created topup.');
       }
