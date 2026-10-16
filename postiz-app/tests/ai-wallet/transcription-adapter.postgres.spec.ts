@@ -66,6 +66,27 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     expect(await db.mediaTranscription.findUnique({ where: { id: job } })).toMatchObject({ status: 'READY', text: 'Synthetic transcript.' });
     expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(1);
   });
+  it('resumes a held reservation through real accounting after flags and plan authorization pause', async () => {
+    const dispatchFailure = jest.spyOn(wallet, 'dispatchTranscription')
+      .mockRejectedValueOnce(Error('synthetic pre-claim local failure'));
+    await expect(run()).rejects.toThrow('pre-claim local failure');
+    dispatchFailure.mockRestore();
+    expect(await wallet.quotedOperation(org, `media-transcription:${job}`)).toMatchObject({ state: 'RESERVED' });
+    expect(model.transcribePrepaidAudio).not.toHaveBeenCalled();
+
+    process.env.AI_WALLET_ENABLED = 'false';
+    process.env.AI_WALLET_TRANSCRIPTION_ENABLED = 'false';
+    expect((await run(false))?.state).toBe('SETTLED');
+    expect((await run(false))?.state).toBe('SETTLED');
+
+    expect(model.transcribePrepaidAudio).toHaveBeenCalledTimes(1);
+    expect(await wallet.quotedOperation(org, `media-transcription:${job}`)).toMatchObject({ state: 'SETTLED', chargedNanos: 168n });
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(1);
+    expect(await db.mediaTranscription.findUnique({ where: { id: job } })).toMatchObject({
+      status: 'READY', text: 'Synthetic transcript.',
+    });
+  });
+
   it('recovers a crash after receipt staging without another paid call, even after flags pause', async () => {
     jest.spyOn(wallet, 'finishTranscription').mockRejectedValueOnce(Error('synthetic local commit failure'));
     await expect(run()).rejects.toThrow('commit failure');
