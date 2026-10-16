@@ -2,6 +2,7 @@
 /.cloudflared/
 /.playwright-mcp/
 /backups/*.sql
+/backups/*.sha256
 
 /postiz-app/browser-results/
 /postiz-app/browser-report/
