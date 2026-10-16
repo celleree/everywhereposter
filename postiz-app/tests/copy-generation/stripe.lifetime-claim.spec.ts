@@ -8,7 +8,7 @@ describe('lifetime code claims', () => {
   const transaction = (claimed = false) => ({
     $queryRaw: jest.fn(async () => []),
     usedCodes: { findFirst: jest.fn(async () => claimed ? { id: 'existing-claim', orgId: 'other-org' } : null), create: jest.fn(async () => ({})) },
-    subscription: { upsert: jest.fn(async () => ({})) },
+    subscription: { findFirst: jest.fn(async () => null), upsert: jest.fn(async () => ({})) },
     organization: { update: jest.fn(async () => ({})) },
   });
 
@@ -16,7 +16,7 @@ describe('lifetime code claims', () => {
     const tx = transaction();
     await expect(claim(repository(), tx)).resolves.toEqual({ applied: true, organizationId: 'org_1' });
     const [query, code] = tx.$queryRaw.mock.calls[0] as any;
-    expect(query.join('?')).toContain('pg_advisory_xact_lock(hashtextextended(?, 0))');
+    expect(query.join('?')).toContain('pg_advisory_xact_lock(hashtextextended(?, 1))');
     expect(code).toBe('private-code');
     expect(tx.usedCodes.findFirst).toHaveBeenCalledWith({ where: { code: 'private-code' } });
     expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.usedCodes.findFirst.mock.invocationCallOrder[0]);
@@ -39,6 +39,19 @@ describe('lifetime code claims', () => {
     expect(tx.subscription.upsert).not.toHaveBeenCalled();
     expect(tx.organization.update).not.toHaveBeenCalled();
     expect(tx.usedCodes.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale subscription target before consuming a different code', async () => {
+    const tx = transaction();
+    tx.subscription.findFirst.mockResolvedValueOnce({ id: 'new-sub' } as any);
+    await expect(repository().persistLifetimeSubscription(tx as any, false, 'id', 'org_1', 5, 'STANDARD', 'MONTHLY', null, 'different-code', { id: 'org_1' }, null))
+      .rejects.toThrow('Subscription changed; retry the lifetime code.');
+    expect(tx.subscription.upsert).not.toHaveBeenCalled();
+    expect(tx.usedCodes.create).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    const [orgQuery, orgId] = tx.$queryRaw.mock.calls[1] as any;
+    expect(orgQuery.join('?')).toContain('hashtextextended(?, 2)');
+    expect(orgId).toBe('org_1');
   });
 
   it('does not fall back to an unlocked claim if the lock fails', async () => {

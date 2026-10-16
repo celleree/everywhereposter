@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
-import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
+import { LifetimeSubscriptionSnapshot, SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { Organization, Prisma } from '@prisma/client';
@@ -264,7 +264,8 @@ export class SubscriptionService {
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null,
     code?: string,
-    org?: string
+    org?: string,
+    expectedSubscription?: LifetimeSubscriptionSnapshot | null
   ) {
     if (code) {
       if (!isBillingEnabled()) {
@@ -287,7 +288,8 @@ export class SubscriptionService {
             period,
             cancelAt,
             code,
-            org ? { id: org } : undefined
+            org ? { id: org } : undefined,
+            expectedSubscription
           )
       );
 

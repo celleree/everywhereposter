@@ -990,7 +990,8 @@ export class StripeService {
         'MONTHLY',
         null,
         testCode,
-        organizationId
+        organizationId,
+        getCurrentSubscription || null
       );
       return {
         success: true,

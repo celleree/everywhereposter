@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import dayjs from 'dayjs';
-import { Organization, Prisma } from '@prisma/client';
+import { Organization, Prisma, Subscription } from '@prisma/client';
+
+export type LifetimeSubscriptionSnapshot = Pick<Subscription, 'id' | 'updatedAt' | 'identifier'>;
 
 @Injectable()
 export class SubscriptionRepository {
@@ -357,13 +359,14 @@ export class SubscriptionRepository {
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null,
     code: string,
-    org?: { id: string }
+    org?: { id: string },
+    expectedSubscription?: LifetimeSubscriptionSnapshot | null
   ) {
     // Serialize claims for this code across organizations without requiring a
     // uniqueness migration over historical data. The claim check and writes
     // must share the transaction that owns this lock.
     await client.$queryRaw`
-      SELECT pg_advisory_xact_lock(hashtextextended(${code}, 0))::text
+      SELECT pg_advisory_xact_lock(hashtextextended(${code}, 1))::text
     `;
     const findOrg =
       org ||
@@ -380,6 +383,10 @@ export class SubscriptionRepository {
       return { applied: false as const };
     }
 
+    // Always acquire the code lock before the organization lock.
+    await client.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${findOrg.id}, 2))::text
+    `;
     const claim = await client.usedCodes.findFirst({ where: { code } });
     if (claim) {
       if (claim.orgId !== findOrg.id) {
@@ -388,6 +395,20 @@ export class SubscriptionRepository {
       // A committed claim may still need post-commit entitlement reconciliation.
       // Never apply its upgrade twice when the caller retries.
       return { applied: true as const, organizationId: findOrg.id };
+    }
+
+    if (expectedSubscription !== undefined) {
+      const current = await client.subscription.findFirst({
+        where: { organizationId: findOrg.id, deletedAt: null },
+      });
+      const matches = expectedSubscription === null
+        ? current === null
+        : current?.id === expectedSubscription.id &&
+          current.identifier === expectedSubscription.identifier &&
+          current.updatedAt.getTime() === expectedSubscription.updatedAt.getTime();
+      if (!matches) {
+        throw new Error('Subscription changed; retry the lifetime code.');
+      }
     }
 
     await client.subscription.upsert({
@@ -448,7 +469,8 @@ export class SubscriptionRepository {
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null,
     code: string,
-    org?: { id: string }
+    org?: { id: string },
+    expectedSubscription?: LifetimeSubscriptionSnapshot | null
   ) {
     return this.persistLifetimeSubscriptionWithClient(
       transaction,
@@ -460,7 +482,8 @@ export class SubscriptionRepository {
       period,
       cancelAt,
       code,
-      org
+      org,
+      expectedSubscription
     );
   }
 
