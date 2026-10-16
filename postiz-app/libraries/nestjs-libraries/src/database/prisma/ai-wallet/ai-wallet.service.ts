@@ -159,7 +159,11 @@ export class AiWalletService {
   async settle(organizationId: string, id: string, chargedNanos: bigint, providerRequestId: string, measured?: MeasuredUsage) {
     this.amount(chargedNanos, true);
     this.key(providerRequestId);
-    return this.transact(organizationId, async (tx) => {
+    return this.transact(organizationId, tx => this.settleInTransaction(tx, organizationId, id, chargedNanos, providerRequestId, measured));
+  }
+
+  private async settleInTransaction(tx: Prisma.TransactionClient, organizationId: string, id: string,
+    chargedNanos: bigint, providerRequestId: string, measured?: MeasuredUsage) {
       const reservation = await this.reservation(tx, organizationId, id);
       if (reservation.providerRequestId && reservation.providerRequestId !== providerRequestId) {
         throw new Error('Provider receipt identity changed.');
@@ -197,7 +201,6 @@ export class AiWalletService {
       return tx.aiWalletReservation.update({ where: { id }, data: {
         state: 'SETTLED', chargedNanos, reportedNanos: chargedNanos, providerRequestId, ...usageData,
       } });
-    });
   }
 
   /** Reconciliation uses the persisted quote, including when purchases pause.
@@ -209,6 +212,65 @@ export class AiWalletService {
     const usage = receipt ?? (reservation.usageSnapshot ? measuredSnapshot(reservation.usageSnapshot) : undefined);
     if (!usage) throw new Error('Reconciliation requires provider usage.');
     return this.settle(organizationId, id, quotedCharge(quote, usage), usage.providerRequestId, usage);
+  }
+
+  async quotedOperation(organizationId: string, operationKey: string) {
+    this.key(operationKey);
+    return this.transact(organizationId, async tx => {
+      const row = await tx.aiWalletReservation.findUnique({ where: { organizationId_operationKey: { organizationId, operationKey } } });
+      if (row) this.storedQuote(row);
+      return row;
+    });
+  }
+
+  private async transcription(tx: Prisma.TransactionClient, organizationId: string, reservationId: string,
+    transcriptionId: string, generation: number) {
+    const reservation = await this.reservation(tx, organizationId, reservationId);
+    if (!this.storedQuote(reservation) || reservation.operationKey !== `media-transcription:${transcriptionId}`) {
+      throw new Error('Reservation does not own this transcription.');
+    }
+    const row = await tx.mediaTranscription.findFirst({ where: { id: transcriptionId, generation,
+      media: { organizationId, deletedAt: null } } });
+    if (!row) throw new Error('Transcription is no longer active.');
+    return { reservation, row };
+  }
+
+  /** First commit: receipt and recoverable business output together, still held.
+   * Text stays on MediaTranscription, never in wallet metadata or ledger. */
+  async stageTranscription(organizationId: string, reservationId: string, transcriptionId: string,
+    generation: number, text: string, receipt: MeasuredUsage) {
+    if (typeof text !== 'string') throw new Error('Invalid transcription result.');
+    const usage = usageSnapshot(receipt), usageFingerprint = snapshotFingerprint(usage);
+    return this.transact(organizationId, async tx => {
+      const { reservation, row } = await this.transcription(tx, organizationId, reservationId, transcriptionId, generation);
+      quotedCharge(reservation.quoteSnapshot, receipt);
+      if (row.status !== 'PROCESSING' || !['DISPATCHED', 'UNKNOWN'].includes(reservation.state) ||
+          (reservation.providerRequestId && reservation.providerRequestId !== receipt.providerRequestId) ||
+          (reservation.usageFingerprint && reservation.usageFingerprint !== usageFingerprint) ||
+          (row.text !== null && row.text !== text)) throw new Error('Transcription receipt or result changed.');
+      await tx.aiWalletReservation.update({ where: { id: reservationId }, data: { state: 'UNKNOWN',
+        providerRequestId: receipt.providerRequestId, usageSnapshot: usage, usageFingerprint } });
+      await tx.mediaTranscription.update({ where: { id: transcriptionId }, data: { text } });
+    });
+  }
+
+  /** Second commit: debit and READY become visible atomically. Crash/retry after
+   * staging resumes here; it must never invoke the provider again. */
+  async finishTranscription(organizationId: string, reservationId: string, transcriptionId: string, generation: number) {
+    return this.transact(organizationId, async tx => {
+      const { reservation, row } = await this.transcription(tx, organizationId, reservationId, transcriptionId, generation);
+      if (row.status === 'READY' && reservation.state === 'SETTLED') return reservation;
+      if (row.status !== 'PROCESSING' || row.text === null || !reservation.usageSnapshot) {
+        throw new Error('Transcription has no staged provider result.');
+      }
+      const usage = measuredSnapshot(reservation.usageSnapshot);
+      const settled = await this.settleInTransaction(tx, organizationId, reservationId,
+        quotedCharge(reservation.quoteSnapshot, usage), usage.providerRequestId, usage);
+      if (settled.state === 'SETTLED') await tx.mediaTranscription.update({ where: { id: transcriptionId }, data: {
+        status: 'READY', text: row.text || null, completedAt: new Date(), errorCode: null, errorMessage: null,
+      } });
+      return settled;
+    });
   }
 
   /** Internal server-created intent. The eventual Checkout adapter must accept
