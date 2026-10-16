@@ -4,6 +4,7 @@ import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prism
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
 import { UsersRepository } from '@gitroom/nestjs-libraries/database/prisma/users/users.repository';
+import { AiWalletService } from './ai-wallet/ai-wallet.service';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
@@ -77,6 +78,7 @@ import { ResumableUploadService } from '../../upload/resumable-upload.service';
     OrganizationService,
     OrganizationRepository,
     SubscriptionService,
+    AiWalletService,
     SubscriptionRepository,
     NotificationService,
     NotificationsRepository,

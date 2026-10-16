@@ -9,6 +9,7 @@ datasource db {
 }
 
 model Organization {
+  aiWallet AiWallet?
   uploadSessions VideoUploadSession[]
   quickUploadIntents QuickUploadIntent[]
   id                  String               @id @default(uuid())
@@ -1320,4 +1321,102 @@ model QuickUploadIntent {
   organization    Organization @relation(fields: [organizationId], references: [id])
 
   @@index([dispatched, createdAt])
+}
+
+
+enum AiWalletStatus {
+  ACTIVE
+  REVIEW
+}
+
+enum AiWalletReservationState {
+  RESERVED
+  DISPATCHED
+  UNKNOWN
+  SETTLED
+  RELEASED
+}
+
+enum AiWalletLedgerKind {
+  FUNDING
+  USAGE
+}
+
+model AiWallet {
+  organizationId String @id
+  balanceNanos BigInt @default(0)
+  heldNanos BigInt @default(0)
+  status AiWalletStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id])
+  reservations AiWalletReservation[]
+  ledger AiWalletLedger[]
+  topups AiWalletTopup[]
+}
+
+model AiWalletReservation {
+  id String @id @default(uuid())
+  organizationId String
+  operationKey String
+  provider String
+  model String
+  ceilingNanos BigInt
+  reportedNanos BigInt?
+  chargedNanos BigInt?
+  state AiWalletReservationState @default(RESERVED)
+  providerRequestId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
+  ledger AiWalletLedger?
+  @@unique([organizationId, operationKey])
+  @@unique([id, organizationId])
+  @@unique([provider, providerRequestId])
+  @@index([organizationId, state])
+}
+
+model AiWalletLedger {
+  id String @id @default(uuid())
+  organizationId String
+  externalKey String @unique
+  kind AiWalletLedgerKind
+  amountNanos BigInt
+  reservationId String? @unique
+  topupId String? @unique
+  createdAt DateTime @default(now())
+  wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
+  reservation AiWalletReservation? @relation(fields: [reservationId, organizationId], references: [id, organizationId])
+  topup AiWalletTopup? @relation(fields: [topupId, organizationId], references: [id, organizationId])
+  @@index([organizationId, createdAt])
+  @@unique([reservationId, organizationId])
+  @@unique([topupId, organizationId])
+}
+
+model AiWalletTopup {
+  id String @id @default(uuid())
+  organizationId String
+  operationKey String
+  customerId String
+  amountCents Int
+  currency String
+  sessionId String? @unique
+  paymentId String? @unique
+  fundedAt DateTime?
+  createdAt DateTime @default(now())
+  wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
+  ledger AiWalletLedger?
+  events AiWalletPaymentEvent[]
+  @@unique([organizationId, operationKey])
+  @@unique([id, organizationId])
+}
+
+model AiWalletPaymentEvent {
+  eventId String @id
+  topupId String
+  organizationId String
+  fingerprint String
+  credited Boolean
+  createdAt DateTime @default(now())
+  topup AiWalletTopup @relation(fields: [topupId, organizationId], references: [id, organizationId])
 }
