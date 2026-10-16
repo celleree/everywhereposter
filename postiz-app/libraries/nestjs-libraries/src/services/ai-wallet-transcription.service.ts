@@ -17,6 +17,7 @@ export class AiWalletTranscriptionService {
   constructor(private readonly wallet: AiWalletService, private readonly model: CopyGenerationModelService) {}
 
   async run(organizationId: string, transcriptionId: string, generation: number,
+    allowNewReservation: boolean,
     prepare: () => ReturnType<CopyGenerationModelService['preparePrepaidTranscription']>) {
     const key = `media-transcription:${transcriptionId}`;
     const existing = await this.wallet.quotedOperation(organizationId, key);
@@ -26,28 +27,50 @@ export class AiWalletTranscriptionService {
       return this.wallet.finishTranscription(organizationId, existing.id, transcriptionId, generation);
     }
     if (existing && existing.state !== 'RESERVED') return existing;
-    if (!enabled(process.env.AI_WALLET_ENABLED)) {
-      if (existing) throw Error('Prepaid transcription is paused.');
-      return undefined;
+    // A legacy bundled-AI plan may resume accounting that already exists, but
+    // it must never acquire a new prepaid reservation merely because the
+    // global wallet adapter is enabled.
+    if (!existing && !allowNewReservation) return undefined;
+
+    let quote: PricingQuote;
+    let reservation: any;
+    let resumeExisting = false;
+    if (existing) {
+      // An accepted reservation owns an immutable quote. Revalidating that
+      // snapshot and its input fingerprint lets held work resume after a
+      // plan or flag change without accepting current environment pricing.
+      quote = validatePricingQuote(existing.quoteSnapshot);
+      if (quote.provider !== 'openai' || quote.model !== PREPAID_TRANSCRIPTION_MODEL) {
+        throw Error('Reservation does not match prepaid transcription.');
+      }
+      reservation = existing;
+      resumeExisting = true;
+    } else {
+      if (!enabled(process.env.AI_WALLET_ENABLED) || !isBillingEnabled() ||
+          !enabled(process.env.AI_WALLET_TRANSCRIPTION_ENABLED)) {
+        throw Error('Prepaid transcription adapter is disabled.');
+      }
+      let card: any;
+      try { card = JSON.parse(process.env.AI_WALLET_TRANSCRIPTION_RATE_CARD || ''); }
+      catch { throw Error('A verified transcription rate card is required.'); }
+      if (!card || Object.keys(card).sort().join(',') !== 'per,rateVersion,rates') throw Error('Invalid transcription rate card.');
+      quote = { policyVersion: PREPAID_AI_POLICY.version, provider: 'openai', model: PREPAID_TRANSCRIPTION_MODEL,
+        currency: 'usd' as const, markupPercent: 20 as const, requestFingerprint: '0'.repeat(64),
+        rateVersion: card.rateVersion, per: card.per, rates: card.rates,
+        limits: { inputText: '16000', inputAudio: '16000', outputText: '2000' } };
+      validatePricingQuote(quote); quotedCharge(quote); // Validate configuration before local preparation or reservation.
     }
-    if (!isBillingEnabled() || !enabled(process.env.AI_WALLET_TRANSCRIPTION_ENABLED)) {
-      throw Error('Prepaid transcription adapter is disabled.');
-    }
-    let card: any;
-    try { card = JSON.parse(process.env.AI_WALLET_TRANSCRIPTION_RATE_CARD || ''); }
-    catch { throw Error('A verified transcription rate card is required.'); }
-    if (!card || Object.keys(card).sort().join(',') !== 'per,rateVersion,rates') throw Error('Invalid transcription rate card.');
-    const base = { policyVersion: PREPAID_AI_POLICY.version, provider: 'openai', model: PREPAID_TRANSCRIPTION_MODEL,
-      currency: 'usd' as const, markupPercent: 20 as const, requestFingerprint: '0'.repeat(64),
-      rateVersion: card.rateVersion, per: card.per, rates: card.rates,
-      limits: { inputText: '16000', inputAudio: '16000', outputText: '2000' } };
-    validatePricingQuote(base); quotedCharge(base); // Validate configuration before local preparation or reservation.
     const prepared = await prepare();
     if (!/^[a-f0-9]{64}$/.test(prepared.audioSha256)) throw Error('Prepared transcription has no audio fingerprint.');
-    const quote: PricingQuote = { ...base, requestFingerprint: snapshotFingerprint({ organizationId,
-      transcriptionId, generation, model: PREPAID_TRANSCRIPTION_MODEL, audioSha256: prepared.audioSha256 }) };
-    const reservation = await this.wallet.reserve(organizationId, key, quote.provider, quote.model, quotedCharge(quote), quote);
-    const claim = await this.wallet.dispatchTranscription(organizationId, reservation.id, transcriptionId, generation);
+    const requestFingerprint = snapshotFingerprint({ organizationId, transcriptionId, generation,
+      model: PREPAID_TRANSCRIPTION_MODEL, audioSha256: prepared.audioSha256 });
+    if (resumeExisting) {
+      if (quote.requestFingerprint !== requestFingerprint) throw Error('Reservation input fingerprint does not match transcription.');
+    } else {
+      quote = { ...quote, requestFingerprint };
+      reservation = await this.wallet.reserve(organizationId, key, quote.provider, quote.model, quotedCharge(quote), quote);
+    }
+    const claim = await this.wallet.dispatchTranscription(organizationId, reservation.id, transcriptionId, generation, resumeExisting);
     if (!claim.dispatch) return claim.reservation;
     let requestId: string | undefined;
     try {

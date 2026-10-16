@@ -1,0 +1,1 @@
+ALTER TYPE "SubscriptionTier" ADD VALUE 'LAUNCH_V1';

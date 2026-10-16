@@ -48,9 +48,10 @@ export class PermissionsService {
       Ability<[AuthorizationActions, Sections]>
     >(Ability as AbilityClass<AppAbility>);
 
+    const packageOptions = await this.getPackageOptions(orgId);
     if (
       requestedPermission.length === 0 ||
-      !isBillingEnabled()
+      (!isBillingEnabled() && packageOptions.subscription?.subscriptionTier !== 'LAUNCH_V1')
     ) {
       for (const [action, section] of requestedPermission) {
         can(action, section);
@@ -63,10 +64,11 @@ export class PermissionsService {
       });
     }
 
-    const { subscription, options } = await this.getPackageOptions(orgId);
+    const { subscription, options } = packageOptions;
     for (const [action, section] of requestedPermission) {
       // check for the amount of channels
       if (section === Sections.CHANNEL) {
+        if (options.unlimited_channels) { can(action, section); continue; }
         // Refreshing an existing channel doesn't add a new one, so skip the limit check
         // but only if the channel actually belongs to this org
         if (refreshChannelId) {
@@ -104,6 +106,7 @@ export class PermissionsService {
 
       // check for posts per month
       if (section === Sections.POSTS_PER_MONTH) {
+        if (options.unlimited_posts) { can(action, section); continue; }
         const createdAt =
           (await this._subscriptionService.getSubscription(orgId))?.createdAt ||
           created_at;

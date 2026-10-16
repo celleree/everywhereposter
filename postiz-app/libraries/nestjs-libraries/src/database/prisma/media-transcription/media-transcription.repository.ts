@@ -185,7 +185,20 @@ export class MediaTranscriptionRepository {
         status: MediaTranscriptionStatus.PROCESSING,
         media: { deletedAt: null },
       },
-      include: { media: true },
+      include: {
+        media: {
+          include: {
+            organization: {
+              select: {
+                subscription: {
+                  where: { deletedAt: null },
+                  select: { subscriptionTier: true },
+                },
+              },
+            },
+          },
+        },
+      },
     });
   }
 

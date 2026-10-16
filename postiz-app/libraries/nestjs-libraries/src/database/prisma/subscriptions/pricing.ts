@@ -1,5 +1,8 @@
 export interface PricingInnerInterface {
   current: string;
+  unlimited_channels?: boolean;
+  unlimited_posts?: boolean;
+  prepaid_ai?: boolean;
   month_price: number;
   year_price: number;
   channel?: number;
@@ -19,7 +22,18 @@ export interface PricingInnerInterface {
 export interface PricingInterface {
   [key: string]: PricingInnerInterface;
 }
+export const LAUNCH_PLAN = 'LAUNCH_V1' as const;
 export const pricing: PricingInterface = {
+  LAUNCH_V1: {
+    current: 'LAUNCH_V1', month_price: 9, year_price: 90,
+    // Numeric DB fields remain zero; explicit flags, not artificial quotas,
+    // represent the approved unlimited ordinary publishing allowance.
+    channel: 0, posts_per_month: 0, unlimited_channels: true, unlimited_posts: true,
+    prepaid_ai: true, team_members: false, community_features: false,
+    featured_by_gitroom: false, ai: false, import_from_channels: false,
+    image_generator: false, image_generation_count: 0, generate_videos: 0,
+    public_api: false, webhooks: 0, autoPost: false,
+  },
   FREE: {
     current: 'FREE',
     month_price: 0,
@@ -111,3 +125,14 @@ export const pricing: PricingInterface = {
     generate_videos: 60,
   },
 };
+
+export function channelAllowance(subscription?: { subscriptionTier?: string; totalChannels?: number } | null): number {
+  return pricing[subscription?.subscriptionTier || 'FREE']?.unlimited_channels
+    ? Number.POSITIVE_INFINITY : subscription?.totalChannels ?? 0;
+}
+/** New customers see the versioned launch offer; legacy subscribers retain their
+ * existing catalogue, prices and access without an automatic tier conversion. */
+export function purchasePlans(currentTier?: string) {
+  const legacy = ['STANDARD', 'TEAM', 'PRO', 'ULTIMATE'].includes(currentTier || '');
+  return Object.entries(pricing).filter(([key]) => legacy ? key !== 'FREE' && key !== LAUNCH_PLAN : key === LAUNCH_PLAN);
+}

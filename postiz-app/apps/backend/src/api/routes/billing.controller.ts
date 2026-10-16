@@ -31,13 +31,23 @@ export class BillingController {
     }
   }
 
+  private assertBillingAdministrator(
+    org: Organization & { users?: { role: string }[] }
+  ) {
+    if (!org.users?.[0] || !['ADMIN', 'SUPERADMIN'].includes(org.users[0].role)) {
+      throw new HttpException('Organization billing administrator required', 403);
+    }
+  }
+
   @Get('/ai-wallet')
   walletBalance(@GetOrgFromRequest() org: Organization) {
     return this.walletCheckout.balance(org.id);
   }
 
   @Get('/ai-wallet/offers')
-  walletOffers() { return this.walletCheckout.offers(); }
+  walletOffers(@GetOrgFromRequest() org: Organization) {
+    return this.walletCheckout.offers(org.id);
+  }
 
   @Post('/ai-wallet/topups')
   createWalletTopup(
@@ -101,6 +111,7 @@ export class BillingController {
     @Req() req: Request
   ) {
     this.assertBillingEnabled();
+    this.assertBillingAdministrator(org);
     const uniqueId = req?.cookies?.track;
     return this._stripeService.embedded(
       uniqueId,
@@ -119,6 +130,7 @@ export class BillingController {
     @Req() req: Request
   ) {
     this.assertBillingEnabled();
+    this.assertBillingAdministrator(org);
     const uniqueId = req?.cookies?.track;
     return this._stripeService.subscribe(
       uniqueId,
@@ -169,6 +181,7 @@ export class BillingController {
     @Body() body: BillingSubscribeDto
   ) {
     this.assertBillingEnabled();
+    this.assertBillingAdministrator(org);
     return this._stripeService.prorate(org.id, body);
   }
 

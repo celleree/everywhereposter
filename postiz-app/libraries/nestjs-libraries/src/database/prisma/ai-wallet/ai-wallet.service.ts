@@ -235,8 +235,9 @@ export class AiWalletService {
     return { reservation, row };
   }
 
-  async dispatchTranscription(organizationId: string, reservationId: string, transcriptionId: string, generation: number) {
-    this.enabled();
+  async dispatchTranscription(organizationId: string, reservationId: string, transcriptionId: string, generation: number,
+    resumeExisting = false) {
+    if (!resumeExisting) this.enabled();
     return this.transact(organizationId, async tx => {
       const { reservation, row } = await this.transcription(tx, organizationId, reservationId, transcriptionId, generation);
       if (row.status !== 'PROCESSING') throw new Error('Transcription is no longer active.');
