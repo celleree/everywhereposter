@@ -664,14 +664,21 @@ describe('ManageModal guided publishing bridge', () => {
     expect(useLaunchStore.getState().global[0].media).toEqual([image]);
   });
 
-  it('renders exactly Add Caption without a numeric badge in the editor section', () => {
+  it('labels the guided media editor Caption without a numeric badge', () => {
     const { container } = renderGuidedManageModal();
     const section = container.querySelector(
       '[data-guided-composer-section="editor"]'
     )!;
     expect(section.firstElementChild!.children).toHaveLength(1);
-    expect(screen.getByText('Add Caption', { exact: true })).toBeTruthy();
+    expect(screen.getByText('Caption', { exact: true })).toBeTruthy();
     expect(screen.queryByText('Review and edit', { exact: true })).toBeNull();
+  });
+
+  it('distinguishes post text from a media caption in the guided editor', () => {
+    useLaunchStore.getState().setGlobalValueMedia(0, []);
+    renderGuidedManageModal();
+    expect(screen.getByText('Post text', { exact: true })).toBeTruthy();
+    expect(screen.queryByText('Caption', { exact: true })).toBeNull();
   });
 
   it('removes four videos right to left without restoring attachments or hiding upload controls', async () => {

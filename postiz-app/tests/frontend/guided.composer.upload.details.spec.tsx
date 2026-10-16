@@ -1064,7 +1064,7 @@ describe('mobile Upload context', () => {
     useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'video-1', path: '/source.mp4' }]);
     useGuidedComposerStore.getState().selectSourceMedia('video-1');
     render(<GuidedComposerUploadDetails />);
-    const details = screen.getByText('Caption options', { selector: 'summary' }).parentElement as HTMLDetailsElement;
+    const details = screen.getByText('Caption options', { selector: '.mobile-caption-options summary' }).parentElement as HTMLDetailsElement;
     expect(details.open).toBe(false);
     expect(useGuidedComposerStore.getState().captionMode).toBe('generate');
     fireEvent.click(details.querySelector('summary')!);

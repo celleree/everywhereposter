@@ -21,6 +21,6 @@ export function InlineUploadProgress({ uppy, onCancel }: {
       <p className="break-all text-[13px] font-[600]">{file.name}</p>
       <progress aria-label={`Upload progress for ${file.name}`} value={file.progress.bytesUploaded || 0} max={file.size || 1} className="my-[8px] block h-[8px] w-full accent-btnPrimary" />
     </div>)}
-    <button type="button" className="!min-h-[44px] px-[8px]" onClick={onCancel}>Cancel upload</button>
+    <button type="button" className="mt-[8px] !min-h-[44px] rounded-[8px] border border-newBorder bg-newBgColorInner px-[14px] py-[8px] font-[600]" onClick={onCancel}>Cancel upload</button>
   </section>;
 }

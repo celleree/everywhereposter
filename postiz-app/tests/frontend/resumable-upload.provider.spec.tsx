@@ -73,3 +73,63 @@ it('scopes cancellation errors to their row and clears them after a successful c
   expect(deletes).toBe(3);
   view.unmount();
 });
+
+it('keeps saved transfers until composer attachment and retains publishing results afterwards', async () => {
+  localStorage.clear();
+  const sessions = ['attached', 'publishing'].map(id => ({ id, originalName: id + '.mp4', byteSize: 10,
+    status: 'COMPLETE', parts: [], manifest: [], media: { id },
+    ...(id === 'publishing' ? { quickIntent: { id: 'intent', status: 'COMPLETE', results: [{ integrationId: 'channel', name: 'Channel', state: 'Published' }] } } : {}),
+  }));
+  const fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions }) });
+  (useFetch as jest.Mock).mockReturnValue(fetch);
+  const { UploadTransfers, useDismissAttachedTransfers } = require('../../apps/frontend/src/components/media/resumable-upload.provider');
+  function Composer({ media }: { media: { id: string }[] }) {
+    useDismissAttachedTransfers(media);
+    return <><UploadTransfers />{media.map(item => <span key={item.id}>Attached {item.id}</span>)}</>;
+  }
+  const view = render(<ResumableUploadProvider><Composer media={[]} /></ResumableUploadProvider>);
+  await view.findByText('attached.mp4');
+  view.rerender(<ResumableUploadProvider><Composer media={[{ id: 'attached' }, { id: 'publishing' }]} /></ResumableUploadProvider>);
+  await waitFor(() => expect(view.queryByText('attached.mp4')).toBeNull());
+  expect(view.getByText('Attached attached')).toBeTruthy();
+  expect(view.getByText('publishing.mp4')).toBeTruthy();
+  expect(view.getByText('Channel: Published')).toBeTruthy();
+  expect(fetch.mock.calls.every(([, options]) => !options?.method)).toBe(true);
+  view.unmount();
+});
+
+it.each([true, false])('protects an attached transfer while Quick Upload lookup is pending and after errors (success=%s)', async success => {
+  localStorage.clear();
+  let release!: (value: any) => void;
+  const lookup = new Promise(resolve => { release = resolve; });
+  const session: any = { id: 'lookup-session', originalName: 'lookup.mp4', byteSize: 10, status: 'COMPLETE', parts: [], manifest: [], media: { id: 'lookup-media' } };
+  const fetch = jest.fn(async (url, options) => {
+    if (url === '/integrations/list') return lookup;
+    if (url.endsWith('/quick-upload')) {
+      session.quickIntent = { id: 'intent', status: 'PROCESSING', results: [] };
+      return { ok: true, json: async () => session.quickIntent };
+    }
+    return { ok: true, json: async () => ({ durableQuickUploadEnabled: true, sessions: [session] }) };
+  });
+  (useFetch as jest.Mock).mockReturnValue(fetch);
+  const { UploadTransfers, useDismissAttachedTransfers } = require('../../apps/frontend/src/components/media/resumable-upload.provider');
+  function Composer({ attached }: { attached: boolean }) {
+    useDismissAttachedTransfers(attached ? [{ id: 'lookup-media' }] : []);
+    return <UploadTransfers />;
+  }
+  const view = render(<ResumableUploadProvider><Composer attached={false} /></ResumableUploadProvider>);
+  fireEvent.click(await view.findByRole('button', { name: 'Quick Upload without individual review' }));
+  view.rerender(<ResumableUploadProvider><Composer attached /></ResumableUploadProvider>);
+  expect(view.getByText('lookup.mp4')).toBeTruthy();
+  expect((view.getByRole('button', { name: 'Dismiss transfer' }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => { release(success ? { ok: true, json: async () => ({ integrations: [{ id: 'account', identifier: 'x' }] }) } : { ok: false }); });
+  await waitFor(() => expect(view.getByText('lookup.mp4')).toBeTruthy());
+  if (success) {
+    await view.findByText('Quick Upload: Processing');
+    expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+  } else {
+    await view.findByText('Connected accounts could not be checked safely.');
+    expect(fetch.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+  }
+  view.unmount();
+});
