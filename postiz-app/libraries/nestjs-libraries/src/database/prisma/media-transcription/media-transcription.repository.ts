@@ -50,6 +50,12 @@ export class MediaTranscriptionRepository {
     return rows.length > 0;
   }
 
+  private async prepaidAttemptExists(tx: Prisma.TransactionClient, organizationId: string, id: string) {
+    return !!await tx.aiWalletReservation.findUnique({ where: { organizationId_operationKey: {
+      organizationId, operationKey: `media-transcription:${id}`,
+    } } });
+  }
+
   async ensurePendingForActiveMedia(organizationId: string, mediaId: string) {
     return this._prisma.$transaction(async (transaction) => {
       if (!(await this.lockActiveMedia(transaction, organizationId, mediaId))) {
@@ -64,6 +70,7 @@ export class MediaTranscriptionRepository {
         const processingSince = existing.startedAt || existing.updatedAt;
         if (
           existing.status === MediaTranscriptionStatus.PROCESSING &&
+          !(await this.prepaidAttemptExists(transaction, organizationId, existing.id)) &&
           processingSince.getTime() <=
             Date.now() - TRANSCRIPTION_PROCESSING_LEASE_MS
         ) {
@@ -129,7 +136,8 @@ export class MediaTranscriptionRepository {
         });
       }
 
-      if (current.status !== MediaTranscriptionStatus.FAILED) {
+      if (current.status !== MediaTranscriptionStatus.FAILED ||
+          await this.prepaidAttemptExists(transaction, organizationId, current.id)) {
         return current;
       }
 
@@ -205,6 +213,12 @@ export class MediaTranscriptionRepository {
     return result.count === 1;
   }
 
+  private withoutPaidAttempt(transcriptionId: string): Prisma.MediaTranscriptionWhereInput {
+    return { NOT: { media: { organization: { aiWallet: { is: {
+      reservations: { some: { operationKey: 'media-transcription:' + transcriptionId } },
+    } } } } } };
+  }
+
   async failIfActive(
     transcriptionId: string,
     generation: number,
@@ -215,6 +229,7 @@ export class MediaTranscriptionRepository {
       where: {
         id: transcriptionId,
         generation,
+        ...this.withoutPaidAttempt(transcriptionId),
         status: MediaTranscriptionStatus.PROCESSING,
         media: { deletedAt: null },
       },
@@ -240,6 +255,7 @@ export class MediaTranscriptionRepository {
       where: {
         id: transcriptionId,
         generation,
+        ...this.withoutPaidAttempt(transcriptionId),
         status: {
           in: [
             MediaTranscriptionStatus.PENDING,
