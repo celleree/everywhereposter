@@ -269,6 +269,22 @@ describe('CopyGenerationModelService structured output schemas', () => {
     expect(result.voiceProfile).toBeNull();
   });
 
+  it('returns a valid transcript fallback when OpenAI has no parsed payload', async () => {
+    getParseMock().mockResolvedValue({
+      choices: [{ message: { parsed: null } }],
+    });
+    const transcript = 'A concrete detail from the speaker. '.repeat(12);
+
+    await expect(service.summarizeTranscript(transcript)).resolves.toEqual({
+      transcriptSummary: transcript.slice(0, 300),
+      facts: [],
+      unknowns: [],
+      coreMessage: transcript.slice(0, 180),
+      sourceConfidence: 0.7,
+      voiceProfile: null,
+    });
+  });
+
   it('keeps platform draft defaults compatible with structured outputs', async () => {
     const parse = getParseMock().mockImplementation(async (params) => ({
       choices: [
