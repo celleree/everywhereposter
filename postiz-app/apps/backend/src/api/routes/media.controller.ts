@@ -40,6 +40,10 @@ import { QuickUploadService } from '@gitroom/nestjs-libraries/upload/quick-uploa
 import { QuickUploadIntentDto } from '@gitroom/nestjs-libraries/dtos/media/quick.upload.intent.dto';
 import { CreateVideoUploadDto } from '@gitroom/nestjs-libraries/dtos/media/create.video.upload.dto';
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
+import { VideoEditorService } from '@gitroom/nestjs-libraries/media-editing/video-editor.service';
+import { CreateVideoEditDto } from '@gitroom/nestjs-libraries/dtos/media/create-video-edit.dto';
+import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
+import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -52,8 +56,15 @@ export class MediaController {
     private readonly resumable: ResumableUploadService,
     private readonly quickUpload: QuickUploadService,
     private _subscriptionService: SubscriptionService,
-    private _mediaTranscriptionService: MediaTranscriptionService
+    private _mediaTranscriptionService: MediaTranscriptionService,
+    private readonly videoEditor: VideoEditorService
   ) {}
+
+  @Post('/:id/video-edits')
+  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  createVideoEdit(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Body() body: CreateVideoEditDto) {
+    return this.videoEditor.create(org.id, id, body);
+  }
 
   @Post('/uploads')
   createUpload(@GetOrgFromRequest() org: Organization, @GetUserFromRequest() user: User, @Body() body: CreateVideoUploadDto) {
