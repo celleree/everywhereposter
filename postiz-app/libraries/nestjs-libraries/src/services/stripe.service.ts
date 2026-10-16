@@ -476,6 +476,8 @@ export class StripeService {
         process.env['FRONTEND_URL'] +
         `/launches?onboarding=true&check=${uniqueId}${isUtm}`,
       mode: 'subscription',
+      payment_method_collection: 'always',
+      payment_method_types: ['card'],
       subscription_data: {
         ...(allowTrial ? { trial_period_days: 7 } : {}),
         metadata: {
@@ -537,6 +539,8 @@ export class StripeService {
         process.env['FRONTEND_URL'] +
         `/launches?onboarding=true&check=${uniqueId}${isUtm}`,
       mode: 'subscription',
+      payment_method_collection: 'always',
+      payment_method_types: ['card'],
       subscription_data: {
         ...(allowTrial ? { trial_period_days: 7 } : {}),
         metadata: {
