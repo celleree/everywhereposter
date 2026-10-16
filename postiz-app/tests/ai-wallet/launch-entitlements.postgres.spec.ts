@@ -4,13 +4,13 @@ import { randomUUID } from 'crypto';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { WebhooksRepository } from '@gitroom/nestjs-libraries/database/prisma/webhooks/webhooks.repository';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
-const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
+const fixtureUrl = process.env.LAUNCH_ENTITLEMENT_TEST_DATABASE_URL;
 (fixtureUrl ? describe : describe.skip)('launch plan PostgreSQL entitlement boundary', () => {
   let db: PrismaClient, organizations: OrganizationRepository, webhooks: WebhooksRepository, autoposts: AutopostRepository;
   beforeAll(async () => {
     const url = new URL(fixtureUrl!);
-    if (!['localhost', '127.0.0.1'].includes(url.hostname) || url.port !== '55473' || url.pathname !== '/ep_ai_wallet_test') {
-      throw Error('Owned isolated launch fixture on loopback:55473/ep_ai_wallet_test required');
+    if (!['localhost', '127.0.0.1'].includes(url.hostname) || url.pathname !== '/ep_ai_wallet_test') {
+      throw Error('Owned isolated launch fixture on loopback/ep_ai_wallet_test required');
     }
     db = new PrismaClient({ datasources: { db: { url: fixtureUrl } } }); await db.$connect();
     const repository = { model: db } as any;
