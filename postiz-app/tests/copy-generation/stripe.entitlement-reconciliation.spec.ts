@@ -201,6 +201,7 @@ const makeReconciliationHarness = (
     }),
   };
 
+  let claimedCode: any = null;
   const usedCodesModel = {
     findFirst: jest.fn(),
     create: jest.fn(async ({ data }: any) => data),
@@ -277,6 +278,7 @@ const makeReconciliationHarness = (
       $transaction: jest.fn(async (operation: any) => {
         let stagedSubscription = cloneSubscription(subscriptionState);
         let stagedOrganization = { ...organizationState };
+        let stagedClaim = claimedCode;
         const stagedSubscriptionModel = makeSubscriptionModel(
           () => stagedSubscription,
           (value) => {
@@ -301,7 +303,13 @@ const makeReconciliationHarness = (
         const result = await operation({
           subscription: stagedSubscriptionModel,
           organization: stagedOrganizationModel,
-          usedCodes: usedCodesModel,
+          usedCodes: {
+            findFirst: jest.fn(async () => stagedClaim),
+            create: jest.fn(async ({ data }: any) => {
+              stagedClaim = { ...data };
+              return usedCodesModel.create({ data });
+            }),
+          },
           $queryRaw: jest.fn(async () => []),
         });
 
@@ -309,6 +317,7 @@ const makeReconciliationHarness = (
           throw new Error('transaction failed before commit');
         }
 
+        claimedCode = stagedClaim;
         subscriptionState = cloneSubscription(stagedSubscription);
         organizationState = { ...stagedOrganization };
 
@@ -336,6 +345,7 @@ const makeReconciliationHarness = (
     integrationService,
     organizationService,
     prismaTransaction,
+    usedCodesModel,
     getSubscription: () => cloneSubscription(subscriptionState),
     setSubscription: (value: StoredSubscription | null) => {
       subscriptionState = cloneSubscription(value);
@@ -379,6 +389,20 @@ describe('Stripe S1 authoritative entitlement reconciliation', () => {
     } else {
       process.env.BILLING_ENABLED = originalBillingEnabled;
     }
+  });
+
+  it('a lifetime retry after post-commit failure reconciles without redeeming twice', async () => {
+    const harness = makeReconciliationHarness(null, 0);
+    harness.failNextIntegrationRead();
+    const redeem = () => harness.subscriptionService.createOrUpdateSubscription(
+      false, 'lifetime_id', 'org_1', 5, 'STANDARD', 'MONTHLY', null, 'same-code', 'org_1'
+    );
+    await expect(redeem()).rejects.toThrow('integration read failed');
+    expect(harness.getSubscription()).toMatchObject({ isLifetime: true, totalChannels: 5 });
+    await expect(redeem()).resolves.toBeUndefined();
+    expect(harness.usedCodesModel.create).toHaveBeenCalledTimes(1);
+    expect(harness.getSubscription()).toMatchObject({ isLifetime: true, totalChannels: 5 });
+    expect(harness.integrationService.getIntegrationsList).toHaveBeenCalledTimes(2);
   });
 
   it('ordinary-first then lifetime-before-reconciliation converges to lifetime entitlements', async () => {

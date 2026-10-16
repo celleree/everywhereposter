@@ -976,13 +976,6 @@ export class StripeService {
 
     try {
       const testCode = AuthService.fixedDecryption(code);
-      const findCode = await this._subscriptionService.getCode(testCode);
-      if (findCode) {
-        return {
-          success: false,
-        };
-      }
-
       const nextPackage = !getCurrentSubscription ? 'STANDARD' : 'PRO';
       const findPricing = pricing[nextPackage];
 

@@ -365,10 +365,6 @@ export class SubscriptionRepository {
     await client.$queryRaw`
       SELECT pg_advisory_xact_lock(hashtextextended(${code}, 0))::text
     `;
-    if (await client.usedCodes.findFirst({ where: { code } })) {
-      throw new Error('Lifetime code has already been redeemed.');
-    }
-
     const findOrg =
       org ||
       (await client.organization.findFirst({
@@ -382,6 +378,16 @@ export class SubscriptionRepository {
 
     if (!findOrg) {
       return { applied: false as const };
+    }
+
+    const claim = await client.usedCodes.findFirst({ where: { code } });
+    if (claim) {
+      if (claim.orgId !== findOrg.id) {
+        throw new Error('Lifetime code has already been redeemed.');
+      }
+      // A committed claim may still need post-commit entitlement reconciliation.
+      // Never apply its upgrade twice when the caller retries.
+      return { applied: true as const, organizationId: findOrg.id };
     }
 
     await client.subscription.upsert({

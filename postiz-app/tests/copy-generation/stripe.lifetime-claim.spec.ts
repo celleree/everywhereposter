@@ -7,7 +7,7 @@ describe('lifetime code claims', () => {
 
   const transaction = (claimed = false) => ({
     $queryRaw: jest.fn(async () => []),
-    usedCodes: { findFirst: jest.fn(async () => claimed ? { id: 'existing-claim' } : null), create: jest.fn(async () => ({})) },
+    usedCodes: { findFirst: jest.fn(async () => claimed ? { id: 'existing-claim', orgId: 'other-org' } : null), create: jest.fn(async () => ({})) },
     subscription: { upsert: jest.fn(async () => ({})) },
     organization: { update: jest.fn(async () => ({})) },
   });
@@ -27,6 +27,15 @@ describe('lifetime code claims', () => {
   it('rejects a claim already held by any organization before entitlement writes', async () => {
     const tx = transaction(true);
     await expect(claim(repository(), tx)).rejects.toThrow('Lifetime code has already been redeemed.');
+    expect(tx.subscription.upsert).not.toHaveBeenCalled();
+    expect(tx.organization.update).not.toHaveBeenCalled();
+    expect(tx.usedCodes.create).not.toHaveBeenCalled();
+  });
+
+  it('resumes reconciliation for the owner without applying an upgrade twice', async () => {
+    const tx = transaction();
+    tx.usedCodes.findFirst.mockResolvedValueOnce({ id: 'existing-claim', orgId: 'org_1' } as any);
+    await expect(claim(repository(), tx)).resolves.toEqual({ applied: true, organizationId: 'org_1' });
     expect(tx.subscription.upsert).not.toHaveBeenCalled();
     expect(tx.organization.update).not.toHaveBeenCalled();
     expect(tx.usedCodes.create).not.toHaveBeenCalled();
