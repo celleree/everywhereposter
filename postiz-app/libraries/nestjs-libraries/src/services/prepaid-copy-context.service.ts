@@ -7,7 +7,7 @@ import { snapshotFingerprint } from './ai-wallet-pricing';
 import { GenerateMediaCopyDto } from '../dtos/copy-generation/generate.media.copy.dto';
 import { pricing } from '../database/prisma/subscriptions/pricing';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
-type Context = { organizationId: string; requestKey: string; fingerprint: string; counts: Map<string, number> };
+type Context = { organizationId: string; requestKey: string; fingerprint: string; counts: Map<string, number>; retryRequired: boolean };
 const enabled = (v?: string) => v?.trim().toLowerCase() === 'true';
 
 /** Scoped per iterator advance: async generators execute on next(), not creation.
@@ -31,23 +31,29 @@ export class PrepaidCopyContextService {
     if (!existing && (!isBillingEnabled() || !enabled(process.env.AI_WALLET_ENABLED) || !enabled(process.env.AI_WALLET_TEXT_ENABLED))) {
       throw new ForbiddenException('Prepaid text generation is disabled.');
     }
-    const context: Context = { organizationId, requestKey: body.requestKey!, fingerprint: snapshotFingerprint(body), counts: new Map() };
+    const context: Context = { organizationId, requestKey: body.requestKey!, fingerprint: snapshotFingerprint(body), counts: new Map(), retryRequired: false };
     const iterator = create();
     try {
       while (true) {
         const step = await this.storage.run(context, () => iterator.next());
         if (step.done) return;
-        yield step.value;
+        const event = step.value as any;
+        yield (context.retryRequired && event?.name === 'completed'
+          ? { ...event, data: { ...event.data, prepaidRetryRequired: true } } : step.value) as T;
       }
     } finally { await this.storage.run(context, () => iterator.return(undefined)); }
   }
+
+  markIncomplete() { const context = this.storage.getStore(); if (context) context.retryRequired = true; }
 
   async complete(stage: 'summary' | 'draft' | 'rewrite', request: TextRequest, invoke: (bounded: any) => Promise<any>) {
     const context = this.storage.getStore();
     if (!context) throw Error('A prepaid text context is required.');
     const index = context.counts.get(stage) || 0; context.counts.set(stage, index + 1);
+    try {
     const subscription = await this.subscriptions.getSubscriptionByOrganizationId(context.organizationId);
-    return this.text.run(context.organizationId, `guided-text:${context.requestKey}:${stage}_${index}`, context.fingerprint,
+    return await this.text.run(context.organizationId, `guided-text:${context.requestKey}:${stage}_${index}`, context.fingerprint,
       request, subscription?.subscriptionTier === 'LAUNCH_V1', invoke);
+    } catch (error) { context.retryRequired = true; throw error; }
   }
 }

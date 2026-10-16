@@ -1,3 +1,4 @@
+import { SourceBriefService } from '@gitroom/nestjs-libraries/copy-generation/source-brief.service';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
@@ -73,4 +74,26 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
     expect(await db.aiWalletReservation.count({where:{organizationId:org,state:'SETTLED'}})).toBeGreaterThan(0);
     for(const [,opts] of parse.mock.calls) expect(opts).toMatchObject({maxRetries:0});
   });
+  it('runs the real source brief and copy generator with a supplied transcript and no visual/transcription dispatch', async () => {
+    const media={getMediaByOrganizationIdAndId:jest.fn(async()=>({id:body.mediaId,path:'/offline/fixture.mp4',name:'fixture.mp4'}))};
+    const transcriptions={ensureTranscriptionStarted:jest.fn(),resolveForGeneration:jest.fn()};
+    const source=new SourceBriefService(media as any,model,{resolvePersonalization:jest.fn(async()=>({storedFacts:[],overlapReferenceTexts:[]}))} as any,transcriptions as any,scope);
+    const visual=jest.spyOn(model,'analyzeVideoFrames');
+    const service=new CopyGenerationService(source,new AntiGenericService(),model,new ImagePlanService(undefined,scope),scope);
+    const events=await collect(service.generate(org,{...body,transcript:{text:'Handwritten labels and two stock checks.',source:'manual'}}));
+    expect(events.at(-1)).toMatchObject({name:'completed',data:{status:'complete',imagePlans:[]}});
+    expect(parse.mock.calls.some(([req])=>req.response_format.json_schema.name==='transcriptInsights')).toBe(true);
+    expect(visual).not.toHaveBeenCalled();expect(transcriptions.ensureTranscriptionStarted).not.toHaveBeenCalled();expect(transcriptions.resolveForGeneration).not.toHaveBeenCalled();
+    expect(media.getMediaByOrganizationIdAndId).toHaveBeenCalledWith(org,body.mediaId);
+  });
+
+  it('preserves prepaid identity when adaptation returns an original-caption fallback after an ambiguous dispatch',async()=>{
+    const source={assertMediaAccess:jest.fn(),build:jest.fn(async()=>({media:{id:'fixture-media',path:'/offline',mediaType:'image',mimeType:'image/png'},source:{mediaType:'image',visualSummary:'Supplied notes',facts:['Handwritten labels'],unknowns:[]},coreMessage:'Check details',sourceConfidence:0.8,warnings:[],storedKnowledgeBaseFacts:[],overlapReferenceTexts:[],blocked:false}))};
+    parse.mockRejectedValue(Error('synthetic ambiguous timeout'));
+    const service=new CopyGenerationService(source as any,new AntiGenericService(),model,undefined,scope);
+    const request={...body,captionMode:'adapt-by-platform',sourceCaption:'Handwritten labels help our checks.'};
+    for(let i=0;i<2;i++) expect((await collect(service.generate(org,request))).at(-1)).toMatchObject({name:'completed',data:{prepaidRetryRequired:true,status:'complete'}});
+    expect(parse).toHaveBeenCalledTimes(1);
+  });
+
 });

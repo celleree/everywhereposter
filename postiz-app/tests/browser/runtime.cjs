@@ -54,6 +54,7 @@ const values = {
 };
 if (walletMode) Object.assign(values, {
   '/user/subscription/tiers': {}, '/user/subscription': { subscription: null },
+  '/billing/ai-wallet/refund-requests': { organizationId: user.orgId, creditsExpire: false, purchasedNanos: '0', eligibleNanos: '0', usageHeldNanos: '0', refundHeldNanos: '0', requiresReconciliation: false, requests: [] },
   '/billing/ai-wallet/offers': [{ id: 'usd_5', amountCents: 500 }, { id: 'usd_10', amountCents: 1000 },
     { id: 'usd_25', amountCents: 2500 }],
   '/billing/ai-wallet': { organizationId: user.orgId, currency: 'usd', status: 'ACTIVE',

@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { MeasuredUsage } from './ai-wallet-usage';
 
 export const PREPAID_AI_POLICY = { version: '2026-10-16-cost-plus-20-v1', markupPercent: 20,
-  topupCents: [500, 1000, 2500], trialGrantNanos: '0' } as const;
+  topupCents: [500, 1000, 2500], trialGrantNanos: '0', creditsExpire: false, refunds: 'unused-credit-requests' } as const;
 export type PricingQuote = {
   policyVersion: string; rateVersion: string; provider: string; model: string;
   currency: 'usd'; markupPercent: 20; requestFingerprint: string;

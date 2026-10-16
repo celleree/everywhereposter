@@ -110,6 +110,7 @@ export interface GenerateMediaCopyResult {
 }
 
 export interface GenerateMediaCopyResponse {
+  prepaidRetryRequired?: boolean;
   requestId: string;
   status: 'complete' | 'partial' | 'failed';
   sourceConfidence: number | null;

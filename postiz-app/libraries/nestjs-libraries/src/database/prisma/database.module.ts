@@ -1,3 +1,4 @@
+import { AiWalletRefundRequestService } from '@gitroom/nestjs-libraries/services/ai-wallet-refund-request.service';
 import { AiWalletTextService } from '@gitroom/nestjs-libraries/services/ai-wallet-text.service';
 import { PrepaidCopyContextService } from '@gitroom/nestjs-libraries/services/prepaid-copy-context.service';
 import { Global, Module } from '@nestjs/common';
@@ -86,6 +87,7 @@ import { ResumableUploadService } from '../../upload/resumable-upload.service';
     AiWalletDispatchService,
     AiWalletTranscriptionService,
     AiWalletTextService,
+    AiWalletRefundRequestService,
     PrepaidCopyContextService,
     SubscriptionRepository,
     NotificationService,

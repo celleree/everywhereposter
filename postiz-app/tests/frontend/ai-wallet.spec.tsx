@@ -21,6 +21,7 @@ const response = (value: any, ok = true) => ({ ok, json: async () => value });
 const api = (balance: any = snapshot(), topup: (body: any) => any = () => response({
   topupId: 'topup', status: 'open', url: 'https://checkout.stripe.com/c/pay/synthetic',
 })) => mockFetch.mockImplementation(async (path: string, options?: RequestInit) => {
+  if (path === '/billing/ai-wallet/refund-requests') return response({ organizationId: mockUser.orgId, creditsExpire: false, purchasedNanos: '0', eligibleNanos: '0', usageHeldNanos: '0', refundHeldNanos: '0', requiresReconciliation: false, requests: [] });
   if (path === '/billing/ai-wallet') return response(balance);
   if (path === '/billing/ai-wallet/offers') return response(offers);
   if (path === '/billing/ai-wallet/topups' && options?.method === 'POST') return topup(JSON.parse(String(options.body)));
@@ -49,12 +50,12 @@ it('shows server offers with pending and settled costs while initial requests re
   for (const amount of ['$5.00', '$10.00', '$25.00']) {
     expect(await screen.findByRole('button', { name: `Add ${amount} test balance` })).toBeTruthy();
   }
-  await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
   for (const [, options] of mockFetch.mock.calls) expect(options).toBeUndefined();
 });
 it('handles an unavailable wallet and retries a read to show empty history', async () => {
   let calls = 0;
-  mockFetch.mockImplementation(async (path: string) => path === '/billing/ai-wallet/offers' ? response(offers)
+  mockFetch.mockImplementation(async (path: string) => path === '/billing/ai-wallet/refund-requests' ? response({ organizationId: mockUser.orgId, creditsExpire: false, purchasedNanos: '0', eligibleNanos: '0', usageHeldNanos: '0', refundHeldNanos: '0', requests: [] }) : path === '/billing/ai-wallet/offers' ? response(offers)
     : calls++ ? response({ ...snapshot(), operations: [], entries: [] }) : response({}, false));
   mount(); expect(await screen.findByText('Prepaid AI balance is unavailable.')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Retry balance' }));
@@ -71,7 +72,7 @@ it('clears previous tenant data while a different organization is loading', asyn
   const ui = () => <SWRConfig value={{ provider: () => cache, dedupingInterval: 0 }}><AiWalletComponent /></SWRConfig>;
   api(); const view = render(ui()); expect(await screen.findByText('$1.225')).toBeTruthy();
   let complete!: (value: any) => void;
-  mockFetch.mockImplementation((path: string) => path === '/billing/ai-wallet/offers' ? Promise.resolve(response(offers))
+  mockFetch.mockImplementation((path: string) => path === '/billing/ai-wallet/refund-requests' ? Promise.resolve(response({ organizationId: mockUser.orgId, creditsExpire: false, purchasedNanos: '0', eligibleNanos: '0', usageHeldNanos: '0', refundHeldNanos: '0', requests: [] })) : path === '/billing/ai-wallet/offers' ? Promise.resolve(response(offers))
     : new Promise((resolve) => { complete = resolve; }));
   mockUser = { id: 'user', orgId: 'org-b', role: 'ADMIN', tier: { prepaid_ai: true } }; view.rerender(ui());
   expect(screen.queryByText('$1.225')).toBeNull(); await waitFor(() => expect(complete).toBeDefined());
@@ -87,7 +88,7 @@ it('keeps the eligible wallet read-only for a non-administrator', async () => {
 it('does not request or render a wallet for a plan without prepaid AI', async () => {
   mockUser = { id: 'user', orgId: 'org-a', role: 'ADMIN', tier: { prepaid_ai: false } }; api(); mount();
   await waitFor(() => expect(screen.queryByRole('region', { name: 'Prepaid AI balance' })).toBeNull());
-  expect(mockFetch).not.toHaveBeenCalled();
+  expect(mockFetch.mock.calls.every(([path]) => path === '/billing/ai-wallet/refund-requests')).toBe(true);
 });
 it('rejects unsafe redirects and reuses one operation key after ambiguous failures', async () => {
   const bodies: any[] = []; let attempt = 0;

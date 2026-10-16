@@ -173,6 +173,7 @@ export class CopyGenerationService {
       try {
         await this._sourceBriefService.assertMediaAccess(orgId, body.mediaId);
       } catch (error) {
+        this._prepaid?.markIncomplete();
         if (!(error instanceof NotFoundException)) {
           throw error;
         }
@@ -257,6 +258,7 @@ export class CopyGenerationService {
     try {
       sourceBrief = await this._sourceBriefService.build(orgId, body);
     } catch (error) {
+        this._prepaid?.markIncomplete();
       if (error instanceof TranscriptionLifecycleError) {
         yield {
           name: 'completed',
@@ -613,6 +615,7 @@ export class CopyGenerationService {
           },
         };
       } catch (error: any) {
+        this._prepaid?.markIncomplete();
         if (captionMode === 'adapt-by-platform') {
           const sourceCaption = body.sourceCaption as string;
           const controls = body.platformControls?.[platform] as
@@ -695,6 +698,7 @@ export class CopyGenerationService {
           },
         };
       } catch (error: any) {
+        this._prepaid?.markIncomplete();
         topLevelWarnings.push({
           code: 'IMAGE_PLAN_GENERATION_FAILED',
           message: `Image planning failed: ${error?.message || 'Unknown error'}`,

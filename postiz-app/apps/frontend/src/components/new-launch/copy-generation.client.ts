@@ -212,7 +212,7 @@ export const requestMediaCopyGeneration = async (
   }
 
   const result = await parseCopyGenerationStream(request, onStage);
-  if (pendingStorageKey && result.status === 'complete') localStorage.removeItem(pendingStorageKey);
+  if (pendingStorageKey && result.status === 'complete' && !result.prepaidRetryRequired) localStorage.removeItem(pendingStorageKey);
   return result;
 };
 

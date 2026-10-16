@@ -21,3 +21,10 @@ it('keeps explicitly supplied keys and prevents dispatch if durable browser stor
   const fail=jest.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw Error('storage unavailable');});
   await expect(requestMediaCopyGeneration(fetch,body)).rejects.toThrow('storage unavailable');expect(fetch).toHaveBeenCalledTimes(1);fail.mockRestore();
 });
+
+it('retains the operation key when a completed fallback still has incomplete prepaid work',async()=>{
+  const fallback={ok:true,status:200,body:{getReader:()=>{let done=false;return{read:async()=>done?{done:true}:(done=true,{done:false,value:new TextEncoder().encode(JSON.stringify({name:'completed',data:{status:'complete',prepaidRetryRequired:true,results:[],imagePlans:[]}})+'\n')})};}}} as any;
+  const fetch=jest.fn().mockResolvedValueOnce(fallback).mockResolvedValueOnce(final('complete'));
+  await requestMediaCopyGeneration(fetch,body);await requestMediaCopyGeneration(fetch,body);
+  expect(JSON.parse(fetch.mock.calls[0][1].body).requestKey).toBe(JSON.parse(fetch.mock.calls[1][1].body).requestKey);
+});

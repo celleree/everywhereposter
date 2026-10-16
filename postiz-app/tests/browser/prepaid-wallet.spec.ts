@@ -14,7 +14,7 @@ test('Prepaid wallet distinguishes pending and settled costs on mobile and deskt
     await expect(wallet.getByText('Pending reconciliation · Reserved maximum $0.005', { exact: true })).toBeVisible();
     await expect(wallet.getByText('Settled · Charged $0.000000001', { exact: true })).toBeVisible();
     await expect(wallet.getByText('$1.225', { exact: true })).toBeVisible();
-    await expect(wallet.getByText('All amounts are USD. Pending holds are maximum reserved amounts, not final charges.')).toBeVisible();
+    await expect(wallet.getByText('Purchased credits never expire. All amounts are USD. Holds cover pending usage and refund requests; usage holds are maximum reserved amounts.')).toBeVisible();
     await noHorizontalOverflow(page);
     const refresh = wallet.getByRole('button', { name: 'Refresh balance', exact: true });
     await refresh.focus(); await expect(refresh).toBeFocused();
@@ -89,4 +89,27 @@ test('Prepaid checkout retries one request key and refreshes return balance only
   expect(await page.evaluate(() => sessionStorage.getItem('ai-wallet-topup:synthetic-org:usd_10'))).toBe('wallet_existing_return');
   expect(externalRequests).toEqual([]);
   expect(new URL(page.url()).origin).toBe(browserOrigin);
+});
+
+test('Unused-credit requests exclude usage holds and record manual review without a provider payment', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  let operation = '', posts = 0, requested = false, stripeRequests = 0;
+  page.on('request', request => { if (request.url().includes('stripe.com')) stripeRequests++; });
+  await page.route('**/backend-api/billing/ai-wallet/refund-requests', async route => {
+    if (route.request().method() === 'POST') {
+      operation = route.request().postDataJSON().operationKey; requested = true; posts++;
+      return route.fulfill({ json: { id: 'synthetic-refund-request', operationKey: operation, status: 'REQUESTED' } });
+    }
+    return route.fulfill({ json: { organizationId: 'synthetic-org', creditsExpire: false, purchasedNanos: '1230000000', eligibleNanos: requested ? '0' : '1225000000',
+      usageHeldNanos: '5000000', refundHeldNanos: requested ? '1225000000' : '0', requiresReconciliation: false,
+      requests: requested ? [{ id: 'synthetic-refund-request', operationKey: operation, requestedNanos: '1225000000', status: 'REQUESTED', createdAt: '2026-10-16T00:00:00Z' }] : [] } });
+  });
+  await openApp(page, '/billing');
+  const refunds = page.getByRole('region', { name: 'Unused credit refund requests' });
+  await expect(refunds.getByText(/Purchased credits never expire/)).toBeVisible();
+  await expect(refunds.getByText(/Available for a request: \$1.225/)).toBeVisible();
+  await refunds.getByRole('button', { name: 'Request refund review of available unused credits' }).click();
+  await expect(refunds.getByText(/Awaiting manual review/)).toBeVisible();
+  await expect(refunds.getByRole('button', { name: 'Request refund review of available unused credits' })).toBeDisabled();
+  await noHorizontalOverflow(page); expect(posts).toBe(1); expect(operation).toMatch(/^refund_/); expect(stripeRequests).toBe(0);
 });

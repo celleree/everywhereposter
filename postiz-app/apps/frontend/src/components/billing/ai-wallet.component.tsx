@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { AiWalletRefundRequestsComponent } from './ai-wallet-refund-requests.component';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
@@ -49,7 +50,7 @@ const operationKey = (org: string, offer: string) => {
 };
 
 /** Test-wallet view. Offers and purchase availability always come from the server. */
-export function AiWalletComponent({ navigate = (url) => window.location.assign(url) }:
+function AiWalletPurchaseComponent({ navigate = (url) => window.location.assign(url) }:
     { navigate?: (url: string) => void } = {}) {
   const fetch = useFetch();
   const user = useUser();
@@ -145,10 +146,10 @@ export function AiWalletComponent({ navigate = (url) => window.location.assign(u
     </div>
     <dl className="my-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
       <div><dt>Available</dt><dd>{walletDollars(data.availableNanos)}</dd></div>
-      <div><dt>Held for pending usage</dt><dd>{walletDollars(data.heldNanos)}</dd></div>
+      <div><dt>Held for pending usage or refund requests</dt><dd>{walletDollars(data.heldNanos)}</dd></div>
       <div><dt>Total balance</dt><dd>{walletDollars(data.balanceNanos)}</dd></div>
     </dl>
-    <p className="text-sm">All amounts are USD. Pending holds are maximum reserved amounts, not final charges.</p>
+    <p className="text-sm">Purchased credits never expire. All amounts are USD. Holds cover pending usage and refund requests; usage holds are maximum reserved amounts.</p>
     {data.status !== 'ACTIVE' ? <p role="status">Usage needs reconciliation. Pending amounts remain reserved.</p> : null}
     {canPurchase ? <div className="mt-4 rounded-lg border border-white/15 p-3">
       <h3 className="font-semibold">Add test balance</h3>
@@ -183,4 +184,8 @@ export function AiWalletComponent({ navigate = (url) => window.location.assign(u
       </li>)}
     </ul>}
   </section>;
+}
+
+export function AiWalletComponent(props: { navigate?: (url: string) => void } = {}) {
+  return <><AiWalletPurchaseComponent {...props} /><AiWalletRefundRequestsComponent formatAmount={walletDollars} /></>;
 }
