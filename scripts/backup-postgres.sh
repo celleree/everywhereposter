@@ -50,8 +50,12 @@ docker compose -f "$COMPOSE_FILE" exec -T "$SERVICE" pg_dump -U "$DB_USER" -d "$
 }
 
 [ -s "$BACKUP_FILE" ] || fail "pg_dump returned an empty backup. No backup was kept."
-sha256sum "$BACKUP_FILE" > "$CHECKSUM_FILE"
-sha256sum --check "$CHECKSUM_FILE" >/dev/null || fail "Backup checksum verification failed."
+# Relative entries verify the copied artifact after transfer to protected storage.
+(
+  cd "$BACKUP_DIR"
+  sha256sum "$(basename -- "$BACKUP_FILE")" > "$CHECKSUM_FILE"
+  sha256sum --check "$(basename -- "$CHECKSUM_FILE")" >/dev/null
+) || fail "Backup checksum verification failed."
 COMPLETE=true
 
 echo "Backup created: ${BACKUP_FILE}"

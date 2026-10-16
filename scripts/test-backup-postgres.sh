@@ -50,7 +50,20 @@ checksum="$(find "$TEST_ROOT/repo/backups" -name '*.sha256')"
 [ -s "$dump" ] && [ -s "$checksum" ]
 [ "$(stat -c %a "$dump")" = 600 ]
 [ "$(stat -c %a "$checksum")" = 600 ]
-sha256sum --check "$checksum" >/dev/null
+(cd "$(dirname -- "$dump")" && sha256sum --check "$(basename -- "$checksum")" >/dev/null)
+# A copied pair must verify its local dump, not the intact original checkout file.
+mkdir "$TEST_ROOT/protected"
+cp "$dump" "$checksum" "$TEST_ROOT/protected/"
+(
+  cd "$TEST_ROOT/protected"
+  sha256sum --check "$(basename -- "$checksum")" >/dev/null
+  echo 'corrupted relocated fixture' >> "$(basename -- "$dump")"
+  if sha256sum --check "$(basename -- "$checksum")" >/dev/null 2>&1; then
+    echo 'Corrupted relocated backup unexpectedly verified' >&2
+    exit 1
+  fi
+)
+(cd "$(dirname -- "$dump")" && sha256sum --check "$(basename -- "$checksum")" >/dev/null)
 grep -q 'isolated restore' "$TEST_ROOT/result"
 
 # Repeat runs preserve existing artifacts instead of overwriting them.
