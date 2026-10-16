@@ -274,3 +274,47 @@ it('waits for the aborted local part before cancelling and retains the file whil
   expect(changed.mock.calls.at(-1)[0][0].state).toBe('Paused');
   expect(fetch.mock.calls.filter(([url]) => url.endsWith('/complete'))).toHaveLength(0);
 });
+
+it('dismisses only confirmed attached media without hiding publishing results or uncertainty', async () => {
+  const complete = { id: 'plain', originalName: 'original.mp4', byteSize: 10, manifest: [], parts: [], status: 'COMPLETE', media: { id: 'media-plain' } };
+  const sessions = [complete,
+    { ...complete, id: 'unattached', media: { id: 'media-unattached' } },
+    { ...complete, id: 'publishing', media: { id: 'media-publishing' }, quickIntent: { id: 'intent', status: 'COMPLETE', results: [{ integrationId: 'x', name: 'Channel', state: 'Published' }] } },
+    { ...complete, id: 'uncertain', media: { id: 'media-uncertain' }, error: 'Check saved outcome' },
+    { ...complete, id: 'partial', status: 'FINALIZING', media: { id: 'media-partial' } },
+  ];
+  const changed = jest.fn();
+  const fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions }) });
+  const transfers = new ResumableTransfers(fetch, changed, 'attachment-org');
+  await transfers.refresh();
+  transfers.dismissAttached(new Set(['media-plain', 'media-publishing', 'media-uncertain', 'media-partial']));
+  expect(changed.mock.calls.at(-1)[0].map(item => item.id)).toEqual(['unattached', 'publishing', 'uncertain', 'partial']);
+  expect(fetch).toHaveBeenCalledTimes(1); // Presentation only; no asset mutation.
+  const restored = new ResumableTransfers(fetch, changed, 'attachment-org');
+  await restored.refresh();
+  expect(changed.mock.calls.at(-1)[0].map(item => item.id)).toEqual(['unattached', 'publishing', 'uncertain', 'partial']);
+});
+
+it('restores polling and publishing receipts after a later explicit Quick Upload choice', async () => {
+  const session: any = { id: 'reopened', originalName: 'source.mp4', byteSize: 10, manifest: [], parts: [], status: 'COMPLETE', media: { id: 'reopened-media' } };
+  const changed = jest.fn();
+  const fetch = jest.fn(async (url, options) => {
+    if (url.endsWith('/quick-upload')) {
+      session.quickIntent = { id: 'intent', status: 'PROCESSING', results: [] };
+      return { ok: true, json: async () => session.quickIntent } as Response;
+    }
+    return { ok: true, json: async () => url === '/media/uploads' ? { sessions: [session] } : session } as Response;
+  });
+  const transfers = new ResumableTransfers(fetch, changed, 'reopen-org');
+  await transfers.refresh();
+  transfers.dismissAttached(new Set(['reopened-media']));
+  expect(changed.mock.calls.at(-1)[0]).toEqual([]);
+  await transfers.tryCompletedQuickUpload('reopened-media', { confirmNoIndividualReview: true, destinations: [{ id: 'channel', settings: {} }] });
+  session.quickIntent = { ...session.quickIntent, status: 'COMPLETE', results: [{ integrationId: 'channel', name: 'Channel', state: 'Published' }] };
+  await transfers.refresh();
+  expect(changed.mock.calls.at(-1)[0][0].session.quickIntent.results[0].state).toBe('Published');
+  const restored = new ResumableTransfers(fetch, changed, 'reopen-org');
+  await restored.refresh();
+  expect(changed.mock.calls.at(-1)[0][0].session.quickIntent.status).toBe('COMPLETE');
+  expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+});

@@ -54,6 +54,16 @@ export class ResumableTransfers {
     this.items.delete(id); this.consents.delete(id);
     this.changed([...this.items.values()]);
   }
+  dismissAttached(mediaIds: Set<string>, protectedIds = new Set<string>()) {
+    for (const item of this.items.values()) {
+      // Attachment is separate from server completion. Keep publishing receipts,
+      // consent uncertainty and errors visible even when media is attached.
+      if (!protectedIds.has(item.id) && mediaIds.has(item.session?.media?.id) && !item.error && !item.quickError &&
+          !item.quickRequested && !item.session?.quickIntent && this.canDismiss(item)) {
+        this.dismiss(item.id);
+      }
+    }
+  }
   private reconcile(item: Transfer, session: UploadSession) {
     if (item.session?.status === 'COMPLETE' && item.session.media?.id && session.status !== 'COMPLETE') return;
     const complete = session.status === 'COMPLETE' && !!session.media?.id;
@@ -102,6 +112,10 @@ export class ResumableTransfers {
     const item = [...this.items.values()].find(value => value.session?.id === session.id) || {
       id: session.id, name: session.originalName, bytes: session.byteSize, sent: session.byteSize, state: 'Transfer complete' as const,
     };
+    // A later explicit publishing choice restores polling for an attached upload
+    // whose presentation was dismissed earlier. Never hide its new results.
+    this.dismissed.delete(session.id);
+    try { localStorage.setItem(this.dismissKey(), JSON.stringify([...this.dismissed].slice(-200))); } catch {}
     this.update({ ...item, session });
     // Resumable media always uses server consent. Disabled enrollment never falls
     // back to the old browser generator, which could race a later durable choice.
