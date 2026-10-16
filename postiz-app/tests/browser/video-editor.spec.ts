@@ -153,10 +153,10 @@ test('Video Editor: stopped or lost requests stay uncertain after reload without
   await expect(page.getByRole('status').filter({ hasText: 'Editing your video' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Choose video' })).toBeDisabled();
   await page.getByRole('button', { name: 'Stop waiting', exact: true }).click(); release();
-  await expect(page.getByRole('alert')).toContainText('will not retry automatically');
+  await expect(page.getByRole('region', { name: 'Edit settings', exact: true }).getByRole('alert')).toContainText('will not retry automatically');
   expect(mode.renders).toBe(1);
   await page.reload();
-  await expect(page.getByRole('alert')).toContainText('may still finish');
+  await expect(page.getByRole('region', { name: 'Edit settings', exact: true }).getByRole('alert')).toContainText('may still finish');
   expect(mode.renders).toBe(1);
   page.once('dialog', dialog => dialog.dismiss());
   await page.getByRole('button', { name: 'Create another edit', exact: true }).click();
