@@ -25,7 +25,7 @@ for (const dir of [root, path.dirname(root), path.join(root, 'apps/frontend')]) 
   }
 }
 const discovery = process.env.EP_DISCOVERY_BROWSER === '1' ? require('./discovery-runtime.cjs')() : undefined;
-const user = { id: 'synthetic-user', orgId: 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
+const user = { id: 'synthetic-user', orgId: 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: walletMode ? 'LAUNCH_V1' : 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
 const posts = Array.from({ length: 18 }, (_, index) => ({ id: `synthetic-post-${index}`, group: `synthetic-group-${index}`, state: 'QUEUE', content: `Synthetic scheduled post ${index + 1}: a long caption for responsive scrolling and reachability checks.`, publishDate: '2035-01-01T18:00:00.000Z', tags: [], intervalInDays: null, integration: { id: 'synthetic-channel', name: 'Synthetic channel', providerIdentifier: 'x', picture: '/icons/platforms/x.png' } }));
 const values = {
   '/user/self': user,
@@ -54,6 +54,8 @@ const values = {
 };
 if (walletMode) Object.assign(values, {
   '/user/subscription/tiers': {}, '/user/subscription': { subscription: null },
+  '/billing/ai-wallet/offers': [{ id: 'usd_5', amountCents: 500 }, { id: 'usd_10', amountCents: 1000 },
+    { id: 'usd_25', amountCents: 2500 }],
   '/billing/ai-wallet': { organizationId: user.orgId, currency: 'usd', status: 'ACTIVE',
     balanceNanos: '1230000000', heldNanos: '5000000', availableNanos: '1225000000',
     operations: [{ id: 'pending', provider: 'openai', model: 'synthetic-model', state: 'UNKNOWN',
