@@ -920,6 +920,7 @@ export class StripeService {
           ...body,
           userId,
           id,
+          uniqueId: id,
           ud: uniqueId,
         },
         proration_behavior: 'always_invoice',

@@ -11,9 +11,11 @@ const mockProducts = jest.fn();
 const mockPriceCreate = jest.fn();
 const mockCheckout = jest.fn();
 const mockPromo = jest.fn();
+const mockSubscriptions = jest.fn(), mockSubscriptionUpdate = jest.fn();
 jest.mock('stripe', () => ({ __esModule: true, default: jest.fn(() => ({
   prices: { list: (...args: any[]) => mockPrices(...args), create: (...args: any[]) => mockPriceCreate(...args) },
   products: { list: (...args: any[]) => mockProducts(...args), create: (...args: any[]) => mockProducts(...args) },
+  subscriptions: { list: (...args: any[]) => mockSubscriptions(...args), update: (...args: any[]) => mockSubscriptionUpdate(...args) },
   customers: { update: jest.fn() }, promotionCodes: { list: (...args: any[]) => mockPromo(...args) },
   checkout: { sessions: { create: (...args: any[]) => mockCheckout(...args) } },
 })) }));
@@ -105,4 +107,18 @@ it.each(['embedded', 'subscribe', 'prorate'])('rejects a lifetime %s without cre
   const result = method === 'prorate' ? (service as any)[method]('org_fixture', body) : (service as any)[method]('track', 'org_fixture', 'user', body, true);
   await expect(result).rejects.toThrow('Lifetime subscriptions');
   expect(mockPrices).not.toHaveBeenCalled(); expect(mockProducts).not.toHaveBeenCalled(); expect(mockCheckout).not.toHaveBeenCalled();
+});
+
+it('binds an existing Launch period change to the new webhook/polling checkpoint', async () => {
+  const { service } = harness('LAUNCH_V1');
+  mockPrices.mockResolvedValue({ data: [validPrice('YEARLY')] });
+  mockSubscriptions.mockResolvedValue({ data: [{ id: 'sub_existing', status: 'active', items: { data: [{ id: 'item_existing' }] } }] });
+  mockSubscriptionUpdate.mockResolvedValue({});
+  const result = await service.subscribe('tracking_cookie', 'org_fixture', 'user', { billing: 'LAUNCH_V1', period: 'YEARLY' } as any, false);
+  expect(result).toHaveProperty('id');
+  if (!('id' in result)) throw Error('Expected subscription checkpoint');
+  expect(mockSubscriptionUpdate).toHaveBeenCalledWith('sub_existing', expect.objectContaining({
+    metadata: expect.objectContaining({ billing: 'LAUNCH_V1', period: 'YEARLY', id: result.id, uniqueId: result.id, ud: 'tracking_cookie' }),
+    items: [{ id: 'item_existing', price: 'price_approved', quantity: 1 }],
+  }));
 });
