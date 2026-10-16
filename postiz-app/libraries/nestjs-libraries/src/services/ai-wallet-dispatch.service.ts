@@ -14,15 +14,19 @@ export class AiWalletDispatchService {
   constructor(private readonly wallet: AiWalletService) {}
 
   async run<T>(organizationId: string, operationKey: string, quote: Quote,
-    invoke: () => Promise<T>, measure: (result: T) => Measurement,
+    invoke: () => Promise<T>, identify: (result: T) => string | undefined, measure: (result: T) => Measurement,
     price: (usage: MeasuredUsage) => bigint) {
     const reservation = await this.wallet.reserve(organizationId, operationKey,
       quote.provider, quote.model, quote.ceilingNanos);
     const claim = await this.wallet.dispatch(organizationId, reservation.id);
     if (!claim.dispatch) return { reservation: claim.reservation, result: undefined };
     let receipt: Measurement | undefined;
+    let requestId: string | undefined;
     try {
       const result = await invoke();
+      requestId = identify(result);
+      // Persist a known identity before parsing usage that may be absent/invalid.
+      if (requestId !== undefined) await this.wallet.markUnknown(organizationId, reservation.id, requestId);
       receipt = measure(result);
       if (receipt.provider !== reservation.provider || receipt.model !== reservation.model) {
         receipt = undefined;
@@ -38,7 +42,7 @@ export class AiWalletDispatchService {
       // A timeout, invalid usage or failed settlement may already have incurred cost.
       // If this write fails, the durable DISPATCHED state still retains the hold.
       try {
-        return { reservation: await this.wallet.markUnknown(organizationId, reservation.id, receipt?.providerRequestId), result: undefined };
+        return { reservation: await this.wallet.markUnknown(organizationId, reservation.id, requestId ?? receipt?.providerRequestId), result: undefined };
       } catch (error) {
         // A receipt already bound to another dispatch must not be attached again.
         if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;

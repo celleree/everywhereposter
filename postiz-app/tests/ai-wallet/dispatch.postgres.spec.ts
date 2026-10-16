@@ -15,7 +15,7 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
   const measure = (r: any) => normalizeOpenAiTokens('chat', r);
   const price = (u: any) => priceUsage(u, rates);
   const state = () => db.aiWallet.findUniqueOrThrow({ where: { organizationId: org } });
-  const run = (invoke: () => Promise<any>, key = randomUUID(), q = quote) => gateway.run(org, key, q, invoke, measure, price);
+  const run = (invoke: () => Promise<any>, key = randomUUID(), q = quote) => gateway.run(org, key, q, invoke, (r) => r?.id, measure, price);
   beforeAll(async () => {
     const url = new URL(fixtureUrl!);
     if (!['localhost', '127.0.0.1'].includes(url.hostname) || url.pathname !== '/ep_ai_wallet_test') throw Error('Isolated fixture required');
@@ -53,12 +53,14 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     expect(invoke).not.toHaveBeenCalled();
   });
   it.each(['timeout', 'usage', 'model'])('holds ambiguous %s and never dispatches a retry', async (failure) => {
+    const raw = receipt();
     const invoke = jest.fn(async () => {
       if (failure === 'timeout') throw Error('synthetic connection lost after acceptance');
-      return { ...receipt(), ...(failure === 'usage' ? { usage: null } : { model: 'unquoted-fallback-model' }) };
+      return { ...raw, ...(failure === 'usage' ? { usage: null } : { model: 'unquoted-fallback-model' }) };
     });
     const key = randomUUID(); const result = await run(invoke, key);
     expect(result.reservation.state).toBe('UNKNOWN'); expect(result.result).toBeUndefined();
+    expect(result.reservation.providerRequestId).toBe(failure === 'timeout' ? null : raw.id);
     expect(await state()).toMatchObject({ balanceNanos: 10000000n, heldNanos: 5000000n });
     gateway = new AiWalletDispatchService(new AiWalletService({ model: db } as any));
     await run(invoke, key); expect(invoke).toHaveBeenCalledTimes(1);
@@ -90,10 +92,10 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     const invoke = jest.fn(async () => ({ task }));
     const pending = () => ({ provider: 'kie', model: 'fixture-video', providerRequestId: task, pending: true as const });
     const q = { ...quote, provider: 'kie', model: 'fixture-video' };
-    const result = await gateway.run(org, key, q, invoke, pending, price);
+    const result = await gateway.run(org, key, q, invoke, (r) => r.task, pending, price);
     expect(result.reservation).toMatchObject({ state: 'UNKNOWN', providerRequestId: task });
     gateway = new AiWalletDispatchService(new AiWalletService({ model: db } as any));
-    await gateway.run(org, key, q, invoke, pending, price);
+    await gateway.run(org, key, q, invoke, (r) => r.task, pending, price);
     expect(invoke).toHaveBeenCalledTimes(1);
     await wallet.settle(org, result.reservation.id, 2000000n, task);
     expect(await state()).toMatchObject({ balanceNanos: 8000000n, heldNanos: 0n });
