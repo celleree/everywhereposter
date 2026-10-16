@@ -97,3 +97,12 @@ it.each(['createSubscription', 'updateSubscription'])('validates actual event pr
   await (service as any)[method](event);
   expect(subscription.createOrUpdateSubscription).toHaveBeenCalledWith(false, 'track', 'cus_fixture', 0, 'LAUNCH_V1', 'MONTHLY', null);
 });
+
+it.each(['embedded', 'subscribe', 'prorate'])('rejects a lifetime %s without creating a second paid subscription', async (method) => {
+  const { service, subscription } = harness('PRO');
+  subscription.getSubscription.mockResolvedValue({ subscriptionTier: 'PRO', isLifetime: true });
+  const body = { billing: 'PRO', period: 'MONTHLY' };
+  const result = method === 'prorate' ? (service as any)[method]('org_fixture', body) : (service as any)[method]('track', 'org_fixture', 'user', body, true);
+  await expect(result).rejects.toThrow('Lifetime subscriptions');
+  expect(mockPrices).not.toHaveBeenCalled(); expect(mockProducts).not.toHaveBeenCalled(); expect(mockCheckout).not.toHaveBeenCalled();
+});

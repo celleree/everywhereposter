@@ -32,6 +32,7 @@ export class StripeService {
 
   private async assertSaleEligible(organizationId: string, body: BillingSubscribeDto) {
     const current = await this._subscriptionService.getSubscription(organizationId);
+    if (current?.isLifetime) throw new ForbiddenException('Lifetime subscriptions cannot purchase an ordinary subscription');
     const legacy = ['STANDARD', 'TEAM', 'PRO', 'ULTIMATE'].includes(current?.subscriptionTier || '');
     if (body.billing !== 'LAUNCH_V1' && !legacy) {
       throw new ForbiddenException('This subscription is available only to existing legacy subscribers');
