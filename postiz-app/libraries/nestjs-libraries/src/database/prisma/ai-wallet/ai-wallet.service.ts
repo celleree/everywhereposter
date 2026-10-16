@@ -73,6 +73,15 @@ export class AiWalletService {
     return reservation;
   }
 
+  private storedQuote(reservation: { quoteSnapshot: unknown; quoteFingerprint: string | null; ceilingNanos: bigint }) {
+    if (reservation.quoteSnapshot === null && reservation.quoteFingerprint === null) return undefined;
+    const quote = validatePricingQuote(reservation.quoteSnapshot);
+    if (snapshotFingerprint(quote) !== reservation.quoteFingerprint || quotedCharge(quote) !== reservation.ceilingNanos) {
+      throw new Error('Stored quote integrity check failed.');
+    }
+    return quote;
+  }
+
   async reserve(organizationId: string, operationKey: string, provider: string, model: string, ceilingNanos: bigint, pricingQuote?: PricingQuote) {
     this.enabled();
     [operationKey, provider, model].forEach((value) => this.key(value));
@@ -88,6 +97,7 @@ export class AiWalletService {
         where: { organizationId_operationKey: { organizationId, operationKey } },
       });
       if (existing) {
+        this.storedQuote(existing);
         if (existing.provider !== provider || existing.model !== model || existing.ceilingNanos !== ceilingNanos ||
             existing.quoteFingerprint !== quoteFingerprint) {
           throw new Error('Wallet operation was reused with different parameters.');
@@ -111,6 +121,7 @@ export class AiWalletService {
       const wallet = await this.wallet(tx, organizationId);
       if (wallet.status !== 'ACTIVE') throw new Error('Wallet requires reconciliation.');
       const reservation = await this.reservation(tx, organizationId, id);
+      this.storedQuote(reservation);
       if (reservation.state !== 'RESERVED') return { dispatch: false, reservation };
       return { dispatch: true, reservation: await tx.aiWalletReservation.update({
         where: { id }, data: { state: 'DISPATCHED' },
@@ -153,10 +164,11 @@ export class AiWalletService {
       if (reservation.providerRequestId && reservation.providerRequestId !== providerRequestId) {
         throw new Error('Provider receipt identity changed.');
       }
+      const quote = this.storedQuote(reservation);
       const usage = measured ? usageSnapshot(measured) : undefined;
       const usageFingerprint = usage ? snapshotFingerprint(usage) : null;
-      if (reservation.quoteSnapshot && (!measured || measured.providerRequestId !== providerRequestId ||
-          quotedCharge(reservation.quoteSnapshot, measured) !== chargedNanos)) {
+      if (quote && (!measured || measured.providerRequestId !== providerRequestId ||
+          quotedCharge(quote, measured) !== chargedNanos)) {
         throw new Error('Settlement requires the quoted provider usage.');
       }
       if (reservation.usageFingerprint && reservation.usageFingerprint !== usageFingerprint) {
@@ -192,10 +204,11 @@ export class AiWalletService {
    * Only trusted normalized provider receipts may reach this internal method. */
   async reconcileQuoted(organizationId: string, id: string, receipt?: MeasuredUsage) {
     const reservation = await this.transact(organizationId, tx => this.reservation(tx, organizationId, id));
-    if (!reservation.quoteSnapshot) throw new Error('Reservation has no pricing quote.');
+    const quote = this.storedQuote(reservation);
+    if (!quote) throw new Error('Reservation has no pricing quote.');
     const usage = receipt ?? (reservation.usageSnapshot ? measuredSnapshot(reservation.usageSnapshot) : undefined);
     if (!usage) throw new Error('Reconciliation requires provider usage.');
-    return this.settle(organizationId, id, quotedCharge(reservation.quoteSnapshot, usage), usage.providerRequestId, usage);
+    return this.settle(organizationId, id, quotedCharge(quote, usage), usage.providerRequestId, usage);
   }
 
   /** Internal server-created intent. The eventual Checkout adapter must accept

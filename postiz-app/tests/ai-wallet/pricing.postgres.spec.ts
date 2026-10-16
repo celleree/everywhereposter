@@ -36,6 +36,18 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     await expect(wallet.reserve(org, key, q.provider, q.model, r.ceilingNanos)).rejects.toThrow('different parameters');
     await expect(wallet.reserve(org, randomUUID(), q.provider, q.model, 1n, q)).rejects.toThrow('does not match');
   });
+  it('rejects stored quote tampering before retry, dispatch or debit even when the ceiling is unchanged', async () => {
+    const key = randomUUID(), q = quote(), r = await reserve(key, q), u = usage();
+    await db.aiWalletReservation.update({ where: { id: r.id }, data: { quoteSnapshot: { ...q, rateVersion: 'corrupted-version' } } });
+    await expect(reserve(key, q)).rejects.toThrow('integrity');
+    await expect(wallet.dispatch(org, r.id)).rejects.toThrow('integrity');
+    await db.aiWalletReservation.update({ where: { id: r.id }, data: { state: 'DISPATCHED' } });
+    await expect(wallet.settle(org, r.id, 168n, u.providerRequestId, u)).rejects.toThrow('integrity');
+    await expect(wallet.reconcileQuoted(org, r.id, u)).rejects.toThrow('integrity');
+    expect(await db.aiWallet.findUnique({ where: { organizationId: org } })).toMatchObject({ balanceNanos: 10000000n, heldNanos: r.ceilingNanos });
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(0);
+  });
+
   it('settles the stored quote with +20 percent once despite flags/rate configuration changes', async () => {
     const r = await reserve(), u = usage(); await wallet.dispatch(org, r.id);
     await wallet.markUnknown(org, r.id, u.providerRequestId);
