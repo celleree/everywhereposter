@@ -76,8 +76,8 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
         runtimeUrl={backendUrl + '/copilot/chat'}
         showDevConsole={false}
       >
-        <MantineWrapper>
-          <ResumableUploadProvider>
+        <ResumableUploadProvider>
+          <MantineWrapper>
           <ToolTip />
           <Toaster />
           <CheckPayment check={searchParams.get('check') || ''} mutate={mutate}>
@@ -161,8 +161,8 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
               )}
             </div>
           </CheckPayment>
-          </ResumableUploadProvider>
-        </MantineWrapper>
+          </MantineWrapper>
+        </ResumableUploadProvider>
       </CopilotKit>
     </ContextWrapper>
   );

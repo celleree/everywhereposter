@@ -164,6 +164,17 @@ export const useMenuItem = () => {
       ),
       path: '/media',
     },
+    {
+      name: t('video_editor', 'Video Editor'),
+      icon: (
+        <svg aria-hidden="true" width="21" height="21" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="3" />
+          <path d="m10 8 6 4-6 4V8ZM3 7h3M3 12h3M3 17h3M18 7h3M18 12h3M18 17h3" />
+        </svg>
+      ),
+      path: '/video-editor',
+    },
   ] satisfies MenuItemInterface[] as MenuItemInterface[];
 
   const secondMenu = [
