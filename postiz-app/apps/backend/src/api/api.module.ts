@@ -14,6 +14,7 @@ import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integ
 import { SettingsController } from '@gitroom/backend/api/routes/settings.controller';
 import { PostsController } from '@gitroom/backend/api/routes/posts.controller';
 import { MediaController } from '@gitroom/backend/api/routes/media.controller';
+import { CookedReviewController } from './routes/cooked-review.controller';
 import { ImageAssetsController } from '@gitroom/backend/api/routes/image-assets.controller';
 import { ReferenceImagesController } from '@gitroom/backend/api/routes/reference-images.controller';
 import { KnowledgeBaseController } from '@gitroom/backend/api/routes/knowledge-base.controller';
@@ -58,6 +59,7 @@ const authenticatedController = [
   SettingsController,
   KnowledgeBaseController,
   PostsController,
+  CookedReviewController,
   MediaController,
   ImageAssetsController,
   ReferenceImagesController,

@@ -4,18 +4,20 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { createHash, randomUUID } = require('node:crypto');
-module.exports = function videoEditorRuntime() {
-  if (process.env.EP_VIDEO_EDITOR_BROWSER !== '1' || process.env.BROWSER_FRONTEND_PORT !== '4347' || process.env.BROWSER_API_PORT !== '4348') throw new Error('Editor fixture requires its exact owned ports 4347/4348');
+module.exports = function videoEditorRuntime(fixtureOptions = {}) {
+  const frontendPort = fixtureOptions.cooked ? '4547' : '4347', apiPort = fixtureOptions.cooked ? '4548' : '4348';
+  if (process.env[fixtureOptions.cooked ? 'EP_COOKED_BROWSER' : 'EP_VIDEO_EDITOR_BROWSER'] !== '1' || process.env.BROWSER_FRONTEND_PORT !== frontendPort || process.env.BROWSER_API_PORT !== apiPort) throw new Error('Editor fixture requires its exact owned ports');
   // No ambient credentials/configuration reach imported services or subprocesses.
-  const clean = Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'EP_VIDEO_EDITOR_BROWSER', 'BROWSER_FRONTEND_PORT', 'BROWSER_API_PORT'].filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]));
+  const clean = Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'EP_VIDEO_EDITOR_BROWSER', 'EP_COOKED_BROWSER', 'COOKED_EDITOR_SOCKET', 'BROWSER_FRONTEND_PORT', 'BROWSER_API_PORT'].filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]));
   process.env = clean;
   require('./network-guard.cjs');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ep-editor-browser-'));
   const marker = randomUUID(), markerPath = path.join(directory, '.owned-fixture');
   fs.writeFileSync(markerPath, marker, { flag: 'wx' });
-  Object.assign(process.env, { STORAGE_PROVIDER: 'local', UPLOAD_DIRECTORY: directory, FRONTEND_URL: 'http://127.0.0.1:4347' });
+  Object.assign(process.env, { STORAGE_PROVIDER: 'local', UPLOAD_DIRECTORY: directory, FRONTEND_URL: 'http://127.0.0.1:' + frontendPort });
   const sourceFile = path.join(directory, 'source.mp4');
-  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=size=160x120:duration=4', '-f', 'lavfi', '-i', 'sine=duration=4', '-filter:a', "volume=0:enable='between(t,1,3)'", '-c:v', 'libx264', '-threads', '2', '-c:a', 'aac', '-shortest', sourceFile], { timeout: 15000, env: clean });
+  if (fixtureOptions.cooked) execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:size=640x360:rate=25', '-f', 'lavfi', '-i', 'flite=text=Here is the plan. Um I want to I want to show you how this works. We record one useful video. Uh then we review the cuts before publishing. The original always stays available.:voice=slt', '-c:v', 'libx264', '-threads', '2', '-c:a', 'aac', '-shortest', sourceFile], { timeout: 15000, env: clean });
+  else execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=size=160x120:duration=4', '-f', 'lavfi', '-i', 'sine=duration=4', '-filter:a', "volume=0:enable='between(t,1,3)'", '-c:v', 'libx264', '-threads', '2', '-c:a', 'aac', '-shortest', sourceFile], { timeout: 15000, env: clean });
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
   const sourceBytes = fs.readFileSync(sourceFile), originalHash = hash(sourceBytes);
   if (sourceBytes.length > 1024 * 1024) throw new Error('Synthetic source exceeds fixture bound');
@@ -57,11 +59,14 @@ module.exports = function videoEditorRuntime() {
     },
   };
   const service = new VideoEditorService(repository, { getCurrentForActiveMedia: async () => null }, new FfmpegVideoEditorService());
+  const cooked = fixtureOptions.cooked ? require('./cooked-browser-auth.cjs')(repository, new FfmpegVideoEditorService(), process.env.FRONTEND_URL) : undefined;
   const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
   const read = async (req, limit = 16384) => { const chunks = []; let size = 0; for await (const chunk of req) { size += chunk.length; if (size > limit) throw Object.assign(new Error('Fixture payload too large'), { status: 413 }); chunks.push(chunk); } return Buffer.concat(chunks); };
   const body = async req => JSON.parse(String(await read(req)) || '{}');
   return {
+    token: cooked?.token,
     async handle(req, res, url, token) {
+      if (cooked && await cooked.handle(req, res, url)) return true;
       // Known generated public assets carry no auth requirement; never accept a path.
       const asset = /^\/__video-editor\/assets\/([a-z0-9-]+)\.mp4$/.exec(url.pathname);
       if (asset && req.method === 'GET') {
@@ -76,6 +81,7 @@ module.exports = function videoEditorRuntime() {
       if (auth !== token) { json(res, {}, 401); return true; }
       if (url.pathname === '/posts' && req.method !== 'GET') { postWrites++; json(res, { message: 'Publishing forbidden' }, 405); return true; }
       try {
+        if (url.pathname === '/media/cooked/status') { json(res, { enabled: false }); return true; }
         if (url.pathname === '/__video-editor/stats') { json(res, { renders, active, peak, postWrites, originalHash, currentHash: hash(fs.readFileSync(sourceFile)), uploaded: !!session?.media, uploadedHash: session?.media ? hash(fs.readFileSync(assets.get(session.media.id))) : null, outputIds: [...media.keys()].filter(k => k.startsWith('editor-output-')) }); return true; }
         if (url.pathname === '/__video-editor/reset' && req.method === 'POST') {
           if (active) { json(res, { message: 'Active render prevents reset' }, 409); return true; }

@@ -1,0 +1,12 @@
+# Local build extends the verified Python/model package. Supply reviewed bases.
+ARG NODE_BASE
+ARG COOKED_BASE
+FROM ${NODE_BASE} AS node
+FROM ${COOKED_BASE}
+USER root
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/LICENSE /opt/NODE-LICENSE
+COPY runtime /opt/runtime
+USER 10001:0
+ENTRYPOINT ["node","/opt/runtime/worker-entry.cjs"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 CMD ["node","/opt/runtime/worker-health.cjs"]

@@ -9,9 +9,8 @@ const frontendPort = Number(process.env.BROWSER_FRONTEND_PORT || 4217);
 const apiPort = Number(process.env.BROWSER_API_PORT || 4218);
 if (![frontendPort, apiPort].every(port => Number.isInteger(port) && port > 1024 && port < 65536) || frontendPort === apiPort) throw new Error('Invalid owned fixture ports');
 const origin = `http://127.0.0.1:${frontendPort}`;
-if (['EP_FACEBOOK_BROWSER', 'EP_DISCOVERY_BROWSER', 'EP_VIDEO_EDITOR_BROWSER'].filter(key => process.env[key] === '1').length > 1) throw new Error('Select only one isolated browser fixture mode per process');
+if (['EP_FACEBOOK_BROWSER', 'EP_DISCOVERY_BROWSER', 'EP_VIDEO_EDITOR_BROWSER', 'EP_COOKED_BROWSER'].filter(key => process.env[key] === '1').length > 1) throw new Error('Select only one isolated browser fixture mode per process');
 const facebook = process.env.EP_FACEBOOK_BROWSER === '1' ? require('./facebook-runtime.cjs')() : undefined;
-const token = 'synthetic-playwright-session';
 const branding = path.join(root, 'apps/frontend/public/branding');
 const brandingSource = path.resolve(root, '../site/branding');
 // Refuse accidental execution inside a checkout carrying live environment files.
@@ -23,7 +22,8 @@ for (const dir of [root, path.dirname(root), path.join(root, 'apps/frontend')]) 
   }
 }
 const discovery = process.env.EP_DISCOVERY_BROWSER === '1' ? require('./discovery-runtime.cjs')() : undefined;
-const videoEditor = process.env.EP_VIDEO_EDITOR_BROWSER === '1' ? require('./video-editor-runtime.cjs')() : undefined;
+const videoEditor = process.env.EP_VIDEO_EDITOR_BROWSER === '1' || process.env.EP_COOKED_BROWSER === '1' ? require('./video-editor-runtime.cjs')({ cooked: process.env.EP_COOKED_BROWSER === '1' }) : undefined;
+const token = videoEditor?.token || 'synthetic-playwright-session';
 const user = { id: 'synthetic-user', orgId: 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
 const posts = Array.from({ length: 18 }, (_, index) => ({ id: `synthetic-post-${index}`, group: `synthetic-group-${index}`, state: 'QUEUE', content: `Synthetic scheduled post ${index + 1}: a long caption for responsive scrolling and reachability checks.`, publishDate: '2035-01-01T18:00:00.000Z', tags: [], intervalInDays: null, integration: { id: 'synthetic-channel', name: 'Synthetic channel', providerIdentifier: 'x', picture: '/icons/platforms/x.png' } }));
 const values = {
@@ -35,6 +35,7 @@ const values = {
   '/notifications': { total: 0 },
   '/notifications/list': { notifications: [], total: 0 },
   '/media': { pages: 0, results: [] },
+  '/media/cooked/status': { enabled: false },
   '/media/post-attached': { pages: 0, results: [] },
   '/posts/list': { posts, total: posts.length, page: 0, limit: 100, hasMore: false },
   '/posts': { posts },

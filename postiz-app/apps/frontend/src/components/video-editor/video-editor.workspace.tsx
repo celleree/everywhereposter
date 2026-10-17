@@ -9,6 +9,7 @@ import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
 import styles from './video-editor.module.css';
+import { CookedReviewWorkspace } from './cooked-review.workspace';
 import dayjs from 'dayjs';
 import { VideoEditClient, EditView, isVideo, downloadVideo } from './video-editor.client';
 import type { PacingPreset } from '@gitroom/nestjs-libraries/media-editing/video-edit-decision';
@@ -56,7 +57,14 @@ function SourcePreview({ source, edited = false }: { source: SourceVideo; edited
 export function VideoEditorWorkspace() {
   const user = useUser();
   const scope = user?.id && user?.orgId ? encodeURIComponent(user.id) + ':' + encodeURIComponent(user.orgId) : '';
-  return <Workspace key={scope} scope={scope} />;
+  const fetch = useFetch();
+  const { data, isLoading } = useSWR(scope ? ['word-editor-availability', scope] : null, async () => {
+    const r = await fetch('/media/cooked/status');
+    if (!r.ok) return { enabled: false };
+    const value = await r.json(); return { enabled: value?.enabled === true };
+  }, { revalidateOnFocus: false, shouldRetryOnError: false });
+  if (isLoading) return <main className={styles.workspace}><p role="status">Loading editor…</p></main>;
+  return data?.enabled ? <CookedReviewWorkspace key={scope} scope={scope} /> : <Workspace key={scope} scope={scope} />;
 }
 
 function Workspace({ scope }: { scope: string }) {
