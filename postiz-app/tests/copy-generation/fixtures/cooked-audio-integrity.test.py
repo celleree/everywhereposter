@@ -175,6 +175,49 @@ class AudioIntegrityCorruption(unittest.TestCase):
         self.remux_audio('volume=0.5,atrim=duration=2')
         self.rejected()
 
+    def test_optional_asr_diagnostic_runs_only_after_complete_physical_proof(self):
+        self.render()
+        upstream = self.edit / 'fake-upstream'
+        script = upstream / 'plugins/ai-editor/skills/cut/scripts/verify_cut.py'
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "import json, sys\nfrom pathlib import Path\n"
+            "(Path(sys.argv[1])/'fake-asr-invocation.json').write_text(json.dumps(sys.argv[1:]))\n"
+            "print('Deliberate model-free diagnostic failure')\nraise SystemExit(1)\n",
+            encoding='utf-8')
+        marker = self.edit / 'fake-asr-invocation.json'
+        diagnostic_path = self.edit / 'asr-diagnostic.json'
+        self.accepted()
+        self.assertFalse(marker.exists(), 'Normal verify must not invoke ASR')
+        proof = json.loads((self.edit / 'audio-integrity.json').read_text())
+        before = (sha(self.source), sha(self.edit / 'cut.mp4'))
+        command = [sys.executable, '-I', str(HELPER), 'diagnose', str(self.source),
+            str(self.edit), json.dumps(self.plan), str(upstream)]
+        result = subprocess.run(command, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(json.loads(marker.read_text()), [str(self.edit), '--engine', 'whisper'])
+        diagnostic = json.loads(diagnostic_path.read_text())
+        self.assertIs(diagnostic['authoritative'], False)
+        self.assertEqual(diagnostic['exitCode'], 1)
+        self.assertEqual(diagnostic['status'], 'differences-or-unavailable')
+        self.assertIn('Deliberate model-free diagnostic failure', diagnostic['report'])
+        self.assertEqual(diagnostic['audioIntegrity'], proof)
+        self.assertEqual(json.loads((self.edit / 'audio-integrity.json').read_text()), proof)
+        self.assertEqual((sha(self.source), sha(self.edit / 'cut.mp4')), before)
+
+        marker.unlink()
+        diagnostic_path.unlink()
+        self.remux_audio('volume=0.5,atrim=duration=1.6')
+        corrupted = (sha(self.source), sha(self.edit / 'cut.mp4'))
+        self.assertNotEqual(corrupted[1], before[1])
+        # A matching mutable receipt cannot replace reconstruction before ASR.
+        write(self.edit / 'audio-integrity.json', dict(proof, outputSha256=corrupted[1]))
+        result = subprocess.run(command, capture_output=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(marker.exists(), 'Incomplete physical proof must prevent every ASR invocation')
+        self.assertFalse(diagnostic_path.exists())
+        self.assertEqual((sha(self.source), sha(self.edit / 'cut.mp4')), corrupted)
+
     def test_omitted_retained_audio_same_duration(self):
         self.render()
         before = pcm(self.edit / 'cut.mp4')
