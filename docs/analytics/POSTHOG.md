@@ -18,6 +18,7 @@ Search/hash changes do not count as new pages. Hostnames remain in `$host` and
 `$current_url`; query strings, fragments and credentials are removed. Unknown
 paths (including activation/reset tokens and private resource IDs) become
 `/[private]`. Sanitization also covers SDK initial/session URL properties.
+Unused feature-flag requests are disabled because they bypass event sanitization.
 Autocapture, heatmaps, console capture, performance capture, surveys and Session
 Replay collection are disabled. Existing explicit custom events/identification
 are retained. Plausible, Facebook, Dub and Datafast behavior remains separate.
@@ -77,7 +78,9 @@ Static legal HTML is outside the marketing React entry point and is not covered.
 ## Verification and release gate
 
 Focused Jest suites: `posthog.analytics`, `posthog.signup`,
-`posthog.conversions`, and `posthog.stripe`. Browser fixtures exercise the real
+`posthog.conversions`, and `posthog.stripe`. A standalone `node --test
+postiz-app/tests/upload/posthog-sdk-privacy.test.cjs` exercises the real SDK in
+Chromium and guards all intercepted request bodies, including flag traffic. Browser fixtures exercise the real
 SDK with a dummy key and intercepted transport: app initial/navigation/dedup,
 marketing single bootstrap, sanitization and disabled recording. These fixtures
 are not authenticated production or ingestion proof. Targeted helper/provider

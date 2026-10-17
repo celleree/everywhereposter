@@ -68,6 +68,8 @@ export function initializePostHog(key?: string, host?: string, environment?: str
       enable_heatmaps: false,
       capture_exceptions: false,
       disable_surveys: true,
+      // Flag requests bypass before_send and may include raw initial URLs.
+      advanced_disable_flags: true,
       before_send: sanitizeAnalytics,
     });
   }

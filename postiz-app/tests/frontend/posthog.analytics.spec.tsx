@@ -66,7 +66,7 @@ it('captures initial and client navigation once, retains referrer and disables s
   render(<PHProvider {...props}>remount</PHProvider>);
   expect(posthog.capture).toHaveBeenCalledTimes(2);
   expect(posthog.init).toHaveBeenCalledWith('key', expect.objectContaining({
-    disable_session_recording: true, autocapture: false, enable_heatmaps: false,
+    advanced_disable_flags: true, disable_session_recording: true, autocapture: false, enable_heatmaps: false,
     enable_recording_console_log: false, capture_performance: false,
     session_recording: { maskAllInputs: true, maskTextSelector: '*', blockSelector: 'body' },
   }));
