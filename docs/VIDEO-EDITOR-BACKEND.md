@@ -47,6 +47,35 @@ The engine and its verification form one coherent slice; storage/API integration
 is a separate dependent slice. No dependency, migration, billing or deployment
 change is required.
 
+## Integrated workspace and resource checks
+
+PR #214 integrates the engine, source/storage, API and workspace foundations
+(#172, #174 and #175); merge the coherent integration rather than those old
+branches separately. The workspace defaults to Natural (`relaxed`), with Balanced
+and Brisk (`tight`) alternatives. It supports source selection/upload, preview,
+MP4 download and attaching the exact generated media to the composer.
+
+Multi-range video rendering uses one streaming selection and removes timestamp
+gaps while retaining source frame cadence. Audio keeps sample-accurate trims and
+an audio-only concat. This avoids buffering future decoded video frames in
+parallel trim branches. The single-range trim path is unchanged.
+
+Offline synthetic checks on October 17 used the real integrated service, FFmpeg
+and local storage with all network access blocked. A 30s/720p/30fps input reduced
+sampled incremental cgroup memory from about 1,009 MiB to 135 MiB. A 59.8s,
+1080p/60fps many-cut input completed in 17.4s with a 366 MiB whole-scope peak,
+under a transient 1 GiB cap, zero swap and two CPUs. Source hashes were preserved;
+no paid API calls occurred. These are isolated synthetic measurements, not
+combined production-host, arbitrary-content or physical-phone acceptance.
+
+No schema, dependency, worker or queue is added. One edit is admitted per backend
+process; browser cancellation only stops waiting and can leave a completed output
+in the library. Uncertain outcomes survive reload and never trigger an automatic
+POST retry. The existing Create/AI policy remains unchanged: without a Stripe
+publishable key it allows authenticated organization roles, including FREE; it
+is neither an internal-org allowlist nor a payment-status check. Billing remains
+paused. Production signed-in and physical-mobile acceptance remains separate.
+
 ## Frontend API
 
 `POST /media/:id/video-edits` uses the normal backend base URL and authenticated
@@ -112,7 +141,8 @@ the outcome is unknown: inspect the media library before deliberately retrying.
 Process admission does not coordinate multiple replicas. Long-running/restartable
 jobs, draft persistence and stronger admission controls require a separate design.
 
-Dependency order: engine #172, source/storage #174, API #175. Each merge requires
-human approval. After a parent merges, retarget/synchronize the next selected PR
-onto main, rerun affected checks and obtain fresh exact-HEAD review. The waiting
-PRs stay frozen. The API PR can be tested/reviewed on its storage base now.
+Historical foundation order was engine #172, source/storage #174, API #175.
+PR #214 is the selected integration. Require matching final-HEAD CI and fresh
+independent review before release. Ordinary reviewed safe releases have standing
+user approval through October 19, 2026 Pacific; new infrastructure, commercial
+policy, credential or spending choices still require a scoped decision.
