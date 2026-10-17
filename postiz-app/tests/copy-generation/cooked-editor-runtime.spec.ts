@@ -19,7 +19,19 @@ describe('private cooked native boundary', () => {
     }
     if (c.stage === 'review_start') await writeFile(join(c.workspace, 'edit/review.json'), '{"round":1}');
     if (c.stage === 'audit_render' || c.stage === 'verify') expect(await readdir(join(c.workspace, 'edit'))).not.toContain('.segments');
-    if (c.stage === 'verify') expect(await readdir(join(c.workspace, 'edit'))).not.toContain('cut.transcript.json');
+    if (c.stage === 'verify') {
+      expect(await readdir(join(c.workspace, 'edit'))).not.toContain('cut.transcript.json');
+      expect(await readdir(join(c.workspace, 'edit'))).not.toContain('audio-integrity.json');
+      expect(c.script).toContain('cooked-audio-integrity.py');
+      expect(c.args[0]).toBe('verify');
+      const plan = c.args[3];
+      await writeFile(join(c.workspace, 'edit/audio-integrity.json'), JSON.stringify({
+        version: 'source-plan-audio-v1', sourceSha256: JSON.parse(plan).sourceSha256,
+        planSha256: createHash('sha256').update(plan).digest('hex'),
+        outputSha256: createHash('sha256').update(await readFile(join(c.workspace, 'edit/cut.mp4'))).digest('hex'),
+        audioPackets: 1, frameCount: 1,
+      }));
+    }
   };
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'cooked-boundary-test-')); calls = [];
@@ -49,6 +61,56 @@ describe('private cooked native boundary', () => {
     await expect(runtime.cleanup('../../source.mp4', 'o')).rejects.toThrow('NOT_OWNED');
     expect(await runtime.cleanup(receipt.jobId, 'o')).toMatchObject({ removed: true });
     expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
+  });
+  it('binds proof to the in-memory source, requested next plan and actual output', async () => {
+    for (const field of ['missing', 'sourceSha256', 'planSha256', 'outputSha256', 'audioPackets', 'frameCount']) {
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c);
+        if (c.stage !== 'verify') return;
+        const path = join(c.workspace, 'edit/audio-integrity.json');
+        if (field === 'missing') return rm(path);
+        const proof = JSON.parse(await readFile(path, 'utf8'));
+        proof[field] = field === 'audioPackets' || field === 'frameCount' ? 0 : '0'.repeat(64);
+        await writeFile(path, JSON.stringify(proof));
+      });
+      const failure = await runtime.run(input).catch(e => e);
+      expect(typeof failure.message).toBe('string');
+      expect(typeof failure.jobId).toBe('string');
+      expect(calls.at(-1)!.stage).toBe('verify');
+      await runtime.cleanup(failure.jobId, 'o'); calls = [];
+    }
+    const runtime = new CookedEditorRuntime(config, runner), made = await runtime.run(input);
+    expect(JSON.parse(calls.find(c => c.stage === 'verify')!.args[3]).removedBlocks).toEqual([]);
+    calls = [];
+    await runtime.revise(made.jobId, 'o', { cut: [[1, 2]] }, 0);
+    expect(JSON.parse(calls.find(c => c.stage === 'verify')!.args[3]).removedBlocks).toEqual([[1, 2]]);
+    calls = [];
+    await runtime.revise(made.jobId, 'o', { restore: [[1, 2]] }, 1);
+    expect(JSON.parse(calls.find(c => c.stage === 'verify')!.args[3]).removedBlocks).toEqual([]);
+    await runtime.cleanup(made.jobId, 'o');
+  });
+  it('retains the captured output proof across mutable review and guarded recovery', async () => {
+    let sabotage = false;
+    const runtime = new CookedEditorRuntime(config, async c => {
+      await runner(c);
+      if (!sabotage || c.stage !== 'review_round') return;
+      const cut = join(c.workspace, 'edit/cut.mp4'); await writeFile(cut, 'changed after complete proof');
+      const path = join(c.workspace, 'edit/audio-integrity.json');
+      const forged = JSON.parse(await readFile(path, 'utf8'));
+      forged.outputSha256 = createHash('sha256').update(await readFile(cut)).digest('hex');
+      await writeFile(path, JSON.stringify(forged));
+    });
+    const made = await runtime.run(input); sabotage = true;
+    await expect(runtime.revise(made.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toMatchObject({
+      message: 'VERIFIED_DRAFT_CHANGED', revision: 0, previousRevisionRestored: true,
+    });
+    expect(await readFile(made.cutPath, 'utf8')).toBe('native cut');
+    sabotage = false;
+    await expect(runtime.revise(made.jobId, 'o', { cut: [[1, 2]] }, 0)).resolves.toMatchObject({ revision: 1 });
+    await writeFile(made.cutPath, 'unverified later modification');
+    await expect(runtime.revise(made.jobId, 'o', { restore: [[1, 2]] }, 1)).rejects.toThrow('VERIFIED_DRAFT_CHANGED');
+    await expect(runtime.revise(made.jobId, 'o', { restore: [[1, 2]] }, 1)).rejects.toThrow('STALE_OR_FAILED_REVISION');
+    await runtime.cleanup(made.jobId, 'o');
   });
   it('rejects unsafe render-cache paths or changed ownership before audit and preserves external files', async () => {
     const outside = join(root, 'outside'); await mkdir(outside); await writeFile(join(outside, 'keep'), 'external');
