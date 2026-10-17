@@ -21,3 +21,14 @@ it('keeps explicitly supplied keys and prevents dispatch if durable browser stor
   const fail=jest.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw Error('storage unavailable');});
   await expect(requestMediaCopyGeneration(fetch,body)).rejects.toThrow('storage unavailable');expect(fetch).toHaveBeenCalledTimes(1);fail.mockRestore();
 });
+
+it('reuses the durable key after a partial stream and a reloaded client module',async()=>{
+  const interrupted={ok:true,status:200,body:{getReader:()=>{let n=0;return{read:async()=>{if(n++)throw Error('stream interrupted');return{done:false,value:new TextEncoder().encode('{"name":"draft-started"}\n')};}};}}} as any;
+  const fetch=jest.fn().mockResolvedValueOnce(interrupted).mockResolvedValueOnce(final('complete'));
+  await expect(requestMediaCopyGeneration(fetch,body)).rejects.toThrow('stream interrupted');
+  let reloaded:typeof requestMediaCopyGeneration;
+  jest.isolateModules(()=>{reloaded=require('../../apps/frontend/src/components/new-launch/copy-generation.client').requestMediaCopyGeneration;});
+  await reloaded!(fetch,body);
+  const requests=fetch.mock.calls.map(([,opts])=>JSON.parse(opts.body));expect(requests[1].requestKey).toBe(requests[0].requestKey);
+  expect(localStorage.length).toBe(0);
+});

@@ -1,3 +1,11 @@
+import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
+import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
+import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
+const mockSubscriptions = jest.fn();
+jest.mock('stripe', () => ({ __esModule: true, default: jest.fn(() => ({
+  subscriptions: { list: (...args: any[]) => mockSubscriptions(...args) },
+})) }));
+jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
@@ -24,8 +32,10 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
   beforeEach(async () => {
     Object.assign(process.env,{BILLING_ENABLED:'true',AI_WALLET_ENABLED:'true',AI_WALLET_TEXT_ENABLED:'true',AI_WALLET_TEXT_RATE_CARDS:JSON.stringify(cards)});
     org=randomUUID();body={requestKey:randomUUID(),mediaId:'fixture-media',platforms:['linkedin'],goal:'position'};
-    await db.organization.create({data:{id:org,name:'Offline guided text'}});await db.aiWallet.create({data:{organizationId:org,balanceNanos:100000000n}});
-    wallet=new AiWalletService({model:db} as any);subscriptions={getSubscriptionByOrganizationId:jest.fn(async()=>({subscriptionTier:'LAUNCH_V1'}))};
+    await db.organization.create({data:{id:org,name:'Offline guided text',paymentId:`cus_${org}`,allowTrial:false,
+      subscription:{create:{subscriptionTier:'LAUNCH_V1',totalChannels:0,period:'MONTHLY'}}}});await db.aiWallet.create({data:{organizationId:org,balanceNanos:100000000n}});
+    wallet=new AiWalletService({model:db} as any);const repository={model:db} as any;
+    subscriptions=new SubscriptionRepository(repository,repository,repository,repository,repository);
     scope=new PrepaidCopyContextService(subscriptions,wallet,new AiWalletTextService(wallet));model=new CopyGenerationModelService(scope);
     parse.mockReset().mockImplementation(async req => ({id:randomUUID(),model:req.model,service_tier:'default',
       choices:[{finish_reason:'stop',message:{parsed:req.response_format.json_schema.name==='transcriptInsights'
@@ -34,6 +44,19 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
       usage:{prompt_tokens:10,completion_tokens:3,total_tokens:13,prompt_tokens_details:{cached_tokens:2},completion_tokens_details:{reasoning_tokens:1}}}));
   });
   afterAll(async()=>{for(const k of ['BILLING_ENABLED','AI_WALLET_ENABLED','AI_WALLET_TEXT_ENABLED','AI_WALLET_TEXT_RATE_CARDS']) before[k]===undefined?delete process.env[k]:process.env[k]=before[k];await db?.$disconnect();});
+  const reconcile=async(status:string)=>{
+    const repository={model:db} as any;
+    const service=new SubscriptionService(subscriptions,{getIntegrationsList:async()=>[],changeActiveCron:jest.fn(),restoreActiveCron:jest.fn()} as any,
+      {enforceSingleEnabledOwner:jest.fn(),disableOrEnableNonSuperAdminUsers:jest.fn()} as any,repository);
+    const stripe=new StripeService(service,{} as any,{} as any,{} as any);jest.spyOn(stripe,'checkValidCard').mockResolvedValue(true);
+    const event={data:{object:{id:`sub_${org}`,customer:`cus_${org}`,status,cancel_at:2000000000,
+      metadata:{service:'gitroom',billing:'LAUNCH_V1',period:'MONTHLY',uniqueId:`sub_${org}`},
+      items:{data:[{quantity:1,price:{currency:'usd',type:'recurring',unit_amount:900,recurring:{interval:'month',interval_count:1},
+        billing_scheme:'per_unit',lookup_key:'everywhereposter_launch_v1_monthly',metadata:{plan_version:'LAUNCH_V1'}}}]}}}} as any;
+    mockSubscriptions.mockResolvedValue({data:[event.data.object],has_more:false});
+    if(status==='canceled') await stripe.deleteSubscription(event);else await stripe.updateSubscription(event);
+    return subscriptions.getSubscriptionByOrganizationId(org);
+  };
   const stages=async function*(m:CopyGenerationModelService){
     yield 'start';await m.summarizeTranscript('Handwritten labels and two stock checks.');
     const brief:any={platform:{name:'LinkedIn',targetCharacters:300,hashtags:'none',lineBreaks:'moderate',ctaStyle:'none'},strategy:{coreMessage:'Check details'},source:{facts:['Handwritten labels']}};
@@ -43,7 +66,7 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
   it('meters analysis, draft and rewrite with no SDK retry and replays after flags/plan pause',async()=>{
     const first=await collect(scope.scope(org,body,()=>stages(model)));expect(parse).toHaveBeenCalledTimes(3);
     for(const [req,opts] of parse.mock.calls){expect(req).toMatchObject({max_completion_tokens:4096,n:1,service_tier:'default'});expect(opts).toMatchObject({maxRetries:0});}
-    process.env.AI_WALLET_ENABLED='false';process.env.AI_WALLET_TEXT_ENABLED='false';subscriptions.getSubscriptionByOrganizationId.mockResolvedValue({subscriptionTier:'STANDARD'});
+    process.env.AI_WALLET_ENABLED='false';process.env.AI_WALLET_TEXT_ENABLED='false';await db.subscription.delete({where:{organizationId:org}});
     expect(await collect(scope.scope(org,body,()=>stages(model)))).toEqual(first);expect(parse).toHaveBeenCalledTimes(3);
     expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(3);
   });
@@ -51,15 +74,16 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
     await collect(scope.scope(org,body,()=>stages(model)));
     await expect(collect(scope.scope(org,{...body,audience:'changed'},()=>stages(model)))).rejects.toThrow('different inputs');
     expect(parse).toHaveBeenCalledTimes(3);
-    const other=randomUUID();await db.organization.create({data:{id:other,name:'Other org'}});await db.aiWallet.create({data:{organizationId:other,balanceNanos:100000000n}});
+    const other=randomUUID();await db.organization.create({data:{id:other,name:'Other org',subscription:{create:{subscriptionTier:'LAUNCH_V1',totalChannels:0,period:'MONTHLY'}}}});await db.aiWallet.create({data:{organizationId:other,balanceNanos:100000000n}});
     await Promise.all([collect(scope.scope(org,body,()=>stages(model))),collect(scope.scope(other,body,()=>stages(model)))]);
     expect(parse).toHaveBeenCalledTimes(6);expect(scope.active).toBe(false);
+    for(const organizationId of [org,other]) expect(await db.aiWalletLedger.count({where:{organizationId}})).toBe(3);
   });
   it('blocks default-off/new-free paths and visual/image planning before any provider call',async()=>{
     process.env.AI_WALLET_TEXT_ENABLED='false';await expect(collect(scope.scope(org,body,()=>stages(model)))).rejects.toThrow('disabled');
-    process.env.AI_WALLET_TEXT_ENABLED='true';subscriptions.getSubscriptionByOrganizationId.mockResolvedValue(null);
+    process.env.AI_WALLET_TEXT_ENABLED='true';await db.subscription.delete({where:{organizationId:org}});
     await expect(collect(scope.scope(org,body,()=>stages(model)))).rejects.toThrow('unavailable');
-    subscriptions.getSubscriptionByOrganizationId.mockResolvedValue({subscriptionTier:'LAUNCH_V1'});
+    await reconcile('active');
     await collect(scope.scope(org,body,async function*(){
       await expect(model.analyzeImage({buffer:Buffer.from('offline'),mimeType:'image/png'})).rejects.toThrow('unavailable');
       await expect(model.analyzeVideoFrames({inputPath:'/offline',mimeType:'video/mp4'})).rejects.toThrow('unavailable');
@@ -72,5 +96,46 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
     const events=await collect(service.generate(org,body));expect(events.at(-1)).toMatchObject({name:'completed',data:{requestId:body.requestKey,status:'complete'}});
     expect(await db.aiWalletReservation.count({where:{organizationId:org,state:'SETTLED'}})).toBeGreaterThan(0);
     for(const [,opts] of parse.mock.calls) expect(opts).toMatchObject({maxRetries:0});
+  });
+  it.each(['unpaid','paused','canceled','incomplete_expired'])('denies fresh and RESERVED guided execution after %s, then restores once',async status=>{
+    const interrupted=jest.spyOn(wallet,'dispatch').mockRejectedValueOnce(Error('interrupted before claim'));
+    await expect(collect(scope.scope(org,body,()=>stages(model)))).rejects.toThrow('interrupted before claim');interrupted.mockRestore();
+    const key=`guided-text:${body.requestKey}:summary_0`;
+    expect(await wallet.quotedOperation(org,key)).toMatchObject({state:'RESERVED'});
+    expect(await reconcile(status)).toBeNull();
+    await expect(collect(scope.scope(org,body,()=>stages(model)))).rejects.toThrow('disabled');
+    await expect(collect(scope.scope(org,{...body,requestKey:randomUUID()},()=>stages(model)))).rejects.toThrow('unavailable');
+    expect(parse).not.toHaveBeenCalled();expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(0);
+    await reconcile('active');await Promise.allSettled([collect(scope.scope(org,body,()=>stages(model))),collect(scope.scope(org,body,()=>stages(model)))]);
+    await collect(scope.scope(org,body,()=>stages(model)));expect(parse).toHaveBeenCalledTimes(3);
+    expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(3);
+    expect(await db.aiWallet.findUnique({where:{organizationId:org}})).toMatchObject({heldNanos:0n,balanceNanos:99999880n});
+  });
+  it.each(['active','trialing','past_due'])('preserves %s guided stages and period-end cancellation',async status=>{
+    expect(await reconcile(status)).toMatchObject({subscriptionTier:'LAUNCH_V1',cancelAt:new Date(2000000000000)});
+    await collect(scope.scope(org,body,()=>stages(model)));await collect(scope.scope(org,body,()=>stages(model)));
+    expect(parse).toHaveBeenCalledTimes(3);expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(3);
+  });
+  it.each(['unpaid','paused','canceled','incomplete_expired'])('rechecks %s between summary and draft in an open iterator',async status=>{
+    const iterator=scope.scope(org,body,async function*(){await model.summarizeTranscript('Handwritten labels.');yield 'summary';await model.generatePlatformDraft({platform:{name:'LinkedIn',targetCharacters:300,hashtags:'none',lineBreaks:'moderate',ctaStyle:'none'}} as any,'Grounded copy','Be specific');});
+    expect(await iterator.next()).toMatchObject({value:'summary'});expect(scope.active).toBe(false);await reconcile(status);
+    await expect(iterator.next()).rejects.toThrow('disabled');expect(scope.active).toBe(false);
+    expect(parse).toHaveBeenCalledTimes(1);expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(1);
+  });
+  it('settles a staged summary after restart/revocation without running a new draft or debiting twice',async()=>{
+    jest.spyOn(wallet,'finishText').mockRejectedValueOnce(Error('local settlement interruption'));
+    await expect(collect(scope.scope(org,body,()=>stages(model)))).rejects.toThrow('settlement interruption');await reconcile('unpaid');
+    process.env.BILLING_ENABLED=process.env.AI_WALLET_ENABLED=process.env.AI_WALLET_TEXT_ENABLED='false';
+    wallet=new AiWalletService({model:db} as any);scope=new PrepaidCopyContextService(subscriptions,wallet,new AiWalletTextService(wallet));model=new CopyGenerationModelService(scope);
+    for(let i=0;i<2;i++) await expect(collect(scope.scope(org,body,()=>stages(model)))).rejects.toThrow('disabled');
+    expect(parse).toHaveBeenCalledTimes(1);expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(1);
+    Object.assign(process.env,{BILLING_ENABLED:'true',AI_WALLET_ENABLED:'true',AI_WALLET_TEXT_ENABLED:'true'});await reconcile('active');
+    await collect(scope.scope(org,body,()=>stages(model)));expect(parse).toHaveBeenCalledTimes(3);
+    expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(3);
+  });
+  it('scopes generator cleanup without leaking context into its consumer',async()=>{
+    const cleanup=jest.fn();const iterator=scope.scope(org,body,async function*(){try{yield scope.active;}finally{cleanup(scope.active);}});
+    expect(await iterator.next()).toMatchObject({value:true});expect(scope.active).toBe(false);
+    await iterator.return(undefined);expect(cleanup).toHaveBeenCalledWith(true);expect(scope.active).toBe(false);expect(parse).not.toHaveBeenCalled();
   });
 });
