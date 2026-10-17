@@ -39,6 +39,15 @@ class QuietBlockContract(unittest.TestCase):
         self.assertEqual(len(presentation([1]*16400, aac)), 16400)
         aac['streams'][1]['duration'] = '1.1'
         self.assertEqual(len(presentation([1]*16212, aac)), 16212)
+        # Decode/render map the FIRST stream: a later track cannot authorize padding.
+        first_mismatch = meta(audio=1.01)
+        first_mismatch['streams'][0].update(codec_name='aac', sample_rate='44100')
+        first_mismatch['streams'].append(dict(codec_type='audio', duration='1', codec_name='aac', sample_rate='44100'))
+        self.assertEqual(len(presentation([1]*16160, first_mismatch)), 16160)
+        first_mismatch = meta(audio=1.01)
+        first_mismatch['streams'][0].update(codec_name='aac', sample_rate='44100')
+        first_mismatch['streams'].append(dict(codec_type='video', duration='1.01'))
+        self.assertEqual(len(presentation([1]*16160, first_mismatch)), 16160)
 
     def test_final_decisions_and_av_must_match_the_exact_block_plan(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -52,7 +61,8 @@ class QuietBlockContract(unittest.TestCase):
                     dict(codec_type='audio', start_time='0', duration=str(audio), sample_rate='48000')])
             audit.__globals__['probe'] = lambda _: metadata()
             audit(edit, self.policy)
-            for meta in [metadata(audio=9.1), metadata(video=8.8), {'streams': []}]:
+            for meta in [metadata(audio=9.1), metadata(video=8.8), {'streams': []},
+                dict(streams=metadata()['streams']+[dict(codec_type='audio', start_time='0', duration='9', sample_rate='48000')])]:
                 audit.__globals__['probe'] = lambda _, result=meta: result
                 with self.assertRaises(ValueError):
                     audit(edit, self.policy)

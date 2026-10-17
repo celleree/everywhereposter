@@ -41,8 +41,9 @@ def presentation_audio(audio, meta):
     # PyAV resampling can flush a few samples past an exact presentation end.
     # AAC can also expose at most one incomplete decoded packet. Trim only past
     # matching declared presentation ends; mismatched/long decoded tails remain.
-    av = {s['codec_type']: s for s in meta['streams'] if s['codec_type'] in ('audio', 'video')}
-    if set(av) == {'audio', 'video'}:
+    av = {kind: next((s for s in meta['streams'] if s['codec_type'] == kind), None)
+          for kind in ('audio', 'video')}
+    if all(av.values()):
         end = float(av['audio']['duration'])
         if math.isfinite(end) and end > 0 and abs(end-float(av['video']['duration'])) <= .001:
             samples = round(end*16000)
@@ -181,8 +182,9 @@ def audit(edit, policy):
         raise ValueError('UNSAFE_NATIVE_TIMELINE')
     meta = probe(edit/'cut.mp4')
     expected = sum(s['end']-s['start'] for s in read(edit/'decisions.json'))
-    av = {s['codec_type']: s for s in meta['streams'] if s['codec_type'] in ('audio', 'video')}
-    if set(av) != {'audio', 'video'}:
+    streams = [s for s in meta['streams'] if s['codec_type'] in ('audio', 'video')]
+    av = {s['codec_type']: s for s in streams}
+    if set(av) != {'audio', 'video'} or len(streams) != 2:
         raise ValueError('INVALID_OUTPUT_SYNC')
     tolerance = max(1/policy['fps'], 1024/int(av['audio']['sample_rate']))+.005
     if any(abs(float(s['start_time'])) > .001 or abs(float(s['duration'])-expected) > tolerance for s in av.values()):
