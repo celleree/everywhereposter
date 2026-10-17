@@ -49,6 +49,55 @@ class QuietBlockContract(unittest.TestCase):
         first_mismatch['streams'].append(dict(codec_type='video', duration='1.01'))
         self.assertEqual(len(presentation([1]*16160, first_mismatch)), 16160)
 
+    def test_uncut_audio_only_replaces_after_exact_packet_and_asr_pcm_identity(self):
+        preserve = functions['preserve_uncut_audio']
+        g = preserve.__globals__
+        original_command, original_probe = g['command'], g['probe']
+        with tempfile.TemporaryDirectory() as folder:
+            edit = Path(folder); source = edit/'source.mp4'; source.write_bytes(b'original')
+            cut = edit/'cut.mp4'; cut.write_bytes(b'native render')
+            (edit/'safe-cuts.json').write_text('[]')
+            (edit/'report.json').write_text('{"frames":[[0,250]]}')
+            (edit/'decisions.json').write_text('[{"start":0,"end":10}]')
+            meta = dict(streams=[dict(codec_type='video', codec_name='h264', start_time='0', duration='10'),
+                dict(codec_type='audio', codec_name='aac', start_time='0', duration='10')])
+            g['probe'] = lambda _: meta
+            mismatch = None; calls = []
+            def fake_command(args):
+                from types import SimpleNamespace
+                calls.append(args)
+                if '-show_packets' in args:
+                    kind = args[args.index('-select_streams')+1]
+                    changed = mismatch == kind and 'uncut-audio-' in args[-1]
+                    return SimpleNamespace(stdout=json.dumps({'packets':[kind, 'changed' if changed else 'same']}))
+                if '-f' in args:
+                    path = args[args.index('-i')+1]
+                    return SimpleNamespace(stdout='different' if mismatch == 'pcm' and 'uncut-audio-' in path else 'SHA256=same')
+                Path(args[-1]).write_bytes(b'preserved')
+                return SimpleNamespace(stdout='')
+            g['command'] = fake_command
+            try:
+                for mismatch in ['a:0', 'v:0', 'pcm']:
+                    with self.assertRaisesRegex(ValueError, 'UNCUT_MEDIA_CHANGED'):
+                        preserve(source, edit, self.policy)
+                    self.assertEqual(cut.read_bytes(), b'native render')
+                    self.assertFalse(any(edit.glob('uncut-audio-*')))
+                mismatch = None
+                self.assertTrue(preserve(source, edit, self.policy))
+                self.assertEqual(cut.read_bytes(), b'preserved')
+                self.assertEqual(source.read_bytes(), b'original')
+                calls.clear(); (edit/'safe-cuts.json').write_text('[[1,2]]')
+                self.assertFalse(preserve(source, edit, self.policy)); self.assertEqual(calls, [])
+                (edit/'safe-cuts.json').write_text('[]'); meta['streams'][1]['codec_name'] = 'alac'
+                self.assertFalse(preserve(source, edit, self.policy)); self.assertEqual(calls, [])
+                meta['streams'][1]['codec_name'] = 'aac'; meta['streams'][1]['duration'] = '9.98'
+                self.assertFalse(preserve(source, edit, self.policy)); self.assertEqual(calls, [])
+                (edit/'report.json').write_text('{"frames":[[0,249]]}')
+                with self.assertRaisesRegex(ValueError, 'UNSAFE_NATIVE_TIMELINE'):
+                    preserve(source, edit, self.policy)
+            finally:
+                g['command'], g['probe'] = original_command, original_probe
+
     def test_final_decisions_and_av_must_match_the_exact_block_plan(self):
         with tempfile.TemporaryDirectory() as folder:
             edit = Path(folder)
