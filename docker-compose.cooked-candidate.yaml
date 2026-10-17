@@ -1,0 +1,43 @@
+# Opt-in only; current deployment does not load this file.
+# Explicit activation approval is required for the private IPC bind and worker.
+services:
+  postiz:
+    environment:
+      COOKED_EDITOR_ENABLED: 'true'
+      COOKED_EDITOR_SOCKET: /run/cooked/cooked.sock
+      COOKED_EDITOR_ORGANIZATIONS: ${COOKED_PILOT_ORGANIZATIONS:?Explicit pilot organization IDs required}
+    volumes:
+      - type: bind
+        source: ${COOKED_IPC_DIR:?Private owned IPC directory required}
+        target: /run/cooked
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      cooked-editor:
+        condition: service_healthy
+  cooked-editor:
+    profiles: [cooked]
+    image: ${COOKED_WORKER_IMAGE:?Exact reviewed worker image required}
+    user: '10001:0'
+    init: true
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 2
+    pids_limit: 128
+    ulimits:
+      fsize: 536870912
+    tmpfs:
+      - /work:rw,noexec,nosuid,nodev,size=512m,uid=10001,gid=0,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+    volumes:
+      - type: bind
+        source: ${COOKED_IPC_DIR:?Private owned IPC directory required}
+        target: /ipc
+        bind:
+          create_host_path: false
+    restart: unless-stopped

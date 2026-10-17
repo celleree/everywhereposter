@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { SWRConfig } from 'swr';
+import { SWRConfig, unstable_serialize } from 'swr';
 import { VideoEditorWorkspace } from '../../apps/frontend/src/components/video-editor/video-editor.workspace';
 
 const mockFetch = jest.fn();
@@ -17,8 +17,12 @@ import { buildVideoEditDecisionList } from '../../libraries/nestjs-libraries/src
 
 const output = { id: 'output-1', path: '/edited.mp4', originalName: 'Original-edited.mp4', type: 'video' };
 const video = { id: 'video-1', path: '/fixture.mp4', originalName: 'Original.mp4', type: 'video' };
+function legacyConfig() {
+  return { provider: () => new Map(), dedupingInterval: 0, revalidateIfStale: false,
+    fallback: Object.fromEntries(['org-1', 'org-2'].map(org => [unstable_serialize(['word-editor-availability', 'user-1:' + org]), { enabled: false }])) };
+}
 function mount() {
-  return render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}><VideoEditorWorkspace /></SWRConfig>);
+  return render(<SWRConfig value={legacyConfig()}><VideoEditorWorkspace /></SWRConfig>);
 }
 function select(items = [{ id: 'video-1', path: '/fixture.mp4' }]) {
   fireEvent.click(screen.getByRole('button', { name: 'Choose video' }));
@@ -147,10 +151,22 @@ it('drops an old organization response after the workspace identity changes', as
   const view = mount(); select();
   await waitFor(() => expect(finish).toBeTruthy());
   mockUser = { id: 'user-1', orgId: 'org-2' };
-  view.rerender(<SWRConfig value={{ provider: () => new Map() }}><VideoEditorWorkspace /></SWRConfig>);
+  view.rerender(<SWRConfig value={legacyConfig()}><VideoEditorWorkspace /></SWRConfig>);
   await act(async () => finish({ ok: true, json: async () => ({ schemaVersion: 1, outputMedia: output,
     editDecisionList: buildVideoEditDecisionList({ mediaId: video.id, durationMs: 2500, pacingPreset: 'relaxed', detectedSilence: [] }),
     render: { status: 'completed', durationMs: 2500, container: 'mp4', videoCodec: 'h264', audioCodec: 'aac' } }) }));
   expect(screen.queryByLabelText('Edited video preview')).toBeNull();
   expect(screen.getByText('Start with one video')).toBeTruthy();
+});
+
+it('waits for mode selection and keeps native mode during worker recovery', async () => {
+  localStorage.setItem('everywhereposter:video-editor-selection:v1:user-1:org-1', JSON.stringify({ version: 1, sourceId: video.id, pacing: 'relaxed' }));
+  let resolve!: (value: unknown) => void;
+  mockFetch.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}><VideoEditorWorkspace /></SWRConfig>);
+  expect(screen.getByRole('status').textContent).toContain('Loading editor');
+  expect(screen.queryByRole('button', { name: 'Choose video' })).toBeNull();
+  await act(async () => resolve({ ok: true, json: async () => ({ enabled: true, ready: false }) }));
+  expect(await screen.findByText('Choose or upload one video to start automatic transcription.')).toBeTruthy();
+  expect(mockFetch.mock.calls.map(([url]) => url)).toEqual(['/media/cooked/status']);
 });

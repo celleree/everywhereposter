@@ -204,6 +204,12 @@ export const buildFfmpegRenderArgs = (
 
 @Injectable()
 export class FfmpegVideoEditorService {
+  async probeForCooked(inputPath: string) {
+    await this.assertLocalMp4(inputPath);
+    const p = await this.probeMedia(inputPath); this.assertSupportedSource(p);
+    return { durationMs: p.durationMs, width: p.videoWidth, height: p.videoHeight, fps: p.videoFrameRate,
+      alignedTimestamps: true as const, hasAudio: true as const };
+  }
   async analyzeTalkingHeadVideo(
     input: AnalyzeTalkingHeadVideoInput
   ): Promise<VideoEditDecisionListV1> {
