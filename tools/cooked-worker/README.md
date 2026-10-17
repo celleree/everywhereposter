@@ -14,9 +14,9 @@ organization-scoped request receipt; reloading does not start transcription.
 
 The source is prepared using existing storage code and probed using the existing
 video editor. The current transcription configuration is English speech. Accepted input is one audio-bearing MP4/MOV, at most 60 seconds,
-100 MiB, 1080p and 60 fps, with aligned timestamps. Uploading/selecting it starts
+100 MiB, 720p and30fps, with aligned timestamps. Uploading/selecting it starts
 offline transcription and the native timeline/render/verification pipeline.
-Native word cut/restore operations use optimistic revisions and native review
+Eligible whole-block cut/restore operations use optimistic revisions and native review
 snapshots. Saving streams a separate MP4 through the existing ordinary Media
 storage interface. Download and composer handoff use that saved Media; neither
 publishes a post. A failed or expired temporary session leaves the source intact.
@@ -41,12 +41,39 @@ other native failures remain cleanup-only. No rejected render becomes output.
 This recovery is a fallback, not a precise single-word editing claim. General
 single-word accuracy still needs a validated alignment and audio-boundary solution.
 
+## Restricted whole-block policy
+
+Current native mode is `quiet-block-v1`. Phase1 pause trimming remains the existing
+FFmpeg editor and is unchanged. This mode only removes explicitly selected complete
+speech blocks with both source-time edges in verified long quiet gaps. The initial
+draft retains all source frames; automatic retake/word and pause cuts are bypassed.
+The native renderer, transcript verifier, review/history and rejected-edit recovery
+are reused unchanged; upstream source/model files are not patched.
+
+Boundary discovery uses Phase1 Natural's minimum pause/padding, a stricter-45dB
+quiet threshold and installed offline VAD, including local-gain speech veto inside
+proposed gaps. Edges have100ms quiet guards and exact integer frame provenance.
+The source must be at most720p/30fps, with constant frame cadence and compatible audio/video endings;
+1080p/60fps multispan encoding exceeded the512MiB test cap because the pinned renderer uses parallel encoders.
+Phase1 keeps its separate1080p renderer. The native limit is enforced against actual streams as well as metadata;
+VFR, missing/shifted timestamps, no detected speech and unpaired tails are rejected.
+This is conservative acoustic eligibility, not semantic or general word alignment.
+
+Job/find receipts expose `editing` with `mode`, `blocks`, `removedBlocks` and
+`wordCuts:false`, `arbitraryPhrases:false`, `pauseEdits:false`. Cut requests must
+exactly match a published block; restore must match a currently removed block.
+Unsupported ranges return422 before mutation, preserving the previous revision.
+No word/phrase request is silently expanded. Restores retain source ordering.
+Final source decisions and rendered A/V durations are checked against that exact
+plan before the unchanged transcript verifier. Old word-selection controls do not
+gain permission through this capability; UI selection wiring is not added here.
+
 ## Worker and app boundary
 
 Build the local Python/model image using the pinned preparation instructions in
 `../cooked-pilot/README.md`. Compile `cooked-editor-runtime.ts` and
-`cooked-worker.ts` to CommonJS using the repository TypeScript compiler. Stage
-those two JS files, `cooked-editor-launcher.py`, `cooked-editor-apply.py`,
+`cooked-worker.ts` and their pure `video-edit-decision.ts` dependency to CommonJS using the repository TypeScript compiler. Stage
+those three JS files, `cooked-editor-launcher.py`, `cooked-quiet-blocks.py`,
 `worker-entry.cjs` and `worker-health.cjs` under a Docker build context's `runtime/`
 directory. Build `Dockerfile.worker` with exact `NODE_BASE` and `COOKED_BASE`
 image identities. No npm installation or application secrets are needed inside
@@ -83,8 +110,8 @@ The app verifies the exact upstream HTML SHA-256 before executing it and
 reconstructs transcript/state JSON using bounded text and numeric fields. It
 forces MP4 playback, validates response lengths/ranges, denies upstream agent,
 capture, update and other unsupported routes, and removes their UI controls.
-The upstream algorithms, transcript renderer and native cut/restore behavior
-remain unchanged. Mobile layout changes keep the native transcript visible.
+The upstream renderer, transcript report and review history remain pinned.
+The restricted adapter plans explicit source blocks instead of native word snapping. Mobile layout changes keep the native transcript visible.
 
 ## Activation and rollback
 
@@ -109,7 +136,7 @@ previous app image for ordinary release rollback. Do not delete source/saved
 Media, restore a database or recursively clean persistent storage. Temporary
 drafts are disposable; they are not a backup of the source.
 
-## Isolated acceptance evidence
+## Historical unrestricted-pilot acceptance evidence
 
 The final worker completed a real authenticated API cut/restore/save/recovery
 loop with one owned 10.73-second synthetic 640x360 speech clip under the
@@ -130,6 +157,9 @@ reload lookup, save/download and composer review with unchanged source hashes
 and zero post writes. Browser emulation does not establish physical-phone
 acceptance. The normal CI suite does not start the optional native model worker;
 this opt-in browser acceptance requires the documented disposable local worker.
+
+The historical word-selection browser results above do not establish acceptance
+of the current restricted block policy or precise word-cut acoustic quality.
 
 ## Acceptance limits
 
