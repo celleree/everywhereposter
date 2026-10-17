@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { createHash, randomUUID } from 'crypto';
 import { appendFileSync, constants, createReadStream, existsSync, statSync } from 'fs';
-import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'fs/promises';
+import { cp, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative } from 'path';
 
 type PipelineStage = 'transcribe' | 'retakes' | 'build_timeline' | 'render' | 'verify';
@@ -224,13 +224,26 @@ export class CookedEditorRuntime {
         r.some(n => typeof n !== 'number' || !Number.isFinite(n)) || r[0] < 0 || r[0] >= r[1] || r[1] > job.durationSeconds)) throw new Error('INVALID_EDITS');
     this.active = true; job.active = true;
     const started = Date.now(), source = join(job.workspace, 'source.mp4'), edit = join(job.workspace, 'edit');
+    let checkpoint: string | undefined, previousRender = '', previousReview = '';
     try {
       await this.assertOwned(job);
       if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
       const helper = join(dirname(this.config.launcherPath), 'cooked-editor-apply.py'); await regular(helper);
       const request = join(job.workspace, 'revision-request.json');
       await writeFile(request, JSON.stringify(edits), { mode: 0o600 });
-      // Native edits are not transactional with rendering. Failed mutations are cleanup-only.
+      // Preserve the verified native draft before a speculative edit. Cache segments
+      // can be regenerated; every checkpoint byte still counts toward the job cap.
+      previousRender = await digest(join(edit, 'cut.mp4'));
+      previousReview = await digest(join(edit, 'review.json'));
+      if (await bytes(job.workspace) + await bytes(edit) + 8 * MiB > this.disk) throw new Error('CHECKPOINT_LIMIT');
+      checkpoint = await mkdtemp(join(job.workspace, 'verified-edit-'));
+      await rmdir(checkpoint); // cp requires an absent exclusive destination
+      await cp(edit, checkpoint, { recursive: true, force: false, errorOnExist: true, filter: async path => {
+        if (relative(edit, path).split('/')[0] === '.segments') return false;
+        const info = await lstat(path);
+        if (!info.isDirectory() && !info.isFile()) throw new Error('CHECKPOINT_FILE_REQUIRED');
+        return true;
+      } });
       job.ready = false; job.revision++;
       await this.execute(job, 'apply_edits', helper, [this.config.sourceRoot, edit, request], started);
       for (const stage of ['build_timeline', 'render', 'verify'] as PipelineStage[]) {
@@ -240,9 +253,27 @@ export class CookedEditorRuntime {
       await this.review(job, 'round', started);
       await regular(join(edit, 'cut.mp4'));
       if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
+      await rm(checkpoint, { recursive: true }); checkpoint = undefined;
       job.ready = true;
       return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace: job.workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4') };
-    } catch (error) { throw Object.assign(error as Error, { jobId, revision: job.revision }); }
+    } catch (error) {
+      let previousRevisionRestored = false;
+      if ((error as Error).message === 'NATIVE_verify_FAILED' && checkpoint && !job.ready) {
+        try {
+          await this.assertOwned(job);
+          if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
+          // Guarded swap while the worker remains busy. Never serve the rejected
+          // render as a successful revision, even when rollback itself fails.
+          const rejected = join(job.workspace, 'rejected-edit');
+          await rename(edit, rejected); await rename(checkpoint, edit); checkpoint = undefined;
+          if (await digest(join(edit, 'cut.mp4')) !== previousRender || await digest(join(edit, 'review.json')) !== previousReview) throw new Error('RESTORE_MISMATCH');
+          await rm(rejected, { recursive: true });
+          if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256 || await bytes(job.workspace) > this.disk) throw new Error('RESTORE_MISMATCH');
+          job.revision = expectedRevision; job.ready = true; previousRevisionRestored = true;
+        } catch { job.ready = false; }
+      }
+      throw Object.assign(error as Error, { jobId, revision: job.revision, previousRevisionRestored });
+    }
     finally { job.active = false; this.active = false; }
   }
   async cleanup(jobId: string, orgId: string) {
