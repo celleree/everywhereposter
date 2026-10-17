@@ -27,7 +27,7 @@ const validPrice = (period = 'MONTHLY') => ({
   metadata: { plan_version: 'LAUNCH_V1' },
 });
 const harness = (tier?: string) => {
-  const subscription = { getSubscription: jest.fn().mockResolvedValue(tier ? { subscriptionTier: tier } : null), createOrUpdateSubscription: jest.fn() };
+  const subscription = { getSubscription: jest.fn().mockResolvedValue(tier ? { subscriptionTier: tier } : null), createOrUpdateSubscription: jest.fn(), reconcileLaunchSubscription: jest.fn() };
   const service = new StripeService(subscription as any, { getOrgById: jest.fn().mockResolvedValue({ paymentId: 'cus_fixture' }) } as any,
     { getUserById: jest.fn().mockResolvedValue({ email: 'fixture@example.test' }) } as any, {} as any);
   return { service, subscription };
@@ -97,7 +97,8 @@ it.each(['createSubscription', 'updateSubscription'])('validates actual event pr
   expect(checkCard).not.toHaveBeenCalled(); expect(subscription.createOrUpdateSubscription).not.toHaveBeenCalled();
   event.data.object.items.data[0].quantity = 1;
   await (service as any)[method](event);
-  expect(subscription.createOrUpdateSubscription).toHaveBeenCalledWith(false, 'track', 'cus_fixture', 0, 'LAUNCH_V1', 'MONTHLY', null);
+  expect(subscription.reconcileLaunchSubscription).toHaveBeenCalledWith('cus_fixture', expect.any(Function));
+  expect(subscription.createOrUpdateSubscription).not.toHaveBeenCalled();
 });
 
 it.each(['embedded', 'subscribe', 'prorate'])('rejects a lifetime %s without creating a second paid subscription', async (method) => {

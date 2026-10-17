@@ -1,3 +1,8 @@
+import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
+const mockLaunchHistory = jest.fn();
+jest.mock('stripe', () => ({ __esModule: true, default: jest.fn(() => ({
+  subscriptions: { list: (...args: any[]) => mockLaunchHistory(...args) },
+})) }));
 import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
@@ -118,6 +123,8 @@ const makeReconciliationHarness = (
       if (where?.organizationId && where.organizationId !== current.organizationId) {
         return { count: 0 };
       }
+      if (where?.NOT?.subscriptionTier === current.subscriptionTier) return { count: 0 };
+      if (where?.subscriptionTier && where.subscriptionTier !== current.subscriptionTier) return { count: 0 };
       if (where?.isLifetime === false && current.isLifetime) {
         return { count: 0 };
       }
@@ -155,6 +162,8 @@ const makeReconciliationHarness = (
       if (where?.organizationId && where.organizationId !== current.organizationId) {
         return { count: 0 };
       }
+      if (where?.NOT?.subscriptionTier === current.subscriptionTier) return { count: 0 };
+      if (where?.subscriptionTier && where.subscriptionTier !== current.subscriptionTier) return { count: 0 };
       if (where?.isLifetime === false && current.isLifetime) {
         return { count: 0 };
       }
@@ -347,6 +356,7 @@ const makeReconciliationHarness = (
     organizationService,
     prismaTransaction,
     usedCodesModel,
+    getOrganization: () => ({ ...organizationState }),
     getSubscription: () => cloneSubscription(subscriptionState),
     setSubscription: (value: StoredSubscription | null) => {
       subscriptionState = cloneSubscription(value);
@@ -748,5 +758,123 @@ describe('Stripe S1 Temporal/autopost reconciliation contract', () => {
         deletedAt: null,
       },
     });
+  });
+});
+
+
+describe('Launch webhook status authority', () => {
+  const saved = process.env.BILLING_ENABLED;
+  beforeEach(() => { process.env.BILLING_ENABLED = 'true'; mockLaunchHistory.mockReset(); });
+  afterAll(() => { if (saved === undefined) delete process.env.BILLING_ENABLED; else process.env.BILLING_ENABLED = saved; });
+  const event = (status: string, id = 'sub_launch', cancelAt: number | null = null) => ({
+    type: 'customer.subscription.updated', data: { object: {
+      id, customer: 'cus_1', status, cancel_at: cancelAt,
+      metadata: { service: 'gitroom', billing: 'LAUNCH_V1', period: 'MONTHLY', uniqueId: id },
+      items: { data: [{ quantity: 1, price: { currency: 'usd', type: 'recurring', unit_amount: 900,
+        recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit',
+        lookup_key: 'everywhereposter_launch_v1_monthly', metadata: { plan_version: 'LAUNCH_V1' } } }] },
+    } },
+  } as any);
+  const harness = (initial: StoredSubscription | null = ordinary('LAUNCH_V1', 0)) => {
+    const h = makeReconciliationHarness(initial, 2);
+    const stripe = new StripeService(h.subscriptionService, {} as any, {} as any, {} as any);
+    jest.spyOn(stripe, 'checkValidCard').mockResolvedValue(true);
+    return { ...h, stripe };
+  };
+  const history = (...events: any[]) => mockLaunchHistory.mockResolvedValue({ data: events.map(e => e.data.object), has_more: false });
+
+  it.each(['unpaid', 'paused', 'incomplete_expired'])('revokes %s access and converges on duplicate delivery', async status => {
+    const h = harness(); const e = event(status); history(e);
+    await h.stripe.updateSubscription(e); await h.stripe.updateSubscription(e);
+    expect(h.getSubscription()).toBeNull();
+    expect(h.getIntegrations().every(i => i.disabled && i.disabledByBilling)).toBe(true);
+    expect(h.getOrganization().isTrailing).toBe(false);
+    expect(h.stripe.checkValidCard).not.toHaveBeenCalled();
+  });
+  it.each(['unpaid', 'paused', 'incomplete_expired', 'incomplete', 'canceled'])('cannot initially grant %s', async status => {
+    const h = harness(null); history(event(status));
+    await h.stripe.createSubscription(event(status));
+    expect(h.getSubscription()).toBeNull();
+  });
+  it.each(['active', 'trialing', 'past_due'])('restores %s from persisted tier and preserves period-end cancellation', async status => {
+    const h = harness(); history(event('unpaid')); await h.stripe.updateSubscription(event('unpaid'));
+    history(event(status, 'sub_recovered', 2000000000));
+    await h.stripe.updateSubscription(event(status));
+    expect(h.getSubscription()).toMatchObject({ subscriptionTier: 'LAUNCH_V1', identifier: 'sub_recovered', cancelAt: new Date(2000000000000) });
+    expect(h.getIntegrations().every(i => !i.disabled)).toBe(true);
+    expect(h.getOrganization().isTrailing).toBe(status === 'trialing');
+  });
+  it('ignores delayed grant/revocation payloads in favor of current Stripe state', async () => {
+    const h = harness(); history(event('unpaid'));
+    await h.stripe.createSubscription(event('active'));
+    expect(h.getSubscription()).toBeNull();
+    history(event('active', 'sub_new'));
+    await h.stripe.updateSubscription(event('unpaid', 'sub_old'));
+    await h.stripe.deleteSubscription(event('canceled', 'sub_old'));
+    expect(h.getSubscription()).toMatchObject({ subscriptionTier: 'LAUNCH_V1', identifier: 'sub_new' });
+    expect(h.getIntegrations().every(i => !i.disabled)).toBe(true);
+  });
+  it.each([ordinary(), lifetime()])('preserves legacy/lifetime persistence', async initial => {
+    const h = harness(initial); history(event('unpaid'));
+    await h.stripe.updateSubscription(event('unpaid'));
+    await h.stripe.deleteSubscription(event('canceled'));
+    expect(h.getSubscription()).toEqual(initial);
+    expect(mockLaunchHistory).not.toHaveBeenCalled();
+  });
+  it('does not let stale legacy update/delete events replace a Launch subscription', async () => {
+    const h = harness(); const before = h.getSubscription(); const old = event('active', 'old_legacy');
+    old.data.object.metadata.billing = 'PRO'; old.data.object.items.data[0].price.lookup_key = null;
+    old.data.object.items.data[0].price.metadata = {};
+    await h.stripe.updateSubscription(old); await h.stripe.deleteSubscription(old);
+    expect(h.getSubscription()).toEqual(before);
+    expect(h.getIntegrations().every(i => !i.disabled)).toBe(true);
+  });
+  it.each(['unpaid', 'paused', 'incomplete_expired'])('rejects stale legacy grants after %s revocation and still recovers', async status => {
+    const h = harness(); history(event(status)); await h.stripe.updateSubscription(event(status));
+    const old = event('active', 'old_legacy'); old.data.object.metadata.billing = 'PRO';
+    old.data.object.items.data[0].price.lookup_key = null; old.data.object.items.data[0].price.metadata = {};
+    await h.stripe.createSubscription(old); await h.stripe.updateSubscription(old);
+    expect(h.getSubscription()).toBeNull(); expect(h.getIntegrations().every(i => i.disabled)).toBe(true);
+    history(event('active', 'recovered')); await h.stripe.updateSubscription(event(status));
+    expect(h.getSubscription()).toMatchObject({ subscriptionTier: 'LAUNCH_V1', identifier: 'recovered' });
+    expect(h.getIntegrations().every(i => !i.disabled)).toBe(true);
+  });
+  it('preserves an initial legacy grant for a customer with no Launch history', async () => {
+    const h = harness(null); const legacy = event('active', 'legacy'); legacy.data.object.metadata.billing = 'PRO';
+    legacy.data.object.items.data[0].price.lookup_key = null; legacy.data.object.items.data[0].price.metadata = {};
+    history(legacy); await h.stripe.createSubscription(legacy);
+    expect(h.getSubscription()).toMatchObject({ subscriptionTier: 'PRO', identifier: 'legacy' });
+  });
+  it.each(['read', 'pagination'])('does not create legacy access on %s verification failure', async failure => {
+    const h = harness(null); const old = event('active', 'legacy'); old.data.object.metadata.billing = 'PRO';
+    old.data.object.items.data[0].price.lookup_key = null; old.data.object.items.data[0].price.metadata = {};
+    if (failure === 'read') mockLaunchHistory.mockRejectedValue(Error('offline read failure'));
+    else mockLaunchHistory.mockResolvedValue({ data: [], has_more: true });
+    await expect(h.stripe.updateSubscription(old)).rejects.toThrow();
+    expect(h.getSubscription()).toBeNull();
+  });
+  it('makes no read or entitlement changes while billing is disabled', async () => {
+    const h = harness(); process.env.BILLING_ENABLED = 'false';
+    await h.stripe.updateSubscription(event('unpaid'));
+    expect(h.getSubscription()?.subscriptionTier).toBe('LAUNCH_V1');
+    expect(mockLaunchHistory).not.toHaveBeenCalled();
+  });
+  it.each(['read', 'pagination', 'multiple', 'transaction'])('does not mutate on %s failure', async failure => {
+    const h = harness(); const before = h.getSubscription(); history(event('unpaid'));
+    if (failure === 'read') mockLaunchHistory.mockRejectedValue(Error('offline read failure'));
+    if (failure === 'pagination') mockLaunchHistory.mockResolvedValue({ data: [], has_more: true });
+    if (failure === 'multiple') history(event('active'), event('trialing', 'second'));
+    if (failure === 'transaction') h.setTransactionFailure(true);
+    await expect(h.stripe.updateSubscription(event('unpaid'))).rejects.toThrow();
+    expect(h.getSubscription()).toEqual(before);
+    expect(h.getIntegrations().every(i => !i.disabled)).toBe(true);
+  });
+  it('retries reconciliation after a revocation commits before a downstream failure', async () => {
+    const h = harness(); history(event('unpaid')); h.failNextIntegrationRead();
+    await expect(h.stripe.updateSubscription(event('unpaid'))).rejects.toThrow('integration read failed');
+    expect(h.getSubscription()).toBeNull();
+    await h.stripe.updateSubscription(event('active'));
+    expect(h.getSubscription()).toBeNull();
+    expect(h.getIntegrations().every(i => i.disabled)).toBe(true);
   });
 });

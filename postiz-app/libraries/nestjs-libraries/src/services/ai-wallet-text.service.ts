@@ -56,7 +56,11 @@ export class AiWalletTextService {
         per: card.per, rates: card.rates, limits });
       reservation = await this.wallet.reserve(organizationId, operationKey, 'openai', request.model, quotedCharge(quote), quote);
     }
-    const claim = await this.wallet.dispatch(organizationId, reservation.id);
+    // A reserved hold is not a paid dispatch. Replays may settle incurred work,
+    // but cannot start fresh execution after entitlement or flags are revoked.
+    if (!allowNew || !isBillingEnabled() || !enabled(process.env.AI_WALLET_ENABLED) ||
+        !enabled(process.env.AI_WALLET_TEXT_ENABLED)) throw Error('Prepaid text generation is disabled.');
+    const claim = await this.wallet.dispatch(organizationId, reservation.id, true);
     if (!claim.dispatch) {
       if (claim.reservation.usageSnapshot) return this.wallet.finishText(organizationId, reservation.id);
       throw Error('Text dispatch is pending reconciliation; it will not be retried.');
