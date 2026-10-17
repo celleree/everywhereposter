@@ -177,6 +177,10 @@ def preserve_uncut_audio(source, edit, policy):
             dict(start=0, end=policy['total']/policy['fps'])]:
         raise ValueError('UNSAFE_NATIVE_TIMELINE')
     meta = probe(source)
+    # The pinned transcriber uses FFmpeg automatic audio selection. With one
+    # source audio stream it necessarily decodes the explicit stream copied here.
+    if sum(s['codec_type'] == 'audio' for s in meta['streams']) != 1:
+        return False
     av = {kind: next(s for s in meta['streams'] if s['codec_type'] == kind) for kind in ('audio', 'video')}
     if av['audio']['codec_name'] != 'aac' or any(abs(float(s['start_time'])) > .001 for s in av.values()) or abs(
             float(av['audio']['duration'])-float(av['video']['duration'])) > .001:

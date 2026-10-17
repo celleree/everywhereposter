@@ -90,7 +90,10 @@ class QuietBlockContract(unittest.TestCase):
                 self.assertFalse(preserve(source, edit, self.policy)); self.assertEqual(calls, [])
                 (edit/'safe-cuts.json').write_text('[]'); meta['streams'][1]['codec_name'] = 'alac'
                 self.assertFalse(preserve(source, edit, self.policy)); self.assertEqual(calls, [])
-                meta['streams'][1]['codec_name'] = 'aac'; meta['streams'][1]['duration'] = '9.98'
+                meta['streams'][1]['codec_name'] = 'aac'
+                meta['streams'].append(dict(meta['streams'][1], index=2))
+                self.assertFalse(preserve(source, edit, self.policy)); self.assertEqual(calls, [])
+                meta['streams'].pop(); meta['streams'][1]['duration'] = '9.98'
                 self.assertFalse(preserve(source, edit, self.policy)); self.assertEqual(calls, [])
                 (edit/'report.json').write_text('{"frames":[[0,249]]}')
                 with self.assertRaisesRegex(ValueError, 'UNSAFE_NATIVE_TIMELINE'):
