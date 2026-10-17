@@ -298,7 +298,7 @@ export class CopyGenerationService {
         return;
       }
 
-      if (captionMode !== 'adapt-by-platform') {
+      if (captionMode !== 'adapt-by-platform' || this._prepaid?.active) {
         throw error;
       }
 
@@ -613,7 +613,8 @@ export class CopyGenerationService {
           },
         };
       } catch (error: any) {
-        if (captionMode === 'adapt-by-platform') {
+        // A paid-stage error must keep the request incomplete and its retry key.
+        if (captionMode === 'adapt-by-platform' && !this._prepaid?.active) {
           const sourceCaption = body.sourceCaption as string;
           const controls = body.platformControls?.[platform] as
             | PlatformRuleOverrides

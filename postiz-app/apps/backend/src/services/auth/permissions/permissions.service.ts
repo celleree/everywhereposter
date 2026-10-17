@@ -1,3 +1,4 @@
+import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
 import { Ability, AbilityBuilder, AbilityClass } from '@casl/ability';
 import { Injectable } from '@nestjs/common';
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
@@ -17,7 +18,8 @@ export class PermissionsService {
     private _subscriptionService: SubscriptionService,
     private _postsService: PostsService,
     private _integrationService: IntegrationService,
-    private _webhooksService: WebhooksService
+    private _webhooksService: WebhooksService,
+    private _wallet?: AiWalletService
   ) {}
   async getPackageOptions(orgId: string) {
     const subscription =
@@ -42,7 +44,8 @@ export class PermissionsService {
     created_at: Date,
     permission: 'USER' | 'ADMIN' | 'SUPERADMIN',
     requestedPermission: Array<[AuthorizationActions, Sections]>,
-    refreshChannelId?: string
+    refreshChannelId?: string,
+    guidedRequestKey?: string
   ) {
     const { can, build } = new AbilityBuilder<
       Ability<[AuthorizationActions, Sections]>
@@ -64,8 +67,16 @@ export class PermissionsService {
       });
     }
 
+    const recoveringText = requestedPermission.some(([, section]) => section === Sections.GUIDED_COPY) &&
+      /^[a-zA-Z0-9_-]{16,80}$/.test(guidedRequestKey || '') &&
+      await this._wallet?.existingTextRequest(orgId, guidedRequestKey!);
     const { subscription, options } = packageOptions;
     for (const [action, section] of requestedPermission) {
+      // Existing owned work may reach bookkeeping after revocation/quota changes.
+      // The prepaid context still requires a current grant for every new dispatch.
+      if (recoveringText && [Sections.GUIDED_COPY, Sections.POSTS_PER_MONTH].includes(section)) {
+        can(action, section); continue;
+      }
       // check for the amount of channels
       if (section === Sections.CHANNEL) {
         if (options.unlimited_channels) { can(action, section); continue; }

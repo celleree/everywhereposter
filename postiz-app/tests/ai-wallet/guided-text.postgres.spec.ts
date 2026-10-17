@@ -1,3 +1,7 @@
+import { PermissionsService } from '../../apps/backend/src/services/auth/permissions/permissions.service';
+import { PoliciesGuard } from '../../apps/backend/src/services/auth/permissions/permissions.guard';
+import { AuthorizationActions, Sections } from '../../apps/backend/src/services/auth/permissions/permission.exception.class';
+import { requestMediaCopyGeneration } from '../../apps/frontend/src/components/new-launch/copy-generation.client';
 import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
 import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
@@ -7,7 +11,7 @@ jest.mock('stripe', () => ({ __esModule: true, default: jest.fn(() => ({
 })) }));
 jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 import { PrismaClient } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { randomUUID, webcrypto } from 'crypto';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
 import { AiWalletTextService } from '@gitroom/nestjs-libraries/services/ai-wallet-text.service';
 import { PrepaidCopyContextService } from '@gitroom/nestjs-libraries/services/prepaid-copy-context.service';
@@ -44,6 +48,13 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
       usage:{prompt_tokens:10,completion_tokens:3,total_tokens:13,prompt_tokens_details:{cached_tokens:2},completion_tokens_details:{reasoning_tokens:1}}}));
   });
   afterAll(async()=>{for(const k of ['BILLING_ENABLED','AI_WALLET_ENABLED','AI_WALLET_TEXT_ENABLED','AI_WALLET_TEXT_RATE_CARDS']) before[k]===undefined?delete process.env[k]:process.env[k]=before[k];await db?.$disconnect();});
+  const guardFor=(organizationId:string,requestKey:string)=>{
+    const permissions=new PermissionsService(subscriptions,{countPostsFromDay:async()=>999999} as any,{} as any,{} as any,wallet);
+    const handlers=[[AuthorizationActions.Create,Sections.POSTS_PER_MONTH],[AuthorizationActions.Create,Sections.GUIDED_COPY]];
+    const guard=new PoliciesGuard({get:()=>handlers} as any,permissions);
+    return guard.canActivate({switchToHttp:()=>({getRequest:()=>({path:'/posts/copy/generate',body:{requestKey},
+      org:{id:organizationId,createdAt:new Date(),users:[{role:'SUPERADMIN'}]}})}),getHandler:()=>({})} as any);
+  };
   const reconcile=async(status:string)=>{
     const repository={model:db} as any;
     const service=new SubscriptionService(subscriptions,{getIntegrationsList:async()=>[],changeActiveCron:jest.fn(),restoreActiveCron:jest.fn()} as any,
@@ -103,6 +114,9 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
     const key=`guided-text:${body.requestKey}:summary_0`;
     expect(await wallet.quotedOperation(org,key)).toMatchObject({state:'RESERVED'});
     expect(await reconcile(status)).toBeNull();
+    await expect(guardFor(org,body.requestKey)).resolves.toBe(true);
+    await expect(guardFor(org,randomUUID())).rejects.toThrow();
+    await expect(guardFor(randomUUID(),body.requestKey)).rejects.toThrow();
     await expect(collect(scope.scope(org,body,()=>stages(model)))).rejects.toThrow('disabled');
     await expect(collect(scope.scope(org,{...body,requestKey:randomUUID()},()=>stages(model)))).rejects.toThrow('unavailable');
     expect(parse).not.toHaveBeenCalled();expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(0);
@@ -137,5 +151,38 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
     const cleanup=jest.fn();const iterator=scope.scope(org,body,async function*(){try{yield scope.active;}finally{cleanup(scope.active);}});
     expect(await iterator.next()).toMatchObject({value:true});expect(scope.active).toBe(false);
     await iterator.return(undefined);expect(cleanup).toHaveBeenCalledWith(true);expect(scope.active).toBe(false);expect(parse).not.toHaveBeenCalled();
+  });
+  it.each(['source','platform'].flatMap(stage=>['settlement','unknown'].map(failure=>[stage,failure])))('retains browser identity after %s %s ambiguity instead of completing caption fallback',async(stage,failure)=>{
+    if(failure==='settlement') jest.spyOn(wallet,'finishText').mockRejectedValueOnce(Error('local settlement interruption'));
+    else parse.mockRejectedValueOnce(Error('ambiguous provider outcome'));
+    const source={assertMediaAccess:async()=>({id:'fixture-media'}),build:async()=>{
+      if(stage==='source') await model.summarizeTranscript('Handwritten labels and two stock checks.');
+      return{media:{id:'fixture-media',mediaType:'image'},source:{mediaType:'image',visualSummary:'Supplied notes',facts:['Handwritten labels','Two stock checks'],unknowns:[]},
+        coreMessage:'Check details',sourceConfidence:0.8,warnings:[],storedKnowledgeBaseFacts:[],overlapReferenceTexts:[],blocked:false};
+    }};
+    const service=new CopyGenerationService(source as any,new AntiGenericService(),model,undefined,scope);
+    const saved=Object.fromEntries(['window','localStorage','crypto'].map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));
+    const storage=new Map<string,string>();const keys:string[]=[];
+    try{
+      Object.defineProperties(globalThis,{window:{configurable:true,value:{}},crypto:{configurable:true,value:webcrypto},
+        localStorage:{configurable:true,value:{getItem:(k:string)=>storage.get(k),setItem:(k:string,v:string)=>storage.set(k,v),removeItem:(k:string)=>storage.delete(k)}}});
+      const fetch=async(_url:string,init:any)=>{
+        const request=JSON.parse(init.body);keys.push(request.requestKey);const events=[];
+        await guardFor(org,request.requestKey);
+        try{for await(const event of service.generate(org,request)) events.push(event);}
+        catch{events.push({name:'completed',data:{status:'failed',results:[],imagePlans:[]}});}
+        let done=false;return{ok:true,body:{getReader:()=>({read:async()=>done?{done:true}:(done=true,{done:false,
+          value:new TextEncoder().encode(events.map(e=>JSON.stringify(e)).join('\n')+'\n')})})}} as any;
+      };
+      const request:any={mediaId:'fixture-media',platforms:['linkedin'],goal:'position',captionMode:'adapt-by-platform',sourceCaption:'Handwritten labels and two stock checks.'};
+      expect((await requestMediaCopyGeneration(fetch,request)).status).toBe('failed');expect(storage.size).toBe(1);
+      expect(parse).toHaveBeenCalledTimes(1);expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(0);
+      if(failure==='settlement') await reconcile('unpaid');
+      expect((await requestMediaCopyGeneration(fetch,request)).status).toBe(failure==='settlement'&&stage==='platform'?'complete':'failed');
+      expect(keys[1]).toBe(keys[0]);expect(parse).toHaveBeenCalledTimes(1);
+      expect(await db.aiWalletReservation.count({where:{organizationId:org}})).toBe(1);
+      expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(failure==='settlement'?1:0);
+      if(failure==='unknown'||stage==='source') expect(storage.size).toBe(1);
+    }finally{for(const [k,descriptor] of Object.entries(saved)) descriptor?Object.defineProperty(globalThis,k,descriptor):delete(globalThis as any)[k];}
   });
 });
