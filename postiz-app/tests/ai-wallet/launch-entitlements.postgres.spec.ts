@@ -1,3 +1,5 @@
+import { SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
+import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -68,4 +70,43 @@ const fixtureUrl = process.env.LAUNCH_ENTITLEMENT_TEST_DATABASE_URL;
     await expect(organizations.enforceSingleEnabledOwner(org.id)).rejects.toThrow('enabled owner');
     expect(await db.userOrganization.findMany({ where: { organizationId: org.id }, orderBy: { id: 'asc' } })).toEqual(before);
   });
+  it('persists revocation/recovery under the customer lock and preserves lifetime/legacy rows', async () => {
+    const saved = process.env.BILLING_ENABLED; process.env.BILLING_ENABLED = 'true';
+    try {
+      const org = await createOrg('LAUNCH_V1'); const customer = `cus_fixture_${org.id}`;
+      await db.organization.update({ where: { id: org.id }, data: { paymentId: customer, isTrailing: true } });
+      const repository = { model: db } as any;
+      const subscriptions = new SubscriptionRepository(repository, repository, repository, repository, repository);
+      const integrations = { getIntegrationsList: jest.fn(async () => []), changeActiveCron: jest.fn(), restoreActiveCron: jest.fn() };
+      const owners = { enforceSingleEnabledOwner: jest.fn(), disableOrEnableNonSuperAdminUsers: jest.fn() };
+      const service = new SubscriptionService(subscriptions, integrations as any, owners as any, repository);
+      let unblock!: () => void, entered!: () => void;
+      const held = new Promise<void>(resolve => { unblock = resolve; });
+      const ready = new Promise<void>(resolve => { entered = resolve; });
+      const grant = service.reconcileLaunchSubscription(customer, async () => {
+        entered(); await held;
+        return { status: 'active', identifier: 'current', period: 'MONTHLY', cancelAt: 2000000000 };
+      });
+      await ready;
+      const revokeRead = jest.fn(async () => null);
+      const revoke = service.reconcileLaunchSubscription(customer, revokeRead);
+      // The second transaction must not read a provider snapshot before owning the lock.
+      await new Promise(resolve => setTimeout(resolve, 30)); expect(revokeRead).not.toHaveBeenCalled();
+      unblock(); await Promise.all([grant, revoke]);
+      expect(await subscriptions.getSubscription(org.id)).toBeNull();
+      expect((await db.organization.findUnique({ where: { id: org.id } }))?.isTrailing).toBe(false);
+      expect(owners.disableOrEnableNonSuperAdminUsers).toHaveBeenCalledWith(org.id, true);
+      const recovered = { status: 'trialing', identifier: 'recovered', period: 'MONTHLY' as const, cancelAt: 2000000000 };
+      await service.reconcileLaunchSubscription(customer, async () => recovered);
+      expect(await subscriptions.getSubscription(org.id)).toMatchObject({ subscriptionTier: 'LAUNCH_V1', cancelAt: new Date(2000000000000) });
+      expect(owners.enforceSingleEnabledOwner).toHaveBeenCalledWith(org.id);
+      for (const isLifetime of [false, true]) {
+        await db.subscription.update({ where: { organizationId: org.id }, data: { subscriptionTier: 'PRO', isLifetime } });
+        const before = await subscriptions.getSubscription(org.id); const read = jest.fn(async () => null);
+        await service.reconcileLaunchSubscription(customer, read);
+        expect(read).not.toHaveBeenCalled(); expect(await subscriptions.getSubscription(org.id)).toEqual(before);
+      }
+    } finally { if (saved === undefined) delete process.env.BILLING_ENABLED; else process.env.BILLING_ENABLED = saved; }
+  });
+
 });

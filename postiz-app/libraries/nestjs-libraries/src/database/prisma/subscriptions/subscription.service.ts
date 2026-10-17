@@ -74,7 +74,7 @@ export class SubscriptionService {
     return this._subscriptionRepository.getCode(code);
   }
 
-  async deleteSubscription(customerId: string) {
+  async deleteSubscription(customerId: string, preserveLaunch = false) {
     if (!isBillingEnabled()) {
       return;
     }
@@ -87,7 +87,8 @@ export class SubscriptionService {
       (transaction) =>
         this._subscriptionRepository.deleteOrdinarySubscription(
           transaction,
-          customerId
+          customerId,
+          preserveLaunch ? 'legacy' : undefined
         )
     );
 
@@ -100,6 +101,36 @@ export class SubscriptionService {
 
     await this.reconcileAuthoritativeEntitlements(deleted.organizationId);
     return deleted.result;
+  }
+
+  /** Launch webhooks are wake-ups, not authority. Serialize the fresh provider
+   * read with persistence (and lifetime claims), then reconcile the stored tier. */
+  async reconcileLaunchSubscription(customerId: string, readCurrent: () => Promise<{
+    status: string; identifier: string; period: 'MONTHLY' | 'YEARLY'; cancelAt: number | null;
+  } | null>) {
+    if (!isBillingEnabled()) return;
+    if (!this._transaction) throw new Error('Subscription mutation transaction is unavailable.');
+    const org = await this._subscriptionRepository.getOrganizationByCustomerId(customerId);
+    if (!org) return;
+    const changed = await this._transaction.model.$transaction(async transaction => {
+      await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${org.id}, 2))::text`;
+      const stored = await transaction.subscription.findFirst({ where: { organizationId: org.id } });
+      if (stored && (stored.isLifetime || stored.subscriptionTier !== 'LAUNCH_V1')) return false;
+      const current = await readCurrent();
+      if (current) {
+        if (!['active', 'trialing', 'past_due'].includes(current.status)) throw new Error('Invalid Launch entitlement status.');
+        const result = await this._subscriptionRepository.persistOrdinarySubscription(transaction,
+          current.status === 'trialing', current.identifier, customerId, 0, 'LAUNCH_V1', current.period, current.cancelAt, true);
+        return result.applied;
+      }
+      const result = await this._subscriptionRepository.deleteOrdinarySubscription(transaction, customerId, 'launch');
+      if (result.applied || ('reconcile' in result && result.reconcile)) {
+        await transaction.organization.update({ where: { id: org.id }, data: { isTrailing: false } });
+        return true;
+      }
+      return false;
+    }, { timeout: 30000 });
+    if (changed) await this.reconcileAuthoritativeEntitlements(org.id);
   }
 
   updateCustomerId(organizationId: string, customerId: string) {

@@ -155,8 +155,35 @@ export class StripeService {
     }
   }
 
+  private async reconcileLaunchEvent(event: Stripe.CustomerSubscriptionCreatedEvent | Stripe.CustomerSubscriptionUpdatedEvent | Stripe.CustomerSubscriptionDeletedEvent) {
+    if (!isBillingEnabled()) return;
+    const customer = event.data.object.customer as string;
+    return this._subscriptionService.reconcileLaunchSubscription(customer, async () => {
+      // Old event payloads may describe a recovered, cancelled, or superseded
+      // subscription. Read the customer's complete current state under the lock.
+      const history = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 },
+        { timeout: 10000, maxNetworkRetries: 0 });
+      if (history.has_more) throw new ServiceUnavailableException('Launch subscription history is incomplete');
+      const candidates = history.data.filter(subscription => this.isLaunchSubscription(subscription) &&
+        ['active', 'trialing', 'past_due'].includes(subscription.status));
+      if (candidates.length > 1) throw new ServiceUnavailableException('Launch subscription state is ambiguous');
+      const current = candidates[0];
+      if (!current) return null;
+      if (current.customer !== customer || current.metadata.service !== 'gitroom' || !current.metadata.uniqueId) {
+        throw new ForbiddenException('Launch subscription identity does not match');
+      }
+      this.assertLaunchEvent({ ...event, data: { object: current } } as Stripe.CustomerSubscriptionUpdatedEvent);
+      if (!(await this.checkValidCard({ ...event, data: { object: current } } as Stripe.CustomerSubscriptionUpdatedEvent))) {
+        throw new ServiceUnavailableException('Launch card validation has not completed');
+      }
+      return { status: current.status, identifier: current.metadata.uniqueId,
+        period: current.metadata.period as 'MONTHLY' | 'YEARLY', cancelAt: current.cancel_at };
+    });
+  }
+
   async createSubscription(event: Stripe.CustomerSubscriptionCreatedEvent) {
     this.assertLaunchEvent(event);
+    if (event.data.object.metadata.billing === 'LAUNCH_V1') return this.reconcileLaunchEvent(event);
     const {
       uniqueId,
       billing,
@@ -188,6 +215,7 @@ export class StripeService {
   }
   async updateSubscription(event: Stripe.CustomerSubscriptionUpdatedEvent) {
     this.assertLaunchEvent(event);
+    if (event.data.object.metadata.billing === 'LAUNCH_V1') return this.reconcileLaunchEvent(event);
     const {
       uniqueId,
       billing,
@@ -215,8 +243,10 @@ export class StripeService {
   }
 
   async deleteSubscription(event: Stripe.CustomerSubscriptionDeletedEvent) {
+    if (this.isLaunchSubscription(event.data.object)) return this.reconcileLaunchEvent(event);
     await this._subscriptionService.deleteSubscription(
-      event.data.object.customer as string
+      event.data.object.customer as string,
+      true
     );
   }
 
@@ -430,7 +460,7 @@ export class StripeService {
   }
 
   private isLaunchSubscription(subscription: Stripe.Subscription) {
-    return subscription.metadata?.billing === 'LAUNCH_V1' || subscription.items.data.some(item =>
+    return subscription.metadata?.billing === 'LAUNCH_V1' || subscription.items?.data?.some(item =>
       item.price.metadata?.plan_version === 'LAUNCH_V1' ||
       item.price.lookup_key?.startsWith('everywhereposter_launch_v1_'));
   }

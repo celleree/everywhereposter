@@ -460,6 +460,7 @@ describe('Stripe S1 billing activation boundary', () => {
       where: {
         organizationId: 'org_1',
         isLifetime: false,
+        NOT: { subscriptionTier: 'LAUNCH_V1' },
         organization: {
           paymentId: 'cus_1',
         },
