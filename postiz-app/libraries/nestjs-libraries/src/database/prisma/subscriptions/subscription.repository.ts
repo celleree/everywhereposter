@@ -143,7 +143,8 @@ export class SubscriptionRepository {
     totalChannels: number,
     billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
     period: 'MONTHLY' | 'YEARLY',
-    cancelAt: number | null
+    cancelAt: number | null,
+    launchOnly = false
   ) {
     const findOrg = await client.organization.findFirst({
       where: {
@@ -168,6 +169,8 @@ export class SubscriptionRepository {
       where: {
         organizationId: findOrg.id,
         isLifetime: false,
+        ...(launchOnly ? { subscriptionTier: 'LAUNCH_V1' as const } :
+          billing !== 'LAUNCH_V1' ? { NOT: { subscriptionTier: 'LAUNCH_V1' as const } } : {}),
         organization: {
           paymentId: customerId,
         },
@@ -231,7 +234,8 @@ export class SubscriptionRepository {
     totalChannels: number,
     billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
     period: 'MONTHLY' | 'YEARLY',
-    cancelAt: number | null
+    cancelAt: number | null,
+    launchOnly = false
   ) {
     return this.persistOrdinarySubscriptionWithClient(
       transaction,
@@ -241,13 +245,15 @@ export class SubscriptionRepository {
       totalChannels,
       billing,
       period,
-      cancelAt
+      cancelAt,
+      launchOnly
     );
   }
 
   async deleteOrdinarySubscription(
     transaction: Prisma.TransactionClient,
-    customerId: string
+    customerId: string,
+    tierScope?: 'launch' | 'legacy'
   ) {
     const findOrg = await transaction.organization.findFirst({
       where: {
@@ -276,7 +282,8 @@ export class SubscriptionRepository {
       };
     }
 
-    if (current.isLifetime) {
+    if (current.isLifetime || (tierScope === 'launch' && current.subscriptionTier !== 'LAUNCH_V1') ||
+        (tierScope === 'legacy' && current.subscriptionTier === 'LAUNCH_V1')) {
       return { applied: false as const };
     }
 
@@ -284,6 +291,8 @@ export class SubscriptionRepository {
       where: {
         organizationId: findOrg.id,
         isLifetime: false,
+        ...(tierScope === 'launch' ? { subscriptionTier: 'LAUNCH_V1' as const } :
+          tierScope === 'legacy' ? { NOT: { subscriptionTier: 'LAUNCH_V1' as const } } : {}),
         organization: {
           paymentId: customerId,
         },
