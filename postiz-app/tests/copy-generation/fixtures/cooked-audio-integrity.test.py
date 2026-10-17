@@ -243,6 +243,63 @@ class AudioIntegrityCorruption(unittest.TestCase):
         self.accepted()
         self.assertEqual(packets(self.source), packets(self.edit / 'cut.mp4'))
 
+    def test_rational_cfr_native_spans_use_exact_source_rate(self):
+        self.source = self.edit / 'rational-source.mp4'
+        ffmpeg('-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=30000/1001:duration=3.003',
+            '-f', 'lavfi', '-i',
+            'aevalsrc=0.25*sin(2*PI*(230*t+120*t*t))+0.1*sin(2*PI*719*t):s=48000:d=3.003',
+            '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-preset', 'ultrafast',
+            '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', self.source)
+        source_hash = sha(self.source)
+        source_info = json.loads(run('ffprobe', '-v', 'error', '-count_frames',
+            '-show_streams', '-of', 'json', self.source).stdout)['streams']
+        video_info = next(s for s in source_info if s['codec_type'] == 'video')
+        audio_info = next(s for s in source_info if s['codec_type'] == 'audio')
+        self.assertEqual(video_info['r_frame_rate'], '30000/1001')
+        self.assertEqual(int(video_info['nb_read_frames']), 90)
+        self.assertEqual(Fraction(audio_info['duration']), Fraction(3003, 1000))
+        self.plan = dict(version='source-plan-audio-v1', sourceSha256=source_hash,
+            removedBlocks=[[1.001, 2.002]])
+        frames = [[0, 30], [60, 90]]
+        fps = float(Fraction(30000, 1001))
+        write(self.edit / 'safe-cuts.json', self.plan['removedBlocks'])
+        write(self.edit / 'decisions.json', [dict(start=a/fps, end=b/fps) for a, b in frames])
+        write(self.edit / 'report.json', dict(frames=frames, fps=fps,
+            duration=3.003, final_s=2.002))
+        audio_filters = []
+        for i, (a, b) in enumerate(frames):
+            ffmpeg('-i', self.source, '-an', '-vf',
+                f'trim=start_frame={a}:end_frame={b},setpts=N/(30000/1001)/TB',
+                '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt',
+                'yuv420p', '-r', '30000/1001', '-g', '15', self.edit / f'rational-{i}.mp4')
+            start, end = float(Fraction(a*1001, 30000)), float(Fraction(b*1001, 30000))
+            audio_filters.append(f'[0:a:0]atrim=start={start:.6f}:end={end:.6f},'
+                f'asetpts=PTS-STARTPTS,afade=t=in:d=0.008,'
+                f'afade=t=out:st={end-start-0.008:.6f}:d=0.008[a{i}]')
+        listing = self.edit / 'rational-spans.txt'
+        # Each encoded 30-frame movie is exactly 1.001s, including its ms header.
+        listing.write_text("file 'rational-0.mp4'\nfile 'rational-1.mp4'\n", encoding='utf-8')
+        video, audio = self.edit / 'rational-video.mp4', self.edit / 'rational-audio.m4a'
+        ffmpeg('-f', 'concat', '-safe', '0', '-i', listing, '-c', 'copy', video)
+        ffmpeg('-vn', '-i', self.source, '-filter_complex',
+            ';'.join(audio_filters) + ';[a0][a1]concat=n=2:v=0:a=1[ac]',
+            '-map', '[ac]', '-c:a', 'aac', '-b:a', '192k', audio)
+        cut = self.edit / 'cut.mp4'
+        ffmpeg('-i', video, '-i', audio, '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', cut)
+        clock = json.loads(run('ffprobe', '-v', 'error', '-select_streams', 'v:0',
+            '-show_packets', '-show_streams', '-of', 'json', cut).stdout)
+        pts = sorted(int(p['pts']) for p in clock['packets'])
+        self.assertEqual(len(pts), 60)
+        self.assertEqual(pts[30]*Fraction(clock['streams'][0]['time_base']), Fraction(1001, 1000))
+        result, raw = self.verify()
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        proof = json.loads((self.edit / 'audio-integrity.json').read_text())
+        self.assertEqual(proof['frameCount'], 60)
+        self.assertEqual(proof['sourceSha256'], source_hash)
+        self.assertEqual(proof['outputSha256'], sha(cut))
+        self.assertEqual(proof['planSha256'], hashlib.sha256(raw.encode()).hexdigest())
+        self.assertEqual(sha(self.source), source_hash)
+
     def test_uncut_copy_cannot_accept_altered_audio_with_forged_receipt(self):
         self.plan['removedBlocks'] = []
         self.render(blocks=[])
