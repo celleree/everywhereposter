@@ -14,11 +14,11 @@ Get EverywherePoster to a safe early paid launch with the core repurposing/publi
 
 ## Priority workstreams
 
-### User-requested engineering priority — Video Editor completion
+### User-requested engineering priority — Video Editor deployed; user acceptance pending
 
-Continue the existing PR #214 integration; the user reactivated completion on October 17. Phase 1 performs local FFmpeg pause editing, creates a separate ordinary organization media item and hands it to the composer. It makes no paid model/transcription call and adds no schema, queue or worker. See `docs/VIDEO-EDITOR-BACKEND.md` for the implemented limits and runtime contract.
+PR #214 deployed on October 17 as `ae171190e5d5e105259aeb42fbd004276f977010` after matching CI and fresh independent exact-HEAD review. Phase 1 performs local FFmpeg pause editing, creates a separate ordinary organization media item and hands it to the composer. It makes no paid model/transcription call and adds no schema, queue or worker. The streaming repair reduced isolated render memory; runtime health/public checks passed. Signed-in production and physical-phone acceptance remain unverified. See `docs/VIDEO-EDITOR-BACKEND.md` for limits and `docs/RELEASE-LEDGER.md` for exact release evidence.
 
-Preserve the paused billing candidate. Current editor eligibility inherits the existing Create/AI guard: with the Stripe publishable key absent, all authenticated organization roles are eligible; it is not an internal-only gate or payment-status check. Capacity and acceptance evidence, current-main integration, matching CI and fresh exact-HEAD review remain release gates. Ordinary reviewed safe releases are authorized through October 19 Pacific; genuinely major infrastructure, business-policy, credential or spending changes still need a scoped decision.
+Preserve the paused billing candidate. Current editor eligibility inherits the existing Create/AI guard: with the Stripe publishable key absent, all authenticated organization roles are eligible; it is not an internal-only gate or payment-status check. Current-main integration, matching CI, independent review and ordinary deployment gates passed. Isolated synthetic capacity checks passed; combined production-host load and authenticated/physical-mobile behavior remain acceptance gaps. Ordinary reviewed safe releases are authorized through October 19 Pacific; genuinely major infrastructure, business-policy, credential or spending changes still need a scoped decision.
 
 ### 1. External platform verification — ACTIVE
 
@@ -116,7 +116,7 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-Complete PR #214 against current main: verify source selection, bounded local rendering, preview/download and exact edited-media composer handoff; resolve the measured render-memory concern with ordinary code where possible. Preserve existing billing and entitlement behavior. Record any unresolved capacity or activation decision precisely instead of treating ordinary release approval as missing.
+Obtain authorized signed-in production and physical-phone acceptance for the deployed editor: upload/select a source, render, preview/download and confirm the exact edited-media composer handoff and recovery behavior. Do not publish real posts without scoped approval. Preserve paused billing and current entitlement behavior. Provider-dashboard, paid billing acceptance and full Temporal/media restore gates remain separate; do not claim paid launch readiness from this deployment.
 
 The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 
