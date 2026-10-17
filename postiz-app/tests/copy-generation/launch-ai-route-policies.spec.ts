@@ -24,5 +24,5 @@ it.each([
     switchToHttp: () => ({ getRequest: () => ({ path: '/fixture', org: { id: 'org-1', createdAt: new Date(), users: [{ role: 'SUPERADMIN' }] }, query: {} }) }),
   };
   await expect(guard.canActivate(context as any)).rejects.toMatchObject({ response: { section: Sections.AI } });
-  expect(check).toHaveBeenCalledWith('org-1', expect.any(Date), 'SUPERADMIN', [[AuthorizationActions.Create, Sections.AI]], undefined);
+  expect(check).toHaveBeenCalledWith('org-1', expect.any(Date), 'SUPERADMIN', [[AuthorizationActions.Create, Sections.AI]], undefined, undefined);
 });
