@@ -57,6 +57,10 @@ async function choose(page: Page, name = 'Synthetic talking head.mp4') {
 test('Video Editor: navigation, manual playback and responsive workspace', async ({ page }, info) => {
   const mode: Mode = {};
   await fixtures(page, mode);
+  // Next dev can evict this bundle during earlier smoke cases. Compile it as
+  // bootstrap before measuring the real link navigation with the usual budget.
+  const warmupResponse = await page.request.get('/video-editor');
+  expect(warmupResponse.status()).toBe(200);
   await openApp(page, '/media');
   if (mobileProject(info)) {
     const nav = page.getByRole('navigation', { name: 'Mobile navigation' });
