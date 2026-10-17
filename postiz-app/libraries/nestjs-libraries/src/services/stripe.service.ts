@@ -1,4 +1,5 @@
 import Stripe from 'stripe';
+import { captureBillingConversion } from '@gitroom/nestjs-libraries/track/posthog.conversions';
 import { Injectable } from '@nestjs/common';
 import { Organization, User } from '@prisma/client';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
@@ -119,7 +120,7 @@ export class StripeService {
       return { ok: false };
     }
 
-    return this._subscriptionService.createOrUpdateSubscription(
+    const result = await this._subscriptionService.createOrUpdateSubscription(
       event.data.object.status !== 'active',
       uniqueId,
       event.data.object.customer as string,
@@ -128,6 +129,13 @@ export class StripeService {
       period,
       event.data.object.cancel_at
     );
+    if (event.livemode && event.data.object.status === 'trialing') {
+      await captureBillingConversion(
+        'trial_started', event.data.object.metadata.userId,
+        event.data.object.id, event.data.object.created
+      );
+    }
+    return result;
   }
   async updateSubscription(event: Stripe.CustomerSubscriptionUpdatedEvent) {
     const {
@@ -836,6 +844,12 @@ export class StripeService {
 
     const { userId, ud } = subscription.metadata;
     const user = await this._userService.getUserById(userId);
+    if (event.livemode && user && subscription.metadata.service === 'gitroom' && event.data.object.amount_paid > 0) {
+      await captureBillingConversion(
+        'subscription_payment_completed', user.id,
+        event.data.object.id, event.data.object.created
+      );
+    }
     if (user && user.ip && user.agent) {
       this._trackService.track(ud, user.ip, user.agent, TrackEnum.Purchase, {
         value: event.data.object.amount_paid / 100,

@@ -5,7 +5,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import Link from 'next/link';
 import { Button } from '@gitroom/react/form/button';
 import { Input } from '@gitroom/react/form/input';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { classValidatorResolver } from '@hookform/resolvers/class-validator';
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
 import { GithubProvider } from '@gitroom/frontend/components/auth/providers/github.provider';
@@ -107,6 +107,7 @@ export function RegisterAfter({
   const router = useRouter();
   const fireEvents = useFireEvents();
   const track = useTrack();
+  const signupStarted = useRef(false);
   const [datafast_visitor_id] = useCookie('datafast_visitor_id');
   const isAfterProvider = useMemo(() => {
     return !!token && !!provider;
@@ -123,6 +124,10 @@ export function RegisterAfter({
   });
   const fetchData = useFetch();
   const onSubmit: SubmitHandler<Inputs> = async (data) => {
+    if (!signupStarted.current) {
+      fireEvents('signup_started');
+      signupStarted.current = true;
+    }
     setLoading(true);
     await fetchData('/auth/register', {
       method: 'POST',

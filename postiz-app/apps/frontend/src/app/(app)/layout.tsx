@@ -90,6 +90,8 @@ export const metadata: Metadata = {
 };
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
+  // Alias prevents Next.js from freezing NEXT_PUBLIC values at image build time.
+  const runtimeEnvironment = process.env;
   const cookieStore = await cookies();
   const language = cookieStore.get(cookieName)?.value || fallbackLng;
   const Plausible = !!process.env.STRIPE_PUBLISHABLE_KEY
@@ -210,8 +212,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               domain={!!process.env.IS_GENERAL ? 'postiz.com' : 'gitroom.com'}
             >
               <PHProvider
-                phkey={process.env.NEXT_PUBLIC_POSTHOG_KEY}
-                host={process.env.NEXT_PUBLIC_POSTHOG_HOST}
+                phkey={runtimeEnvironment.NEXT_PUBLIC_POSTHOG_KEY}
+                host={runtimeEnvironment.NEXT_PUBLIC_POSTHOG_HOST}
+                environment={process.env.NODE_ENV}
               >
                 <LayoutContext>
                   <UtmSaver />
