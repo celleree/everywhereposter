@@ -1,6 +1,6 @@
 # Current Work
 
-Updated: 2026-09-14
+Updated: 2026-10-17
 
 Use this file when the user asks to continue the project, continue a roadmap, decide what to do next, or coordinate work across multiple EverywherePoster workstreams. Do not load it for a narrow bug with an already-named issue or file unless the current priority matters.
 
@@ -13,6 +13,12 @@ For long-running local Codex Desktop orchestration, also follow `docs/brain/ORCH
 Get EverywherePoster to a safe early paid launch with the core repurposing/publishing workflow usable, external social-app reviews completed, and production operations verified.
 
 ## Priority workstreams
+
+### User-requested engineering priority — Video Editor completion
+
+Continue the existing PR #214 integration; the user reactivated completion on October 17. Phase 1 performs local FFmpeg pause editing, creates a separate ordinary organization media item and hands it to the composer. It makes no paid model/transcription call and adds no schema, queue or worker. See `docs/VIDEO-EDITOR-BACKEND.md` for the implemented limits and runtime contract.
+
+Preserve the paused billing candidate. Current editor eligibility inherits the existing Create/AI guard: with the Stripe publishable key absent, all authenticated organization roles are eligible; it is not an internal-only gate or payment-status check. Capacity and acceptance evidence, current-main integration, matching CI and fresh exact-HEAD review remain release gates. Ordinary reviewed safe releases are authorized through October 19 Pacific; genuinely major infrastructure, business-policy, credential or spending changes still need a scoped decision.
 
 ### 1. External platform verification — ACTIVE
 
@@ -104,13 +110,13 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Parked / not current by default
 
-- PR #83 prompt-guided video editor work is not a current priority. Do not resume it unless the user explicitly reactivates it.
+- PR #83 prompt-guided video editor work remains parked. The current reactivation applies to the existing PR #214 local FFmpeg integration, not a replacement implementation.
 - PR #82 Codex verification-loop automation remains separate from ordinary local Codex orchestration. Do not treat the draft PR as required for the root orchestrator protocol.
 - Broad rebrand cleanup in Issue #47 is a tracker. Use its outstanding items when they block launch or external verification rather than reopening completed rebrand work.
 
 ## Next bounded engineering task
 
-Phase 2 PR #106 has a bounded non-destructive CI-storage repair underway after required CI failed, and Phase 3 waits for that image to settle. Phase 5 repository work is complete; the combined internal/public deployment path awaits separate production approval. Phase 6 has one docs-only observation, with the remaining representative matrix and final consolidation pending.
+Complete PR #214 against current main: verify source selection, bounded local rendering, preview/download and exact edited-media composer handoff; resolve the measured render-memory concern with ordinary code where possible. Preserve existing billing and entitlement behavior. Record any unresolved capacity or activation decision precisely instead of treating ordinary release approval as missing.
 
 The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 
