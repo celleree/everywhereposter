@@ -284,16 +284,24 @@ export class AiWalletService {
     return { reservation, row };
   }
 
-  async dispatchTranscription(organizationId: string, reservationId: string, transcriptionId: string, generation: number,
-    resumeExisting = false) {
-    if (!resumeExisting) this.enabled();
+  async dispatchTranscription(organizationId: string, reservationId: string, transcriptionId: string, generation: number) {
     return this.transact(organizationId, async tx => {
       const { reservation, row } = await this.transcription(tx, organizationId, reservationId, transcriptionId, generation);
       if (row.status !== 'PROCESSING') throw new Error('Transcription is no longer active.');
       if ((await this.wallet(tx, organizationId)).status !== 'ACTIVE') throw new Error('Wallet requires reconciliation.');
       if (reservation.state !== 'RESERVED') return { dispatch: false, reservation };
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 2))::text`;
+      const subscription = await tx.subscription.findFirst({ where: { organizationId, deletedAt: null },
+        select: { subscriptionTier: true } });
+      this.enabled();
+      if (process.env.AI_WALLET_TRANSCRIPTION_ENABLED?.trim().toLowerCase() !== 'true') {
+        throw Error('Prepaid transcription adapter is disabled.');
+      }
+      if (subscription?.subscriptionTier !== 'LAUNCH_V1') throw Error('Prepaid transcription is not included in this plan.');
       return { dispatch: true, reservation: await tx.aiWalletReservation.update({ where: { id: reservationId }, data: { state: 'DISPATCHED' } }) };
-    });
+      // As with text dispatch, read the plan after reconciliation releases its
+      // shared lock; a snapshot taken before waiting could retain revoked access.
+    }, Prisma.TransactionIsolationLevel.ReadCommitted);
   }
 
   /** First commit: receipt and recoverable business output together, still held.

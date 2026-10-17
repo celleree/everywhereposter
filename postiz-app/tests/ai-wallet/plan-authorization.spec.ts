@@ -102,7 +102,7 @@ describe('per-plan prepaid AI authorization', () => {
     }
   });
 
-  it('resumes a verified held reservation despite plan and flag changes', async () => {
+  it('denies a held reservation after revocation without falling through to legacy execution', async () => {
     process.env.AI_WALLET_ENABLED = process.env.AI_WALLET_TRANSCRIPTION_ENABLED = process.env.BILLING_ENABLED = 'false';
     const audioSha256 = 'a'.repeat(64);
     const requestFingerprint = snapshotFingerprint({ organizationId: 'org-1', transcriptionId: 'job-1', generation: 1,
@@ -118,9 +118,13 @@ describe('per-plan prepaid AI authorization', () => {
     const model = { transcribePrepaidAudio: jest.fn() };
     const service = new AiWalletTranscriptionService(wallet as any, model as any);
     await expect(service.run('org-1', 'job-1', 1, false, async () => ({ file: {} as any, audioSha256 } as any)))
-      .resolves.toBe(reservation);
+      .rejects.toThrow('disabled');
     expect(wallet.reserve).not.toHaveBeenCalled();
-    expect(wallet.dispatchTranscription).toHaveBeenCalledWith('org-1', 'reservation-1', 'job-1', 1, true);
+    expect(wallet.dispatchTranscription).not.toHaveBeenCalled();
+    const lifecycle = lifecycleHarness('STANDARD', { run: jest.fn((org, job, generation, allow, prepare) =>
+      service.run(org, job, generation, allow, prepare)) });
+    await expect(lifecycle.service.processTranscription('job-1', 1)).rejects.toThrow('disabled');
+    expect(lifecycle.model.transcribeVideo).not.toHaveBeenCalled();
     expect(model.transcribePrepaidAudio).not.toHaveBeenCalled();
   });
 

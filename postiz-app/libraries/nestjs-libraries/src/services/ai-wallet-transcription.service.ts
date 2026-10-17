@@ -27,18 +27,22 @@ export class AiWalletTranscriptionService {
       return this.wallet.finishTranscription(organizationId, existing.id, transcriptionId, generation);
     }
     if (existing && existing.state !== 'RESERVED') return existing;
-    // A legacy bundled-AI plan may resume accounting that already exists, but
-    // it must never acquire a new prepaid reservation merely because the
-    // global wallet adapter is enabled.
+    // A legacy bundled-AI plan without prepaid work keeps its existing path.
     if (!existing && !allowNewReservation) return undefined;
+    // A hold is not execution authority. Incurred work returned above may settle
+    // after revocation, but every undispatched operation needs a current grant.
+    if (!allowNewReservation || !enabled(process.env.AI_WALLET_ENABLED) || !isBillingEnabled() ||
+        !enabled(process.env.AI_WALLET_TRANSCRIPTION_ENABLED)) {
+      throw Error('Prepaid transcription adapter is disabled.');
+    }
 
     let quote: PricingQuote;
     let reservation: any;
     let resumeExisting = false;
     if (existing) {
       // An accepted reservation owns an immutable quote. Revalidating that
-      // snapshot and its input fingerprint lets held work resume after a
-      // plan or flag change without accepting current environment pricing.
+      // snapshot and its input fingerprint lets authorized held work resume
+      // without accepting current environment pricing.
       quote = validatePricingQuote(existing.quoteSnapshot);
       if (quote.provider !== 'openai' || quote.model !== PREPAID_TRANSCRIPTION_MODEL) {
         throw Error('Reservation does not match prepaid transcription.');
@@ -46,10 +50,6 @@ export class AiWalletTranscriptionService {
       reservation = existing;
       resumeExisting = true;
     } else {
-      if (!enabled(process.env.AI_WALLET_ENABLED) || !isBillingEnabled() ||
-          !enabled(process.env.AI_WALLET_TRANSCRIPTION_ENABLED)) {
-        throw Error('Prepaid transcription adapter is disabled.');
-      }
       let card: any;
       try { card = JSON.parse(process.env.AI_WALLET_TRANSCRIPTION_RATE_CARD || ''); }
       catch { throw Error('A verified transcription rate card is required.'); }
@@ -70,7 +70,7 @@ export class AiWalletTranscriptionService {
       quote = { ...quote, requestFingerprint };
       reservation = await this.wallet.reserve(organizationId, key, quote.provider, quote.model, quotedCharge(quote), quote);
     }
-    const claim = await this.wallet.dispatchTranscription(organizationId, reservation.id, transcriptionId, generation, resumeExisting);
+    const claim = await this.wallet.dispatchTranscription(organizationId, reservation.id, transcriptionId, generation);
     if (!claim.dispatch) return claim.reservation;
     let requestId: string | undefined;
     try {
