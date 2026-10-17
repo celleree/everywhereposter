@@ -27,7 +27,7 @@ export interface CookedEdits { cut?: [number, number][]; restore?: [number, numb
 interface OwnedJob {
   workspace: string; marker: string; orgId: string; sourceSha256: string; active: boolean;
   durationSeconds: number; revision: number; ready: boolean; sourcePath: string;
-  blocks: [number, number][]; selected: [number, number][];
+  blocks: [number, number][]; selected: [number, number][]; verifiedOutputSha256?: string;
   command?: Omit<CookedCommand, 'stage' | 'script' | 'args' | 'timeoutMs'>;
 }
 const MiB = 1024 * 1024;
@@ -174,10 +174,9 @@ export class CookedEditorRuntime {
         AI_EDITOR_LIBRARY: join(workspace, 'library'), TMPDIR: join(workspace, 'tmp'),
         AI_EDITOR_WHISPER_MODEL: await realpath(this.config.modelPath), HF_HUB_OFFLINE: '1', HF_DATASETS_OFFLINE: '1',
         OMP_NUM_THREADS: '2', OPENBLAS_NUM_THREADS: '1', MKL_NUM_THREADS: '1' };
-      const args: Record<PipelineStage, string[]> = {
+      const args: Record<Exclude<PipelineStage, 'verify'>, string[]> = {
         transcribe: [source, join(edit, 'words.raw.json'), '--engine', 'whisper', '--lang', 'en'],
         retakes: ['propose', edit], build_timeline: [source, edit], render: [source, edit, '--max', '1080'],
-        verify: [edit, '--engine', 'whisper'],
       };
       job.command = { python: this.config.python, launcher: this.config.launcherPath, workspace, env,
         rssBytes: this.rss, workspaceBytes: this.disk };
@@ -189,12 +188,14 @@ export class CookedEditorRuntime {
             r.some(n => typeof n !== 'number' || !Number.isFinite(n)) || r[0] < 0 || r[0] >= r[1] || r[1] > job!.durationSeconds)) throw new Error('INVALID_BOUNDARY_POLICY');
       job.blocks = policy.blocks;
       for (const stage of ['transcribe', 'build_timeline', 'render', 'audit_render', 'verify'] as const) {
+        if (stage === 'verify') { job.verifiedOutputSha256 = await this.verify(job, source, edit, [], started); continue; }
         await this.execute(job, stage, stage === 'build_timeline' || stage === 'audit_render' ? helper : join(native, scripts[stage]),
           stage === 'build_timeline' || stage === 'audit_render' ? [stage === 'build_timeline' ? 'build' : 'audit', this.config.sourceRoot, source, edit] : args[stage], started);
       }
       await this.review(job, 'start', started); await this.review(job, 'final', started);
       await regular(join(edit, 'cut.mp4'));
       if (await digest(source) !== job.sourceSha256 || await digest(input.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
+      if (await digest(join(edit, 'cut.mp4')) !== job.verifiedOutputSha256) throw new Error('VERIFIED_DRAFT_CHANGED');
       job.ready = true;
       return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4'), blocks: job.blocks, removedBlocks: job.selected };
     } catch (error) { throw Object.assign(error as Error, { jobId: job ? jobId : undefined }); }
@@ -202,13 +203,41 @@ export class CookedEditorRuntime {
   }
   private async execute(job: OwnedJob, stage: Stage, script: string, args: string[], started: number) {
     // Native render-cache mtimes can make an old verification transcript appear fresh.
-    if (stage === 'verify') await rm(join(job.workspace, 'edit/cut.transcript.json'), { force: true });
+    if (stage === 'verify') for (const name of ['cut.transcript.json', 'asr-diagnostic.json', 'audio-integrity.json']) await rm(join(job.workspace, 'edit', name), { force: true });
     const remaining = this.overallMs - (Date.now() - started);
     if (remaining <= 0) throw new Error('OVERALL_TIMEOUT');
     if (await bytes(job.workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
     await this.runner({ ...job.command!, stage, script, args, timeoutMs: Math.min(this.stageMs, remaining) });
     if (Date.now() - started >= this.overallMs) throw new Error('OVERALL_TIMEOUT');
     if (await bytes(job.workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
+    if (stage === 'render') await this.releaseRenderCache(job);
+  }
+  private async verify(job: OwnedJob, source: string, edit: string, selected: [number, number][], started: number) {
+    const script = join(dirname(this.config.launcherPath), 'cooked-audio-integrity.py'); await regular(script);
+    const plan = JSON.stringify({ version: 'source-plan-audio-v1', sourceSha256: job.sourceSha256, removedBlocks: selected });
+    await this.execute(job, 'verify', script, ['verify', source, edit, plan], started);
+    const path = join(edit, 'audio-integrity.json'); await regular(path);
+    if ((await stat(path)).size > 16 * 1024) throw new Error('INVALID_AUDIO_PROOF');
+    const proof = JSON.parse(await readFile(path, 'utf8'));
+    if (proof.version !== 'source-plan-audio-v1' || proof.sourceSha256 !== job.sourceSha256 ||
+        proof.planSha256 !== createHash('sha256').update(plan).digest('hex') ||
+        typeof proof.outputSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(proof.outputSha256) ||
+        !Number.isSafeInteger(proof.audioPackets) || proof.audioPackets <= 0 ||
+        !Number.isSafeInteger(proof.frameCount) || proof.frameCount <= 0 || proof.frameCount > 7200 ||
+        await digest(join(edit, 'cut.mp4')) !== proof.outputSha256) throw new Error('INVALID_AUDIO_PROOF');
+    return proof.outputSha256 as string;
+  }
+  private async releaseRenderCache(job: OwnedJob) {
+    // Encoded video segments are regenerable and excluded from verified checkpoints.
+    // Release their tmpfs pages before verification; preserve the render and review history.
+    await this.assertOwned(job);
+    const edit = join(job.workspace, 'edit'), cache = join(edit, '.segments');
+    if (!(await lstat(edit)).isDirectory() || await realpath(edit) !== edit) throw new Error('CACHE_PATH_MISMATCH');
+    let info;
+    try { info = await lstat(cache); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+    if (!info.isDirectory() || await realpath(cache) !== cache) throw new Error('CACHE_PATH_MISMATCH');
+    await rm(cache, { recursive: true });
   }
   private async review(job: OwnedJob, action: 'start' | 'round' | 'final', started: number) {
     const edit = join(job.workspace, 'edit');
@@ -252,6 +281,7 @@ export class CookedEditorRuntime {
       // Preserve the verified native draft before a speculative edit. Cache segments
       // can be regenerated; every checkpoint byte still counts toward the job cap.
       previousRender = await digest(join(edit, 'cut.mp4'));
+      if (previousRender !== job.verifiedOutputSha256) { job.ready = false; throw new Error('VERIFIED_DRAFT_CHANGED'); }
       previousReview = await digest(join(edit, 'review.json'));
       if (await bytes(job.workspace) + await bytes(edit) + 8 * MiB > this.disk) throw new Error('CHECKPOINT_LIMIT');
       checkpoint = await mkdtemp(join(job.workspace, 'verified-edit-'));
@@ -264,20 +294,27 @@ export class CookedEditorRuntime {
       } });
       job.ready = false; job.revision++;
       await this.execute(job, 'apply_edits', helper, ['apply', this.config.sourceRoot, source, edit, request], started);
+      let verifiedOutputSha256 = '';
       for (const stage of ['build_timeline', 'render', 'audit_render', 'verify'] as const) {
+        if (stage === 'verify') { verifiedOutputSha256 = await this.verify(job, source, edit, nextSelected, started); continue; }
         await this.execute(job, stage, stage === 'build_timeline' || stage === 'audit_render' ? helper : join(this.config.sourceRoot, 'plugins/ai-editor/skills/cut/scripts', scripts[stage]),
           stage === 'build_timeline' || stage === 'audit_render' ? [stage === 'build_timeline' ? 'build' : 'audit', this.config.sourceRoot, source, edit] :
-            stage === 'verify' ? [edit, '--engine', 'whisper'] : [source, edit, '--max', '1080'], started);
+            [source, edit, '--max', '1080'], started);
       }
       await this.review(job, 'round', started);
       await regular(join(edit, 'cut.mp4'));
       if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
+      if (await digest(join(edit, 'cut.mp4')) !== verifiedOutputSha256) throw new Error('VERIFIED_DRAFT_CHANGED');
       await rm(checkpoint, { recursive: true }); checkpoint = undefined;
+      job.verifiedOutputSha256 = verifiedOutputSha256;
       job.ready = true; job.selected = nextSelected;
       return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace: job.workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4'), blocks: job.blocks, removedBlocks: job.selected };
     } catch (error) {
       let previousRevisionRestored = false;
-      if ((error as Error).message === 'NATIVE_verify_FAILED' && checkpoint && !job.ready) {
+      // Every awaited native command has exited/killed its process group before
+      // rejection. A render/resource failure needs the same guarded recovery as
+      // a rejected transcript; never strand or expose the speculative draft.
+      if (checkpoint && !job.ready) {
         try {
           await this.assertOwned(job);
           if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');

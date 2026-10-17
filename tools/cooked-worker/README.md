@@ -29,14 +29,16 @@ alignment also misplaced that boundary. Native frame quantization can cross
 phoneme boundaries even with correct labels. A successful ASR comparison alone
 is not proof of sample-accurate word removal or human speech quality.
 
-The adapter never widens a selected word to a phrase or weakens native verification.
+The adapter never widens a selected word to a phrase. Audio acceptance uses the
+source-plan proof below; transcript agreement cannot authorize output.
 Before each trial mutation it checkpoints the verified native draft, excluding
 regenerable segment caches and reserving capacity within the existing workspace
 limit. A native verification rejection still returns422. Only after a complete
 guarded restoration, source checks and exact prior render/review hashes does the
 worker retain the previous ready state and revision. The user may discard the
 pending selection and deliberately choose another edit. Rollback failure and
-other native failures remain cleanup-only. No rejected render becomes output.
+other native failures recover only through the same complete guarded restoration.
+Rollback failure remains cleanup-only. No rejected render becomes output.
 
 This recovery is a fallback, not a precise single-word editing claim. General
 single-word accuracy still needs a validated alignment and audio-boundary solution.
@@ -47,8 +49,9 @@ Current native mode is `quiet-block-v1`. Phase1 pause trimming remains the exist
 FFmpeg editor and is unchanged. This mode only removes explicitly selected complete
 speech blocks with both source-time edges in verified long quiet gaps. The initial
 draft retains all source frames; automatic retake/word and pause cuts are bypassed.
-The native renderer, transcript verifier, review/history and rejected-edit recovery
-are reused unchanged; upstream source/model files are not patched.
+The native renderer, review/history and rejected-edit recovery are reused; upstream
+source/model files are not patched. The repository-owned audio proof is authoritative,
+and the pinned transcript verifier remains available only for explicit diagnostics.
 
 Boundary discovery uses Phase1 Natural's minimum pause/padding, a stricter-45dB
 quiet threshold and installed offline VAD, including local-gain speech veto inside
@@ -69,18 +72,48 @@ bounded per-stage deadline is180seconds, total operation600seconds, with a630sec
 client deadline; these are ceilings, not processing-time promises. A longer CPU
 occupancy does not establish capacity on the shared production host.
 
-An uncut real-speech AAC render can still fail the unchanged tiny-model transcript
-verifier when a second ASR pass omits kept words. Such a rejection remains a
-rejection; no acoustic comparison overrides it and no failed output is accepted.
-Actual raw-footage quality and full-duration resource evidence must be checked
-separately before activation.
+### Source-plan audio proof
 
-The full117-second normalized raw fixture exceeded512MiB during verification
-even with its client outside the worker cgroup. The existing512MiB one-session
-override is therefore not accepted for this duration. Local1GiB evaluation is
-separate from live authorization; any proposed1GiB/oneCPU configuration needs
-exact image/resource receipts and fresh shared-host capacity/security review
-before activation. Source, work/tmp disk and single-session limits are unchanged.
+`cooked-audio-integrity.py verify SOURCE EDIT TRUSTED_PLAN_JSON` accepts only
+`source-plan-audio-v1` with an actual source SHA-256 and exact removed block ranges.
+The runtime supplies that plan from its in-memory source identity and requested
+next selection. Mutable generated policies, manifests and old receipts cannot
+authorize a different source or range. Incomplete proof rejects the edit.
+
+The checker derives the retained integer frames independently from that plan,
+checks the disk timeline against it, and regenerates expected AAC from the actual
+source using the pinned renderer's trim, 8ms endpoint fades and one-pass AAC192k
+recipe. An uncut, aligned single-track AAC draft preserves actual source packets.
+Every retained audio packet payload, integer timestamp, duration and side-data,
+decoder configuration, and the complete mono16k signed16 decoded waveform and
+sample count must match. No correlation threshold, word-count tolerance or ASR
+agreement substitutes for that proof. Source and output hashes are rechecked.
+
+Video frame counts, dimensions, format and presentation clocks must match the
+requested retained plan. Native MP4 segment movie durations round up to milliseconds
+before concat; exact join offsets are derived from the trusted frame spans, with
+at most1ms total A/V offset. Arbitrary timing drift is rejected. This verifies
+audio provenance and A/V clocks, not independent pixel provenance after lossy
+H264 encoding, semantic edit quality or a human judgment of intelligibility.
+
+The runtime binds the bounded proof receipt to its exact request and actual cut,
+captures the resulting hash before review, and rechecks it after review. A failed
+edit retains the previous ready revision only after complete guarded restoration.
+Unsupported transformations, multiple A/V tracks and missing evidence fail closed.
+
+Normal acceptance does not load a second ASR model. For an explicit offline
+diagnostic, run `diagnose SOURCE EDIT TRUSTED_PLAN_JSON UPSTREAM_ROOT` through the
+same bounded supervisor. It first reruns complete physical proof, then calls the
+unchanged pinned verifier and records `asr-diagnostic.json` with
+`authoritative:false`. A transcript difference cannot invalidate or replace the
+physical proof; failed proof cannot reach ASR. Initial source transcription still
+supplies approximate review word labels. Semantic quality remains a separate gate.
+
+Full-duration memory and shared-host capacity remain separate activation gates.
+Earlier720p multispan renders exceeded512MiB; removing repeat ASR does not prove
+that every accepted source size fits the one-session worker. Local proxy or1GiB
+evidence must retain its exact quality/resource scope. No resource or scratch
+configuration change is authorized by this verification policy.
 
 Job/find receipts expose `editing` with `mode`, `blocks`, `removedBlocks` and
 `wordCuts:false`, `arbitraryPhrases:false`, `pauseEdits:false`. Cut requests must
@@ -88,7 +121,7 @@ exactly match a published block; restore must match a currently removed block.
 Unsupported ranges return422 before mutation, preserving the previous revision.
 No word/phrase request is silently expanded. Restores retain source ordering.
 Final source decisions and rendered A/V durations are checked against that exact
-plan before the unchanged transcript verifier. Old word-selection controls do not
+plan before complete source-plan audio verification. Old word-selection controls do not
 gain permission through this capability; UI selection wiring is not added here.
 
 ## Worker and app boundary
@@ -97,6 +130,7 @@ Build the local Python/model image using the pinned preparation instructions in
 `../cooked-pilot/README.md`. Compile `cooked-editor-runtime.ts` and
 `cooked-worker.ts` and their pure `video-edit-decision.ts` and `cooked-editor-limits.ts` dependencies to CommonJS using the repository TypeScript compiler. Stage
 those four JS files, `cooked-editor-launcher.py`, `cooked-quiet-blocks.py`,
+`cooked-audio-integrity.py`,
 `worker-entry.cjs` and `worker-health.cjs` under a Docker build context's `runtime/`
 directory. Build `Dockerfile.worker` with exact `NODE_BASE` and `COOKED_BASE`
 image identities. No npm installation or application secrets are needed inside
