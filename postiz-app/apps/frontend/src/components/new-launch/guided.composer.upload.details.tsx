@@ -293,15 +293,16 @@ export const GuidedComposerUploadDetails: FC<{
       )}
 
       {!attachedMedia.length && (
-        <section className="mobile-text-post hidden">
-          <button type="button" disabled={disabled} aria-expanded={textPostOpen}
+        <div className="mobile-text-post hidden mx-auto w-full max-w-[1600px] px-[40px] pt-[12px] mobile:px-[15px]">
+          <button type="button" className="!min-h-[44px] rounded-[10px] border border-newBorder bg-newBgColorInner px-[16px] py-[10px] text-[14px] font-[700] text-newTextColor" disabled={disabled} aria-expanded={textPostOpen}
             aria-controls="mobile-post-text-fields" onClick={() => setTextPostOpen((open) => !open)}>
-            Write a text post
+            {textPostOpen ? 'Close text post' : 'Write a text post'}
           </button>
           {textPostOpen && (
             <div id="mobile-post-text-fields">
-              <label htmlFor="mobile-post-text">Post text</label>
-              <textarea id="mobile-post-text" value={postText} disabled={disabled}
+              <label className="my-[8px] block text-[14px] font-[700]" htmlFor="mobile-post-text">Post text</label>
+              <p className="mb-[8px] text-[12px] text-textColor/65">This is the text you will publish. Add media above to create a media post instead.</p>
+              <textarea id="mobile-post-text" className="block min-h-[110px] w-full rounded-[12px] border border-newBorder bg-newBgColorInner p-[12px] text-newTextColor" value={postText} disabled={disabled}
                 placeholder="Write the post you want to publish..."
                 onChange={(event) => {
                   const text = event.target.value;
@@ -312,7 +313,7 @@ export const GuidedComposerUploadDetails: FC<{
                 }} />
             </div>
           )}
-        </section>
+        </div>
       )}
 
       {!textMode && <MobileUploadContext disabled={disabled} />}
@@ -422,10 +423,8 @@ export const GuidedComposerUploadDetails: FC<{
                 />
               </section>
 
-              <section>
-                <div className="mobile:hidden text-[16px] font-[700] text-white">
-                  How should we handle the caption?
-                </div>
+              <details className="mobile:hidden">
+                <summary className="cursor-pointer text-[14px] font-[600] text-newTextColor">Caption options</summary>
                 <div className="mobile:hidden mt-[14px] flex flex-col gap-[10px]">
                   {CAPTION_OPTIONS.map((option) => (
                     <label
@@ -479,7 +478,7 @@ export const GuidedComposerUploadDetails: FC<{
                     />
                   </div>
                 )}
-              </section>
+              </details>
             </div>
           </div>
         </div>
@@ -497,7 +496,7 @@ const MobileUploadContext: FC<{ disabled: boolean }> = ({ disabled }) => {
   return (
     <section className="mobile-upload-context hidden">
       <label htmlFor="mobile-upload-context">Optional context</label>
-      <p id="mobile-upload-context-help">Add any information the AI should know about your post.</p>
+      <p id="mobile-upload-context-help">Help the AI understand your media. This guidance is not your published caption.</p>
       <div className="mobile-context-input">
         <textarea id="mobile-upload-context" value={value} disabled={disabled} maxLength={500}
           aria-describedby="mobile-upload-context-help"

@@ -7,7 +7,7 @@ export type UploadSession = {
   status: string; parts: { index: number; digest: string; byteSize: number }[];
   media?: any; error?: string; expiresAt?: string;
 };
-export type TransferState = 'Uploading' | 'Paused' | 'Resume needed' | 'Transfer complete' | 'Failed';
+export type TransferState = 'Uploading' | 'Paused' | 'Resume needed' | 'Transfer complete' | 'Finalizing' | 'Failed';
 export type Transfer = { id: string; name: string; bytes: number; sent: number; state: TransferState; session?: UploadSession; error?: string; quickRequested?: boolean; quickError?: string };
 type Fetch = (url: string, options?: RequestInit) => Promise<Response>;
 
@@ -31,8 +31,48 @@ export class ResumableTransfers {
   private pendingCreations = new Set<string>();
   private receipts = new Map<string, { resolve: (media: any) => void; reject: (error: Error) => void }>();
   private items = new Map<string, Transfer>();
+  private runs = new Map<string, Promise<void>>();
+  private cancellations = new Map<string, Promise<void>>();
+  private dismissed = new Set<string>();
   private disposed = false;
-  constructor(private fetch: Fetch, private changed: (items: Transfer[]) => void, private organizationId: string) {}
+  constructor(private fetch: Fetch, private changed: (items: Transfer[]) => void, private organizationId: string) {
+    try { this.dismissed = new Set(JSON.parse(localStorage.getItem(this.dismissKey()) || '[]')); } catch {}
+  }
+  private dismissKey() { return 'everywhereposter:dismissed-transfers:' + this.organizationId; }
+  canDismiss(item: Transfer) {
+    return item.session?.status === 'COMPLETE' && !!item.session.media?.id &&
+      !this.controllers.has(item.id) && !this.cancellations.has(item.id) &&
+      !this.pendingCreations.has(item.id) && !item.quickError &&
+      (!item.quickRequested || !!item.session.quickIntent) &&
+      (!item.session.quickIntent || ['COMPLETE', 'FAILED', 'CANCELLED'].includes(item.session.quickIntent.status));
+  }
+  dismiss(id: string) {
+    const item = this.items.get(id);
+    if (!item || !this.canDismiss(item)) return;
+    this.dismissed.add(item.session!.id);
+    try { localStorage.setItem(this.dismissKey(), JSON.stringify([...this.dismissed].slice(-200))); } catch {}
+    this.items.delete(id); this.consents.delete(id);
+    this.changed([...this.items.values()]);
+  }
+  dismissAttached(mediaIds: Set<string>, protectedIds = new Set<string>()) {
+    for (const item of this.items.values()) {
+      // Attachment is separate from server completion. Keep publishing receipts,
+      // consent uncertainty and errors visible even when media is attached.
+      if (!protectedIds.has(item.id) && mediaIds.has(item.session?.media?.id) && !item.error && !item.quickError &&
+          !item.quickRequested && !item.session?.quickIntent && this.canDismiss(item)) {
+        this.dismiss(item.id);
+      }
+    }
+  }
+  private reconcile(item: Transfer, session: UploadSession) {
+    if (item.session?.status === 'COMPLETE' && item.session.media?.id && session.status !== 'COMPLETE') return;
+    const complete = session.status === 'COMPLETE' && !!session.media?.id;
+    this.update({ ...item, session, ...(complete ? { state: 'Transfer complete' as const, sent: item.bytes, error: undefined } :
+      session.status === 'FINALIZING' ? { state: 'Finalizing' as const, error: undefined } : {}) });
+    if (complete) {
+      this.receipts.get(item.id)?.resolve(session.media); this.receipts.delete(item.id); this.files.delete(item.id);
+    }
+  }
   activate() { this.disposed = false; }
   private update(item: Transfer) {
     if (this.disposed) return;
@@ -52,17 +92,14 @@ export class ResumableTransfers {
     const result = await this.request('');
     this.durableQuickUploadEnabled = result.durableQuickUploadEnabled === true;
     for (const session of result.sessions as UploadSession[]) {
+      if (this.dismissed.has(session.id)) continue;
       const existing = [...this.items.values()].find(item => item.session?.id === session.id || item.id === session.clientId);
       if (existing) {
-        this.update({ ...existing, session });
-        if (!this.controllers.has(existing.id) && session.status === 'COMPLETE' && session.media?.id) {
-          this.update({ ...existing, session, sent: existing.bytes, state: 'Transfer complete', error: undefined });
-          this.receipts.get(existing.id)?.resolve(session.media); this.receipts.delete(existing.id); this.files.delete(existing.id);
-        }
+        this.reconcile(existing, session);
         continue;
       }
       this.update({ id: session.id, name: session.originalName, bytes: session.byteSize, sent: session.parts.reduce((sum, part) => sum + part.byteSize, 0), session,
-        state: session.status === 'COMPLETE' ? 'Transfer complete' : session.status === 'FAILED' ? 'Failed' : 'Resume needed', error: session.error });
+        state: session.status === 'COMPLETE' && session.media?.id ? 'Transfer complete' : session.status === 'FINALIZING' ? 'Finalizing' : session.status === 'FAILED' ? 'Failed' : 'Resume needed', error: session.error });
     }
     return result;
   }
@@ -75,6 +112,10 @@ export class ResumableTransfers {
     const item = [...this.items.values()].find(value => value.session?.id === session.id) || {
       id: session.id, name: session.originalName, bytes: session.byteSize, sent: session.byteSize, state: 'Transfer complete' as const,
     };
+    // A later explicit publishing choice restores polling for an attached upload
+    // whose presentation was dismissed earlier. Never hide its new results.
+    this.dismissed.delete(session.id);
+    try { localStorage.setItem(this.dismissKey(), JSON.stringify([...this.dismissed].slice(-200))); } catch {}
     this.update({ ...item, session });
     // Resumable media always uses server consent. Disabled enrollment never falls
     // back to the old browser generator, which could race a later durable choice.
@@ -130,7 +171,7 @@ export class ResumableTransfers {
   }
   hasFile(id: string) { return this.files.has(id); }
   async resume(id: string, file?: File) {
-    if (this.disposed || this.controllers.has(id) || !this.items.has(id) || this.items.get(id)?.state === 'Transfer complete') return;
+    if (this.disposed || this.cancellations.has(id) || this.controllers.has(id) || !this.items.has(id) || this.items.get(id)?.state === 'Transfer complete') return;
     if (file) this.files.set(id, file);
     if (!this.files.has(id)) throw new Error('Select the original video to resume.');
     await this.run(id);
@@ -140,14 +181,38 @@ export class ResumableTransfers {
     const item = this.items.get(id);
     if (item && item.state !== 'Transfer complete') this.update({ ...item, state: 'Paused' });
   }
-  async cancel(id: string) {
+  cancel(id: string) {
+    const existing = this.cancellations.get(id);
+    if (existing) return existing;
+    const pending = this.cancelTransfer(id).finally(() => { this.cancellations.delete(id); if (!this.disposed) this.changed([...this.items.values()]); });
+    this.cancellations.set(id, pending);
+    return pending;
+  }
+  private async cancelTransfer(id: string) {
     this.pause(id);
+    await this.runs.get(id);
     if (!this.items.get(id)?.session && this.pendingCreations.has(id)) {
       await this.refresh();
       if (!this.items.get(id)?.session) throw new Error('Upload session creation is uncertain. Return to the saved upload before cancelling.');
     }
     const item = this.items.get(id);
-    if (item?.session) await this.request('/' + item.session.id, { method: 'DELETE' });
+    if (item?.session) {
+      const session = await this.request('/' + item.session.id);
+      this.reconcile(item, session);
+      if (session.status === 'COMPLETE' && session.media?.id) return;
+      if (session.status === 'FINALIZING') throw new Error('The server is finalizing this video. Check its progress before cancelling.');
+      try { await this.request('/' + session.id, { method: 'DELETE' }); }
+      catch (error) {
+        // A browser abort does not prove server work stopped. Keep the row/file on uncertainty.
+        try {
+          const saved = await this.request('/' + session.id);
+          this.reconcile(this.items.get(id) || item, saved);
+          if (saved.status === 'COMPLETE' && saved.media?.id) return;
+        } catch {}
+        throw error;
+      }
+    }
+    if (item?.session) this.dismissed.add(item.session.id);
     this.pendingCreations.delete(id);
     this.items.delete(id); this.files.delete(id); this.consents.delete(id);
     this.receipts.get(id)?.reject(new Error('Upload cancelled.')); this.receipts.delete(id);
@@ -158,7 +223,14 @@ export class ResumableTransfers {
     for (const controller of this.controllers.values()) controller.abort();
     this.controllers.clear(); this.files.clear();
   }
-  private async run(id: string) {
+  private run(id: string) {
+    const existing = this.runs.get(id);
+    if (existing) return existing;
+    const pending = this.execute(id).finally(() => this.runs.delete(id));
+    this.runs.set(id, pending);
+    return pending;
+  }
+  private async execute(id: string) {
     if (this.disposed || this.controllers.has(id)) return;
     let item = this.items.get(id)!;
     const file = this.files.get(id)!;
@@ -210,10 +282,10 @@ export class ResumableTransfers {
       const status = (error as any).status;
       if (!creationWasPending && status >= 400 && status < 500 && status !== 408) this.pendingCreations.delete(id);
       const remaining = this.items.get(id);
-      if (!this.disposed && remaining) {
+      if (!this.disposed && remaining && remaining.session?.status !== 'COMPLETE') {
         this.update({ ...remaining, state: controller.signal.aborted ? 'Paused' : (error as any).status === 400 ? 'Failed' : 'Resume needed', error: controller.signal.aborted ? undefined : (error as Error).message });
       }
       if (status === 400) { this.receipts.get(id)?.reject(error as Error); this.receipts.delete(id); this.files.delete(id); }
-    } finally { this.controllers.delete(id); }
+    } finally { this.controllers.delete(id); if (!this.disposed) this.changed([...this.items.values()]); }
   }
 }

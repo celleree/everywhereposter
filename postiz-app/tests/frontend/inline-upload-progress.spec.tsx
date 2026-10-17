@@ -21,3 +21,21 @@ it('shows no duplicate legacy progress for layout-owned video uploads', () => {
   const view = render(<InlineUploadProgress uppy={uppy} onCancel={jest.fn()} />);
   expect(view.queryByRole('region')).toBeNull();
 });
+
+it('limits guidance to mobile during an active upload and removes it after completion', () => {
+  const progress: any = { bytesUploaded: 42, uploadStarted: 1, uploadComplete: false };
+  const upload: any = { id: 'image', name: 'photo.png', size: 100, progress };
+  const uppy = { on: jest.fn(), off: jest.fn(), getFiles: () => [upload] } as any;
+  const view = render(<InlineUploadProgress uppy={uppy} onCancel={jest.fn()} />);
+  const message = 'Keep this browser open and on screen while uploading.';
+  expect(view.getByText(message).className).toContain('hidden mobile:block');
+  progress.uploadComplete = true;
+  view.rerender(<InlineUploadProgress uppy={uppy} onCancel={jest.fn()} />);
+  expect(view.queryByText(message)).toBeNull();
+  progress.uploadComplete = false; upload.error = 'Synthetic upload failure';
+  view.rerender(<InlineUploadProgress uppy={uppy} onCancel={jest.fn()} />);
+  expect(view.queryByText(message)).toBeNull();
+  upload.error = undefined; upload.isPaused = true;
+  view.rerender(<InlineUploadProgress uppy={uppy} onCancel={jest.fn()} />);
+  expect(view.queryByText(message)).toBeNull();
+});

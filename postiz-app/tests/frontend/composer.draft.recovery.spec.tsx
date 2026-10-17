@@ -834,3 +834,35 @@ it.each([
     }
   }
 );
+
+it.each(['true', 'false'])('starts a usable empty composer without reloading after acknowledging recovered publishing (guided %s)', async enabled => {
+  process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL = enabled;
+  const first = render(<StrictMode>{composer()}</StrictMode>);
+  await screen.findByTestId('manage-modal');
+  act(() => useLaunchStore.getState().setGlobalValueText(0, 'Previous caption'));
+  const saved = draft();
+  first.unmount();
+  localStorage.setItem(key(), JSON.stringify({ ...saved, journal: { attemptId: 'previous', destinationIds: ['channel-1'], startedAt: Date.now() } }));
+  const recovered = render(<StrictMode>{composer()}</StrictMode>);
+  await screen.findByRole('region', { name: 'Publishing recovery' });
+  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge notice' }));
+  expect(screen.getByText('Publishing remains locked until you start a new draft.')).toBeTruthy();
+  expect(draft().journal?.attemptId).toBe('previous');
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Start a new draft' }));
+  expect(draft().journal?.attemptId).toBe('previous');
+  expect(useLaunchStore.getState().global[0].content).toBe('Previous caption');
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Start a new draft' }));
+  await screen.findByTestId('manage-modal');
+  await waitFor(() => expect(useLaunchStore.getState().global).toHaveLength(1));
+  expect(useLaunchStore.getState().global[0]).toMatchObject({ content: '', media: [] });
+  expect(screen.queryByRole('region', { name: 'Publishing recovery' })).toBeNull();
+  act(() => useLaunchStore.getState().setGlobalValueText(0, 'New caption'));
+  expect(draft().journal).toBeNull();
+  recovered.unmount();
+  render(<StrictMode>{composer()}</StrictMode>);
+  await screen.findByTestId('manage-modal');
+  expect(useLaunchStore.getState().global[0].content).toBe('New caption');
+  confirm.mockRestore();
+});

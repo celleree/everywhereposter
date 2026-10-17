@@ -54,7 +54,8 @@ import {
   useUppyUploader,
 } from '@gitroom/frontend/components/media/new.uploader';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
-import { UploadTransfers } from '../media/resumable-upload.provider';
+import { UploadTransfers, useDismissAttachedTransfers } from '../media/resumable-upload.provider';
+import { ComposerMediaPreview } from './composer.media.preview';
 import { InlineUploadProgress } from '../media/inline-upload-progress';
 import { MediaAutoplayContext, VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
@@ -1530,7 +1531,7 @@ export const ManageModal: FC<
                     </ComposerSection>
 
                     <ComposerSection
-                      title="Add Caption"
+                      title={props.guidedComposerActive && !guidedReview ? (globalMedia.length ? "Caption" : "Post text") : "Add Caption"}
                       mobileTitle={props.guidedComposerActive ? "Platform comments / posts" : undefined}
                       description={props.guidedComposerActive && guidedReview ? 'Add comments or follow-up posts to the shared version or a platform.' : 'Edit the shared post or a platform version.'}
                       guidedComposerSection="editor"
@@ -1955,6 +1956,7 @@ const ComposerUploadCard: FC<{
   const mediaDirectory = useMediaDirectory();
   const [loading, setLoading] = useState(false);
   const [uploadIssue, setUploadIssue] = useState('');
+  useDismissAttachedTransfers(media);
 
   const uppy = useUppyUploader({
     allowedFileTypes: 'image/*,video/mp4,video/quicktime,video/mov',
@@ -2088,13 +2090,7 @@ const ComposerUploadCard: FC<{
       >
         {media.length > 0 && (
           <div className="flex min-w-0 flex-col gap-[14px]">
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-[12px]">
-              <div className="composer-media-label text-[14px] font-[700] text-white">
-                Shared media
-              </div>
-
-            </div>
-            <div className="grid min-w-0 max-w-full grid-cols-2 gap-[10px] md:grid-cols-3 xl:grid-cols-4 mobile:gap-[8px]">
+            <div className={clsx("composer-attached-media grid min-w-0 max-w-full grid-cols-1 gap-[14px]", media.length > 1 && "lg:grid-cols-2")}>
               {media.slice(0, 8).map((item: any) => (
                 <div
                   key={item.id}
@@ -2113,12 +2109,11 @@ const ComposerUploadCard: FC<{
                         <CloseIcon size={18} aria-hidden="true" />
                       </button>
                     )}
-                  <div className="aspect-[1/1]">
-                    <VideoOrImage
-                      autoplay={false}
-                      src={mediaDirectory.set(item.path)}
-                    />
-                  </div>
+                  <ComposerMediaPreview
+                    media={item}
+                    src={mediaDirectory.set(item.path)}
+                    poster={item.thumbnail ? mediaDirectory.set(item.thumbnail) : undefined}
+                  />
                 </div>
               ))}
             </div>

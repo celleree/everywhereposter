@@ -16,11 +16,11 @@ export function InlineUploadProgress({ uppy, onCancel }: {
   const files = uppy.getFiles();
   if (!files.length) return null;
   return <section aria-label="File transfers" className="mt-[16px] min-w-0 text-newTextColor">
-    <p className="text-[12px]">You can browse Everywhere Poster while uploading. Keep this website open.</p>
+    {files.some(file => file.progress.uploadStarted && !file.progress.uploadComplete && !file.error && !file.isPaused) && <p className="text-[12px] hidden mobile:block">Keep this browser open and on screen while uploading.</p>}
     {files.map(file => <div key={file.id} className="mt-[8px] min-w-0">
       <p className="break-all text-[13px] font-[600]">{file.name}</p>
       <progress aria-label={`Upload progress for ${file.name}`} value={file.progress.bytesUploaded || 0} max={file.size || 1} className="my-[8px] block h-[8px] w-full accent-btnPrimary" />
     </div>)}
-    <button type="button" className="!min-h-[44px] px-[8px]" onClick={onCancel}>Cancel upload</button>
+    <button type="button" className="mt-[8px] !min-h-[44px] rounded-[8px] border border-newBorder bg-newBgColorInner px-[14px] py-[8px] font-[600]" onClick={onCancel}>Cancel upload</button>
   </section>;
 }
