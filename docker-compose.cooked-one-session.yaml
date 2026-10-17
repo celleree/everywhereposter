@@ -1,0 +1,13 @@
+# Additional override for the explicitly approved one-session functional test.
+# Use one owned <=15s 640x360 synthetic clip, then disable the feature and stop it.
+# This file is never loaded by the ordinary production deployment.
+services:
+  cooked-editor:
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    logging:
+      driver: json-file
+      options:
+        max-size: '1m'
+        max-file: '2'

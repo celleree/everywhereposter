@@ -79,6 +79,19 @@ describe('private cooked worker protocol', () => {
     await expect(client.stream('/jobs/' + first.jobId + '/video', org, media)).rejects.toMatchObject({ status: 404 });
     expect(await readFile(join(root, 'input.mp4'), 'utf8')).toBe('owned-input');
   });
+  it('serves the last committed state while native review writes the next round', async () => {
+    const first = await create(), path = '/jobs/' + first.jobId;
+    let release!: () => void, written!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { written = resolve; });
+    const original = runtime.revise.getMockImplementation();
+    runtime.revise.mockImplementationOnce(async (...args) => { const result = await original(...args); written(); await gate; return result; });
+    const mutation = client.json(path + '/edits', org, media, 'POST', { revision: 0, cut: [[1, 2]] });
+    await ready;
+    try { expect(await client.json(path + '/state', org, media)).toMatchObject({ round: 1, revision: 0, busy: true, rounds: [{ round: 1 }] }); }
+    finally { release(); await mutation; }
+    expect(await client.json(path + '/state', org, media)).toMatchObject({ round: 2, revision: 1, busy: false });
+  });
   it('retires the worker before another tenant can enter, including when cleanup fails', async () => {
     const request = randomUUID(); await create(request);
     const retire = jest.fn(); server.once('sessionClosed', retire);

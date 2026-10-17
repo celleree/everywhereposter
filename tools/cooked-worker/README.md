@@ -13,7 +13,7 @@ Mutations require the application's exact Origin. Recovery only reads an opaque,
 organization-scoped request receipt; reloading does not start transcription.
 
 The source is prepared using existing storage code and probed using the existing
-video editor. Accepted input is one audio-bearing MP4/MOV, at most 60 seconds,
+video editor. The current transcription configuration is English speech. Accepted input is one audio-bearing MP4/MOV, at most 60 seconds,
 100 MiB, 1080p and 60 fps, with aligned timestamps. Uploading/selecting it starts
 offline transcription and the native timeline/render/verification pipeline.
 Native word cut/restore operations use optimistic revisions and native review
@@ -72,17 +72,41 @@ directory ownership/mode above, and the existing-host resource assessment. No
 new VM, subscription, paid transcription or new OAuth/provider permission is
 required by this implementation.
 
-The recommended first action is one functional test with an owned synthetic
-clip of at most 15 seconds, in one explicitly allowed organization, followed by
-disabling the pilot. Check upload/automatic transcription, word cut/restore,
+The recommended first action additionally loads `docker-compose.cooked-one-session.yaml`
+(one CPU, 512 MiB memory with no swap) for one functional test with an owned
+synthetic clip of at most 15 seconds at 640x360, in one explicitly allowed organization, followed by
+disabling the pilot. This override also caps worker logs at two 1 MiB files.
+Check upload/automatic transcription, word cut/restore,
 playback, recovery, save/download and unchanged source. Do not publish, perform
 a production load test or broaden the allowlist as part of this action.
 
-Rollback removes the optional override and three feature variables, recreates
+Rollback removes both optional overrides and the three feature variables, recreates
 the app with its prior mount/configuration and stops the worker. Retain the
 previous app image for ordinary release rollback. Do not delete source/saved
 Media, restore a database or recursively clean persistent storage. Temporary
 drafts are disposable; they are not a backup of the source.
+
+## Isolated acceptance evidence
+
+The final worker completed a real authenticated API cut/restore/save/recovery
+loop with one owned 10.73-second synthetic 640x360 speech clip under the
+one-session limits: peak cgroup memory 254,332,928 bytes (about 243 MiB), peak
+34 PIDs, 18.35 CPU seconds, and zero memory-limit or OOM events. The restored
+output was byte-identical to the original render. Foreign-organization and
+cross-Origin requests were denied; playback ranges, duplicate-save protection,
+ordinary Media handoff and whole-worker recycling passed. Authentication and
+policy code were real; membership and Media repositories were disposable
+fixtures. This is a functional test, not a production capacity estimate.
+
+Desktop Chromium, emulated phone Chromium and emulated phone WebKit passed
+the complete UI flow (42.3/46.1/45.3 seconds). Desktop used the actual upload
+picker; phones selected the owned fixture and used touch word selection.
+Every profile recovered from one controlled state-read 503 and one transcript
+read 503, then completed cut/restore, native history/Compare, range playback,
+reload lookup, save/download and composer review with unchanged source hashes
+and zero post writes. Browser emulation does not establish physical-phone
+acceptance. The normal CI suite does not start the optional native model worker;
+this opt-in browser acceptance requires the documented disposable local worker.
 
 ## Acceptance limits
 

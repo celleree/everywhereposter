@@ -142,6 +142,23 @@ describe('private cooked native boundary', () => {
     await expect(runCookedCommand({ ...command, rssBytes: 1 })).rejects.toThrow('RSS_LIMIT');
     await writeFile(script, 'print("x" * (9 * 1024 * 1024))\n'); await expect(runCookedCommand(command)).rejects.toThrow('LOG_LIMIT');
   });
+  it('tolerates an exited proc entry reported as ESRCH while permission errors still fail closed', async () => {
+    const workspace = join(root, 'jobs'), script = join(root, 'synthetic.py');
+    await writeFile(script, 'import time\ntime.sleep(0.4)\n');
+    const command = { stage: 'verify' as const, python: config.python, launcher: config.launcherPath, script, args: [], workspace,
+      env: { PATH: config.path }, timeoutMs: 2000, rssBytes: 768 * 1024 * 1024, workspaceBytes: 512 * 1024 * 1024 };
+    const original = filesystem.readFile; let inspected = false;
+    const vanished = jest.spyOn(filesystem, 'readFile').mockImplementation((async (path: string, ...args: any[]) => {
+      if (/^\/proc\/\d+\/stat$/.test(path) && !inspected) { inspected = true; throw Object.assign(new Error('process exited'), { code: 'ESRCH' }); }
+      return (original as any)(path, ...args);
+    }) as any);
+    try { await runCookedCommand(command); expect(inspected).toBe(true); } finally { vanished.mockRestore(); }
+    const denied = jest.spyOn(filesystem, 'readFile').mockImplementation((async (path: string, ...args: any[]) => {
+      if (/^\/proc\/\d+\/stat$/.test(path)) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return (original as any)(path, ...args);
+    }) as any);
+    try { await expect(runCookedCommand(command)).rejects.toThrow('SUPERVISION_FAILED:RSS:EACCES'); } finally { denied.mockRestore(); }
+  });
   it('tolerates an enumerated temporary file disappearing while preserving other supervision failures', async () => {
     const workspace = join(root, 'jobs'), script = join(root, 'synthetic.py'), transient = join(workspace, 'transient');
     await writeFile(script, 'import time\ntime.sleep(0.4)\n'); await writeFile(transient, 'temporary');

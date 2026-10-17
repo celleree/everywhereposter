@@ -113,7 +113,7 @@ function startFrontend() {
   frontend.on('exit', code => { stopping = true; cleanupEditor(); cleanupBranding(); server.close(); process.exitCode = process.exitCode || code || 0; });
 }
 async function warmRoutes() {
-  const deadline = Date.now() + (process.env.EP_COOKED_BROWSER === '1' ? 630_000 : 330_000);
+  const deadline = Date.now() + 330_000;
   for (const route of (discovery ? ['/auth/login', '/analytics'] : videoEditor ? ['/auth/login', '/video-editor', '/create'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
     let loaded = false;
     while (!stopping && !loaded && Date.now() < deadline) {

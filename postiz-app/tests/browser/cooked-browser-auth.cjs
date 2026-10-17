@@ -10,6 +10,16 @@ module.exports=function cookedAuth(repository,probe,frontend){
   const {Reflector}=require('@nestjs/core');
   const {CookedReviewService}=require('../../libraries/nestjs-libraries/src/media-editing/cooked-review.service.ts');
   const {CookedReviewController}=require('../../apps/backend/src/api/routes/cooked-review.controller.ts');
+  // Local fixture diagnostics: bounded schema fields only, never transcript/cookies/paths.
+  const {CookedWorkerClient}=require('../../libraries/nestjs-libraries/src/media-editing/cooked-worker-client.ts');
+  const originalBytes=CookedWorkerClient.prototype.bytes,seen=new Map();
+  CookedWorkerClient.prototype.bytes=async function(path,...args){
+    try{
+      const bytes=await originalBytes.call(this,path,...args);
+      if(path.endsWith('/state')&&(seen.get(path)||0)<2){seen.set(path,(seen.get(path)||0)+1);const v=JSON.parse(bytes.toString());console.log('COOKED_STATE_SCHEMA '+JSON.stringify({round:v.round,revision:v.revision,stage:v.stage,busy:v.busy,rounds:v.rounds?.map(r=>({round:r.round,stage:r.stage}))}))}
+      return bytes;
+    }catch(e){if(path.endsWith('/state'))console.log('COOKED_STATE_REQUEST_FAILED '+JSON.stringify({status:e.status||null}));throw e}
+  };
   const service=new CookedReviewService(repository,probe),controller=new CookedReviewController(service);
   const user=id=>({id,activated:true,isSuperAdmin:false});
   const token=AuthService.signJWT(user('synthetic-user')),otherToken=AuthService.signJWT(user('other-user'));
@@ -46,6 +56,6 @@ module.exports=function cookedAuth(repository,probe,frontend){
         await controller.view(req.org,id,job,view,url.searchParams.get('k'),req,res);return true;
       }
       json(res,result);return true;
-    }catch(e){if(!res.headersSent)json(res,{message:'Owned editor fixture request rejected'},e.getStatus?.()||e.status||500);else res.destroy();return true}
+    }catch(e){console.log('COOKED_FIXTURE_REJECTION '+JSON.stringify({status:e.getStatus?.()||e.status||500,message:String(e.message||'').slice(0,256)}));if(!res.headersSent)json(res,{message:'Owned editor fixture request rejected'},e.getStatus?.()||e.status||500);else res.destroy();return true}
   }};
 };

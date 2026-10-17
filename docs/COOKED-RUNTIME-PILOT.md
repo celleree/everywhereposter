@@ -1,6 +1,6 @@
 # cooked. native runtime pilot
 
-This is an internal integration candidate, not an enabled app feature or a production worker. No route, model installation, provider call, database migration, or deployment is added.
+The native adapter remains an internal component. The authenticated app gateway, opt-in offline worker and review-page adaptations are now implemented but disabled by default; see [the worker activation and rollback guide](../tools/cooked-worker/README.md). They add no production model installation, paid provider call or database migration. Production worker activation requires separate scoped approval. The measurements below describe the original isolated adapter pilot.
 
 ## Reuse boundary
 
@@ -22,7 +22,7 @@ Every render invalidates the generated verification transcript: upstream render 
 - Ownership records are in memory. They do not survive restarts and do not establish durable jobs, retention, or crash recovery.
 - Cleanup checks organization, workspace containment, owner marker and active state. Only generated job workspaces are eligible.
 
-The adapter is not an authorization gateway. The local upstream review server must not be exposed to tenants. A future gateway must authorize every asset/state/edit request, bind browser state to the adapter revision, and choose one mutation owner: native `/edits` and `revise()` must not both write the same edit. Block local agent, external capture, update, learning and unrelated routes. Native UI URLs assume the origin root; a subpath requires a small URL adapter.
+The adapter is not an authorization gateway. The app gateway now checks source Media ownership on every operation, binds mutations to the adapter revision and exposes only bounded review/state/data/video/edit/save routes. It uses `revise()` as the single mutation owner; the upstream local HTTP server is never exposed. Local agent, capture, update, learning and unrelated routes are denied. A small pinned-HTML adapter makes URLs relative, sets JSON edit headers and preserves word selection on phone layouts. The worker admits one retained session globally and retires its entire namespace between sessions.
 
 ## Isolated evidence
 
@@ -30,12 +30,12 @@ An owned 10.73-second synthetic speech fixture ran with network disabled and an 
 
 The tiny model retained the repeated phrase but normalized both synthetic filler words; filler-removal quality is not accepted. This synthetic smoke test does not establish real-person quality, maximum-source capacity, authenticated app integration, physical-phone usability or production capacity.
 
-The unchanged desktop review UI accepted selecting words and Cut/Apply. The native phone layout hides the transcript editor and still needs a bounded UI adaptation. Basic captions were separately demonstrated using upstream `plan.chunk_captions`, `export_nle.srt` and FFmpeg subtitles; this is not proof of kinetic captions or the styled renderer.
+The original unchanged desktop review UI accepted selecting words and Cut/Apply. The original native phone layout hid the transcript editor; the current small app adapter keeps it visible and handles touch compatibility clicks. Basic captions were separately demonstrated using upstream `plan.chunk_captions`, `export_nle.srt` and FFmpeg subtitles; this is not proof of kinetic captions or the styled renderer.
 
 ## Dependency decision before packaging
 
-The pilot used faster-whisper 1.2.1 and MIT-labelled Systran faster-whisper-tiny weights pinned to repository revision `d90ca5fe260221311c53c58e660288d3deb8d356`; model.bin SHA-256 `dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1`. Downloads occurred only during isolated setup; editing ran offline. Python dependencies and weights are not included in this change.
+The pilot used faster-whisper 1.2.1 and MIT-labelled Systran faster-whisper-tiny weights pinned to repository revision `d90ca5fe260221311c53c58e660288d3deb8d356`; model.bin SHA-256 `dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1`. Downloads occurred only during isolated setup; editing ran offline. The separate local package pins and bundles these dependencies and weights; they are not installed in the ordinary app image.
 
 The source repository is MIT with separate component terms; copied source must retain its notice. CrisperWhisper noncommercial weights, paid Scribe calls, Remotion, GSAP, optional matting, music and external assets are excluded from the pilot. This is not blanket clearance of the complete upstream product.
 
-Production packaging of the Python runtime/model and the resource-isolated worker needs a scoped dependency/architecture decision. Further work includes an authenticated organization gateway, native UI adaptation, final caption integration, licensed real-person fixtures, persistence/cleanup recovery and deployment acceptance. Existing Phase 1 remains unchanged.
+The separate local Python/model image and opt-in worker package are built and isolated locally. Remaining acceptance includes final captions, licensed real-person quality fixtures, physical-device testing and production activation/resource checks. Temporary native drafts are intentionally disposable; recovery looks up a retained session without rerunning transcription, and saved outputs use ordinary Media storage. Existing production Phase 1 stays active until an ordinary reviewed release; worker activation is a separate gate.

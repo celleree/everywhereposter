@@ -115,7 +115,7 @@ export function CookedReviewWorkspace({ scope }: { scope: string }) {
   return <main className={styles.workspace} aria-label="Video Editor workspace">
     <header className={styles.header}><div><h2>Edit your video by its words</h2><p>Select words to cut or restore, then Apply. Your original stays unchanged.</p></div>
       <Button disabled={pending || saving || opening} onClick={choose}>Choose video</Button></header>
-    <p className={styles.notice}>MP4 or MOV with audio · Up to 60 seconds and 100 MB · Sessions expire after 15 idle minutes. Saved copies stay in Media Library.</p>
+    <p className={styles.notice}>English speech · MP4 or MOV with audio · Up to 60 seconds and 100 MB · Sessions expire after 15 idle minutes. Saved copies stay in Media Library.</p>
     {message && <p role="alert">{message}</p>}
     {pending ? <p role="status">Transcribing and preparing your edit… You can recover this session after reloading.</p> : !session ? <p>Choose or upload one video to start automatic transcription.</p> : null}
     {url && <iframe title="Word-level video editor" src={url} sandbox="allow-scripts allow-same-origin allow-downloads" referrerPolicy="same-origin"

@@ -69,7 +69,11 @@ async function groupRss(group: number) {
         const rss = status.match(/^VmRSS:\s+(\d+) kB$/m);
         if (rss) total += Number(rss[1]) * 1024;
       }
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    } catch (error) {
+      // /proc can report ESRCH after an enumerated process exits, including
+      // between opening its stat/status files. Permission and other errors fail.
+      if (!['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code || '')) throw error;
+    }
   }
   return total;
 }
@@ -119,7 +123,7 @@ export const runCookedCommand: CookedRunner = async (command) => {
 };
 
 /** Internal, non-durable adapter. No API route, authorization, queue, or downloads.
- * Paths in receipts are private and must only be read through a future org proxy.
+ * Paths in receipts are private and must only be read through the organization gateway.
  * Trusted config supplies a reviewed pinned upstream checkout and vetted tiny model.
  */
 export class CookedEditorRuntime {

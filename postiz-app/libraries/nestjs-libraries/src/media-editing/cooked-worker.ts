@@ -9,8 +9,14 @@ import { CookedEditorRuntime, PreparedCookedSource } from './cooked-editor-runti
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX = 100 * 1024 * 1024;
 type Receipt = Awaited<ReturnType<CookedEditorRuntime['revise']>>;
-type Job = { org: string; media: string; request: string; at: number; status: 'working' | 'ready' | 'failed'; ingress?: string; receipt?: Receipt; nativeId?: string };
+type Job = { org: string; media: string; request: string; at: number; status: 'working' | 'ready' | 'failed'; ingress?: string; receipt?: Receipt; nativeId?: string; state?: Record<string, any> };
 const error = (code: number) => Object.assign(new Error('Editor request failed'), { status: code });
+function nativeFailure(event: string, error: unknown) {
+  const message = (error as Error).message;
+  const code = typeof message === 'string' && message.length <= 128 && /^[A-Za-z_]+(?::[A-Z_]+)*$/.test(message) ? message : 'UNKNOWN';
+  // No transcripts, paths, source metadata or arbitrary native stderr.
+  console.error(JSON.stringify({ event, code }));
+}
 async function json(req: IncomingMessage) {
   let size = 0; const chunks: Buffer[] = [];
   for await (const chunk of req) { size += chunk.length; if (size > 16384) throw error(413); chunks.push(chunk); }
@@ -93,8 +99,11 @@ export function createCookedWorker(runtime: CookedEditorRuntime, workRoot: strin
           const count = new Transform({ transform(chunk, _, done) { size += chunk.length; done(size > length || size > MAX ? error(413) : null, chunk); } });
           await pipeline(req, count, createWriteStream(path, { flags: 'wx', mode: 0o600 }));
           if (size !== length) throw error(400);
-          j.receipt = await runtime.run({ orgId: org, mediaId: id, sourcePath: path, metadata }); j.nativeId = j.receipt.jobId; j.status = 'ready';
+          j.receipt = await runtime.run({ orgId: org, mediaId: id, sourcePath: path, metadata }); j.nativeId = j.receipt.jobId;
+          j.state = JSON.parse(await readFile(await ownedFile(j, join(j.receipt.editDirectory, 'review.json')), 'utf8'));
+          j.status = 'ready';
         } catch (e) {
+          nativeFailure('cooked_native_failed', e);
           const jobId = (e as { jobId?: string }).jobId;
           if (jobId) { j.nativeId = jobId; await runtime.cleanup(jobId, org).then(() => { j.nativeId = undefined; }).catch(() => {}); }
           j.status = 'failed'; throw error(422);
@@ -111,14 +120,19 @@ export function createCookedWorker(runtime: CookedEditorRuntime, workRoot: strin
         if (active) throw error(429); const body = await json(req);
         if (!body || Object.keys(body).some(k => !['revision', 'cut', 'restore', 'pause'].includes(k))) throw error(400);
         if (!Number.isSafeInteger(body.revision) || body.revision !== r.revision) throw error(409);
-        const { revision, ...edits } = body; active = true;
-        try { j.receipt = await runtime.revise(r.jobId, org, edits, revision); }
-        catch (e) { if ((e as { jobId?: string }).jobId) j.status = 'failed'; throw error(422); }
+        const { revision, ...edits } = body; active = true; let completed = false;
+        try {
+          const next = await runtime.revise(r.jobId, org, edits, revision); completed = true;
+          const state = JSON.parse(await readFile(await ownedFile(j, join(next.editDirectory, 'review.json')), 'utf8'));
+          // Publish receipt + native snapshot together, never a half-written round.
+          j.receipt = next; j.state = state;
+        }
+        catch (e) { nativeFailure('cooked_native_revision_failed', e); if (completed || (e as { jobId?: string }).jobId) j.status = 'failed'; throw error(422); }
         finally { active = false; }
         return send(res, 200, { event: true, revision: j.receipt!.revision });
       }
       if (req.method !== 'GET') throw error(405);
-      const state = JSON.parse(await readFile(await ownedFile(j, join(edit, 'review.json')), 'utf8'));
+      const state = j.state!; // last completed native round, including during a mutation
       const k = url.searchParams.get('k');
       const round = k ? state.rounds.find((x: { stage: string; round: number }) => `${x.stage}-${x.round}` === k) : state;
       if (action === 'state') {
