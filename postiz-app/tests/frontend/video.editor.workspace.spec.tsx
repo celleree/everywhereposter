@@ -159,14 +159,14 @@ it('drops an old organization response after the workspace identity changes', as
   expect(screen.getByText('Start with one video')).toBeTruthy();
 });
 
-it('waits for mode availability without starting a remembered legacy render', async () => {
+it('waits for mode selection and keeps native mode during worker recovery', async () => {
   localStorage.setItem('everywhereposter:video-editor-selection:v1:user-1:org-1', JSON.stringify({ version: 1, sourceId: video.id, pacing: 'relaxed' }));
   let resolve!: (value: unknown) => void;
   mockFetch.mockReturnValueOnce(new Promise(done => { resolve = done; }));
   render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}><VideoEditorWorkspace /></SWRConfig>);
   expect(screen.getByRole('status').textContent).toContain('Loading editor');
   expect(screen.queryByRole('button', { name: 'Choose video' })).toBeNull();
-  await act(async () => resolve({ ok: true, json: async () => ({ enabled: true }) }));
+  await act(async () => resolve({ ok: true, json: async () => ({ enabled: true, ready: false }) }));
   expect(await screen.findByText('Choose or upload one video to start automatic transcription.')).toBeTruthy();
   expect(mockFetch.mock.calls.map(([url]) => url)).toEqual(['/media/cooked/status']);
 });

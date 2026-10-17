@@ -18,10 +18,14 @@ export class CookedReviewService {
   private creating = false; private saving = false;
   private readonly saved = new Map<string, Awaited<ReturnType<MediaRepository['saveFile']>>>();
   constructor(private readonly media: MediaRepository, private readonly probe: FfmpegVideoEditorService) {}
-  private async client(org: string) {
+  private configuration(org: string) {
     const socket = process.env.COOKED_EDITOR_SOCKET;
     const enabled = (process.env.COOKED_EDITOR_ORGANIZATIONS || '').split(',').map(s => s.trim()).filter(Boolean);
     if (process.env.COOKED_EDITOR_ENABLED !== 'true' || !enabled.includes(org) || !socket || !isAbsolute(socket)) throw new ServiceUnavailableException('Word editing is unavailable.');
+    return socket;
+  }
+  private async client(org: string) {
+    const socket = this.configuration(org);
     try { const info = await lstat(socket); if (!info.isSocket() || info.isSymbolicLink()) throw new Error(); }
     catch { throw new ServiceUnavailableException('Word editing is unavailable.'); }
     return new CookedWorkerClient(socket);
@@ -34,7 +38,13 @@ export class CookedReviewService {
     }
     throw new ServiceUnavailableException('The editor is restarting. Try again shortly.');
   }
-  async status(org: string) { try { const c = await this.client(org); return { enabled: (await c.health()).ready === true }; } catch { return { enabled: false }; } }
+  async status(org: string) {
+    try { this.configuration(org); } catch { return { enabled: false, ready: false }; }
+    // A worker restart must not mount the legacy editor and auto-render its
+    // remembered source. Mode follows configuration; readiness can recover.
+    try { const c = await this.client(org); return { enabled: true, ready: (await c.health()).ready === true }; }
+    catch { return { enabled: true, ready: false }; }
+  }
   private async owner(org: string, id: string) {
     if (!/^[\w-]{1,128}$/.test(id)) throw new NotFoundException();
     const source = await this.media.getMediaByOrganizationIdAndId(org, id);

@@ -53,6 +53,9 @@ One session is retained globally, and native mutations are serialized. After
 explicit close or 15 idle minutes, the entire worker exits and Docker restarts
 its namespace and temporary filesystems before another session is admitted.
 Readiness checks tolerate this short restart without resubmitting a native job.
+An enabled organization stays in native-editor mode while the worker recovers;
+it never mounts the legacy editor and automatically renders a remembered source
+because of a temporary health failure.
 Restarts discard temporary edit history; saved Media remains available. A lost
 response is recovered by lookup, never by automatically restarting work.
 
