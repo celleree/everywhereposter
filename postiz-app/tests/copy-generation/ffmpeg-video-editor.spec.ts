@@ -27,7 +27,14 @@ describe('bounded FFmpeg editor', () => {
   it('uses argument arrays, reset timestamps, local protocols and bounded threads', () => {
     const args = buildFfmpegRenderArgs('/source ;$(echo unsafe).mp4', '/output.mp4', list());
     expect(args[args.indexOf('-i') + 1]).toBe('/source ;$(echo unsafe).mp4');
-    expect(args[args.indexOf('-filter_complex') + 1]).toContain('concat=n=2:v=1:a=1');
+    const graph = args[args.indexOf('-filter_complex') + 1];
+    expect(graph).toContain("[0:v:0]select='");
+    expect(graph).toContain("setpts='PTS-STARTPTS-(gte(T\\,2.880)*1.760)/TB'");
+    expect(graph).toContain('[0:a:0]atrim=start=0.000:end=1.120');
+    expect(graph).toContain('concat=n=2:v=0:a=1');
+    expect(graph).not.toContain('[0:v:0]trim');
+    expect(graph).not.toContain('concat=n=2:v=1:a=1');
+    expect(graph).not.toMatch(/N\/FRAME_RATE|fps=/);
     expect(args).toEqual(expect.arrayContaining(['-nostdin', '-protocol_whitelist', 'file', '-fs', '-n']));
   });
   it.each([[61, 1280, '30/1', true, 'SOURCE_TOO_LONG'], [4, 3840, '30/1', true, 'UNSUPPORTED_SOURCE'], [4, 1280, '120/1', true, 'UNSUPPORTED_SOURCE'], [4, 1280, '30/1', false, 'UNSUPPORTED_SOURCE']])('rejects duration/resolution/fps/audio limits (%s, %s, %s, %s)', async (duration, width, fps, audio, code) => {

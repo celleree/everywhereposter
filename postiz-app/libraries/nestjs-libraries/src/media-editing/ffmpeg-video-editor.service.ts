@@ -110,42 +110,53 @@ export const buildFfmpegRenderArgs = (
   );
   const filters: string[] = [];
 
-  for (const [index, decision] of keep.entries()) {
-    const start = formatSeconds(decision.sourceStartMs);
-    const end = formatSeconds(decision.sourceEndMs);
-    filters.push(
-      '[0:v:0]trim=start=' +
-        start +
-        ':end=' +
-        end +
-        ',setpts=PTS-STARTPTS[v' +
-        index +
-        ']'
-    );
-    filters.push(
-      '[0:a:0]atrim=start=' +
-        start +
-        ':end=' +
-        end +
-        ',asetpts=PTS-STARTPTS[a' +
-        index +
-        ']'
-    );
-  }
-
   if (keep.length === 1) {
-    filters.push('[v0]scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]');
-    filters.push('[a0]anull[outa]');
+    const start = formatSeconds(keep[0].sourceStartMs);
+    const end = formatSeconds(keep[0].sourceEndMs);
+    filters.push(
+      '[0:v:0]trim=start=' + start + ':end=' + end +
+        ',setpts=PTS-STARTPTS,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]'
+    );
+    filters.push(
+      '[0:a:0]atrim=start=' + start + ':end=' + end +
+        ',asetpts=PTS-STARTPTS[outa]'
+    );
   } else {
-    const concatInputs = keep
-      .map((_decision, index) => '[v' + index + '][a' + index + ']')
-      .join('');
+    // Splitting decoded video into every trim branch makes future branches
+    // retain full frames until their start time. Select once instead, then
+    // close the removed timestamp gaps while preserving source frame cadence.
+    const selection = keep.map((decision) =>
+      'gte(t\\,' + formatSeconds(decision.sourceStartMs) + ')*lt(t\\,' +
+        formatSeconds(decision.sourceEndMs) + ')'
+    ).join('+');
+    let previousKeepEndMs = keep[0].sourceEndMs;
+    const removedGaps: string[] = [];
+    for (const decision of keep.slice(1)) {
+      const removedGapMs = decision.sourceStartMs - previousKeepEndMs;
+      removedGaps.push(
+        'gte(T\\,' + formatSeconds(decision.sourceStartMs) + ')*' +
+          formatSeconds(removedGapMs)
+      );
+      previousKeepEndMs = decision.sourceEndMs;
+    }
     filters.push(
-      concatInputs + 'concat=n=' + keep.length + ':v=1:a=1[joinedv][outa]'
+      "[0:v:0]select='" + selection + "',setpts='PTS-STARTPTS-(" +
+        removedGaps.join('+') +
+        ")/TB',scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]"
     );
-    filters.push(
-      '[joinedv]scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]'
-    );
+
+    // Audio remains on sample-accurate trims; its decoded buffers are bounded
+    // compared with the full video frames removed from the fan-out graph.
+    for (const [index, decision] of keep.entries()) {
+      const start = formatSeconds(decision.sourceStartMs);
+      const end = formatSeconds(decision.sourceEndMs);
+      filters.push(
+        '[0:a:0]atrim=start=' + start + ':end=' + end +
+          ',asetpts=PTS-STARTPTS[a' + index + ']'
+      );
+    }
+    const audioInputs = keep.map((_decision, index) => '[a' + index + ']').join('');
+    filters.push(audioInputs + 'concat=n=' + keep.length + ':v=0:a=1[outa]');
   }
 
   return [
