@@ -209,6 +209,19 @@ export class CookedEditorRuntime {
     await this.runner({ ...job.command!, stage, script, args, timeoutMs: Math.min(this.stageMs, remaining) });
     if (Date.now() - started >= this.overallMs) throw new Error('OVERALL_TIMEOUT');
     if (await bytes(job.workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
+    if (stage === 'render') await this.releaseRenderCache(job);
+  }
+  private async releaseRenderCache(job: OwnedJob) {
+    // Encoded video segments are regenerable and excluded from verified checkpoints.
+    // Release their tmpfs pages before ASR; preserve the render and review history.
+    await this.assertOwned(job);
+    const edit = join(job.workspace, 'edit'), cache = join(edit, '.segments');
+    if (!(await lstat(edit)).isDirectory() || await realpath(edit) !== edit) throw new Error('CACHE_PATH_MISMATCH');
+    let info;
+    try { info = await lstat(cache); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+    if (!info.isDirectory() || await realpath(cache) !== cache) throw new Error('CACHE_PATH_MISMATCH');
+    await rm(cache, { recursive: true });
   }
   private async review(job: OwnedJob, action: 'start' | 'round' | 'final', started: number) {
     const edit = join(job.workspace, 'edit');
@@ -277,7 +290,10 @@ export class CookedEditorRuntime {
       return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace: job.workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4'), blocks: job.blocks, removedBlocks: job.selected };
     } catch (error) {
       let previousRevisionRestored = false;
-      if ((error as Error).message === 'NATIVE_verify_FAILED' && checkpoint && !job.ready) {
+      // Every awaited native command has exited/killed its process group before
+      // rejection. A render/resource failure needs the same guarded recovery as
+      // a rejected transcript; never strand or expose the speculative draft.
+      if (checkpoint && !job.ready) {
         try {
           await this.assertOwned(job);
           if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
