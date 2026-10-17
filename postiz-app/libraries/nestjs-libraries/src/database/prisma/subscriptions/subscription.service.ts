@@ -301,7 +301,8 @@ export class SubscriptionService {
     cancelAt: number | null,
     code?: string,
     org?: string,
-    expectedSubscription?: LifetimeSubscriptionSnapshot | null
+    expectedSubscription?: LifetimeSubscriptionSnapshot | null,
+    canCreateOrdinary?: () => Promise<boolean>
   ) {
     if (code) {
       if (billing === 'LAUNCH_V1') throw new Error('Launch subscriptions do not accept lifetime coupons');
@@ -353,19 +354,20 @@ export class SubscriptionService {
       throw new Error('Subscription mutation transaction is unavailable.');
     }
 
-    const persisted = await this._transaction.model.$transaction(
-      (transaction) =>
-        this._subscriptionRepository.persistOrdinarySubscription(
-          transaction,
-          isTrailing,
-          identifier,
-          customerId,
-          totalChannels,
-          billing,
-          period,
-          cancelAt
-        )
-    );
+    const persisted = await this._transaction.model.$transaction(async transaction => {
+      if (canCreateOrdinary) {
+        const organization = await transaction.organization.findFirst({ where: { paymentId: customerId } });
+        if (!organization) return { applied: false as const };
+        await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organization.id}, 2))::text`;
+        const stored = await transaction.subscription.findFirst({ where: { organizationId: organization.id } });
+        // A deleted Launch row must not be recreated by an older legacy event.
+        // Verify new legacy grants under the same lock as Launch reconciliation.
+        if (!stored && !(await canCreateOrdinary())) return { applied: false as const };
+      }
+      return this._subscriptionRepository.persistOrdinarySubscription(
+        transaction, isTrailing, identifier, customerId, totalChannels, billing, period, cancelAt
+      );
+    }, { timeout: 30000 });
 
     if (!persisted.applied) {
       return {};

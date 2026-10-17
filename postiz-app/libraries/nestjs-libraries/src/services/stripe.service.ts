@@ -155,16 +155,21 @@ export class StripeService {
     }
   }
 
+  private async currentCustomerSubscriptions(customer: string) {
+    const history = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 },
+      { timeout: 10000, maxNetworkRetries: 0 });
+    if (history.has_more) throw new ServiceUnavailableException('Subscription history is incomplete');
+    return history.data;
+  }
+
   private async reconcileLaunchEvent(event: Stripe.CustomerSubscriptionCreatedEvent | Stripe.CustomerSubscriptionUpdatedEvent | Stripe.CustomerSubscriptionDeletedEvent) {
     if (!isBillingEnabled()) return;
     const customer = event.data.object.customer as string;
     return this._subscriptionService.reconcileLaunchSubscription(customer, async () => {
       // Old event payloads may describe a recovered, cancelled, or superseded
       // subscription. Read the customer's complete current state under the lock.
-      const history = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 },
-        { timeout: 10000, maxNetworkRetries: 0 });
-      if (history.has_more) throw new ServiceUnavailableException('Launch subscription history is incomplete');
-      const candidates = history.data.filter(subscription => this.isLaunchSubscription(subscription) &&
+      const history = await this.currentCustomerSubscriptions(customer);
+      const candidates = history.filter(subscription => this.isLaunchSubscription(subscription) &&
         ['active', 'trialing', 'past_due'].includes(subscription.status));
       if (candidates.length > 1) throw new ServiceUnavailableException('Launch subscription state is ambiguous');
       const current = candidates[0];
@@ -210,7 +215,10 @@ export class StripeService {
       pricing[billing].channel!,
       billing,
       period,
-      event.data.object.cancel_at
+      event.data.object.cancel_at,
+      undefined, undefined, undefined,
+      async () => !(await this.currentCustomerSubscriptions(event.data.object.customer as string))
+        .some(subscription => this.isLaunchSubscription(subscription))
     );
   }
   async updateSubscription(event: Stripe.CustomerSubscriptionUpdatedEvent) {
@@ -238,7 +246,10 @@ export class StripeService {
       pricing[billing].channel!,
       billing,
       period,
-      event.data.object.cancel_at
+      event.data.object.cancel_at,
+      undefined, undefined, undefined,
+      async () => !(await this.currentCustomerSubscriptions(event.data.object.customer as string))
+        .some(subscription => this.isLaunchSubscription(subscription))
     );
   }
 

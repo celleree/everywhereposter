@@ -90,9 +90,13 @@ const fixtureUrl = process.env.LAUNCH_ENTITLEMENT_TEST_DATABASE_URL;
       await ready;
       const revokeRead = jest.fn(async () => null);
       const revoke = service.reconcileLaunchSubscription(customer, revokeRead);
+      const legacyRead = jest.fn(async () => false);
+      const staleLegacy = service.createOrUpdateSubscription(false, 'old_legacy', customer, 30, 'PRO', 'MONTHLY', null,
+        undefined, undefined, undefined, legacyRead);
       // The second transaction must not read a provider snapshot before owning the lock.
-      await new Promise(resolve => setTimeout(resolve, 30)); expect(revokeRead).not.toHaveBeenCalled();
-      unblock(); await Promise.all([grant, revoke]);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(revokeRead).not.toHaveBeenCalled(); expect(legacyRead).not.toHaveBeenCalled();
+      unblock(); await Promise.all([grant, revoke, staleLegacy]);
       expect(await subscriptions.getSubscription(org.id)).toBeNull();
       expect((await db.organization.findUnique({ where: { id: org.id } }))?.isTrailing).toBe(false);
       expect(owners.disableOrEnableNonSuperAdminUsers).toHaveBeenCalledWith(org.id, true);

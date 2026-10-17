@@ -1,3 +1,6 @@
+jest.mock('stripe', () => ({ __esModule: true, default: jest.fn(() => ({
+  subscriptions: { list: jest.fn().mockResolvedValue({ data: [], has_more: false }) },
+})) }));
 import { BillingController } from '../../apps/backend/src/api/routes/billing.controller';
 import { UsersController } from '../../apps/backend/src/api/routes/users.controller';
 import { StripeController } from '../../apps/backend/src/api/routes/stripe.controller';
@@ -267,6 +270,7 @@ const makeHarness = (
   };
 
   const transactionClient = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     subscription: subscriptionModel,
     organization: organizationModel,
   };

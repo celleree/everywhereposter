@@ -829,6 +829,30 @@ describe('Launch webhook status authority', () => {
     expect(h.getSubscription()).toEqual(before);
     expect(h.getIntegrations().every(i => !i.disabled)).toBe(true);
   });
+  it.each(['unpaid', 'paused', 'incomplete_expired'])('rejects stale legacy grants after %s revocation and still recovers', async status => {
+    const h = harness(); history(event(status)); await h.stripe.updateSubscription(event(status));
+    const old = event('active', 'old_legacy'); old.data.object.metadata.billing = 'PRO';
+    old.data.object.items.data[0].price.lookup_key = null; old.data.object.items.data[0].price.metadata = {};
+    await h.stripe.createSubscription(old); await h.stripe.updateSubscription(old);
+    expect(h.getSubscription()).toBeNull(); expect(h.getIntegrations().every(i => i.disabled)).toBe(true);
+    history(event('active', 'recovered')); await h.stripe.updateSubscription(event(status));
+    expect(h.getSubscription()).toMatchObject({ subscriptionTier: 'LAUNCH_V1', identifier: 'recovered' });
+    expect(h.getIntegrations().every(i => !i.disabled)).toBe(true);
+  });
+  it('preserves an initial legacy grant for a customer with no Launch history', async () => {
+    const h = harness(null); const legacy = event('active', 'legacy'); legacy.data.object.metadata.billing = 'PRO';
+    legacy.data.object.items.data[0].price.lookup_key = null; legacy.data.object.items.data[0].price.metadata = {};
+    history(legacy); await h.stripe.createSubscription(legacy);
+    expect(h.getSubscription()).toMatchObject({ subscriptionTier: 'PRO', identifier: 'legacy' });
+  });
+  it.each(['read', 'pagination'])('does not create legacy access on %s verification failure', async failure => {
+    const h = harness(null); const old = event('active', 'legacy'); old.data.object.metadata.billing = 'PRO';
+    old.data.object.items.data[0].price.lookup_key = null; old.data.object.items.data[0].price.metadata = {};
+    if (failure === 'read') mockLaunchHistory.mockRejectedValue(Error('offline read failure'));
+    else mockLaunchHistory.mockResolvedValue({ data: [], has_more: true });
+    await expect(h.stripe.updateSubscription(old)).rejects.toThrow();
+    expect(h.getSubscription()).toBeNull();
+  });
   it('makes no read or entitlement changes while billing is disabled', async () => {
     const h = harness(); process.env.BILLING_ENABLED = 'false';
     await h.stripe.updateSubscription(event('unpaid'));
