@@ -163,7 +163,7 @@ describe('private cooked native boundary', () => {
     await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('SOURCE_CHANGED');
     expect(calls).toHaveLength(0);
   });
-  it('serializes revisions with runs and makes a failed native mutation cleanup-only', async () => {
+  it('serializes mutations and restores the verified draft after a failed native edit', async () => {
     let release!: () => void, entered!: () => void;
     const pending = new Promise<void>(resolve => { release = resolve; });
     const entry = new Promise<void>(resolve => { entered = resolve; });
@@ -176,9 +176,28 @@ describe('private cooked native boundary', () => {
     await expect(runtime.run(input)).rejects.toThrow('BUSY');
     await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('BUSY');
     await expect(runtime.cleanup(initial.jobId, 'o')).rejects.toThrow('ACTIVE'); release();
-    await expect(revise).rejects.toMatchObject({ message: 'native edit failed', revision: 1, jobId: initial.jobId });
-    await expect(runtime.revise(initial.jobId, 'o', { restore: [[1, 2]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
+    await expect(revise).rejects.toMatchObject({ message: 'native edit failed', revision: 0, jobId: initial.jobId, previousRevisionRestored: true });
+    expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
+    await expect(runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 0)).rejects.toMatchObject({ previousRevisionRestored: true, revision: 0 });
     await runtime.cleanup(initial.jobId, 'o');
+  });
+  it('recovers the exact draft after render, resource, audit or review failure without accepting the edit', async () => {
+    for (const [stage, message] of [['render', 'NATIVE_render_FAILED'], ['render', 'RSS_LIMIT'],
+      ['audit_render', 'STAGE_TIMEOUT'], ['review_round', 'NATIVE_review_round_FAILED']]) {
+      let fail = false;
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c);
+        if (fail && c.stage === stage) { await writeFile(join(c.workspace, 'edit/cut.mp4'), 'unverified partial'); throw Error(message); }
+      });
+      const initial = await runtime.run(input); fail = true;
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toMatchObject({ message, revision: 0, previousRevisionRestored: true });
+      expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
+      expect(await readFile(join(initial.editDirectory, 'review.json'), 'utf8')).toBe('{"round":1}');
+      fail = false;
+      expect((await runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 0)).revision).toBe(1);
+      expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
+      await runtime.cleanup(initial.jobId, 'o');
+    }
   });
   it('rejects an unverified edit but restores the exact native draft and revision for a deliberate new choice', async () => {
     let reject = false;

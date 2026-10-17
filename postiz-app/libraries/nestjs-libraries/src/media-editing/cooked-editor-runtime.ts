@@ -290,7 +290,10 @@ export class CookedEditorRuntime {
       return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace: job.workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4'), blocks: job.blocks, removedBlocks: job.selected };
     } catch (error) {
       let previousRevisionRestored = false;
-      if ((error as Error).message === 'NATIVE_verify_FAILED' && checkpoint && !job.ready) {
+      // Every awaited native command has exited/killed its process group before
+      // rejection. A render/resource failure needs the same guarded recovery as
+      // a rejected transcript; never strand or expose the speculative draft.
+      if (checkpoint && !job.ready) {
         try {
           await this.assertOwned(job);
           if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
