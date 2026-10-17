@@ -34,6 +34,8 @@ def command(args):
     result = subprocess.run(args, capture_output=True, check=True, timeout=60)
     if len(result.stdout) + len(result.stderr) > 8 * 1024 * 1024:
         raise ValueError('ANALYSIS_LIMIT')
+    if result.stderr:  # All callers use error-only logging; concealed decode errors are incomplete proof.
+        raise ValueError('MEDIA_ANALYSIS_ERROR')
     return result.stdout
 
 
@@ -171,8 +173,10 @@ def verify(source, edit, raw_plan):
         raise ValueError('UNTRUSTED_TIMELINE')
     output_video = rendered['video']
     count = sum(b - a for a, b in frames)
+    # r_frame_rate is ffprobe's heuristic and can change on a short joined clip.
+    # Exact per-frame presentation clocks below are the actual cadence proof.
     if output_video['codec_name'] != 'h264' or output_video['pix_fmt'] != 'yuv420p' or any(
-            output_video[k] != video[k] for k in ('width', 'height')) or float(Fraction(output_video['r_frame_rate'])) != fps:
+            output_video[k] != video[k] for k in ('width', 'height')):
         raise ValueError('UNSUPPORTED_VIDEO_TRANSFORM')
     video_clock(cut, output_video, fps, count, frames)
     with tempfile.TemporaryDirectory(prefix='audio-proof-', dir=edit) as folder:
