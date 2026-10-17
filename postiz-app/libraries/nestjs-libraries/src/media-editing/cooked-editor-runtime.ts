@@ -195,7 +195,7 @@ export class CookedEditorRuntime {
       await this.review(job, 'start', started); await this.review(job, 'final', started);
       await regular(join(edit, 'cut.mp4'));
       if (await digest(source) !== job.sourceSha256 || await digest(input.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
-      if (await digest(join(edit, 'cut.mp4')) !== job.verifiedOutputSha256) throw new Error('VERIFIED_DRAFT_CHANGED');
+      await this.assertReviewedOutput(job, job.verifiedOutputSha256);
       job.ready = true;
       return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4'), blocks: job.blocks, removedBlocks: job.selected };
     } catch (error) { throw Object.assign(error as Error, { jobId: job ? jobId : undefined }); }
@@ -226,6 +226,19 @@ export class CookedEditorRuntime {
         !Number.isSafeInteger(proof.frameCount) || proof.frameCount <= 0 || proof.frameCount > 7200 ||
         await digest(join(edit, 'cut.mp4')) !== proof.outputSha256) throw new Error('INVALID_AUDIO_PROOF');
     return proof.outputSha256 as string;
+  }
+  private async assertReviewedOutput(job: OwnedJob, expected: string | undefined) {
+    // The worker serves the native review copy, so prove that retained copy too.
+    const edit = join(job.workspace, 'edit'), path = join(edit, 'review.json');
+    await regular(path);
+    if ((await stat(path)).size > 8 * MiB) throw new Error('VERIFIED_DRAFT_CHANGED');
+    const state = JSON.parse(await readFile(path, 'utf8')), video = state.video;
+    if (state.stage !== 'cut' || state.round !== job.revision + 1 || typeof video !== 'string' ||
+        !video.startsWith(join(edit, 'review') + '/') || await realpath(video) !== video ||
+        !Array.isArray(state.rounds) || !state.rounds.some((r: { stage?: unknown; round?: unknown; video?: unknown } | null) => r?.stage === state.stage &&
+          r?.round === state.round && r?.video === video)) throw new Error('VERIFIED_DRAFT_CHANGED');
+    await regular(video); await regular(join(edit, 'cut.mp4'));
+    if (await digest(video) !== expected || await digest(join(edit, 'cut.mp4')) !== expected) throw new Error('VERIFIED_DRAFT_CHANGED');
   }
   private async releaseRenderCache(job: OwnedJob) {
     // Encoded video segments are regenerable and excluded from verified checkpoints.
@@ -281,7 +294,8 @@ export class CookedEditorRuntime {
       // Preserve the verified native draft before a speculative edit. Cache segments
       // can be regenerated; every checkpoint byte still counts toward the job cap.
       previousRender = await digest(join(edit, 'cut.mp4'));
-      if (previousRender !== job.verifiedOutputSha256) { job.ready = false; throw new Error('VERIFIED_DRAFT_CHANGED'); }
+      try { await this.assertReviewedOutput(job, job.verifiedOutputSha256); }
+      catch (error) { job.ready = false; throw error; }
       previousReview = await digest(join(edit, 'review.json'));
       if (await bytes(job.workspace) + await bytes(edit) + 8 * MiB > this.disk) throw new Error('CHECKPOINT_LIMIT');
       checkpoint = await mkdtemp(join(job.workspace, 'verified-edit-'));
@@ -304,7 +318,7 @@ export class CookedEditorRuntime {
       await this.review(job, 'round', started);
       await regular(join(edit, 'cut.mp4'));
       if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
-      if (await digest(join(edit, 'cut.mp4')) !== verifiedOutputSha256) throw new Error('VERIFIED_DRAFT_CHANGED');
+      await this.assertReviewedOutput(job, verifiedOutputSha256);
       await rm(checkpoint, { recursive: true }); checkpoint = undefined;
       job.verifiedOutputSha256 = verifiedOutputSha256;
       job.ready = true; job.selected = nextSelected;

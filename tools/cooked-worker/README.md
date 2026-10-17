@@ -97,7 +97,8 @@ audio provenance and A/V clocks, not independent pixel provenance after lossy
 H264 encoding, semantic edit quality or a human judgment of intelligibility.
 
 The runtime binds the bounded proof receipt to its exact request and actual cut,
-captures the resulting hash before review, and rechecks it after review. A failed
+captures the resulting hash before review, and rechecks both the cut and the
+retained review copy served to the user after review. A failed
 edit retains the previous ready revision only after complete guarded restoration.
 Unsupported transformations, multiple A/V tracks and missing evidence fail closed.
 
