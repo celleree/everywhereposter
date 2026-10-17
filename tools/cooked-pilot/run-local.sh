@@ -6,6 +6,7 @@ image=$1; source=$(realpath "$2"); output=$3
 original=$2; shift 3
 if [ "$#" -eq 2 ]; then set -- --cut "$1" "$2"; fi
 [ -f "$source" ] && [ ! -L "$original" ] && [ ! -e "$output" ] || { echo 'Regular source and new output directory required.' >&2; exit 2; }
+[ "$(id -u)" -ne 0 ] || { echo 'Run as an unprivileged local user, not root.' >&2; exit 2; }
 [ "$(docker context inspect --format '{{.Endpoints.docker.Host}}')" = 'unix:///var/run/docker.sock' ] || { echo 'Only the verified local Unix Docker endpoint is allowed.' >&2; exit 2; }
 [ "$(docker info --format '{{.Name}}')" = "$(hostname)" ] || { echo 'Docker daemon must identify as this local host.' >&2; exit 2; }
 image_id=$(docker image inspect "$image" --format '{{.Id}}')
