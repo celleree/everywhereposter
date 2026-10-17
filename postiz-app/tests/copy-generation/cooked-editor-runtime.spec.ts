@@ -17,6 +17,8 @@ describe('private cooked native boundary', () => {
     root = await mkdtemp(join(tmpdir(), 'cooked-boundary-test-')); calls = [];
     const native = join(root, 'upstream/plugins/ai-editor/skills/cut/scripts');
     await mkdir(native, { recursive: true });
+    await mkdir(join(root, 'upstream/plugins/ai-editor/lib/ai_editor'), { recursive: true });
+    await writeFile(join(root, 'upstream/plugins/ai-editor/lib/ai_editor/review.py'), '');
     for (const file of ['transcribe', 'retakes', 'build_timeline', 'render', 'verify_cut']) await writeFile(join(native, `${file}.py`), '');
     for (const dir of ['model', 'jobs']) await mkdir(join(root, dir), { mode: 0o700 });
     const sourcePath = join(root, 'source.mp4'); await writeFile(sourcePath, 'original');
@@ -28,7 +30,7 @@ describe('private cooked native boundary', () => {
   it('uses native commands, excludes secrets, preserves source and scopes cleanup', async () => {
     process.env.COOKED_SECRET_TEST = 'never pass';
     const runtime = new CookedEditorRuntime(config, runner), receipt = await runtime.run(input);
-    expect(calls.map(c => c.stage)).toEqual(['transcribe', 'retakes', 'build_timeline', 'render', 'verify']);
+    expect(calls.map(c => c.stage)).toEqual(['transcribe', 'retakes', 'build_timeline', 'render', 'verify', 'review_start', 'review_final']);
     expect(calls[0].env).not.toHaveProperty('COOKED_SECRET_TEST');
     expect(calls[0].env.HOME).toBe(join(receipt.workspace, 'home'));
     expect(calls[0].env.HF_HUB_OFFLINE).toBe('1');
@@ -87,6 +89,47 @@ describe('private cooked native boundary', () => {
       await new Promise(resolve => setTimeout(resolve, 15)); await runner(c);
     });
     await expect(slow.run(input)).rejects.toThrow('OVERALL_TIMEOUT');
+  });
+  it('reuses native apply/render/review order for cut and restore with stale-cache invalidation', async () => {
+    const runtime = new CookedEditorRuntime(config, runner), initial = await runtime.run(input);
+    expect(initial.revision).toBe(0); calls = [];
+    const cut = await runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0);
+    expect(cut.revision).toBe(1);
+    expect(calls.map(c => c.stage)).toEqual(['apply_edits', 'build_timeline', 'render', 'verify', 'review_round']);
+    expect(JSON.parse(await readFile(calls[0].args[2], 'utf8'))).toEqual({ cut: [[1, 2]] });
+    expect(calls[0].script).toContain('cooked-editor-apply.py');
+    const restored = await runtime.revise(initial.jobId, 'o', { restore: [[1, 2]], pause: [[3, 4]] }, 1);
+    expect(restored.revision).toBe(2); expect(restored.jobId).toBe(initial.jobId);
+    expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
+    await runtime.cleanup(initial.jobId, 'o');
+  });
+  it('refuses wrong org, stale revisions, invalid ranges and changed sources before native edits', async () => {
+    const runtime = new CookedEditorRuntime(config, runner), initial = await runtime.run(input); calls = [];
+    await expect(runtime.revise(initial.jobId, 'other', { cut: [[1, 2]] }, 0)).rejects.toThrow('NOT_OWNED');
+    await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 1)).rejects.toThrow('STALE');
+    for (const cut of [[[0, 11]], [[-1, 2]], [[2, 1]], [[1, 1]], [[NaN, 2]], [[1, Infinity]], [[1]], Array(101).fill([1, 2])]) {
+      await expect(runtime.revise(initial.jobId, 'o', { cut } as any, 0)).rejects.toThrow('INVALID_EDITS');
+    }
+    await writeFile(input.sourcePath, 'changed');
+    await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('SOURCE_CHANGED');
+    expect(calls).toHaveLength(0);
+  });
+  it('serializes revisions with runs and makes a failed native mutation cleanup-only', async () => {
+    let release!: () => void, entered!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const entry = new Promise<void>(resolve => { entered = resolve; });
+    const runtime = new CookedEditorRuntime(config, async c => {
+      if (c.stage === 'apply_edits') { entered(); await pending; throw new Error('native edit failed'); }
+      await runner(c);
+    });
+    const initial = await runtime.run(input), revise = runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0);
+    await entry;
+    await expect(runtime.run(input)).rejects.toThrow('BUSY');
+    await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('BUSY');
+    await expect(runtime.cleanup(initial.jobId, 'o')).rejects.toThrow('ACTIVE'); release();
+    await expect(revise).rejects.toMatchObject({ message: 'native edit failed', revision: 1, jobId: initial.jobId });
+    await expect(runtime.revise(initial.jobId, 'o', { restore: [[1, 2]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
+    await runtime.cleanup(initial.jobId, 'o');
   });
   it('supervises real subprocess affinity, nonzero exit, timeout, log and RSS limits', async () => {
     const workspace = join(root, 'jobs'), script = join(root, 'synthetic.py');

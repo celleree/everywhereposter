@@ -2,9 +2,10 @@ import { spawn } from 'child_process';
 import { createHash, randomUUID } from 'crypto';
 import { appendFileSync, constants, existsSync, statSync } from 'fs';
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'fs/promises';
-import { isAbsolute, join, relative } from 'path';
+import { dirname, isAbsolute, join, relative } from 'path';
 
-type Stage = 'transcribe' | 'retakes' | 'build_timeline' | 'render' | 'verify';
+type PipelineStage = 'transcribe' | 'retakes' | 'build_timeline' | 'render' | 'verify';
+type Stage = PipelineStage | 'apply_edits' | 'review_start' | 'review_round' | 'review_final';
 export interface CookedCommand {
   stage: Stage; python: string; launcher: string; script: string; args: string[];
   workspace: string; env: NodeJS.ProcessEnv; timeoutMs: number; rssBytes: number; workspaceBytes: number;
@@ -20,9 +21,14 @@ export interface PreparedCookedSource {
   orgId: string; mediaId: string; sourcePath: string;
   metadata: { durationMs: number; width: number; height: number; fps: number; alignedTimestamps: true; hasAudio: true };
 }
-interface OwnedJob { workspace: string; marker: string; orgId: string; sourceSha256: string; active: boolean }
+export interface CookedEdits { cut?: [number, number][]; restore?: [number, number][]; pause?: [number, number][] }
+interface OwnedJob {
+  workspace: string; marker: string; orgId: string; sourceSha256: string; active: boolean;
+  durationSeconds: number; revision: number; ready: boolean; sourcePath: string;
+  command?: Omit<CookedCommand, 'stage' | 'script' | 'args' | 'timeoutMs'>;
+}
 const MiB = 1024 * 1024;
-const scripts: Record<Stage, string> = { transcribe: 'transcribe.py', retakes: 'retakes.py', build_timeline: 'build_timeline.py', render: 'render.py', verify: 'verify_cut.py' };
+const scripts: Record<PipelineStage, string> = { transcribe: 'transcribe.py', retakes: 'retakes.py', build_timeline: 'build_timeline.py', render: 'render.py', verify: 'verify_cut.py' };
 const digest = async (path: string) => createHash('sha256').update(await readFile(path)).digest('hex');
 const bounded = (value: number | undefined, ceiling: number) => {
   const n = value ?? ceiling;
@@ -132,7 +138,8 @@ export class CookedEditorRuntime {
       for (const script of Object.values(scripts)) await regular(join(native, script));
       const sourceSha256 = await digest(input.sourcePath);
       const workspace = await mkdtemp(join(root, 'cooked-'));
-      job = { workspace, orgId: input.orgId, sourceSha256, active: true, marker: '' };
+      job = { workspace, orgId: input.orgId, sourceSha256, active: true, marker: '',
+        durationSeconds: m.durationMs / 1000, revision: 0, ready: false, sourcePath: input.sourcePath };
       job.marker = JSON.stringify({ jobId, orgId: input.orgId, mediaId: input.mediaId, sourceSha256: job.sourceSha256 });
       this.jobs.set(jobId, job);
       await writeFile(join(workspace, '.cooked-owner'), job.marker, { flag: 'wx', mode: 0o600 });
@@ -144,36 +151,88 @@ export class CookedEditorRuntime {
         AI_EDITOR_LIBRARY: join(workspace, 'library'), TMPDIR: join(workspace, 'tmp'),
         AI_EDITOR_WHISPER_MODEL: await realpath(this.config.modelPath), HF_HUB_OFFLINE: '1', HF_DATASETS_OFFLINE: '1',
         OMP_NUM_THREADS: '2', OPENBLAS_NUM_THREADS: '1', MKL_NUM_THREADS: '1' };
-      const args: Record<Stage, string[]> = {
+      const args: Record<PipelineStage, string[]> = {
         transcribe: [source, join(edit, 'words.raw.json'), '--engine', 'whisper', '--lang', 'en'],
         retakes: ['propose', edit], build_timeline: [source, edit], render: [source, edit, '--max', '1080'],
         verify: [edit, '--engine', 'whisper'],
       };
-      for (const stage of Object.keys(scripts) as Stage[]) {
-        // Native render-cache mtimes can make an old verification transcript appear fresh.
-        if (stage === 'verify') await rm(join(edit, 'cut.transcript.json'), { force: true });
-        const remaining = this.overallMs - (Date.now() - started);
-        if (remaining <= 0) throw new Error('OVERALL_TIMEOUT');
-        if (await bytes(workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
-        await this.runner({ stage, python: this.config.python, launcher: this.config.launcherPath,
-          script: join(native, scripts[stage]), args: args[stage], workspace, env,
-          timeoutMs: Math.min(this.stageMs, remaining), rssBytes: this.rss, workspaceBytes: this.disk });
-        if (Date.now() - started >= this.overallMs) throw new Error('OVERALL_TIMEOUT');
-        if (await bytes(workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
-      }
+      job.command = { python: this.config.python, launcher: this.config.launcherPath, workspace, env,
+        rssBytes: this.rss, workspaceBytes: this.disk };
+      for (const stage of Object.keys(scripts) as PipelineStage[]) await this.execute(job, stage, join(native, scripts[stage]), args[stage], started);
+      await this.review(job, 'start', started); await this.review(job, 'final', started);
       await regular(join(edit, 'cut.mp4'));
       if (await digest(source) !== job.sourceSha256 || await digest(input.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
-      return { jobId, sourceSha256: job.sourceSha256, workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4') };
+      job.ready = true;
+      return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4') };
     } catch (error) { throw Object.assign(error as Error, { jobId: job ? jobId : undefined }); }
     finally { if (job) job.active = false; this.active = false; }
+  }
+  private async execute(job: OwnedJob, stage: Stage, script: string, args: string[], started: number) {
+    // Native render-cache mtimes can make an old verification transcript appear fresh.
+    if (stage === 'verify') await rm(join(job.workspace, 'edit/cut.transcript.json'), { force: true });
+    const remaining = this.overallMs - (Date.now() - started);
+    if (remaining <= 0) throw new Error('OVERALL_TIMEOUT');
+    if (await bytes(job.workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
+    await this.runner({ ...job.command!, stage, script, args, timeoutMs: Math.min(this.stageMs, remaining) });
+    if (Date.now() - started >= this.overallMs) throw new Error('OVERALL_TIMEOUT');
+    if (await bytes(job.workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
+  }
+  private async review(job: OwnedJob, action: 'start' | 'round' | 'final', started: number) {
+    const edit = join(job.workspace, 'edit');
+    const script = join(this.config.sourceRoot, 'plugins/ai-editor/lib/ai_editor/review.py');
+    await regular(script);
+    await this.execute(job, `review_${action}`, script, [edit, action, ...(action === 'final' ? [] :
+      ['--video', join(edit, 'cut.mp4'), '--stage', 'cut', '--transcript', join(edit, 'words.json')])], started);
+  }
+  private async assertOwned(job: OwnedJob) {
+    const root = await realpath(this.config.workRoot), path = await realpath(job.workspace);
+    if (relative(root, path).startsWith('..') || relative(root, path) === '' || path !== job.workspace ||
+        await readFile(join(path, '.cooked-owner'), 'utf8') !== job.marker) throw new Error('OWNERSHIP_MISMATCH');
+  }
+  async revise(jobId: string, orgId: string, edits: CookedEdits, expectedRevision: number) {
+    if (this.active) throw new Error('BUSY');
+    const job = this.jobs.get(jobId);
+    if (!job || job.orgId !== orgId || job.active) throw new Error('NOT_OWNED_OR_ACTIVE');
+    if (!job.ready || !Number.isSafeInteger(expectedRevision) || expectedRevision !== job.revision) throw new Error('STALE_OR_FAILED_REVISION');
+    if (!edits || Object.keys(edits).some(key => !['cut', 'restore', 'pause'].includes(key))) throw new Error('INVALID_EDITS');
+    const ranges = ['cut', 'restore', 'pause'].flatMap(key => {
+      const list = edits[key as keyof CookedEdits] ?? [];
+      if (!Array.isArray(list)) throw new Error('INVALID_EDITS');
+      return list;
+    });
+    if (ranges.length === 0 || ranges.length > 100 || ranges.some(r => !Array.isArray(r) || r.length !== 2 ||
+        r.some(n => typeof n !== 'number' || !Number.isFinite(n)) || r[0] < 0 || r[0] >= r[1] || r[1] > job.durationSeconds)) throw new Error('INVALID_EDITS');
+    this.active = true; job.active = true;
+    const started = Date.now(), source = join(job.workspace, 'source.mp4'), edit = join(job.workspace, 'edit');
+    try {
+      await this.assertOwned(job);
+      if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
+      const helper = join(dirname(this.config.launcherPath), 'cooked-editor-apply.py'); await regular(helper);
+      const request = join(job.workspace, 'revision-request.json');
+      await writeFile(request, JSON.stringify(edits), { mode: 0o600 });
+      // Native edits are not transactional with rendering. Failed mutations are cleanup-only.
+      job.ready = false; job.revision++;
+      await this.execute(job, 'apply_edits', helper, [this.config.sourceRoot, edit, request], started);
+      for (const stage of ['build_timeline', 'render', 'verify'] as PipelineStage[]) {
+        await this.execute(job, stage, join(this.config.sourceRoot, 'plugins/ai-editor/skills/cut/scripts', scripts[stage]),
+          stage === 'verify' ? [edit, '--engine', 'whisper'] : [source, edit, ...(stage === 'render' ? ['--max', '1080'] : [])], started);
+      }
+      await this.review(job, 'round', started);
+      await regular(join(edit, 'cut.mp4'));
+      if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
+      job.ready = true;
+      return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace: job.workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4') };
+    } catch (error) { throw Object.assign(error as Error, { jobId, revision: job.revision }); }
+    finally { job.active = false; this.active = false; }
   }
   async cleanup(jobId: string, orgId: string) {
     const job = this.jobs.get(jobId);
     if (!job || job.orgId !== orgId || job.active) throw new Error('NOT_OWNED_OR_ACTIVE');
-    const root = await realpath(this.config.workRoot), path = await realpath(job.workspace);
-    if (relative(root, path).startsWith('..') || relative(root, path) === '' || path !== job.workspace ||
-        await readFile(join(path, '.cooked-owner'), 'utf8') !== job.marker) throw new Error('OWNERSHIP_MISMATCH');
-    await rm(path, { recursive: true }); this.jobs.delete(jobId);
-    return { jobId, removed: true, sourceSha256: job.sourceSha256 };
+    job.active = true;
+    try {
+      await this.assertOwned(job);
+      await rm(job.workspace, { recursive: true }); this.jobs.delete(jobId);
+      return { jobId, removed: true, sourceSha256: job.sourceSha256 };
+    } finally { job.active = false; }
   }
 }
