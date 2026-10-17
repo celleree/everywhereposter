@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import { createHash, randomUUID } from 'crypto';
-import { appendFileSync, constants, existsSync, statSync } from 'fs';
+import { appendFileSync, constants, createReadStream, existsSync, statSync } from 'fs';
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative } from 'path';
 
@@ -29,7 +29,11 @@ interface OwnedJob {
 }
 const MiB = 1024 * 1024;
 const scripts: Record<PipelineStage, string> = { transcribe: 'transcribe.py', retakes: 'retakes.py', build_timeline: 'build_timeline.py', render: 'render.py', verify: 'verify_cut.py' };
-const digest = async (path: string) => createHash('sha256').update(await readFile(path)).digest('hex');
+const digest = async (path: string) => {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+};
 const bounded = (value: number | undefined, ceiling: number) => {
   const n = value ?? ceiling;
   if (!Number.isSafeInteger(n) || n <= 0 || n > ceiling) throw new Error('INVALID_LIMIT');
