@@ -21,6 +21,26 @@ snapshots. Saving streams a separate MP4 through the existing ordinary Media
 storage interface. Download and composer handoff use that saved Media; neither
 publishes a post. A failed or expired temporary session leaves the source intact.
 
+## Rejected word edits and precision limits
+
+The pinned tiny model's word labels are estimates. A captured synthetic short-word
+cut retained vowel audio and trimmed the following consonant; existing forced
+alignment also misplaced that boundary. Native frame quantization can cross
+phoneme boundaries even with correct labels. A successful ASR comparison alone
+is not proof of sample-accurate word removal or human speech quality.
+
+The adapter never widens a selected word to a phrase or weakens native verification.
+Before each trial mutation it checkpoints the verified native draft, excluding
+regenerable segment caches and reserving capacity within the existing workspace
+limit. A native verification rejection still returns422. Only after a complete
+guarded restoration, source checks and exact prior render/review hashes does the
+worker retain the previous ready state and revision. The user may discard the
+pending selection and deliberately choose another edit. Rollback failure and
+other native failures remain cleanup-only. No rejected render becomes output.
+
+This recovery is a fallback, not a precise single-word editing claim. General
+single-word accuracy still needs a validated alignment and audio-boundary solution.
+
 ## Worker and app boundary
 
 Build the local Python/model image using the pinned preparation instructions in

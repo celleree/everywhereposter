@@ -127,7 +127,14 @@ export function createCookedWorker(runtime: CookedEditorRuntime, workRoot: strin
           // Publish receipt + native snapshot together, never a half-written round.
           j.receipt = next; j.state = state;
         }
-        catch (e) { nativeFailure('cooked_native_revision_failed', e); if (completed || (e as { jobId?: string }).jobId) j.status = 'failed'; throw error(422); }
+        catch (e) {
+          nativeFailure('cooked_native_revision_failed', e);
+          // Only the trusted runtime can attest that the complete previous draft
+          // was restored. Keep its receipt/state; the rejected edit still gets422.
+          const restored = (e as { previousRevisionRestored?: boolean }).previousRevisionRestored === true;
+          if (completed || ((e as { jobId?: string }).jobId && !restored)) j.status = 'failed';
+          throw error(422);
+        }
         finally { active = false; }
         return send(res, 200, { event: true, revision: j.receipt!.revision });
       }

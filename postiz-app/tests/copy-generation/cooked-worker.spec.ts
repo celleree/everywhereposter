@@ -73,6 +73,19 @@ describe('private cooked worker protocol', () => {
     expect(runtime.revise).toHaveBeenLastCalledWith(first.jobId, org, { cut: [[1, 2]] }, 0);
     expect((await client.json(path + '/state', org, media)).rounds).toHaveLength(2);
   });
+  it('keeps the verified state and download only after the runtime attests rollback; rejected edits stay422', async () => {
+    const first = await create(), path = '/jobs/' + first.jobId;
+    runtime.revise.mockRejectedValueOnce(Object.assign(new Error('NATIVE_verify_FAILED'), { jobId: first.jobId, previousRevisionRestored: true }));
+    await expect(client.json(path + '/edits', org, media, 'POST', { revision: 0, cut: [[1.48, 1.62]] })).rejects.toMatchObject({ status: 422 });
+    expect(await client.json(path + '/state', org, media)).toMatchObject({ revision: 0, round: 1 });
+    const response = await client.stream(path + '/download?k=cut-1', org, media); let bytes = '';
+    for await (const chunk of response) bytes += chunk;
+    expect(bytes).toBe('synthetic-video-file');
+    expect(await client.json(path + '/edits', org, media, 'POST', { revision: 0, cut: [[1.48, 2.08]] })).toEqual({ event: true, revision: 1 });
+    runtime.revise.mockRejectedValueOnce(Object.assign(new Error('NATIVE_verify_FAILED'), { jobId: first.jobId, previousRevisionRestored: false }));
+    await expect(client.json(path + '/edits', org, media, 'POST', { revision: 1, cut: [[3, 4]] })).rejects.toMatchObject({ status: 422 });
+    await expect(client.json(path + '/state', org, media)).rejects.toMatchObject({ status: 404 });
+  });
   it('never serves a generated symlink outside its private job', async () => {
     const first = await create(); const file = join(receipt.editDirectory, 'review/v-cut1.mp4');
     await rm(file); await symlink(join(root, 'input.mp4'), file);

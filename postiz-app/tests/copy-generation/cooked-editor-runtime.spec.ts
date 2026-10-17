@@ -12,6 +12,7 @@ describe('private cooked native boundary', () => {
       await writeFile(join(c.workspace, 'edit/cut.mp4'), 'native cut');
       await writeFile(join(c.workspace, 'edit/cut.transcript.json'), 'stale cache');
     }
+    if (c.stage === 'review_start') await writeFile(join(c.workspace, 'edit/review.json'), '{"round":1}');
     if (c.stage === 'verify') expect(await readdir(join(c.workspace, 'edit'))).not.toContain('cut.transcript.json');
   };
   beforeEach(async () => {
@@ -131,6 +132,79 @@ describe('private cooked native boundary', () => {
     await expect(revise).rejects.toMatchObject({ message: 'native edit failed', revision: 1, jobId: initial.jobId });
     await expect(runtime.revise(initial.jobId, 'o', { restore: [[1, 2]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
     await runtime.cleanup(initial.jobId, 'o');
+  });
+  it('rejects an unverified edit but restores the exact native draft and revision for a deliberate new choice', async () => {
+    let reject = false;
+    const runtime = new CookedEditorRuntime(config, async c => {
+      await runner(c);
+      if (reject && c.stage === 'render') {
+        await writeFile(join(c.workspace, 'edit/cut.mp4'), 'rejected partial word');
+        await writeFile(join(c.workspace, 'edit/decisions.json'), 'rejected decisions');
+      }
+      if (reject && c.stage === 'verify') throw new Error('NATIVE_verify_FAILED');
+    });
+    const initial = await runtime.run(input); reject = true;
+    const failure = await runtime.revise(initial.jobId, 'o', { cut: [[1.48, 1.62]] }, 0).catch(e => e);
+    expect(failure).toMatchObject({ message: 'NATIVE_verify_FAILED', revision: 0, previousRevisionRestored: true });
+    expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
+    expect(await readFile(join(initial.editDirectory, 'review.json'), 'utf8')).toBe('{"round":1}');
+    expect(await readdir(initial.editDirectory)).not.toContain('decisions.json');
+    expect((await readdir(initial.workspace)).some(name => name.startsWith('verified-edit-') || name === 'rejected-edit')).toBe(false);
+    reject = false;
+    const next = await runtime.revise(initial.jobId, 'o', { cut: [[1.48, 2.08]] }, 0);
+    expect(next.revision).toBe(1);
+    expect((await runtime.revise(initial.jobId, 'o', { restore: [[1.48, 2.08]] }, 1)).revision).toBe(2);
+    expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
+    await runtime.cleanup(initial.jobId, 'o');
+  });
+  it('never reports recovery when checkpoint restoration fails', async () => {
+    let reject = false;
+    const runtime = new CookedEditorRuntime(config, async c => {
+      await runner(c);
+      if (reject && c.stage === 'verify') throw new Error('NATIVE_verify_FAILED');
+    });
+    const initial = await runtime.run(input); reject = true;
+    const originalRename = filesystem.rename;
+    const swap = jest.spyOn(filesystem, 'rename').mockImplementation((async (from: string, to: string) => {
+      if (from.includes('/verified-edit-')) throw new Error('simulated restore I/O failure');
+      return originalRename(from, to);
+    }) as any);
+    try {
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 1.62]] }, 0)).rejects.toMatchObject({ previousRevisionRestored: false });
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 2.08]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
+    } finally { swap.mockRestore(); }
+    await runtime.cleanup(initial.jobId, 'o');
+  });
+  it('does not recover over a changed source or a corrupted verified checkpoint', async () => {
+    for (const sabotage of ['source', 'checkpoint']) {
+      await writeFile(input.sourcePath, 'original'); let reject = false;
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c);
+        if (reject && c.stage === 'verify') {
+          if (sabotage === 'source') await writeFile(input.sourcePath, 'external change');
+          else {
+            const name = (await readdir(c.workspace)).find(n => n.startsWith('verified-edit-'))!;
+            await writeFile(join(c.workspace, name, 'review.json'), 'corrupted checkpoint');
+          }
+          throw new Error('NATIVE_verify_FAILED');
+        }
+      });
+      const initial = await runtime.run(input); reject = true;
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 1.62]] }, 0)).rejects.toMatchObject({ previousRevisionRestored: false });
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 2.08]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
+      await runtime.cleanup(initial.jobId, 'o');
+    }
+  });
+  it('bounds checkpoint allocation before native mutation and rejects unsafe checkpoint files', async () => {
+    const runtime = new CookedEditorRuntime({ ...config, workspaceBytes: 8 * 1024 * 1024 }, runner);
+    const initial = await runtime.run(input); calls = [];
+    await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 1.62]] }, 0)).rejects.toThrow('CHECKPOINT_LIMIT');
+    expect(calls).toHaveLength(0); expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
+    await runtime.cleanup(initial.jobId, 'o');
+    const other = new CookedEditorRuntime(config, runner), job = await other.run(input); calls = [];
+    await symlink(input.sourcePath, join(job.editDirectory, 'unsafe-link'));
+    await expect(other.revise(job.jobId, 'o', { cut: [[1.48, 1.62]] }, 0)).rejects.toThrow('WORKSPACE_SYMLINK');
+    expect(calls).toHaveLength(0); await other.cleanup(job.jobId, 'o');
   });
   it('supervises real subprocess affinity, nonzero exit, timeout, log and RSS limits', async () => {
     const workspace = join(root, 'jobs'), script = join(root, 'synthetic.py');
