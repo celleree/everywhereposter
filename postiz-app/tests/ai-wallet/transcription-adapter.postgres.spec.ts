@@ -141,7 +141,7 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     prepare.mockImplementationOnce(async () => { process.env[flag] = 'false'; return { file: {}, audioSha256: 'a'.repeat(64) }; });
     await expect(run()).rejects.toThrow('disabled'); expect(model.transcribePrepaidAudio).not.toHaveBeenCalled();
   });
-  it.each(['subscription', 'flag'])('rechecks %s after waiting on concurrent subscription reconciliation', async kind => {
+  it.each(['subscription', 'flag', 'generation', 'deletion'])('rechecks %s after waiting on concurrent subscription reconciliation', async kind => {
     await reserveBeforeInterruption();
     let entered!: (pid: number) => void, release!: () => void;
     const ready = new Promise<number>(resolve => { entered = resolve; }), hold = new Promise<void>(resolve => { release = resolve; });
@@ -162,7 +162,12 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
         waiting = row.waiting; if (!waiting) await new Promise(resolve => setTimeout(resolve, 10));
       }
       expect(waiting).toBe(true); expect(model.transcribePrepaidAudio).not.toHaveBeenCalled();
-    } finally { if (kind === 'flag') process.env.AI_WALLET_TRANSCRIPTION_ENABLED = 'false'; release(); await revoke; }
+    } finally {
+      if (kind === 'flag') process.env.AI_WALLET_TRANSCRIPTION_ENABLED = 'false';
+      if (kind === 'generation') await db.mediaTranscription.update({ where: { id: job }, data: { generation: 2 } });
+      if (kind === 'deletion') await db.media.update({ where: { id: mediaId }, data: { deletedAt: new Date() } });
+      release(); await revoke;
+    }
     expect(await execution).toBeInstanceOf(Error); expect(model.transcribePrepaidAudio).not.toHaveBeenCalled();
     expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(0);
   });

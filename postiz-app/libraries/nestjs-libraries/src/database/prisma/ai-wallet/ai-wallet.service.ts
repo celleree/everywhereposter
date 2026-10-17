@@ -286,11 +286,11 @@ export class AiWalletService {
 
   async dispatchTranscription(organizationId: string, reservationId: string, transcriptionId: string, generation: number) {
     return this.transact(organizationId, async tx => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 2))::text`;
       const { reservation, row } = await this.transcription(tx, organizationId, reservationId, transcriptionId, generation);
       if (row.status !== 'PROCESSING') throw new Error('Transcription is no longer active.');
       if ((await this.wallet(tx, organizationId)).status !== 'ACTIVE') throw new Error('Wallet requires reconciliation.');
       if (reservation.state !== 'RESERVED') return { dispatch: false, reservation };
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 2))::text`;
       const subscription = await tx.subscription.findFirst({ where: { organizationId, deletedAt: null },
         select: { subscriptionTier: true } });
       this.enabled();
