@@ -1,3 +1,5 @@
+// Keep the pure media/model unit fixture independent of Prisma's child_process imports.
+jest.mock('@gitroom/nestjs-libraries/services/prepaid-copy-context.service', () => ({ PrepaidCopyContextService: class {} }));
 import {
   buildFrameTimestamps,
   CopyGenerationModelService,

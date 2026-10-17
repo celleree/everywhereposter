@@ -35,3 +35,27 @@ it.each(['true', 'false'])('denies a launch API key with billing flag %s', async
   await middleware.use({ headers: { authorization: 'fixture_api_key' } } as any, res as any, next);
   expect(res.status).toHaveBeenCalledWith(403); expect(next).not.toHaveBeenCalled();
 });
+
+it('permits only the metered guided-copy boundary for Launch, without enabling generic AI', async () => {
+  process.env.BILLING_ENABLED = 'true';
+  const service = new PermissionsService({ getSubscriptionByOrganizationId: jest.fn().mockResolvedValue({ subscriptionTier: 'LAUNCH_V1' }) } as any, {} as any, {} as any, {} as any);
+  const ability = await service.check('org_fixture', new Date(), 'SUPERADMIN', [[AuthorizationActions.Create, Sections.GUIDED_COPY], [AuthorizationActions.Create, Sections.AI]]);
+  expect(ability.can(AuthorizationActions.Create, Sections.GUIDED_COPY)).toBe(true);
+  expect(ability.can(AuthorizationActions.Create, Sections.AI)).toBe(false);
+});
+
+it('allows only owned guided bookkeeping through revoked-plan policies, keeping generic AI denied', async () => {
+  process.env.BILLING_ENABLED = 'true';
+  const wallet = { existingTextRequest: jest.fn(async (org: string, key: string) =>
+    org === 'owner' && key === 'owned-guided-request-key' ? { id: 'held' } : null) };
+  const service = new PermissionsService({ getSubscriptionByOrganizationId: async () => null, getSubscription: async () => null } as any,
+    { countPostsFromDay: async () => 999999 } as any, {} as any, {} as any, wallet as any);
+  const sections = [Sections.GUIDED_COPY, Sections.POSTS_PER_MONTH, Sections.AI];
+  for (const [org, key, recovery] of [['owner', 'owned-guided-request-key', true], ['other', 'owned-guided-request-key', false],
+    ['owner', 'fresh-guided-request-key', false], ['owner', '*', false]] as const) {
+    const ability = await service.check(org, new Date(), 'SUPERADMIN', sections.map(section => [AuthorizationActions.Create, section]), undefined, key);
+    expect(ability.can(AuthorizationActions.Create, Sections.GUIDED_COPY)).toBe(recovery);
+    expect(ability.can(AuthorizationActions.Create, Sections.POSTS_PER_MONTH)).toBe(recovery);
+    expect(ability.can(AuthorizationActions.Create, Sections.AI)).toBe(false);
+  }
+});

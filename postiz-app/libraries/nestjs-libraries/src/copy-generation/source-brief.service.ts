@@ -1,3 +1,4 @@
+import { PrepaidCopyContextService } from '@gitroom/nestjs-libraries/services/prepaid-copy-context.service';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { lookup } from 'mime-types';
 import { uniq } from 'lodash';
@@ -96,7 +97,8 @@ export class SourceBriefService {
     private readonly _mediaRepository: MediaRepository,
     private readonly _copyGenerationModelService: CopyGenerationModelService,
     private readonly _knowledgeBaseService: KnowledgeBaseService,
-    private readonly _mediaTranscriptionService: MediaTranscriptionService
+    private readonly _mediaTranscriptionService: MediaTranscriptionService,
+    private readonly prepaid?: PrepaidCopyContextService
   ) {}
 
   async assertMediaAccess(orgId: string, mediaId: string) {
@@ -160,7 +162,8 @@ export class SourceBriefService {
       const sourceConfidenceParts: number[] = [];
       let hasUsableVisualEvidence = false;
 
-      if (mediaType === 'image') {
+      if (this.prepaid?.active) warnings.push({ code: 'VISUAL_ANALYSIS_UNAVAILABLE', message: 'Visual analysis is unavailable for prepaid generation; only supplied captions, transcripts and saved source facts are used.' });
+      if (mediaType === 'image' && !this.prepaid?.active) {
         const imageBuffer = Buffer.from(await readOrFetch(media.path));
         const imageInsights = await this._copyGenerationModelService.analyzeImage({
           buffer: imageBuffer,
@@ -179,10 +182,12 @@ export class SourceBriefService {
 
       if (mediaType === 'video') {
         if (transcript?.source === 'manual') {
+          if (!this.prepaid?.active) {
           await this._mediaTranscriptionService.ensureTranscriptionStarted(
             orgId,
             media.id
           );
+          }
         } else {
           const generatedTranscript =
             await this._mediaTranscriptionService.resolveForGeneration(
@@ -199,7 +204,7 @@ export class SourceBriefService {
         }
       }
 
-      if (mediaType === 'video') {
+      if (mediaType === 'video' && !this.prepaid?.active) {
         try {
           const videoInsights =
             await this._copyGenerationModelService.analyzeVideoFrames({
@@ -395,7 +400,7 @@ export class SourceBriefService {
           visualSummary ||
           'Share the clearest useful point from the source input.',
         warnings,
-        blocked: mediaType === 'video' && !hasGroundedVideoSource,
+        blocked: (mediaType === 'video' && !hasGroundedVideoSource) || Boolean(this.prepaid?.active && !transcript?.text && !body.sourceCaption),
       };
     } finally {
       await preparedVideoFile?.cleanup();
