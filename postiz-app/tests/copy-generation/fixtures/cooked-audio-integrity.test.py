@@ -1,6 +1,7 @@
 """Real, bounded FFmpeg adversarial corpus; no model or network calls."""
 import hashlib
 from array import array
+from fractions import Fraction
 import json
 import os
 from pathlib import Path
@@ -160,6 +161,79 @@ class AudioIntegrityCorruption(unittest.TestCase):
                 self.plan['sourceSha256'] = sha(self.source)
                 self.render(fps=fps)
                 self.accepted()
+
+    def test_native_file_concat_join_clock_and_one_tick_tampering(self):
+        self.source = self.sources[30]
+        original_source = sha(self.source)
+        self.plan.update(sourceSha256=original_source, removedBlocks=[[25/30, 36/30]])
+        frames = self.manifests(fps=30)
+        self.assertEqual(frames, [[0, 25], [36, 60]])
+        audio_filters = []
+        concat_lines = []
+
+        def box_payload(data, name):
+            cursor = 0
+            while cursor + 8 <= len(data):
+                size = int.from_bytes(data[cursor:cursor+4], 'big')
+                self.assertGreaterEqual(size, 8)
+                self.assertLessEqual(cursor+size, len(data))
+                if data[cursor+4:cursor+8] == name:
+                    return data[cursor+8:cursor+size]
+                cursor += size
+            self.fail(f'Missing generated MP4 box: {name!r}')
+
+        for i, (a, b) in enumerate(frames):
+            segment = self.edit / f'span-{i}.mp4'
+            ffmpeg('-i', self.source, '-an', '-vf',
+                f'trim=start_frame={a}:end_frame={b},setpts=N/(30)/TB',
+                '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+                '-r', '30', '-g', '15', segment)
+            movie = box_payload(box_payload(segment.read_bytes(), b'moov'), b'mvhd')
+            self.assertEqual(movie[0], 0)
+            movie_duration = Fraction(int.from_bytes(movie[16:20], 'big'),
+                int.from_bytes(movie[12:16], 'big'))
+            # Pinned FFmpeg 5 concat uses this actual movie duration. FFmpeg 6
+            # instead infers stream duration; explicit headers keep the pinned
+            # native join-clock regression portable without changing its spans.
+            concat_lines.extend([f"file '{segment.name}'", f'duration {float(movie_duration):.9f}'])
+            audio_filters.append(f'[0:a:0]atrim=start={a/30:.6f}:end={b/30:.6f},'
+                f'asetpts=PTS-STARTPTS,afade=t=in:d=0.008,'
+                f'afade=t=out:st={max(0, (b-a)/30-0.008):.6f}:d=0.008[a{i}]')
+        listing = self.edit / 'native-spans.txt'
+        listing.write_text('\n'.join(concat_lines)+'\n', encoding='utf-8')
+        video = self.edit / 'native-video.mp4'
+        audio = self.edit / 'native-audio.m4a'
+        ffmpeg('-f', 'concat', '-safe', '0', '-i', listing, '-c', 'copy', video)
+        ffmpeg('-vn', '-i', self.source, '-filter_complex',
+            ';'.join(audio_filters) + ';[a0][a1]concat=n=2:v=0:a=1[ac]',
+            '-map', '[ac]', '-c:a', 'aac', '-b:a', '192k', audio)
+        cut = self.edit / 'cut.mp4'
+        ffmpeg('-i', video, '-i', audio, '-map', '0:v:0', '-map', '1:a:0',
+            '-c', 'copy', '-movflags', '+faststart', cut)
+
+        def video_clock():
+            info = json.loads(run('ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                '-show_packets', '-show_streams', '-of', 'json', cut).stdout)
+            return Fraction(info['streams'][0]['time_base']), sorted(int(p['pts']) for p in info['packets'])
+
+        scale, before = video_clock()
+        self.assertEqual(len(before), 49)
+        join_offset = before[25]*scale - Fraction(25, 30)
+        self.assertGreater(join_offset, 0, 'File concat must reproduce the native rounded join')
+        self.assertLessEqual(join_offset, Fraction(1, 1000))
+        self.accepted()
+        native = self.edit / 'native-original.mp4'
+        cut.rename(native)
+        ffmpeg('-i', native, '-map', '0:v:0', '-map', '0:a:0', '-c', 'copy',
+            '-bsf:v', 'setts=pts=PTS+gte(N\\,25):dts=DTS+gte(N\\,25)',
+            '-movflags', '+faststart', cut)
+        shifted_scale, after = video_clock()
+        self.assertEqual(shifted_scale, scale)
+        self.assertEqual([b-a for a, b in zip(before, after)], [0]*25 + [1]*24)
+        result, _ = self.verify()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'VIDEO_CLOCK_MISMATCH', result.stderr)
+        self.assertEqual(sha(self.source), original_source)
 
     def test_valid_uncut_and_restored_proof(self):
         self.render()
