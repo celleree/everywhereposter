@@ -1,3 +1,4 @@
+import { isAnalyticsEnabled } from '@gitroom/react/helpers/posthog.analytics';
 import { usePlausible } from 'next-plausible';
 import { useCallback } from 'react';
 import { usePostHog } from 'posthog-js/react';
@@ -12,17 +13,16 @@ export const useFireEvents = () => {
 
   return useCallback(
     (name: string, props?: any) => {
-      if (!billingEnabled) {
-        return;
-      }
-
-      if (user) {
+      if (isAnalyticsEnabled() && posthog.__loaded && user) {
         posthog.identify(user.id, { email: user.email, name: user.name });
       }
 
-      posthog.capture(name, props);
-      plausible(name, { props });
+      if (isAnalyticsEnabled() && posthog.__loaded) {
+        // Legacy purchase means only a checkout return, not a verified payment.
+        posthog.capture(name === 'purchase' ? 'checkout_returned' : name, props);
+      }
+      if (billingEnabled) plausible(name, { props });
     },
-    [user]
+    [user, posthog, plausible, billingEnabled]
   );
 };

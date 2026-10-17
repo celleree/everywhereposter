@@ -3,21 +3,21 @@
 import posthog from 'posthog-js';
 import { PostHogProvider } from 'posthog-js/react';
 import { FC, ReactNode, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
+import { initializePostHog, capturePageview } from './posthog.analytics';
+
 export const PHProvider: FC<{
   children: ReactNode;
   phkey?: string;
   host?: string;
-}> = ({ children, phkey, host }) => {
+  environment?: string;
+}> = ({ children, phkey, host, environment }) => {
+  const pathname = usePathname();
   useEffect(() => {
-    if (!phkey || !host) {
-      return;
+    if (initializePostHog(phkey, host, environment) && pathname) {
+      capturePageview(pathname);
     }
-    posthog.init(phkey, {
-      api_host: host,
-      person_profiles: 'identified_only',
-      capture_pageview: false, // Disable automatic pageview capture, as we capture manually
-    });
-  }, []);
+  }, [phkey, host, environment, pathname]);
   if (!phkey || !host) {
     return <>{children}</>;
   }
