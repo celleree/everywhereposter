@@ -66,7 +66,8 @@ def finite(value):
     return n
 
 
-def video_clock(path, video, fps, count, native_frames=None):
+def video_clock(path, video, rate, count, native_frames=None):
+    fps = float(rate)
     packets = probe(path, 'v:0', True)['packets']
     pts = sorted(int(p['pts']) for p in packets)
     scale = Fraction(video['time_base'])
@@ -75,8 +76,8 @@ def video_clock(path, video, fps, count, native_frames=None):
     # trusted frame plan; a blanket timestamp tolerance would hide real drift.
     expected, offset = [], Fraction(0)
     for a, b in native_frames or [[0, count]]:
-        expected.extend(round((offset + Fraction(i) / Fraction(str(fps))) / scale) for i in range(b-a))
-        duration = Fraction(b-a) / Fraction(str(fps))
+        expected.extend(round((offset + Fraction(i) / rate) / scale) for i in range(b-a))
+        duration = Fraction(b-a) / rate
         offset += Fraction(math.ceil(duration * 1000), 1000) if native_frames else duration
     if len(pts) != count or int(video['nb_read_frames']) != count or pts != expected:
         raise ValueError('VIDEO_CLOCK_MISMATCH')
@@ -159,14 +160,15 @@ def verify(source, edit, raw_plan):
         raise ValueError('SOURCE_CHANGED')
     original, rendered = streams(probe(source)), streams(probe(cut))
     video, audio = original['video'], original['audio']
-    fps = float(Fraction(video['r_frame_rate']))
+    rate = Fraction(video['r_frame_rate'])
+    fps = float(rate)
     total = int(video['nb_read_frames'])
     if not 0 < fps <= 30 or not 0 < total <= 7200 or total / fps > 240 or not 0 < min(video['width'], video['height']) <= 720 or max(video['width'], video['height']) > 1280:
         raise ValueError('UNSUPPORTED_SOURCE')
     if any(abs(finite(s['start_time'])) > .000001 for s in original.values()) or abs(
             finite(audio['duration']) - total / fps) > .001:
         raise ValueError('UNSUPPORTED_SOURCE_SYNC')
-    video_clock(source, video, fps, total)
+    video_clock(source, video, rate, total)
     frames = trusted_frames(plan, fps, total)
     spans = [dict(start=a / fps, end=b / fps) for a, b in frames]
     if read(edit, 'safe-cuts.json') != plan['removedBlocks'] or read(edit, 'decisions.json') != spans or read(edit, 'report.json')['frames'] != frames:
@@ -178,7 +180,7 @@ def verify(source, edit, raw_plan):
     if output_video['codec_name'] != 'h264' or output_video['pix_fmt'] != 'yuv420p' or any(
             output_video[k] != video[k] for k in ('width', 'height')):
         raise ValueError('UNSUPPORTED_VIDEO_TRANSFORM')
-    video_clock(cut, output_video, fps, count, frames)
+    video_clock(cut, output_video, rate, count, frames)
     with tempfile.TemporaryDirectory(prefix='audio-proof-', dir=edit) as folder:
         expected = source
         if plan['removedBlocks'] or audio['codec_name'] != 'aac':

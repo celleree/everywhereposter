@@ -92,7 +92,8 @@ agreement substitutes for that proof. Source and output hashes are rechecked.
 Video frame counts, dimensions, format and presentation clocks must match the
 requested retained plan. Native MP4 segment movie durations round up to milliseconds
 before concat; exact join offsets are derived from the trusted frame spans, with
-at most1ms total A/V offset. Arbitrary timing drift is rejected. This verifies
+at most1ms video offset from the planned frame clock. Audio clocks must match
+the exact regenerated reference. Arbitrary timing drift is rejected. This verifies
 audio provenance and A/V clocks, not independent pixel provenance after lossy
 H264 encoding, semantic edit quality or a human judgment of intelligibility.
 
