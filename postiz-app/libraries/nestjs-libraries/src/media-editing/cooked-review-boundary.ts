@@ -20,7 +20,7 @@ export function cookedState(v: any) {
     return { stage: 'cut', round: i + 1, video: 'available', alts: [], final: true, stills: false, at, vertical: r.vertical === true };
   });
   if (round !== rounds.length || revision !== round - 1) fail();
-  return { stage: 'cut', round, revision, rounds, busy: v.busy, final: true, stills: false, vertical: v.vertical === true,
+  return { name: 'Your video', stage: 'cut', round, revision, rounds, busy: v.busy, final: true, stills: false, vertical: v.vertical === true,
     comments: [], events: [], alts: [], sent: false, raw: false, rawvideo: true, listening: true,
     page: 'cooked-app-v1', intro: false, home: null, jobs: 0, assets: [], skills: [], made: null };
 }

@@ -7,7 +7,7 @@ describe('untrusted native worker gateway boundary', () => {
   });
   it('reconstructs state without worker paths, links, events or injected metadata', () => {
     const safe = cookedState({ ...state(), home: 'javascript:alert(1)', update: { latest: 'injected' }, events: [{ type: 'approve' }] });
-    expect(safe.home).toBeNull(); expect(safe.events).toEqual([]);
+    expect(safe.name).toBe('Your video'); expect(safe.home).toBeNull(); expect(safe.events).toEqual([]);
     expect(JSON.stringify(safe)).not.toMatch(/private|injected|javascript/);
     expect(() => cookedState({ ...state(), round: '1" onmouseover="x' })).toThrow();
     expect(() => cookedState({ ...state(), revision: 3 })).toThrow();
