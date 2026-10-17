@@ -1,6 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+const filesystem = require('fs/promises');
 import { CookedCommand, CookedConfig, CookedEditorRuntime, PreparedCookedSource, runCookedCommand } from '../../libraries/nestjs-libraries/src/media-editing/cooked-editor-runtime';
 
 describe('private cooked native boundary', () => {
@@ -140,5 +141,25 @@ describe('private cooked native boundary', () => {
     await writeFile(script, 'import time\ntime.sleep(30)\n'); await expect(runCookedCommand({ ...command, timeoutMs: 50 })).rejects.toThrow('STAGE_TIMEOUT');
     await expect(runCookedCommand({ ...command, rssBytes: 1 })).rejects.toThrow('RSS_LIMIT');
     await writeFile(script, 'print("x" * (9 * 1024 * 1024))\n'); await expect(runCookedCommand(command)).rejects.toThrow('LOG_LIMIT');
+  });
+  it('tolerates an enumerated temporary file disappearing while preserving other supervision failures', async () => {
+    const workspace = join(root, 'jobs'), script = join(root, 'synthetic.py'), transient = join(workspace, 'transient');
+    await writeFile(script, 'import time\ntime.sleep(0.4)\n'); await writeFile(transient, 'temporary');
+    const command = { stage: 'verify' as const, python: config.python, launcher: config.launcherPath, script, args: [], workspace,
+      env: { PATH: config.path }, timeoutMs: 2000, rssBytes: 768 * 1024 * 1024, workspaceBytes: 512 * 1024 * 1024 };
+    const original = filesystem.lstat;
+    let inspected = false;
+    const spy = jest.spyOn(filesystem, 'lstat').mockImplementation((async (path: string, ...args: any[]) => {
+      if (path === transient) { inspected = true; throw Object.assign(new Error('temporary file disappeared'), { code: 'ENOENT' }); }
+      return (original as any)(path, ...args);
+    }) as any);
+    try { await runCookedCommand(command); expect(inspected).toBe(true); } finally { spy.mockRestore(); }
+    const denied = jest.spyOn(filesystem, 'lstat').mockImplementation((async (path: string, ...args: any[]) => {
+      if (path === transient) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return (original as any)(path, ...args);
+    }) as any);
+    try { await expect(runCookedCommand(command)).rejects.toThrow('SUPERVISION_FAILED:WORKSPACE:EACCES'); } finally { denied.mockRestore(); }
+    await symlink(input.sourcePath, join(workspace, 'linked'));
+    await expect(runCookedCommand(command)).rejects.toThrow('SUPERVISION_FAILED:WORKSPACE:WORKSPACE_SYMLINK');
   });
 });

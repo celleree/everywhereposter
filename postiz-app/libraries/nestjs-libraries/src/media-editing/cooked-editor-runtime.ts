@@ -42,8 +42,15 @@ async function bytes(path: string): Promise<number> {
   let total = 0;
   for (const entry of await readdir(path, { withFileTypes: true })) {
     const p = join(path, entry.name);
-    if (entry.isSymbolicLink()) throw new Error('WORKSPACE_SYMLINK');
-    total += entry.isDirectory() ? await bytes(p) : (await lstat(p)).size;
+    try {
+      const info = await lstat(p);
+      if (info.isSymbolicLink()) throw new Error('WORKSPACE_SYMLINK');
+      total += info.isDirectory() ? await bytes(p) : info.size;
+    } catch (error) {
+      // Native renderers remove temporary entries between enumeration and inspection.
+      // Only disappearance of an enumerated child is benign; root/read/permission errors fail.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
   return total;
 }
@@ -88,10 +95,15 @@ export const runCookedCommand: CookedRunner = async (command) => {
     const watch = setInterval(async () => {
       if (inspecting || !child.pid) return;
       inspecting = true;
+      let check = 'RSS';
       try {
         if (await groupRss(child.pid) > command.rssBytes) fail('RSS_LIMIT');
+        check = 'WORKSPACE';
         if (await bytes(command.workspace) > command.workspaceBytes) fail('WORKSPACE_LIMIT');
-      } catch { fail('SUPERVISION_FAILED'); }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? (error as Error).message;
+        fail(`SUPERVISION_FAILED:${check}:${typeof code === 'string' && /^[A-Z_]+$/.test(code) ? code : 'UNKNOWN'}`);
+      }
       finally { inspecting = false; }
     }, 100);
     child.once('error', (error) => { failure ??= error; });
