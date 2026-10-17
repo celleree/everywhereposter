@@ -36,7 +36,7 @@ export const sanitizeAnalytics: NonNullable<PostHogConfig['before_send']> = (eve
       }
     }
   };
-  sanitize(event.properties);
+  sanitize(event);
   return event;
 };
 

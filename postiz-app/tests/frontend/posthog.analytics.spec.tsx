@@ -1,3 +1,4 @@
+/** @jest-environment-options {"url":"http://analytics.test"} */
 import React, { StrictMode } from 'react';
 import { render, renderHook, act } from '@testing-library/react';
 import posthog from 'posthog-js';
@@ -70,7 +71,10 @@ it('captures initial and client navigation once, retains referrer and disables s
     session_recording: { maskAllInputs: true, maskTextSelector: '*', blockSelector: 'body' },
   }));
   const config = (posthog.init as jest.Mock).mock.calls[0][1];
-  const sanitized = config.before_send({ properties: {
+  const sanitized = config.before_send({
+    $set_once: { $initial_current_url: 'https://app.test/auth/forgot/private-token?code=secret' },
+    $set: { $referrer: 'https://external.test/private-id?token=secret' },
+    properties: {
     $current_url: 'https://app.test/auth?code=secret#token',
     $referrer: 'https://external.test/private-id?email=secret',
     $set_once: { $initial_current_url: 'https://app.test/auth/forgot/private-token' },
