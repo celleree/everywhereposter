@@ -1370,6 +1370,7 @@ model AiWalletReservation {
   usageSnapshot Json?
   usageFingerprint String?
   resultFingerprint String?
+  textResult AiTextResult?
   state AiWalletReservationState @default(RESERVED)
   providerRequestId String?
   createdAt DateTime @default(now())
@@ -1425,4 +1426,11 @@ model AiWalletPaymentEvent {
   credited Boolean
   createdAt DateTime @default(now())
   topup AiWalletTopup @relation(fields: [topupId, organizationId], references: [id, organizationId])
+}
+
+// Recoverable business output; financial metadata retains only its fingerprint.
+model AiTextResult {
+  reservationId String @id
+  output Json
+  reservation AiWalletReservation @relation(fields: [reservationId], references: [id])
 }

@@ -48,14 +48,15 @@ export class AiWalletService {
     }
   }
 
-  private async transact<T>(organizationId: string, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  private async transact<T>(organizationId: string, operation: (tx: Prisma.TransactionClient) => Promise<T>,
+    isolationLevel: Prisma.TransactionIsolationLevel = Prisma.TransactionIsolationLevel.Serializable): Promise<T> {
     this.key(organizationId);
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         return await this.transactions.model.$transaction(async (tx) => {
           await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 3))::text`;
           return operation(tx);
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        }, { isolationLevel });
       } catch (error) {
         if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2034' || attempt === 4) throw error;
       }
@@ -115,7 +116,7 @@ export class AiWalletService {
     });
   }
 
-  async dispatch(organizationId: string, id: string) {
+  async dispatch(organizationId: string, id: string, requireTextPlan = false) {
     this.enabled();
     return this.transact(organizationId, async (tx) => {
       const wallet = await this.wallet(tx, organizationId);
@@ -123,10 +124,18 @@ export class AiWalletService {
       const reservation = await this.reservation(tx, organizationId, id);
       this.storedQuote(reservation);
       if (reservation.state !== 'RESERVED') return { dispatch: false, reservation };
+      if (requireTextPlan) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 2))::text`;
+        const subscription = await tx.subscription.findFirst({ where: { organizationId, deletedAt: null },
+          select: { subscriptionTier: true } });
+        if (subscription?.subscriptionTier !== 'LAUNCH_V1') throw Error('Prepaid text is not included in this plan.');
+      }
       return { dispatch: true, reservation: await tx.aiWalletReservation.update({
         where: { id }, data: { state: 'DISPATCHED' },
       }) };
-    });
+      // The wallet lock still serializes claims. READ COMMITTED makes the plan
+      // read fresh after waiting for subscription reconciliation's shared lock.
+    }, requireTextPlan ? Prisma.TransactionIsolationLevel.ReadCommitted : Prisma.TransactionIsolationLevel.Serializable);
   }
 
   async cancelBeforeDispatch(organizationId: string, id: string) {
@@ -220,6 +229,46 @@ export class AiWalletService {
       const row = await tx.aiWalletReservation.findUnique({ where: { organizationId_operationKey: { organizationId, operationKey } } });
       if (row) this.storedQuote(row);
       return row;
+    });
+  }
+
+  async existingTextRequest(organizationId: string, requestKey: string) {
+    return this.transact(organizationId, tx => tx.aiWalletReservation.findFirst({ where: {
+      organizationId, operationKey: { startsWith: `guided-text:${requestKey}:` },
+    } }));
+  }
+
+  /** Stage the receipt and recoverable output before the debit. No provider retry
+   * may follow a dispatch claim, including when this local write fails. */
+  async stageText(organizationId: string, id: string, output: Prisma.InputJsonValue, receipt: MeasuredUsage) {
+    const usage = usageSnapshot(receipt), usageFingerprint = snapshotFingerprint(usage);
+    const resultFingerprint = snapshotFingerprint(output);
+    return this.transact(organizationId, async tx => {
+      const row = await this.reservation(tx, organizationId, id);
+      if (!row.operationKey.startsWith('guided-text:') || !this.storedQuote(row) ||
+          !['DISPATCHED', 'UNKNOWN'].includes(row.state) ||
+          (row.providerRequestId && row.providerRequestId !== receipt.providerRequestId) ||
+          (row.usageFingerprint && row.usageFingerprint !== usageFingerprint) ||
+          (row.resultFingerprint && row.resultFingerprint !== resultFingerprint)) throw Error('Text receipt or result changed.');
+      quotedCharge(row.quoteSnapshot, receipt);
+      await tx.aiTextResult.upsert({ where: { reservationId: id }, create: { reservationId: id, output }, update: { output } });
+      return tx.aiWalletReservation.update({ where: { id }, data: { state: 'UNKNOWN',
+        providerRequestId: receipt.providerRequestId, usageSnapshot: usage, usageFingerprint, resultFingerprint } });
+    });
+  }
+
+  async finishText(organizationId: string, id: string) {
+    return this.transact(organizationId, async tx => {
+      const row = await this.reservation(tx, organizationId, id);
+      const result = await tx.aiTextResult.findUnique({ where: { reservationId: id } });
+      if (!row.operationKey.startsWith('guided-text:') || !result || !row.usageSnapshot ||
+          snapshotFingerprint(result.output) !== row.resultFingerprint ||
+          snapshotFingerprint(row.usageSnapshot) !== row.usageFingerprint) throw Error('Text result integrity check failed.');
+      const usage = measuredSnapshot(row.usageSnapshot);
+      const settled = await this.settleInTransaction(tx, organizationId, id,
+        quotedCharge(row.quoteSnapshot, usage), usage.providerRequestId, usage);
+      if (settled.state !== 'SETTLED') throw Error('Text usage requires reconciliation.');
+      return result.output;
     });
   }
 

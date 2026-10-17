@@ -57,3 +57,18 @@ verify sandbox acceptance and approve the reviewed release separately.
 Synthetic tests prove gateway/ledger invariants, not real provider compatibility
 or that the existing Temporal/Copilot/video paths are already metered. Feature
 flags/defaults, legacy entitlements, provider behavior and production are unchanged.
+
+
+## Bounded text adapter (unreleased, default off)
+
+`AiWalletTextService` accepts only textual system/user messages and structured JSON output on `gpt-6-luna` or `gpt-6.1-sol`. It caps the serialized request at 32 KiB and requests one completion with `max_completion_tokens=4096` (including reasoning), standard service tier and no stored provider output. The integrating caller must set SDK `maxRetries: 0`; no fallback/retry is permitted after a durable dispatch claim.
+
+Each organization/request/stage has an immutable request/quote fingerprint. `AiTextResult` stores recoverable business output separately from financial metadata. Output and normalized usage commit before settlement. A replay resumes local settlement or returns persisted output; timeouts, missing receipts and unsupported usage retain the hold and require reconciliation. An undispatched reservation is not execution authority: flags and the caller grant are rechecked, and the current persisted Launch tier is checked under the subscription lock at the durable dispatch claim. Revocation blocks fresh execution while staged output can still settle and replay without another provider call.
+
+There are no default prices. `AI_WALLET_TEXT_RATE_CARDS` is keyed by model. Each card requires `billingContext: standard-text-receipt-no-extra-charges`, `rateVersion`, integer-string `per` and six integer-string nanos rates: `inputUncachedLow`, `inputCachedLow`, `outputLow`, `inputUncachedHigh`, `inputCachedHigh`, `outputHigh`. Low means up to 272,000 input tokens; high means above that threshold for the entire request. The card must reflect actual verified account pricing, including its processing region. An operator must not attest this billing context where cache writes or other charges are billed without authoritative units in the supported receipt. Such environments remain disabled; the string is a configuration assertion, not proof of account verification.
+
+For safe reservations the adapter deliberately over-reserves the published 1,050,000-token model context, both input categories/tiers, and capped output. It does not estimate tokens from characters. This conservative hold can exceed a small wallet's available balance even where the eventual debit would be much smaller. Input bytes are additionally bounded; settlement uses actual receipt units and the applicable configured tier, plus 20 percent, rounded once. Release acceptance must explicitly assess available balances and the hold behavior.
+
+Unsupported audio, image, tool, extra-cache-charge, nonstandard-tier or unrecognized model receipts cannot settle automatically. No Flare ceiling is supplied. This adapter alone does not expose an HTTP entrypoint or enable guided copy; the separately reviewed integration must bind request identity, fresh entitlements and every text call.
+
+Provider contracts checked 16 October 2026: [Luna model](https://developers.openai.com/api/docs/models/gpt-6-luna), [Sol model](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [Chat Completion API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create). Account rates and real receipts remain unverified. Only isolated fixture databases receive this migration before separately approved release.
