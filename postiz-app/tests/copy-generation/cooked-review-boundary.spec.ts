@@ -12,6 +12,14 @@ describe('untrusted native worker gateway boundary', () => {
     expect(() => cookedState({ ...state(), round: '1" onmouseover="x' })).toThrow();
     expect(() => cookedState({ ...state(), revision: 3 })).toThrow();
   });
+  it('admits the four-minute source timeline but rejects numbers beyond its bounded tolerance', () => {
+    const long = data(); long.duration = 240; long.transcript.source_s = 240;
+    long.transcript.kept = [[0, 240]]; long.transcript.lines[0].tokens[0].s = 239;
+    long.transcript.lines[0].tokens[0].e = 240;
+    expect(cookedData(long).transcript.kept).toEqual([[0, 240]]);
+    long.transcript.lines[0].tokens[0].e = 240.101;
+    expect(() => cookedData(long)).toThrow('INVALID_WORKER_RESPONSE');
+  });
   it('allows transcript text as text while rejecting executable attribute and numeric fields', () => {
     expect(cookedData({ ...data(), chapters: [['0" onclick="x', 'x']] }).transcript.lines[0].tokens[0].w).toContain('<img');
     const bad = data(); (bad.transcript.kept[0] as unknown[])[0] = '0" onclick="x';

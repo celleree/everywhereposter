@@ -3,9 +3,11 @@ import { createHash, randomUUID } from 'crypto';
 import { appendFileSync, constants, createReadStream, existsSync, statSync } from 'fs';
 import { cp, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative } from 'path';
+import { PACING_SETTINGS } from './video-edit-decision';
+import { COOKED_EDITOR_LIMITS as LIMITS } from './cooked-editor-limits';
 
 type PipelineStage = 'transcribe' | 'retakes' | 'build_timeline' | 'render' | 'verify';
-type Stage = PipelineStage | 'apply_edits' | 'review_start' | 'review_round' | 'review_final';
+type Stage = PipelineStage | 'apply_edits' | 'prepare_boundaries' | 'audit_render' | 'review_start' | 'review_round' | 'review_final';
 export interface CookedCommand {
   stage: Stage; python: string; launcher: string; script: string; args: string[];
   workspace: string; env: NodeJS.ProcessEnv; timeoutMs: number; rssBytes: number; workspaceBytes: number;
@@ -25,6 +27,7 @@ export interface CookedEdits { cut?: [number, number][]; restore?: [number, numb
 interface OwnedJob {
   workspace: string; marker: string; orgId: string; sourceSha256: string; active: boolean;
   durationSeconds: number; revision: number; ready: boolean; sourcePath: string;
+  blocks: [number, number][]; selected: [number, number][];
   command?: Omit<CookedCommand, 'stage' | 'script' | 'args' | 'timeoutMs'>;
 }
 const MiB = 1024 * 1024;
@@ -131,8 +134,8 @@ export class CookedEditorRuntime {
   private jobs = new Map<string, OwnedJob>();
   private stageMs: number; private overallMs: number; private rss: number; private disk: number;
   constructor(private config: CookedConfig, private runner: CookedRunner = runCookedCommand) {
-    this.stageMs = bounded(config.stageTimeoutMs, 90_000);
-    this.overallMs = bounded(config.overallTimeoutMs, 240_000);
+    this.stageMs = bounded(config.stageTimeoutMs, LIMITS.stageTimeoutMs);
+    this.overallMs = bounded(config.overallTimeoutMs, LIMITS.operationTimeoutMs);
     this.rss = bounded(config.rssBytes, 768 * MiB);
     this.disk = bounded(config.workspaceBytes, 512 * MiB);
   }
@@ -145,9 +148,9 @@ export class CookedEditorRuntime {
       const m = input.metadata;
       if (!input.orgId || !input.mediaId || !m || !m.alignedTimestamps || !m.hasAudio ||
           ![m.durationMs, m.width, m.height, m.fps].every(n => Number.isFinite(n) && n > 0) ||
-          m.durationMs > 60_000 || Math.max(m.width, m.height) > 1920 || Math.min(m.width, m.height) > 1080 || m.fps > 60) throw new Error('UNSUPPORTED_SOURCE');
+          m.durationMs > LIMITS.maxDurationMs || Math.max(m.width, m.height) > LIMITS.maxLongEdge || Math.min(m.width, m.height) > LIMITS.maxShortEdge || m.fps > LIMITS.maxFps) throw new Error('UNSUPPORTED_SOURCE');
       await regular(input.sourcePath);
-      if ((await stat(input.sourcePath)).size > 100 * MiB) throw new Error('SOURCE_TOO_LARGE');
+      if ((await stat(input.sourcePath)).size > LIMITS.maxBytes) throw new Error('SOURCE_TOO_LARGE');
       for (const p of [this.config.workRoot, this.config.sourceRoot, this.config.modelPath]) {
         if (!isAbsolute(p) || !(await lstat(p)).isDirectory()) throw new Error('ABSOLUTE_DIRECTORY_REQUIRED');
       }
@@ -159,7 +162,7 @@ export class CookedEditorRuntime {
       const sourceSha256 = await digest(input.sourcePath);
       const workspace = await mkdtemp(join(root, 'cooked-'));
       job = { workspace, orgId: input.orgId, sourceSha256, active: true, marker: '',
-        durationSeconds: m.durationMs / 1000, revision: 0, ready: false, sourcePath: input.sourcePath };
+        durationSeconds: m.durationMs / 1000, revision: 0, ready: false, sourcePath: input.sourcePath, blocks: [], selected: [] };
       job.marker = JSON.stringify({ jobId, orgId: input.orgId, mediaId: input.mediaId, sourceSha256: job.sourceSha256 });
       this.jobs.set(jobId, job);
       await writeFile(join(workspace, '.cooked-owner'), job.marker, { flag: 'wx', mode: 0o600 });
@@ -178,12 +181,22 @@ export class CookedEditorRuntime {
       };
       job.command = { python: this.config.python, launcher: this.config.launcherPath, workspace, env,
         rssBytes: this.rss, workspaceBytes: this.disk };
-      for (const stage of Object.keys(scripts) as PipelineStage[]) await this.execute(job, stage, join(native, scripts[stage]), args[stage], started);
+      const helper = join(dirname(this.config.launcherPath), 'cooked-quiet-blocks.py'); await regular(helper);
+      await this.execute(job, 'prepare_boundaries', helper, ['prepare', this.config.sourceRoot, source, edit, JSON.stringify(PACING_SETTINGS.relaxed)], started);
+      const policy = JSON.parse(await readFile(join(edit, 'boundary-policy.json'), 'utf8'));
+      if (policy.version !== 'quiet-block-v1' || policy.sourceSha256 !== job.sourceSha256 || !Array.isArray(policy.blocks) ||
+          policy.blocks.length > 100 || policy.blocks.some((r: unknown) => !Array.isArray(r) || r.length !== 2 ||
+            r.some(n => typeof n !== 'number' || !Number.isFinite(n)) || r[0] < 0 || r[0] >= r[1] || r[1] > job!.durationSeconds)) throw new Error('INVALID_BOUNDARY_POLICY');
+      job.blocks = policy.blocks;
+      for (const stage of ['transcribe', 'build_timeline', 'render', 'audit_render', 'verify'] as const) {
+        await this.execute(job, stage, stage === 'build_timeline' || stage === 'audit_render' ? helper : join(native, scripts[stage]),
+          stage === 'build_timeline' || stage === 'audit_render' ? [stage === 'build_timeline' ? 'build' : 'audit', this.config.sourceRoot, source, edit] : args[stage], started);
+      }
       await this.review(job, 'start', started); await this.review(job, 'final', started);
       await regular(join(edit, 'cut.mp4'));
       if (await digest(source) !== job.sourceSha256 || await digest(input.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
       job.ready = true;
-      return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4') };
+      return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4'), blocks: job.blocks, removedBlocks: job.selected };
     } catch (error) { throw Object.assign(error as Error, { jobId: job ? jobId : undefined }); }
     finally { if (job) job.active = false; this.active = false; }
   }
@@ -222,13 +235,18 @@ export class CookedEditorRuntime {
     });
     if (ranges.length === 0 || ranges.length > 100 || ranges.some(r => !Array.isArray(r) || r.length !== 2 ||
         r.some(n => typeof n !== 'number' || !Number.isFinite(n)) || r[0] < 0 || r[0] >= r[1] || r[1] > job.durationSeconds)) throw new Error('INVALID_EDITS');
+    const same = (a: number[], b: number[]) => a[0] === b[0] && a[1] === b[1];
+    const cut = edits.cut ?? [], restore = edits.restore ?? [];
+    if (edits.pause?.length || cut.some(r => !job.blocks.some(b => same(r, b)) || job.selected.some(b => same(r, b))) ||
+        restore.some(r => !job.selected.some(b => same(r, b))) || new Set([...cut, ...restore].map(r => JSON.stringify(r))).size !== cut.length + restore.length) throw new Error('UNSUPPORTED_BLOCK_EDIT');
+    const nextSelected = [...job.selected.filter(r => !restore.some(b => same(r, b))), ...cut.map(r => [...r] as [number, number])].sort((a, b) => a[0] - b[0]);
     this.active = true; job.active = true;
     const started = Date.now(), source = join(job.workspace, 'source.mp4'), edit = join(job.workspace, 'edit');
     let checkpoint: string | undefined, previousRender = '', previousReview = '';
     try {
       await this.assertOwned(job);
       if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
-      const helper = join(dirname(this.config.launcherPath), 'cooked-editor-apply.py'); await regular(helper);
+      const helper = join(dirname(this.config.launcherPath), 'cooked-quiet-blocks.py'); await regular(helper);
       const request = join(job.workspace, 'revision-request.json');
       await writeFile(request, JSON.stringify(edits), { mode: 0o600 });
       // Preserve the verified native draft before a speculative edit. Cache segments
@@ -245,17 +263,18 @@ export class CookedEditorRuntime {
         return true;
       } });
       job.ready = false; job.revision++;
-      await this.execute(job, 'apply_edits', helper, [this.config.sourceRoot, edit, request], started);
-      for (const stage of ['build_timeline', 'render', 'verify'] as PipelineStage[]) {
-        await this.execute(job, stage, join(this.config.sourceRoot, 'plugins/ai-editor/skills/cut/scripts', scripts[stage]),
-          stage === 'verify' ? [edit, '--engine', 'whisper'] : [source, edit, ...(stage === 'render' ? ['--max', '1080'] : [])], started);
+      await this.execute(job, 'apply_edits', helper, ['apply', this.config.sourceRoot, source, edit, request], started);
+      for (const stage of ['build_timeline', 'render', 'audit_render', 'verify'] as const) {
+        await this.execute(job, stage, stage === 'build_timeline' || stage === 'audit_render' ? helper : join(this.config.sourceRoot, 'plugins/ai-editor/skills/cut/scripts', scripts[stage]),
+          stage === 'build_timeline' || stage === 'audit_render' ? [stage === 'build_timeline' ? 'build' : 'audit', this.config.sourceRoot, source, edit] :
+            stage === 'verify' ? [edit, '--engine', 'whisper'] : [source, edit, '--max', '1080'], started);
       }
       await this.review(job, 'round', started);
       await regular(join(edit, 'cut.mp4'));
       if (await digest(source) !== job.sourceSha256 || await digest(job.sourcePath) !== job.sourceSha256) throw new Error('SOURCE_CHANGED');
       await rm(checkpoint, { recursive: true }); checkpoint = undefined;
-      job.ready = true;
-      return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace: job.workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4') };
+      job.ready = true; job.selected = nextSelected;
+      return { jobId, revision: job.revision, sourceSha256: job.sourceSha256, workspace: job.workspace, editDirectory: edit, cutPath: join(edit, 'cut.mp4'), blocks: job.blocks, removedBlocks: job.selected };
     } catch (error) {
       let previousRevisionRestored = false;
       if ((error as Error).message === 'NATIVE_verify_FAILED' && checkpoint && !job.ready) {

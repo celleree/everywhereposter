@@ -13,6 +13,7 @@ import {
   VideoEditDecisionListV1,
 } from '@gitroom/nestjs-libraries/media-editing/video-edit-decision';
 import { PACING_SETTINGS, PacingPreset } from './video-edit-decision';
+import { COOKED_EDITOR_LIMITS } from './cooked-editor-limits';
 
 const execFileAsync = promisify(execFile);
 export const TALKING_HEAD_EDIT_DEFAULTS = {
@@ -206,7 +207,10 @@ export const buildFfmpegRenderArgs = (
 export class FfmpegVideoEditorService {
   async probeForCooked(inputPath: string) {
     await this.assertLocalMp4(inputPath);
-    const p = await this.probeMedia(inputPath); this.assertSupportedSource(p);
+    const p = await this.probeMedia(inputPath); this.assertSupportedSource(p, COOKED_EDITOR_LIMITS.maxDurationMs);
+    if (Math.max(p.videoWidth, p.videoHeight) > COOKED_EDITOR_LIMITS.maxLongEdge ||
+        Math.min(p.videoWidth, p.videoHeight) > COOKED_EDITOR_LIMITS.maxShortEdge || p.videoFrameRate > COOKED_EDITOR_LIMITS.maxFps)
+      throw new VideoEditingError('UNSUPPORTED_SOURCE', 'Native editing supports up to720p and30fps.');
     return { durationMs: p.durationMs, width: p.videoWidth, height: p.videoHeight, fps: p.videoFrameRate,
       alignedTimestamps: true as const, hasAudio: true as const };
   }
@@ -437,7 +441,7 @@ export class FfmpegVideoEditorService {
     }
   }
 
-  private assertSupportedSource(probe: MediaProbeResult) {
+  private assertSupportedSource(probe: MediaProbeResult, maximumDurationMs: number = TALKING_HEAD_EDIT_DEFAULTS.maxDurationMs) {
     if (!probe.hasVideo || !probe.hasAudio) {
       throw new VideoEditingError(
         'UNSUPPORTED_SOURCE',
@@ -452,10 +456,10 @@ export class FfmpegVideoEditorService {
         'This renderer requires audio and video starting at zero; shifted or unknown timestamps are not supported.'
       );
     }
-    if (probe.durationMs > TALKING_HEAD_EDIT_DEFAULTS.maxDurationMs) {
+    if (probe.durationMs > maximumDurationMs) {
       throw new VideoEditingError(
         'SOURCE_TOO_LONG',
-        'Phase 1 talking-head editing is limited to videos of 60 seconds or less.'
+        `Editing is limited to videos of ${maximumDurationMs / 1000} seconds or less.`
       );
     }
     if (
