@@ -25,7 +25,7 @@ def command(args):
 
 def probe(path):
     return json.loads(command(['ffprobe', '-v', 'error', '-protocol_whitelist', 'file',
-        '-show_entries', 'format=start_time,duration:stream=codec_type,start_time,duration,sample_rate,width,height,r_frame_rate',
+        '-show_entries', 'format=start_time,duration:stream=codec_type,codec_name,start_time,duration,sample_rate,width,height,r_frame_rate',
         '-of', 'json', str(path)]).stdout)
 
 
@@ -37,6 +37,26 @@ def source_hash(path):
     return h.hexdigest()
 
 
+def presentation_audio(audio, meta):
+    # PyAV resampling can flush a few samples past an exact presentation end.
+    # AAC can also expose at most one incomplete decoded packet. Trim only past
+    # matching declared presentation ends; mismatched/long decoded tails remain.
+    av = {s['codec_type']: s for s in meta['streams'] if s['codec_type'] in ('audio', 'video')}
+    if set(av) == {'audio', 'video'}:
+        end = float(av['audio']['duration'])
+        if math.isfinite(end) and end > 0 and abs(end-float(av['video']['duration'])) <= .001:
+            samples = round(end*16000)
+            padding = 16
+            if av['audio'].get('codec_name') == 'aac':
+                rate = int(av['audio']['sample_rate'])
+                if not 8000 <= rate <= 192000:
+                    raise ValueError('UNSUPPORTED_AUDIO_RATE')
+                padding += math.ceil(1024/rate*16000)
+            if 0 < len(audio)-samples <= padding:
+                return audio[:samples]
+    return audio
+
+
 def prepare(source, edit, settings, B):
     from faster_whisper.audio import decode_audio
     from faster_whisper.vad import VadOptions, get_speech_timestamps
@@ -45,8 +65,8 @@ def prepare(source, edit, settings, B):
     n, d = video['r_frame_rate'].split('/')
     if not 0 < float(n)/float(d) <= 30 or not 0 < min(video['width'], video['height']) <= 720 or max(video['width'], video['height']) > 1280:
         raise ValueError('UNSUPPORTED_BLOCK_RESOURCES')
-    audio = decode_audio(str(source))
-    if not 0 < len(audio) <= 60 * 16000:
+    audio = presentation_audio(decode_audio(str(source)), meta)
+    if not 0 < len(audio) <= 240 * 16000:
         raise ValueError('UNSUPPORTED_SOURCE')
     speech = get_speech_timestamps(audio, VadOptions(threshold=.2, min_silence_duration_ms=200, speech_pad_ms=120))
     if not speech:
@@ -55,7 +75,7 @@ def prepare(source, edit, settings, B):
     times = json.loads(command(['ffprobe', '-v', 'error', '-protocol_whitelist', 'file', '-select_streams', 'v:0',
         '-show_frames', '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'json', str(source)]).stdout)['frames']
     pts = [float(t['best_effort_timestamp_time']) for t in times]
-    if not 0 < fps <= 60 or len(pts) != total or not 0 < total <= 3600 or abs(pts[0]) > .001 or any(
+    if not 0 < fps <= 30 or len(pts) != total or not 0 < total <= 7200 or abs(pts[0]) > .001 or any(
         abs(b-a-1/fps) > .001 for a, b in zip(pts, pts[1:])) or any(
         abs(float(s['start_time'])) > .001 for s in meta['streams'] if s['codec_type'] in ('audio', 'video')):
         raise ValueError('UNSUPPORTED_CFR_SOURCE')

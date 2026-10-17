@@ -23,6 +23,23 @@ class QuietBlockContract(unittest.TestCase):
             with self.subTest(edits=edits), self.assertRaises(ValueError):
                 selected(self.policy, edits, [])
 
+    def test_only_bounded_decoder_padding_beyond_matching_presentation_ends_is_trimmed(self):
+        presentation = functions['presentation_audio']
+        def meta(audio=1, video=1):
+            return dict(streams=[dict(codec_type='audio', duration=str(audio)),
+                dict(codec_type='video', duration=str(video))])
+        samples = [1]*16005
+        self.assertEqual(len(presentation(samples, meta())), 16000)
+        self.assertEqual(len(presentation([1]*16017, meta())), 16017)
+        self.assertEqual(len(presentation(samples, meta(audio=1.1))), 16005)
+        self.assertEqual(len(presentation(samples, meta(video=1.1))), 16005)
+        self.assertEqual(len(presentation([1]*15999, meta())), 15999)
+        aac = meta(); aac['streams'][0].update(codec_name='aac', sample_rate='44100')
+        self.assertEqual(len(presentation([1]*16212, aac)), 16000)
+        self.assertEqual(len(presentation([1]*16400, aac)), 16400)
+        aac['streams'][1]['duration'] = '1.1'
+        self.assertEqual(len(presentation([1]*16212, aac)), 16212)
+
     def test_final_decisions_and_av_must_match_the_exact_block_plan(self):
         with tempfile.TemporaryDirectory() as folder:
             edit = Path(folder)

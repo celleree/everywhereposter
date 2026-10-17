@@ -4,6 +4,7 @@ import { appendFileSync, constants, createReadStream, existsSync, statSync } fro
 import { cp, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative } from 'path';
 import { PACING_SETTINGS } from './video-edit-decision';
+import { COOKED_EDITOR_LIMITS as LIMITS } from './cooked-editor-limits';
 
 type PipelineStage = 'transcribe' | 'retakes' | 'build_timeline' | 'render' | 'verify';
 type Stage = PipelineStage | 'apply_edits' | 'prepare_boundaries' | 'audit_render' | 'review_start' | 'review_round' | 'review_final';
@@ -133,8 +134,8 @@ export class CookedEditorRuntime {
   private jobs = new Map<string, OwnedJob>();
   private stageMs: number; private overallMs: number; private rss: number; private disk: number;
   constructor(private config: CookedConfig, private runner: CookedRunner = runCookedCommand) {
-    this.stageMs = bounded(config.stageTimeoutMs, 90_000);
-    this.overallMs = bounded(config.overallTimeoutMs, 240_000);
+    this.stageMs = bounded(config.stageTimeoutMs, LIMITS.stageTimeoutMs);
+    this.overallMs = bounded(config.overallTimeoutMs, LIMITS.operationTimeoutMs);
     this.rss = bounded(config.rssBytes, 768 * MiB);
     this.disk = bounded(config.workspaceBytes, 512 * MiB);
   }
@@ -147,9 +148,9 @@ export class CookedEditorRuntime {
       const m = input.metadata;
       if (!input.orgId || !input.mediaId || !m || !m.alignedTimestamps || !m.hasAudio ||
           ![m.durationMs, m.width, m.height, m.fps].every(n => Number.isFinite(n) && n > 0) ||
-          m.durationMs > 60_000 || Math.max(m.width, m.height) > 1280 || Math.min(m.width, m.height) > 720 || m.fps > 30) throw new Error('UNSUPPORTED_SOURCE');
+          m.durationMs > LIMITS.maxDurationMs || Math.max(m.width, m.height) > LIMITS.maxLongEdge || Math.min(m.width, m.height) > LIMITS.maxShortEdge || m.fps > LIMITS.maxFps) throw new Error('UNSUPPORTED_SOURCE');
       await regular(input.sourcePath);
-      if ((await stat(input.sourcePath)).size > 100 * MiB) throw new Error('SOURCE_TOO_LARGE');
+      if ((await stat(input.sourcePath)).size > LIMITS.maxBytes) throw new Error('SOURCE_TOO_LARGE');
       for (const p of [this.config.workRoot, this.config.sourceRoot, this.config.modelPath]) {
         if (!isAbsolute(p) || !(await lstat(p)).isDirectory()) throw new Error('ABSOLUTE_DIRECTORY_REQUIRED');
       }

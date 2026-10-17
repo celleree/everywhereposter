@@ -13,7 +13,7 @@ Mutations require the application's exact Origin. Recovery only reads an opaque,
 organization-scoped request receipt; reloading does not start transcription.
 
 The source is prepared using existing storage code and probed using the existing
-video editor. The current transcription configuration is English speech. Accepted input is one audio-bearing MP4/MOV, at most 60 seconds,
+video editor. The current transcription configuration is English speech. Accepted input is one audio-bearing MP4/MOV, at most240 seconds,
 100 MiB, 720p and30fps, with aligned timestamps. Uploading/selecting it starts
 offline transcription and the native timeline/render/verification pipeline.
 Eligible whole-block cut/restore operations use optimistic revisions and native review
@@ -59,6 +59,29 @@ Phase1 keeps its separate1080p renderer. The native limit is enforced against ac
 VFR, missing/shifted timestamps, no detected speech and unpaired tails are rejected.
 This is conservative acoustic eligibility, not semantic or general word alignment.
 
+The native-only duration contract is four minutes; Phase1 remains60seconds.
+The app probe, response timestamp parser, worker frame/audio checks and request
+deadlines use that contract. Source/output byte caps remain100MiB; long sources
+must still satisfy720p/30fps and are not automatically normalized. Decoder padding (<=oneAAC packet plus1ms resampler flush)
+is trimmed only beyond known matching A/V presentation ends;
+real unmatched tails still reject. Native operations remain serialized. The
+bounded per-stage deadline is180seconds, total operation600seconds, with a630second
+client deadline; these are ceilings, not processing-time promises. A longer CPU
+occupancy does not establish capacity on the shared production host.
+
+An uncut real-speech AAC render can still fail the unchanged tiny-model transcript
+verifier when a second ASR pass omits kept words. Such a rejection remains a
+rejection; no acoustic comparison overrides it and no failed output is accepted.
+Actual raw-footage quality and full-duration resource evidence must be checked
+separately before activation.
+
+The full117-second normalized raw fixture exceeded512MiB during verification
+even with its client outside the worker cgroup. The existing512MiB one-session
+override is therefore not accepted for this duration. Local1GiB evaluation is
+separate from live authorization; any proposed1GiB/oneCPU configuration needs
+exact image/resource receipts and fresh shared-host capacity/security review
+before activation. Source, work/tmp disk and single-session limits are unchanged.
+
 Job/find receipts expose `editing` with `mode`, `blocks`, `removedBlocks` and
 `wordCuts:false`, `arbitraryPhrases:false`, `pauseEdits:false`. Cut requests must
 exactly match a published block; restore must match a currently removed block.
@@ -72,8 +95,8 @@ gain permission through this capability; UI selection wiring is not added here.
 
 Build the local Python/model image using the pinned preparation instructions in
 `../cooked-pilot/README.md`. Compile `cooked-editor-runtime.ts` and
-`cooked-worker.ts` and their pure `video-edit-decision.ts` dependency to CommonJS using the repository TypeScript compiler. Stage
-those three JS files, `cooked-editor-launcher.py`, `cooked-quiet-blocks.py`,
+`cooked-worker.ts` and their pure `video-edit-decision.ts` and `cooked-editor-limits.ts` dependencies to CommonJS using the repository TypeScript compiler. Stage
+those four JS files, `cooked-editor-launcher.py`, `cooked-quiet-blocks.py`,
 `worker-entry.cjs` and `worker-health.cjs` under a Docker build context's `runtime/`
 directory. Build `Dockerfile.worker` with exact `NODE_BASE` and `COOKED_BASE`
 image identities. No npm installation or application secrets are needed inside

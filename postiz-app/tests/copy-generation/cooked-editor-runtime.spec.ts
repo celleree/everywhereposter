@@ -49,7 +49,7 @@ describe('private cooked native boundary', () => {
   });
   it('fails closed for unsupported metadata, missing files, symlinks, nonprivate roots and unsafe limits', async () => {
     const runtime = new CookedEditorRuntime(config, runner);
-    for (const metadata of [{ ...input.metadata, fps: 31 }, { ...input.metadata, width: 1920, height: 1080 }, { ...input.metadata, durationMs: 60001 }, { ...input.metadata, alignedTimestamps: false }]) {
+    for (const metadata of [{ ...input.metadata, fps: 31 }, { ...input.metadata, width: 1920, height: 1080 }, { ...input.metadata, durationMs: 240001 }, { ...input.metadata, alignedTimestamps: false }]) {
       await expect(runtime.run({ ...input, metadata } as PreparedCookedSource)).rejects.toThrow('UNSUPPORTED_SOURCE');
     }
     await expect(runtime.run({ ...input, sourcePath: join(root, 'missing') })).rejects.toThrow();
@@ -60,6 +60,15 @@ describe('private cooked native boundary', () => {
     await expect(runtime.run(input)).rejects.toThrow('PRIVATE');
     expect(() => new CookedEditorRuntime({ ...config, rssBytes: 769 * 1024 * 1024 })).toThrow('INVALID_LIMIT');
     expect(calls).toHaveLength(0);
+  });
+  it('accepts four minutes with bounded stages and keeps source-byte/resource limits', async () => {
+    const runtime = new CookedEditorRuntime(config, runner);
+    const made = await runtime.run({ ...input, metadata: { ...input.metadata, durationMs: 240_000 } });
+    expect(calls[0].timeoutMs).toBeLessThanOrEqual(180_000);
+    expect(calls[0].workspaceBytes).toBe(512 * 1024 * 1024);
+    expect(() => new CookedEditorRuntime({ ...config, stageTimeoutMs: 180_001 })).toThrow('INVALID_LIMIT');
+    expect(() => new CookedEditorRuntime({ ...config, overallTimeoutMs: 600_001 })).toThrow('INVALID_LIMIT');
+    await runtime.cleanup(made.jobId, 'o');
   });
   it('rejects concurrent runs and protects active jobs', async () => {
     let release!: () => void;
