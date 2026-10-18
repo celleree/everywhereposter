@@ -1,6 +1,8 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { AiWalletRefundRequest, Prisma } from '@prisma/client';
 import { PrismaTransaction } from '../database/prisma/prisma.service';
+import Stripe from 'stripe';
+import { createHash } from 'crypto';
 import { walletHoldSnapshot } from './ai-wallet-holds';
 
 /** Durable manual-review requests only. Never expires value or calls a payment,
@@ -8,11 +10,12 @@ import { walletHoldSnapshot } from './ai-wallet-holds';
 @Injectable()
 export class AiWalletRefundRequestService {
   constructor(private readonly transactions: PrismaTransaction) {}
-  private async transact<T>(organizationId: string, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  private async transact<T>(organizationId: string, operation: (tx: Prisma.TransactionClient) => Promise<T>, relatedOrganizations: string[] = []): Promise<T> {
     if (!organizationId?.trim() || organizationId.length > 200) throw new BadRequestException('Invalid organization.');
     for (let attempt = 0; attempt < 5; attempt++) {
       try { return await this.transactions.model.$transaction(async tx => {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 3))::text`;
+        for (const lockedOrg of [...new Set([organizationId, ...relatedOrganizations])].sort())
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockedOrg}, 3))::text`;
         return operation(tx);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
       catch (error) {
@@ -38,19 +41,20 @@ export class AiWalletRefundRequestService {
     const funding = ledger.find(r => r.kind === 'FUNDING')?._sum.amountNanos || 0n;
     const usage = ledger.find(r => r.kind === 'USAGE')?._sum.amountNanos || 0n;
     const balance = wallet?.balanceNanos || 0n, held = wallet?.heldNanos || 0n;
-    const reconciled = funding - usage === balance && holds.reconciled;
+    const reversal = ledger.find(r => r.kind === 'REVERSAL')?._sum.amountNanos || 0n;
+    const reconciled = funding - usage - reversal === balance && holds.reconciled;
     return { ...holds, wallet, funding, balance, held, reconciled,
       eligible: wallet?.status === 'ACTIVE' && reconciled ? balance - held : 0n };
   }
   async summary(organizationId: string) {
     return this.transact(organizationId, async tx => {
       const s = await this.snapshot(tx, organizationId);
-      const rows = await tx.aiWalletRefundRequest.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20 });
+      const rows = await tx.aiWalletRefundRequest.findMany({ where: { organizationId }, include: { reconciliation: true }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20 });
       return { organizationId, creditsExpire: false, purchasedNanos: s.funding.toString(),
         eligibleNanos: s.eligible.toString(), refundHeldNanos: s.refundHeld.toString(),
         usageHeldNanos: s.usageHeld.toString(),
         requiresReconciliation: !s.reconciled || (!!s.wallet && s.wallet.status !== 'ACTIVE'),
-        requests: rows.map(r => this.publicRequest(r)) };
+        requests: rows.map(r => ({ ...this.publicRequest(r), testReconciliation: r.reconciliation ? { state: r.reconciliation.state, reviewedAt: r.reconciliation.reviewedAt } : null })) };
     });
   }
   async request(organizationId: string, requestedByUserId: string, operationKey: string) {
@@ -76,12 +80,152 @@ export class AiWalletRefundRequestService {
       if (!row) throw new NotFoundException('Refund request not found.');
       if (row.status === outcome) return this.publicRequest(row);
       if (row.status !== 'REQUESTED') throw new ConflictException('Refund request is already resolved.');
+      if (await tx.aiWalletRefundReconciliation.findUnique({ where: { requestId: id } })) throw new ConflictException('Test refund reconciliation retains this hold.');
       const s = await this.snapshot(tx, organizationId);
       if (!s.wallet || !s.reconciled) throw new ConflictException('Wallet requires reconciliation.');
       await tx.aiWallet.update({ where: { organizationId }, data: { heldNanos: { decrement: row.requestedNanos } } });
       return this.publicRequest(await tx.aiWalletRefundRequest.update({ where: { id }, data: {
         status: outcome, resolvedByUserId: actorId, resolvedAt: new Date() } }));
     });
+  }
+  private assertTestRefunds() {
+    if (process.env.AI_WALLET_TEST_REFUNDS_ENABLED?.trim().toLowerCase() !== 'true') throw new ServiceUnavailableException('Test refund reconciliation is disabled.');
+    if (!/^(sk|rk)_test_/.test(process.env.STRIPE_SECRET_KEY || '')) throw new ServiceUnavailableException('Test refund reconciliation requires a Stripe test account.');
+  }
+  private async unusedTopup(tx: Prisma.TransactionClient, organizationId: string, requestId: string, topupId: string) {
+    const s = await this.snapshot(tx, organizationId);
+    const row = await tx.aiWalletRefundRequest.findFirst({ where: { id: requestId, organizationId } });
+    const topup = await tx.aiWalletTopup.findFirst({ where: { id: topupId, organizationId } });
+    const entries = await tx.aiWalletLedger.findMany({ where: { organizationId } });
+    if (!s.reconciled || s.wallet?.status !== 'ACTIVE' || row?.status !== 'REQUESTED' || !topup?.fundedAt || !topup.paymentId ||
+        !topup.sessionId || topup.currency !== 'usd' || s.balance !== BigInt(topup.amountCents) * 10000000n ||
+        s.held !== s.balance || row.requestedNanos !== s.balance ||
+        entries.length !== 1 || entries[0].kind !== 'FUNDING' || entries[0].topupId !== topupId ||
+        entries[0].externalKey !== `payment:${topup.paymentId}` || entries[0].amountNanos !== s.balance ||
+        await tx.aiWalletTopup.count({ where: { organizationId, fundedAt: { not: null } } }) !== 1 ||
+        await tx.aiWalletReservation.count({ where: { organizationId } }) !== 0) {
+      throw new ConflictException('A single fully unused identifiable top-up is required.');
+    }
+    return { row, topup };
+  }
+  /** Platform-superadmin route only. This binds reviewed synthetic evidence; it
+   * never creates a refund, contacts Stripe, or approves a production policy. */
+  async reviewTestTopup(organizationId: string, requestId: string, actorId: string,
+    expected: { topupId: string; chargeId: string; refundId: string }) {
+    this.assertTestRefunds();
+    if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200 ||
+        !actorId?.trim() || actorId.length > 200 || !expected || typeof expected.topupId !== 'string' || expected.topupId.length > 200 ||
+        !/^ch_[a-zA-Z0-9_-]{1,190}$/.test(expected.chargeId) || !/^re_[a-zA-Z0-9_-]{1,190}$/.test(expected.refundId)) throw new BadRequestException('Invalid test review identity.');
+    return this.transact(organizationId, async tx => {
+      const previous = await tx.aiWalletRefundReconciliation.findUnique({ where: { requestId } });
+      if (previous) {
+        if (previous.organizationId !== organizationId || previous.topupId !== expected.topupId ||
+            previous.chargeId !== expected.chargeId || previous.refundId !== expected.refundId) throw new ConflictException('Test review identity changed.');
+        return { state: previous.state, reviewedAt: previous.reviewedAt };
+      }
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`charge:${expected.chargeId}`}, 4))::text`;
+      if (await tx.aiWalletRefundEvent.count({ where: { OR: [
+        { evidence: { path: ['chargeId'], equals: expected.chargeId } },
+        { evidence: { path: ['id'], equals: expected.refundId } }] } })) throw new ConflictException('Prior refund/dispute evidence requires reconciliation.');
+      const { topup } = await this.unusedTopup(tx, organizationId, requestId, expected.topupId);
+      const row = await tx.aiWalletRefundReconciliation.create({ data: { requestId, organizationId, topupId: topup.id,
+        paymentId: topup.paymentId!, chargeId: expected.chargeId, refundId: expected.refundId,
+        amountCents: topup.amountCents, currency: topup.currency, reviewedByUserId: actorId } });
+      return { state: row.state, reviewedAt: row.reviewedAt };
+    });
+  }
+  /** Signature verification is mandatory in the caller. Look up the funded
+   * payment independently of metadata. Unmatched payment signals are quarantined without touching subscription state. */
+  async handleVerifiedRefundEvent(event: Stripe.Event) {
+    if (process.env.AI_WALLET_TEST_REFUNDS_ENABLED?.trim().toLowerCase() !== 'true') return { ok: true };
+    this.assertTestRefunds();
+    if (event.livemode !== false || event.account) throw new BadRequestException('Live or Connect refund events are not supported.');
+    const object = event.data.object as any;
+    const id = (value: any): string | null => typeof value === 'string' ? value : value?.id || null;
+    const paymentId = id(object.payment_intent), chargeId = object.object === 'charge' ? object.id : id(object.charge);
+    const { topup, organizations } = await this.transactions.model.$transaction(async tx => {
+      let topup = paymentId ? await tx.aiWalletTopup.findUnique({ where: { paymentId } }) : null;
+      const bindings = await tx.aiWalletRefundReconciliation.findMany({ where: { OR: [
+        { refundId: object.id || '' }, { chargeId: chargeId || '' }] } });
+      const organizations = [...new Set([...(topup ? [topup.organizationId] : []), ...bindings.map(r => r.organizationId)])];
+      if (!topup && bindings.length) topup = await tx.aiWalletTopup.findUnique({ where: { id: bindings[0].topupId } });
+      return { topup, organizations };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    const evidence = { organizations, type: event.type, object: object.object ?? null, id: object.id ?? null, paymentId, chargeId,
+      amount: object.amount ?? null, amountRefunded: object.amount_refunded ?? null, currency: object.currency ?? null,
+      status: object.status ?? null, refundIds: object.refunds?.data?.map((r: any) => r.id) ?? null };
+    const fingerprint = createHash('sha256').update(JSON.stringify(event)).digest('hex');
+    if (!topup?.fundedAt) {
+      const quarantineKey = paymentId || (chargeId ? `charge:${chargeId}` : null);
+      if (!quarantineKey) return { ok: true };
+      // Payment identity can arrive before Checkout funding. Serialize quarantine
+      // with funding; if funding committed meanwhile, retry through its wallet.
+      const quarantine = () => this.transactions.model.$transaction(async tx => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${quarantineKey}, 4))::text`;
+        if ((paymentId && await tx.aiWalletTopup.findUnique({ where: { paymentId } })) ||
+            await tx.aiWalletRefundReconciliation.findFirst({ where: { OR: [{ refundId: object.id || '' }, { chargeId: chargeId || '' }] } })) return true;
+        const prior = await tx.aiWalletRefundEvent.findUnique({ where: { eventId: event.id } });
+        if (prior && prior.fingerprint !== fingerprint) throw new ConflictException('Refund event identity changed.');
+        if (!prior) await tx.aiWalletRefundEvent.create({ data: { eventId: event.id, paymentId, fingerprint, evidence, outcome: 'UNMATCHED' } });
+        return false;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      let retry = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try { retry = await quarantine(); break; }
+        catch (error) {
+          if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2034' || attempt === 4) throw error;
+        }
+      }
+      return retry ? this.handleVerifiedRefundEvent(event) : { ok: true };
+    }
+    const organizationId = topup.organizationId;
+    return this.transact(organizationId, async tx => {
+      const previous = await tx.aiWalletRefundEvent.findUnique({ where: { eventId: event.id } });
+      if (previous) {
+        if (previous.fingerprint !== fingerprint) throw new ConflictException('Refund event identity changed.');
+        return { ok: true };
+      }
+      const reviewed = await tx.aiWalletRefundReconciliation.findUnique({ where: { topupId: topup!.id } });
+      let outcome = 'UNCERTAIN';
+      // charge.refunded is informational only: a charge summary cannot prove an
+      // individual refund succeeded. Await the separate matching Refund object.
+      const refund = ['refund.created', 'refund.updated', 'refund.failed'].includes(event.type) && object.object === 'refund';
+      const matches = reviewed && paymentId === reviewed.paymentId && chargeId === reviewed.chargeId &&
+        (!refund || (object.id === reviewed.refundId && object.amount === reviewed.amountCents && object.currency === reviewed.currency));
+      if (organizations.length > 1 || reviewed?.state === 'UNCERTAIN' ||
+          (event.type === 'refund.failed' && object.status !== 'failed')) {
+        outcome = 'UNCERTAIN';
+      } else if (refund && matches) {
+        if (object.status === 'succeeded') {
+          const reversal = await tx.aiWalletLedger.findUnique({ where: { refundRequestId: reviewed.requestId } });
+          if (reversal) outcome = reviewed.state === 'SUCCEEDED' ? 'SUCCEEDED' : 'UNCERTAIN';
+          else {
+            try { await this.unusedTopup(tx, organizationId, reviewed.requestId, reviewed.topupId); outcome = 'SUCCEEDED'; }
+            catch (error) { if (!(error instanceof ConflictException)) throw error; }
+            if (outcome === 'SUCCEEDED') {
+              const nanos = BigInt(reviewed.amountCents) * 10000000n;
+              await tx.aiWallet.update({ where: { organizationId }, data: { balanceNanos: { decrement: nanos }, heldNanos: { decrement: nanos } } });
+              await tx.aiWalletLedger.create({ data: { organizationId, externalKey: `refund:${reviewed.refundId}`,
+                kind: 'REVERSAL', amountNanos: nanos, refundRequestId: reviewed.requestId } });
+              await tx.aiWalletRefundRequest.update({ where: { id: reviewed.requestId }, data: {
+                status: 'REFUNDED', resolvedByUserId: reviewed.reviewedByUserId, resolvedAt: new Date() } });
+            }
+          }
+        } else if (['failed', 'canceled'].includes(object.status)) outcome = reviewed.state === 'SUCCEEDED' ? 'UNCERTAIN' : 'FAILED';
+        else if (object.status === 'pending') outcome = reviewed.state === 'SUCCEEDED' ? 'SUCCEEDED' : 'PENDING';
+      } else if (event.type === 'charge.refunded' && object.object === 'charge' && matches &&
+          object.amount === reviewed.amountCents && object.amount_refunded === reviewed.amountCents && object.currency === reviewed.currency &&
+          object.refunds?.has_more === false && object.refunds.data?.length === 1 && object.refunds.data[0].id === reviewed.refundId) {
+        outcome = reviewed.state;
+      }
+      if (outcome === 'UNCERTAIN') {
+        await tx.aiWallet.updateMany({ where: { organizationId: { in: organizations } }, data: { status: 'REVIEW' } });
+        await tx.aiWalletRefundReconciliation.updateMany({ where: { organizationId: { in: organizations } }, data: { state: 'UNCERTAIN' } });
+      }
+      if (reviewed) await tx.aiWalletRefundReconciliation.update({ where: { requestId: reviewed.requestId }, data: { state: outcome } });
+      await tx.aiWalletRefundEvent.create({ data: { eventId: event.id, organizationId, paymentId, fingerprint, evidence, outcome } });
+      return { ok: true };
+    }, organizations);
   }
   // Existing platform-superadmin authority owns this queue. The cursor embeds
   // the ordering tuple so resolving its row between pages cannot skip a page.
@@ -97,11 +241,11 @@ export class AiWalletRefundRequestService {
       } catch { throw new BadRequestException('Invalid review cursor.'); }
     }
     const rows = await this.transactions.model.$transaction(tx => tx.aiWalletRefundRequest.findMany({
-      where: { status: 'REQUESTED', ...(after ? { OR: [{ createdAt: { gt: after.createdAt } },
+      include: { reconciliation: true }, where: { status: 'REQUESTED', ...(after ? { OR: [{ createdAt: { gt: after.createdAt } },
         { createdAt: after.createdAt, id: { gt: after.id } }] } : {}) },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 101 }), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     const page = rows.slice(0, 100), last = page[page.length - 1];
-    return { requests: page.map(r => ({ ...this.publicRequest(r), organizationId: r.organizationId })),
+    return { requests: page.map(r => ({ ...this.publicRequest(r), organizationId: r.organizationId, testReconciliation: r.reconciliation })),
       nextCursor: rows.length > 100 ? Buffer.from(JSON.stringify([last.createdAt.toISOString(), last.id])).toString('base64url') : null };
   }
 }

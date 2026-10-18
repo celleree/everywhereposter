@@ -18,3 +18,13 @@ it('requires an organization billing administrator and passes only trusted org/u
   expect(service.resolve).toHaveBeenLastCalledWith('target-org','request','platform-actor','REJECTED');
   controller.walletRefundReview({isSuperAdmin:true} as any,'opaque-cursor');expect(service.reviewQueue).toHaveBeenLastCalledWith('opaque-cursor');
 });
+
+it('keeps test reconciliation under existing platform-superadmin authority and trusted actor identity', () => {
+  const reviewTestTopup = jest.fn();
+  const controller = new BillingController({} as any, {} as any, {} as any, {} as any, {} as any, { reviewTestTopup } as any);
+  const body = { topupId: 'topup', chargeId: 'ch_synthetic', refundId: 're_synthetic' };
+  expect(() => controller.reviewTestWalletRefund({ id: 'org-admin', isSuperAdmin: false } as any, 'org', 'request', body)).toThrow('Platform administrator');
+  expect(reviewTestTopup).not.toHaveBeenCalled();
+  controller.reviewTestWalletRefund({ id: 'trusted-platform-actor', isSuperAdmin: true } as any, 'org', 'request', body);
+  expect(reviewTestTopup).toHaveBeenCalledWith('org', 'request', 'trusted-platform-actor', body);
+});

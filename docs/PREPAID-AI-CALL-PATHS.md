@@ -83,3 +83,78 @@ The browser persists only an opaque operation key under a hash of the request in
 Transcript summary/analysis, platform drafts and bounded rewrites use durable text receipts/results and SDK `maxRetries: 0`, with no fallback model. Guided visual image/frame analysis and image planning/generation are unavailable under this prepaid context and produce explicit warnings. Generating from a media asset without supplied text/transcript is blocked; caption adaptation and supplied transcripts remain the supported text slice. Existing bounded transcription is separately gated and accounted; a manual transcript does not initiate an unnecessary new transcription from the guided text path. Generic tool agents, unsupported async/media providers, Flare image generation and Quick Upload paid AI remain unavailable for Launch.
 
 This change crosses the minimal identity/permission/model/storage wiring, so its small integration edits touch more than ten files. Review order: context adapter; copy/model/source/image boundaries; dedicated route permission; browser retry identity; Compose pass-through; deterministic PostgreSQL/frontend/permission tests. It does not change provider prices, rate cards, credentials, flags or production state.
+
+
+## Fully unused top-up reconciliation (test mode, default off)
+
+`AI_WALLET_TEST_REFUNDS_ENABLED=true` plus a Stripe test key enables only local
+reconciliation of signed test events. The flag is independent of purchase/usage
+activation. Nothing in this change calls Stripe's Refund API, expires credits,
+changes pricing, authorizes live refunds, or applies production migrations.
+The provisional scenario is a full original-purchase refund to the original
+payment method, with the company bearing provider fees and explicit admin review.
+It is a synthetic implementation boundary, not approval of commercial policy.
+
+The existing platform-superadmin review route
+`POST /billing/ai-wallet/refund-review/:organizationId/:id/test-reconciliation`
+accepts `topupId`, expected `chargeId`, and expected `refundId`. It records the
+reviewer's trusted identity and derives the exact payment, amount and currency
+from the server's funded top-up. It does not create or approve an external payment
+operation. Signed refund evidence must independently match that persisted payment,
+charge, refund, original cents and USD currency; metadata cannot select a wallet.
+The customer's current subscription/customer association is not payment identity.
+
+Because the wallet has aggregate accounting, eligibility deliberately requires
+exactly one funded top-up, exactly its FUNDING ledger entry, its full unspent
+balance held by this existing request, an ACTIVE reconciled wallet, and no
+reservation history whatsoever (including released or zero-charge operations).
+Mixed funding, partial spend/refund, missing evidence and unresolved/uncertain
+usage cannot use this path. Eligibility is rechecked inside the shared wallet
+lock at success; new funding or any competing usage rejects automatic reversal.
+
+Matching pending events retain the entire hold. Failed/canceled events record
+FAILED and retain the hold for follow-up; they cannot be withdrawn or rejected
+through the earlier request lifecycle. A later matching success can consume this
+retained hold. Missing/unsupported status, unapproved or partial refunds,
+conflicting object identities and all disputes record UNCERTAIN and freeze the
+wallet in REVIEW. Later pending/failed/success evidence cannot clear UNCERTAIN.
+Conflicting durable identities freeze every identified wallet. There is no
+automatic dispute resolution or credit restoration after a refund failure.
+A success followed by failed evidence stays debited and enters REVIEW.
+
+A matching signed `refund.created`/`refund.updated`/`refund.failed` object with
+status `succeeded` atomically debits the held purchase once, appends one REVERSAL
+ledger entry, and marks its request REFUNDED. Funding minus usage minus reversals
+must equal balance. Charge summaries never prove individual refund success;
+matching full `charge.refunded` summaries only preserve the current state.
+Duplicate events are idempotent; changed reuse of an event ID is rejected.
+Review identity and normalized event audit are protected by database triggers.
+Admin queue and customer request summaries expose durable reconciliation state.
+
+Unmatched payment signals are quarantined without wallet/subscription mutation.
+If Checkout later binds that exact payment, funding freezes the wallet before the
+credit becomes spendable. Namespace 4 serializes this quarantine with funding;
+namespace 3 serializes all wallet, request and reversal mutations (sorted wallet
+locks for conflicting organizations). Quarantine and funding both use retrying
+serializable transactions, including snapshots preceding a competing commit.
+Charge-only orphan evidence also blocks a later review of that charge. The orphan
+branch releases its payment/charge lock before retrying a known-wallet event,
+so it never takes a wallet lock while holding the payment lock.
+
+Review order: schema constraints/history; request eligibility and reconciliation;
+signed webhook routing and pre-funding quarantine; PostgreSQL races/rollback and
+authorization tests; display label. These pieces stay together because a reversal
+without the matching hold, ledger and late-event protections would be unsafe.
+This exceeds the preferred small billing diff for one coherent bounded change.
+
+The offline acceptance runner intentionally retains `externalStripe: NOT_RUN`
+and `refundDisputeReconciliation: BLOCKED_NOT_IMPLEMENTED`. Its new synthetic
+fully-unused-one-top-up tests are a narrower supported subcase, not provider
+acceptance or general refund/dispute implementation. Real Stripe transactions,
+production schema application, commercial policy approval, activation, merge and
+deployment remain separately gated.
+
+Contract references checked 18 October 2026 against installed Stripe 20.4.0 types:
+[Refund object](https://docs.stripe.com/api/refunds/object),
+[refund lifecycle and original method](https://docs.stripe.com/refunds), and
+[refund webhook events](https://docs.stripe.com/changelog/acacia/2024-10-28/refund-webhook-update).

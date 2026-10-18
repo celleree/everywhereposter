@@ -1,5 +1,6 @@
-import { BadRequestException, ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, ServiceUnavailableException, Optional } from '@nestjs/common';
 import Stripe from 'stripe';
+import { AiWalletRefundRequestService } from './ai-wallet-refund-request.service';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
@@ -13,7 +14,7 @@ type Offer = { id: string; amountCents: number };
 /** Test-mode adapter only. Approved manual packs; live Stripe accounts are rejected. */
 @Injectable()
 export class AiWalletCheckoutService {
-  constructor(private readonly db: PrismaService, private readonly wallet: AiWalletService) {}
+  constructor(private readonly db: PrismaService, private readonly wallet: AiWalletService, @Optional() private readonly refunds?: AiWalletRefundRequestService) {}
 
   async assertPrepaidPlan(organizationId: string) {
     const subscription = await this.db.subscription.findFirst({
@@ -134,6 +135,11 @@ export class AiWalletCheckoutService {
 
   /** Caller must verify the raw Stripe signature before dispatching here. */
   async handleVerifiedEvent(event: Stripe.Event) {
+    if (event.type.startsWith('refund.') || event.type === 'charge.refunded' || event.type.startsWith('charge.dispute.')) {
+      if (process.env.AI_WALLET_TEST_REFUNDS_ENABLED?.trim().toLowerCase() !== 'true') return { ok: true };
+      if (!this.refunds) throw new ServiceUnavailableException('Refund reconciliation is unavailable.');
+      return this.refunds.handleVerifiedRefundEvent(event);
+    }
     this.assertTestAccount();
     if (event.livemode !== false) throw new BadRequestException('Live wallet events are not supported.');
     if (!['checkout.session.completed', 'checkout.session.async_payment_succeeded',

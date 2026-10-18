@@ -21,7 +21,7 @@ export async function walletHoldSnapshot(tx: Prisma.TransactionClient, organizat
   }
   for (const row of requests) {
     if (row.status === 'REQUESTED') refundHeld += row._sum.requestedNanos || 0n;
-    else if (row.status !== 'WITHDRAWN' && row.status !== 'REJECTED') supported = false;
+    else if (row.status !== 'WITHDRAWN' && row.status !== 'REJECTED' && row.status !== 'REFUNDED') supported = false;
   }
   const held = current?.heldNanos || 0n, balance = current?.balanceNanos || 0n;
   return { wallet: current, usageHeld, refundHeld,
