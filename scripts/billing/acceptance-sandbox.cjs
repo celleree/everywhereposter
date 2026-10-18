@@ -12,7 +12,8 @@ const app = path.join(root, 'postiz-app');
 const appRequire = createRequire(path.join(app, 'package.json'));
 const TYPES = new Set(['checkout.session.completed', 'checkout.session.async_payment_succeeded',
   'checkout.session.async_payment_failed', 'refund.created', 'refund.updated', 'refund.failed',
-  'charge.refunded', 'charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed']);
+  'charge.refunded', 'charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed',
+  'charge.dispute.funds_withdrawn', 'charge.dispute.funds_reinstated']);
 const BODY_LIMIT = 65536;
 function requireSafe(ok) { if (!ok) throw Error('Sandbox guard refused operation.'); }
 function fixture(value) {

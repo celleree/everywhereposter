@@ -75,7 +75,8 @@ events may arrive first. This listener immediately dispatches them, producing
 REVIEW/BLOCKED_REFUND_RECONCILIATION with held value and no reversal; subsequent
 review rejects prior refund/dispute evidence. This helper does not hold, suppress,
 re-sign, reorder events, alter financial contracts or promise that ordering can
-pass. Early own-case refunds before funding are matched through a read-only
+pass. Both charge.dispute.funds_withdrawn and charge.dispute.funds_reinstated are
+accepted for the same immediate account-verified production quarantine path. Early own-case refunds before funding are matched through a read-only
 bound-session PI lookup and immediately reach production quarantine.
 
 Saved HTTP evidence is labeled

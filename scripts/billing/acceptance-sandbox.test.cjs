@@ -86,6 +86,40 @@ test('early own-case refund uses a read-only bound-session PI and dispatches imm
   assert.equal(dispatched, 1);
 });
 
+for (const type of ['charge.dispute.funds_withdrawn', 'charge.dispute.funds_reinstated']) {
+  test(type + ' verifies its own-case account event before immediate production dispatch', async () => {
+    const trace = [], topup = { id: 'topup_dispute', organizationId: 'synthetic',
+      sessionId: 'cs_test_dispute', customerId: 'cus_dispute', paymentId: 'pi_dispute',
+      amountCents: 500, currency: 'usd' };
+    const event = makeEvent({ id: 'dp_synthetic', object: 'dispute', payment_intent: topup.paymentId,
+      charge: 'ch_dispute', amount: 500, currency: 'usd', status: 'lost' }, type);
+    let accountEvent = event;
+    const sdk = { accounts: { retrieve: async (...args) => {
+      assert.equal(args.length, 0); trace.push('current-account');
+      return { id: 'acct_expected', object: 'account' };
+    } }, events: { retrieve: async eventId => {
+      assert.equal(eventId, event.id); trace.push('account-event'); return accountEvent;
+    } } };
+    const gated = await helper.accountGate(sdk, 'acct_expected');
+    const db = { $transaction: async fn => fn({ $queryRaw: async () => {},
+      organization: { count: async () => 0, create: async () => {} }, subscription: { create: async () => {} } }),
+      aiWalletTopup: { findFirst: async () => topup }, aiWallet: { findUnique: async () => null },
+      aiWalletLedger: { count: async () => 0 }, aiWalletRefundEvent: { count: async () => 0 } };
+    const Services = { Wallet: class {}, Refunds: class {}, Checkout: class {
+      async handleVerifiedEvent(received) { assert.equal(received, event); trace.push('production-dispatch'); }
+    } };
+    const acceptance = await helper.createCase(db, Services, gated, { append() {} }, 'OFFLINE_SIMULATED');
+    await assert.rejects(acceptance.deliver(makeEvent({ ...event.data.object, payment_intent: 'pi_other' }, type)));
+    assert.deepEqual(trace, ['current-account'], 'Unrelated PI rejected before account lookup/dispatch');
+    accountEvent = { ...event, account: 'acct_other' };
+    await assert.rejects(acceptance.deliver(event));
+    assert.deepEqual(trace, ['current-account', 'account-event'], 'Other-account event never dispatches');
+    accountEvent = event;
+    await acceptance.deliver(event);
+    assert.deepEqual(trace, ['current-account', 'account-event', 'account-event', 'production-dispatch']);
+  });
+}
+
 test('real services: capped one purchase, raw signed ingress, rollback and refund-before-review BLOCKED', async () => {
   const url = helper.fixture(testFixture);
   Object.assign(process.env, { BILLING_ENABLED: 'true', AI_WALLET_ENABLED: 'true',
