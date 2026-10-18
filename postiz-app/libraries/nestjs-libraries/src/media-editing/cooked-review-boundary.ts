@@ -1,11 +1,10 @@
 import { createHash } from 'crypto';
-import { COOKED_EDITOR_LIMITS } from './cooked-editor-limits';
 
 // Only this audited upstream document may execute on the application's origin.
 const REVIEW_SHA256 = 'bfdffe39feb7891e07d70a0b31240d1aaa46c9ac8ec3b3dc754625fa8b5685bf';
 const fail = (): never => { throw new Error('INVALID_WORKER_RESPONSE'); };
 const integer = (v: unknown, min = 0, max = 128): number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max ? v : fail();
-const seconds = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= COOKED_EDITOR_LIMITS.maxDurationMs / 1000 + .1 ? v : fail();
+const seconds = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 60.1 ? v : fail();
 const text = (v: unknown, max = 128): string => typeof v === 'string' && v.length <= max ? v : fail();
 const list = (v: unknown, max: number): any[] => Array.isArray(v) && v.length <= max ? v : fail();
 export function trustedCookedHtml(bytes: Buffer) {
