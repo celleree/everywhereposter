@@ -15,7 +15,15 @@ export class AiWalletRefundRequestService {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 3))::text`;
         return operation(tx);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
-      catch (error) { if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2034' || attempt === 4) throw error; }
+      catch (error) {
+        // Waiting on the lock can retain a snapshot from before a competing
+        // creation committed. Retry its unique-key conflict in a fresh transaction.
+        const target = error instanceof Prisma.PrismaClientKnownRequestError ? error.meta?.target : undefined;
+        const creationRace = error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' &&
+          Array.isArray(target) && target.length === 2 && target.includes('organizationId') && target.includes('operationKey');
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) ||
+            (error.code !== 'P2034' && !creationRace) || attempt === 4) throw error;
+      }
     }
     throw Error('Refund request transaction retry exhausted.');
   }

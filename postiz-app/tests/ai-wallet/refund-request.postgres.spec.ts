@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AiWalletRefundRequestService } from '@gitroom/nestjs-libraries/services/ai-wallet-refund-request.service';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
@@ -42,6 +42,31 @@ const fixture=process.env.AI_WALLET_TEST_DATABASE_URL;
     await expect(service.request(org,'u',key())).rejects.toThrow('No unused');expect(await db.aiWalletRefundRequest.count({where:{organizationId:org}})).toBe(1);
     const other=randomUUID();await db.organization.create({data:{id:other,name:'Other synthetic org'}});await db.aiWallet.create({data:{organizationId:other}});await fund(500,other);
     const competing=await Promise.allSettled([service.request(other,'u',key()),service.request(other,'u',key())]);expect(competing.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+  });
+  it('retries a real creation-key conflict from a snapshot preceding the winning commit',async()=>{
+    const operation=key(), failures:string[]=[];let attempts=0, winner:any;
+    const stale=new AiWalletRefundRequestService({model:{$transaction:async(fn:any,opts:any)=>{
+      attempts++;
+      try{return await db.$transaction(async tx=>{
+        if(attempts===1){
+          // Establish a real serializable snapshot, then commit the winning
+          // request before this transaction acquires the wallet lock.
+          await tx.aiWalletRefundRequest.count({where:{organizationId:org}});
+          winner=await service.request(org,'original-actor',operation);
+        }
+        return fn(tx);
+      },opts);}catch(error){if(error instanceof Prisma.PrismaClientKnownRequestError)failures.push(error.code);throw error;}
+    }}} as any);
+    const replay=await stale.request(org,'retry-actor',operation);
+    expect(failures).toEqual(['P2002']);expect(attempts).toBe(2);expect(replay).toEqual(winner);
+    expect(await db.aiWalletRefundRequest.count({where:{organizationId:org}})).toBe(1);
+    expect(await db.aiWallet.findUnique({where:{organizationId:org}})).toMatchObject({heldNanos:10000000000n,balanceNanos:10000000000n});
+  });
+  it('does not retry unrelated unique constraints',async()=>{
+    const failure=new Prisma.PrismaClientKnownRequestError('synthetic unrelated conflict',{code:'P2002',clientVersion:Prisma.prismaVersion.client,meta:{target:['id']}});
+    const transaction=jest.fn().mockRejectedValue(failure);
+    const broken=new AiWalletRefundRequestService({model:{$transaction:transaction}} as any);
+    await expect(broken.request(org,'u',key())).rejects.toBe(failure);expect(transaction).toHaveBeenCalledTimes(1);
   });
   it.each(['REVIEW','ledger-drift'])('rejects %s without overstating or mutating availability',async kind=>{
     await db.aiWallet.update({where:{organizationId:org},data:kind==='REVIEW'?{status:'REVIEW'}:{balanceNanos:{increment:1n}}});
