@@ -122,7 +122,7 @@ Conflicting durable identities freeze every identified wallet. There is no
 automatic dispute resolution or credit restoration after a refund failure.
 A success followed by failed evidence stays debited and enters REVIEW.
 
-A matching signed `refund.created`/`refund.updated`/`refund.failed` object with
+A matching signed `refund.created`/`refund.updated` object with
 status `succeeded` atomically debits the held purchase once, appends one REVERSAL
 ledger entry, and marks its request REFUNDED. Funding minus usage minus reversals
 must equal balance. Charge summaries never prove individual refund success;
