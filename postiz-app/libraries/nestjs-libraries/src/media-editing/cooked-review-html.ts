@@ -33,7 +33,7 @@ export function adaptCookedReviewHtml(html: string) {
   #approve,#send,#safebtn,.themebtn,#oldbadge,#txbar,#txtools,#rsztx,#rszside,
   #timeline,#box,#adds,#howbtn,.hits{display:none!important}
   html,body{height:auto!important;min-height:0!important;overflow-x:hidden;overflow-y:auto}
-  body{display:block}.app{width:100%;height:auto;margin:0!important}
+  body{display:block}.app{width:100%;height:auto;min-height:0!important;margin:0!important}
   main,.left,.stagewrap{min-width:0;flex:none}main{display:block}.left{padding:12px;gap:12px}
   header{height:44px;padding:0 12px}.homebtn{display:none!important}
   body #stage,body.withTx #stage,body.withTx:not(.vertical) #stage{container-type:normal;flex:none;height:auto;display:flex;flex-direction:column;gap:12px}
@@ -44,11 +44,12 @@ export function adaptCookedReviewHtml(html: string) {
   body.vertical .pl{max-width:280px}
   body.withTx #tx,body.withTx:not(.vertical) #tx{display:flex!important;width:100%;height:300px;min-height:0;flex:none}
   #txlines{padding:10px 8px 24px;touch-action:pan-y}#txlines .tw{touch-action:pan-y}
+  body.canCompare #cmprow{display:flex!important}body.compare #p2{display:flex!important}
   #cmprow{flex-wrap:wrap;gap:8px}#cmprow .lead{flex-wrap:wrap;gap:8px}
   #cmprow .hint{display:none!important}.transport{flex-wrap:wrap;height:auto;min-height:40px}
   #ep-blocks{border:1px solid var(--line);border-radius:12px;padding:12px;overflow-wrap:anywhere}
   #ep-blocks h2{font-size:15px;margin:0 0 8px}#ep-blocks p{margin:8px 0}
-  #ep-block-list{display:flex;flex-wrap:wrap;gap:8px;max-height:240px;overflow:auto}
+  #ep-block-list{display:flex;flex-wrap:wrap;gap:8px}
   #ep-blocks button{border:1px solid var(--line2);border-radius:8px;padding:10px;min-height:44px;text-align:left}
   #ep-blocks button:disabled{opacity:.55}#ep-retry[hidden]{display:none}
   @media(max-width:760px){body .pl{max-width:100%}body.vertical .pl{max-width:220px}

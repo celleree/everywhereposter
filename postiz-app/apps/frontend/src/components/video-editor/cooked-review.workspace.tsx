@@ -123,7 +123,7 @@ export function CookedReviewWorkspace({ scope }: { scope: string }) {
       if (!live(epoch, s)) return;
       if (!response.ok) throw new Error(response.status === 429 ? 'Another editing session is open. Try again later.' : 'The edit outcome is uncertain. Recover the session before starting another edit.');
       if (!accept(s, response, body, epoch)) void recover(s, epoch);
-    } catch (e) { if (live(epoch, s)) { setPending(false); setMessage((e as Error).message); } }
+    } catch (e) { if (live(epoch, s)) { setPending(false); setMessage(s ? 'The edit outcome is uncertain. Recover the session before starting another edit.' : (e as Error).message); } }
     finally { if (live(epoch)) operation.current = false; }
   };
   const save = async () => {
@@ -145,7 +145,7 @@ export function CookedReviewWorkspace({ scope }: { scope: string }) {
       }
       if (!isVideo(body.outputMedia, body.outputMedia?.id) || body.outputMedia.id === s.sourceId || body.revision !== state.revision) throw new Error('The saved copy could not be confirmed.');
       write({ ...s, saving: false, saved: body.outputMedia, savedRevision: body.revision });
-    } catch (e) { if (live(epoch, s)) setMessage((e as Error).message); }
+    } catch (e) { if (live(epoch, s)) setMessage(current.current?.saving ? 'The copy could not be confirmed. Check Media Library before saving again.' : (e as Error).message); }
     finally { if (live(epoch)) { operation.current = false; setSaving(false); } }
   };
   const composer = async () => {
@@ -170,27 +170,27 @@ export function CookedReviewWorkspace({ scope }: { scope: string }) {
   const disabled = pending || saving || opening || selecting || frameBusy;
   return <main className={`${styles.workspace} ${styles.cookedWorkspace}`} aria-label="Video Editor workspace">
     <header className={styles.header}><div><h2>Review your video</h2><p>Cut or restore eligible whole speech blocks. Your original stays unchanged.</p></div>
-      <Button disabled={disabled} onClick={choose}>Choose video</Button></header>
+      <Button className={styles.button} disabled={disabled} onClick={choose}>Choose video</Button></header>
     <p className={styles.notice}>English speech · MP4 or MOV with audio · Up to 4 minutes, 100 MiB, 720p and 30 fps · Requires aligned constant-frame-rate audio and video. Sessions expire after 15 idle minutes. Saved copies stay in Media Library.</p>
     <p className={styles.muted}>Whole speech blocks only. Individual word, filler-word, pause and style editing are unavailable.</p>
     {message && <p role="alert">{message}</p>}
     {selecting && <p role="status">Checking your video…</p>}
-    {source && <section className={styles.panel} aria-label="Source video"><h3>{source.originalName || 'Original video'}</h3>
+    {source && !url && <section className={styles.panel} aria-label="Source video"><h3>{source.originalName || 'Original video'}</h3>
       <div className={styles.preview}><video aria-label="Original video preview" controls playsInline preload="metadata" src={source.path} /></div>
-      {!session && <Button disabled={disabled} onClick={() => void prepare()}>Prepare video</Button>}
+      {!session && <Button className={styles.button} disabled={disabled} onClick={() => void prepare()}>Prepare video</Button>}
       <p className={styles.muted}>Your source remains in Media Library.</p></section>}
     {pending ? <p role="status">{recovering ? 'Recovering your review…' : 'Preparing your video…'} You can recover this session after reloading.</p> : !source && !session ? <p>Choose or upload one video, preview it, then prepare it for review.</p> : null}
     {url && <iframe ref={frame} title="Cooked video review" src={url} sandbox="allow-scripts allow-same-origin allow-downloads" referrerPolicy="same-origin"
       className={styles.reviewFrame} style={{ height: frameHeight }} />}
     {session && <div className={styles.tools}>
-      <Button disabled={!session.jobId || disabled || session.saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save current edit'}</Button>
-      <Button secondary disabled={disabled} onClick={() => void close()}>Close editing session</Button>
-      {!url && <Button secondary disabled={disabled} onClick={() => { if (operation.current) return; setPending(true); setRecovering(true); setMessage(''); void recover(session); }}>Recover session</Button>}
+      <Button className={styles.button} disabled={!session.jobId || disabled || session.saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save current edit'}</Button>
+      <Button className={styles.button} secondary disabled={disabled} onClick={() => void close()}>Close editing session</Button>
+      {!url && <Button className={styles.button} secondary disabled={disabled} onClick={() => { if (operation.current) return; setPending(true); setRecovering(true); setMessage(''); void recover(session); }}>Recover session</Button>}
       {frameBusy && <p role="status">Applying your block changes…</p>}
     </div>}
     {session?.saved && <section className={styles.panel}><p>Saved copy · revision {session.savedRevision}. Later review changes are not included until you save again.</p><div className={styles.tools}>
-      <Button disabled={disabled} onClick={() => void composer()}>Use saved copy in composer</Button>
-      <Button secondary onClick={() => { const epoch = generation.current; download.current?.abort(); download.current = new AbortController(); void downloadVideo(session.saved!, download.current.signal).catch(() => { if (live(epoch)) setMessage('Download failed. Open the saved copy in Media Library.'); }); }}>Download saved MP4</Button>
+      <Button className={styles.button} disabled={disabled} onClick={() => void composer()}>Use saved copy in composer</Button>
+      <Button className={styles.button} secondary onClick={() => { const epoch = generation.current; download.current?.abort(); download.current = new AbortController(); void downloadVideo(session.saved!, download.current.signal).catch(() => { if (live(epoch)) setMessage('Download failed. Open the saved copy in Media Library.'); }); }}>Download saved MP4</Button>
     </div><p>Opens a separate new post for review. Nothing is published automatically.</p></section>}
   </main>;
 }
