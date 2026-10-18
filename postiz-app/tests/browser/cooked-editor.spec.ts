@@ -78,7 +78,7 @@ test('Cooked authenticated native editor: whole blocks, history, recovery, saved
       const mutation = page.waitForResponse(r => r.url().includes(base + '/edits') && r.request().method() === 'POST');
       const button = frame.getByRole('button', { name: new RegExp('^' + operation + ' block 1 [(]') });
       await expect(button).toBeEnabled();
-      await reachable(button); await button.click();
+      await reachable(button); if (isMobile) await button.tap(); else await button.click();
       const response = await mutation;
       expect(response.ok()).toBe(true);
       expect(response.request().postDataJSON()).toEqual({ revision: revision - 1, [operation.toLowerCase()]: [receipt.editing.blocks[0]] });
