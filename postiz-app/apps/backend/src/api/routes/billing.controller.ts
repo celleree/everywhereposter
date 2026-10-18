@@ -72,6 +72,13 @@ export class BillingController {
     return this.refundRequests.resolve(organizationId, id, user.id, 'REJECTED');
   }
 
+  @Post('/ai-wallet/refund-review/:organizationId/:id/test-reconciliation')
+  reviewTestWalletRefund(@GetUserFromRequest() user: User, @Param('organizationId') organizationId: string,
+    @Param('id') id: string, @Body() body: { topupId: string; chargeId: string; refundId: string }) {
+    if (!user.isSuperAdmin) throw new HttpException('Platform administrator required', 403);
+    return this.refundRequests.reviewTestTopup(organizationId, id, user.id, body);
+  }
+
   @Get('/ai-wallet')
   walletBalance(@GetOrgFromRequest() org: Organization) {
     return this.walletCheckout.balance(org.id);

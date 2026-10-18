@@ -412,6 +412,13 @@ export class AiWalletService {
       }
       if (event.paymentStatus !== 'paid' && event.paymentStatus !== 'unpaid') throw new Error('Invalid payment state.');
       if (event.paymentStatus === 'paid' && !event.paymentId) throw new Error('Paid topup is missing payment identity.');
+      // A signed refund/dispute can precede Checkout. Quarantined payment
+      // evidence must freeze newly funded value before it can be spent.
+      if (event.paymentId && topup.fundedAt === null) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${event.paymentId}, 4))::text`;
+        if (await tx.aiWalletRefundEvent.count({ where: { paymentId: event.paymentId } }))
+          await tx.aiWallet.update({ where: { organizationId: event.organizationId }, data: { status: 'REVIEW' } });
+      }
       const credited = event.paymentStatus === 'paid' && topup.fundedAt === null;
       if (credited) {
         const amountNanos = BigInt(topup.amountCents) * NANOS_PER_CENT;

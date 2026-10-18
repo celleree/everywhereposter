@@ -26,6 +26,10 @@ export class StripeController {
       process.env.STRIPE_SIGNING_KEY
     );
 
+    if (event.type.startsWith('refund.') || event.type === 'charge.refunded' || event.type.startsWith('charge.dispute.')) {
+      return this.walletCheckout.handleVerifiedEvent(event);
+    }
+
     if ((event.data.object as { metadata?: { service?: string } }).metadata?.service === AI_WALLET_TEST_SERVICE) {
       return this.walletCheckout.handleVerifiedEvent(event);
     }

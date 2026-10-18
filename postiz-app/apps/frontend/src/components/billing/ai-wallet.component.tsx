@@ -178,7 +178,7 @@ export function AiWalletComponent({ navigate = (url) => window.location.assign(u
     <h3 className="mt-4 font-semibold">Recent settled transactions (up to 20)</h3>
     {!data.entries.length ? <p>No settled transactions yet.</p> : <ul className="divide-y divide-white/10">
       {data.entries.map((entry) => <li key={entry.id} className="py-2">
-        {entry.kind === 'FUNDING' ? 'Top-up' : 'AI usage'} · {walletDollars(entry.amountNanos)}
+        {entry.kind === 'FUNDING' ? 'Top-up' : entry.kind === 'REVERSAL' ? 'Top-up refunded' : 'AI usage'} · {walletDollars(entry.amountNanos)}
         <time dateTime={entry.createdAt} className="ml-2 text-sm">{new Date(entry.createdAt).toLocaleString()}</time>
       </li>)}
     </ul>}

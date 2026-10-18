@@ -161,3 +161,8 @@ it('refreshes the server snapshot for funded status without changing credit loca
   expect(sessionStorage).toHaveLength(0); expect(navigate).not.toHaveBeenCalled();
   expect(screen.getByText('$1.225')).toBeTruthy();
 });
+
+it('labels reconciled top-up reversals separately from usage', async () => {
+  const data = snapshot(); data.entries[0] = { ...data.entries[0], kind: 'REVERSAL' };
+  api(data); mount(); expect(await screen.findByText('Top-up refunded · $0.000000001')).toBeTruthy();
+});
