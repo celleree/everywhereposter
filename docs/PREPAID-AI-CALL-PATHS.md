@@ -114,8 +114,8 @@ lock at success; new funding or any competing usage rejects automatic reversal.
 
 Matching pending events retain the entire hold. Failed/canceled events record
 FAILED and retain the hold for follow-up; they cannot be withdrawn or rejected
-through the earlier request lifecycle. A later matching success can consume this
-retained hold. Missing/unsupported status, unapproved or partial refunds,
+through the earlier request lifecycle. A later success conflicts with this terminal failure and records UNCERTAIN,
+retaining the full hold in REVIEW; delayed pending evidence cannot clear FAILED. Missing/unsupported status, unapproved or partial refunds,
 conflicting object identities and all disputes record UNCERTAIN and freeze the
 wallet in REVIEW. Later pending/failed/success evidence cannot clear UNCERTAIN.
 Conflicting durable identities freeze every identified wallet. There is no

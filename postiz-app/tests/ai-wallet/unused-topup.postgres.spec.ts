@@ -59,14 +59,22 @@ const fixture = process.env.AI_WALLET_TEST_DATABASE_URL;
     await new AiWalletRefundRequestService({ model: db } as any).handleVerifiedRefundEvent(event()); await fund(topup);
     expect(await balance()).toMatchObject({ balanceNanos: 0n, heldNanos: 0n });
   });
-  it('retains failed/uncertain holds and accepts delayed success without allowing spending', async () => {
-    await approve(); await deliver(event('failed')); 
+  it.each([['failed'], ['canceled'], ['failed', 'pending'], ['canceled', 'pending']])('retains full holds on terminal contradiction after %j', async (...states) => {
+    await approve();
+    for (const state of states) await deliver(event(state));
+    expect((await service.summary(org)).requests[0].testReconciliation?.state).toBe('FAILED');
     expect(await balance()).toMatchObject({ balanceNanos: 1230000000n, heldNanos: 1230000000n });
     await expect(wallet.reserve(org, randomUUID(), 'fixture', 'offline', 1n)).rejects.toThrow();
     await deliver(event()); await deliver(event('pending'));
-    expect(await balance()).toMatchObject({ balanceNanos: 0n, heldNanos: 0n });
-    await deliver(event('failed')); await deliver(event('pending'));
+    expect(await balance()).toMatchObject({ balanceNanos: 1230000000n, heldNanos: 1230000000n, status: 'REVIEW' });
+    expect((await service.summary(org)).requests[0].testReconciliation?.state).toBe('UNCERTAIN');
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org, kind: 'REVERSAL' } })).toBe(0);
+  });
+  it('keeps a successful debit and REVIEW after later failed evidence without restoring credits', async () => {
+    await approve(); await deliver(event()); await deliver(event('failed')); await deliver(event('pending')); await deliver(event());
     expect(await balance()).toMatchObject({ balanceNanos: 0n, heldNanos: 0n, status: 'REVIEW' });
+    expect((await service.summary(org)).requests[0].testReconciliation?.state).toBe('UNCERTAIN');
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org, kind: 'REVERSAL' } })).toBe(1);
   });
   it.each([{ amount: 1 }, { currency: 'eur' }, { id: 're_unknown' }, { charge: 'ch_wrong' }, { payment_intent: null }])('retains holds for mismatched signed refund %j', async changes => {
     await approve(); await deliver(event('succeeded', changes));

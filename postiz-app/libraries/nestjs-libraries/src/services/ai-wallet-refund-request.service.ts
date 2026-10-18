@@ -193,6 +193,7 @@ export class AiWalletRefundRequestService {
       const matches = reviewed && paymentId === reviewed.paymentId && chargeId === reviewed.chargeId &&
         (!refund || (object.id === reviewed.refundId && object.amount === reviewed.amountCents && object.currency === reviewed.currency));
       if (organizations.length > 1 || reviewed?.state === 'UNCERTAIN' ||
+          (reviewed?.state === 'FAILED' && object.status === 'succeeded') ||
           (event.type === 'refund.failed' && object.status !== 'failed')) {
         outcome = 'UNCERTAIN';
       } else if (refund && matches) {
@@ -212,7 +213,7 @@ export class AiWalletRefundRequestService {
             }
           }
         } else if (['failed', 'canceled'].includes(object.status)) outcome = reviewed.state === 'SUCCEEDED' ? 'UNCERTAIN' : 'FAILED';
-        else if (object.status === 'pending') outcome = reviewed.state === 'SUCCEEDED' ? 'SUCCEEDED' : 'PENDING';
+        else if (object.status === 'pending') outcome = ['SUCCEEDED', 'FAILED'].includes(reviewed.state) ? reviewed.state : 'PENDING';
       } else if (event.type === 'charge.refunded' && object.object === 'charge' && matches &&
           object.amount === reviewed.amountCents && object.amount_refunded === reviewed.amountCents && object.currency === reviewed.currency &&
           object.refunds?.has_more === false && object.refunds.data?.length === 1 && object.refunds.data[0].id === reviewed.refundId) {
