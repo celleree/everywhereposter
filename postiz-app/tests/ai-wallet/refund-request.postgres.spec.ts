@@ -58,7 +58,23 @@ const fixture=process.env.AI_WALLET_TEST_DATABASE_URL;
       },opts);}catch(error){if(error instanceof Prisma.PrismaClientKnownRequestError)failures.push(error.code);throw error;}
     }}} as any);
     const replay=await stale.request(org,'retry-actor',operation);
-    expect(failures).toEqual(['P2002']);expect(attempts).toBe(2);expect(replay).toEqual(winner);
+    expect(failures).toHaveLength(1);expect(['P2002','P2034']).toContain(failures[0]);expect(attempts).toBe(2);expect(replay).toEqual(winner);
+    expect(await db.aiWalletRefundRequest.count({where:{organizationId:org}})).toBe(1);
+    expect(await db.aiWallet.findUnique({where:{organizationId:org}})).toMatchObject({heldNanos:10000000000n,balanceNanos:10000000000n});
+  });
+  it('retries the database creation-key unique error and returns the committed identity',async()=>{
+    const operation=key(), winner=await service.request(org,'original-actor',operation), failures:string[]=[];let attempts=0;
+    const duplicate=new AiWalletRefundRequestService({model:{$transaction:async(fn:any,opts:any)=>{
+      attempts++;
+      try{return await db.$transaction(async tx=>{
+        // Guarantee the unique-error variant independently of PostgreSQL's
+        // choice of unique vs serialization failure for stale snapshots.
+        if(attempts===1)await tx.aiWalletRefundRequest.create({data:{organizationId:org,operationKey:operation,requestedByUserId:'retry-actor',requestedNanos:1n}});
+        return fn(tx);
+      },opts);}catch(error){if(error instanceof Prisma.PrismaClientKnownRequestError)failures.push(error.code);throw error;}
+    }}} as any);
+    expect(await duplicate.request(org,'retry-actor',operation)).toEqual(winner);
+    expect(failures).toEqual(['P2002']);expect(attempts).toBe(2);
     expect(await db.aiWalletRefundRequest.count({where:{organizationId:org}})).toBe(1);
     expect(await db.aiWallet.findUnique({where:{organizationId:org}})).toMatchObject({heldNanos:10000000000n,balanceNanos:10000000000n});
   });
