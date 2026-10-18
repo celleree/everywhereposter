@@ -569,18 +569,18 @@ run_task_case() {
   if [[ "$scenario" == "manual" ]]; then
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
-      TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree \
+      TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
       sh "$TASK_SCRIPT" implement "$number" >/dev/null 2>&1
   elif [[ "$scenario" == "queued-missing" ]]; then
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
-      TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree \
+      TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
       QUEUE_IMPLEMENT=true QUEUE_ISSUE="$number" \
       sh "$TASK_SCRIPT" implement "$number" >/dev/null 2>&1
   else
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
-      TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree \
+      TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
       QUEUE_IMPLEMENT=true QUEUE_ISSUE="$number" QUEUE_VALIDATED_ISSUE_SNAPSHOT="$snapshot" \
       sh "$TASK_SCRIPT" implement "$number" >/dev/null 2>&1
   fi
