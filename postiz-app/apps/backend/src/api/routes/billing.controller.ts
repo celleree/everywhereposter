@@ -1,4 +1,6 @@
-import { Body, Controller, Get, HttpException, Param, Post, Req } from '@nestjs/common';
+import { AiWalletRefundRequestService } from '@gitroom/nestjs-libraries/services/ai-wallet-refund-request.service';
+import { AiWalletRefundRequestDto } from '@gitroom/nestjs-libraries/dtos/billing/ai-wallet-refund-request.dto';
+import { Body, Controller, Get, HttpException, Param, Post, Query, Req } from '@nestjs/common';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
@@ -22,7 +24,8 @@ export class BillingController {
     private _stripeService: StripeService,
     private _notificationService: NotificationService,
     private _nowpayments: Nowpayments,
-    private walletCheckout: AiWalletCheckoutService
+    private walletCheckout: AiWalletCheckoutService,
+    private refundRequests: AiWalletRefundRequestService
   ) {}
 
   private assertBillingEnabled() {
@@ -37,6 +40,36 @@ export class BillingController {
     if (!org.users?.[0] || !['ADMIN', 'SUPERADMIN'].includes(org.users[0].role)) {
       throw new HttpException('Organization billing administrator required', 403);
     }
+  }
+
+  @Get('/ai-wallet/refund-requests')
+  walletRefundRequests(@GetOrgFromRequest() org: Organization) {
+    return this.refundRequests.summary(org.id);
+  }
+
+  @Post('/ai-wallet/refund-requests')
+  requestWalletRefund(@GetOrgFromRequest() org: Organization, @GetUserFromRequest() user: User,
+    @Body() body: AiWalletRefundRequestDto) {
+    this.assertBillingAdministrator(org);
+    return this.refundRequests.request(org.id, user.id, body.operationKey);
+  }
+
+  @Get('/ai-wallet/refund-review')
+  walletRefundReview(@GetUserFromRequest() user: User, @Query('cursor') cursor?: string) {
+    if (!user.isSuperAdmin) throw new HttpException('Platform administrator required', 403);
+    return this.refundRequests.reviewQueue(cursor);
+  }
+
+  @Post('/ai-wallet/refund-requests/:id/withdraw')
+  withdrawWalletRefund(@GetOrgFromRequest() org: Organization, @GetUserFromRequest() user: User, @Param('id') id: string) {
+    this.assertBillingAdministrator(org);
+    return this.refundRequests.resolve(org.id, id, user.id, 'WITHDRAWN');
+  }
+
+  @Post('/ai-wallet/refund-review/:organizationId/:id/reject')
+  rejectWalletRefund(@GetUserFromRequest() user: User, @Param('organizationId') organizationId: string, @Param('id') id: string) {
+    if (!user.isSuperAdmin) throw new HttpException('Platform administrator required', 403);
+    return this.refundRequests.resolve(organizationId, id, user.id, 'REJECTED');
   }
 
   @Get('/ai-wallet')

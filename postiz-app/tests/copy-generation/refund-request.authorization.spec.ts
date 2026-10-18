@@ -1,0 +1,20 @@
+import { BillingController } from '../../apps/backend/src/api/routes/billing.controller';
+it('requires an organization billing administrator and passes only trusted org/user identity',async()=>{
+  const service={request:jest.fn(async()=>({status:'REQUESTED'})),summary:jest.fn(),reviewQueue:jest.fn(),resolve:jest.fn()};
+  const controller=new BillingController({} as any,{} as any,{} as any,{} as any,{} as any,service as any);
+  expect(()=>controller.requestWalletRefund({id:'org',users:[{role:'USER'}]} as any,{id:'user'} as any,{operationKey:'synthetic-request-key'})).toThrow('administrator');
+  expect(service.request).not.toHaveBeenCalled();
+  await controller.requestWalletRefund({id:'trusted-org',users:[{role:'ADMIN'}]} as any,{id:'trusted-user'} as any,{operationKey:'synthetic-request-key'});
+  expect(service.request).toHaveBeenCalledWith('trusted-org','trusted-user','synthetic-request-key');
+  controller.walletRefundRequests({id:'trusted-org'} as any);expect(service.summary).toHaveBeenCalledWith('trusted-org');
+  expect(()=>controller.walletRefundReview({isSuperAdmin:false} as any)).toThrow('Platform administrator');
+  controller.walletRefundReview({isSuperAdmin:true} as any);expect(service.reviewQueue).toHaveBeenCalledTimes(1);
+  expect(()=>controller.withdrawWalletRefund({id:'org',users:[{role:'USER'}]} as any,{id:'u'} as any,'request')).toThrow('administrator');
+  expect(()=>controller.rejectWalletRefund({id:'u',isSuperAdmin:false} as any,'target-org','request')).toThrow('Platform administrator');
+  expect(service.resolve).not.toHaveBeenCalled();
+  controller.withdrawWalletRefund({id:'trusted-org',users:[{role:'ADMIN'}]} as any,{id:'actor'} as any,'request');
+  expect(service.resolve).toHaveBeenLastCalledWith('trusted-org','request','actor','WITHDRAWN');
+  controller.rejectWalletRefund({id:'platform-actor',isSuperAdmin:true} as any,'target-org','request');
+  expect(service.resolve).toHaveBeenLastCalledWith('target-org','request','platform-actor','REJECTED');
+  controller.walletRefundReview({isSuperAdmin:true} as any,'opaque-cursor');expect(service.reviewQueue).toHaveBeenLastCalledWith('opaque-cursor');
+});

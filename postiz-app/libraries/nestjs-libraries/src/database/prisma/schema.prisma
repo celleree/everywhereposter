@@ -1354,6 +1354,7 @@ model AiWallet {
   reservations AiWalletReservation[]
   ledger AiWalletLedger[]
   topups AiWalletTopup[]
+  refundRequests AiWalletRefundRequest[]
 }
 
 model AiWalletReservation {
@@ -1433,4 +1434,27 @@ model AiTextResult {
   reservationId String @id
   output Json
   reservation AiWalletReservation @relation(fields: [reservationId], references: [id])
+}
+
+enum AiWalletRefundRequestStatus {
+  REQUESTED
+  WITHDRAWN
+  REJECTED
+}
+
+// Manual review only; terminal outcomes release holds without moving money.
+model AiWalletRefundRequest {
+  id String @id @default(uuid())
+  organizationId String
+  operationKey String
+  requestedByUserId String
+  requestedNanos BigInt
+  createdAt DateTime @default(now())
+  status AiWalletRefundRequestStatus @default(REQUESTED)
+  resolvedByUserId String?
+  resolvedAt DateTime?
+  wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
+  @@unique([organizationId, operationKey])
+  @@index([organizationId, createdAt])
+  @@index([status, createdAt, id])
 }

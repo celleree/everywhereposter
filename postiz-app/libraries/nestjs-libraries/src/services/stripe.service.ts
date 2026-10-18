@@ -1058,24 +1058,9 @@ export class StripeService {
 
   async refundCharges(organizationId: string, chargeIds: string[]) {
     this.assertBillingEnabled();
-    const org = await this._organizationService.getOrgById(organizationId);
-    if (!org?.paymentId) {
-      throw new Error('No payment customer found for this organization');
-    }
-
-    const refunded: string[] = [];
-    const failed: string[] = [];
-
-    for (const chargeId of chargeIds) {
-      try {
-        await stripe.refunds.create({ charge: chargeId });
-        refunded.push(chargeId);
-      } catch (err) {
-        failed.push(chargeId);
-      }
-    }
-
-    return { refunded, failed };
+    // This route cannot distinguish safely allocated subscription/payment value
+    // from wallet funding. Refuse all legacy charge refunds before provider access.
+    throw new ForbiddenException('Charge refunds are disabled until financial reconciliation is approved.');
   }
 
   async cancelSubscription(organizationId: string) {

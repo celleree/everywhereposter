@@ -5,6 +5,7 @@ import { PrismaService } from '@gitroom/nestjs-libraries/database/prisma/prisma.
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
 import { PREPAID_AI_POLICY } from './ai-wallet-pricing';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
+import { walletHoldSnapshot } from './ai-wallet-holds';
 
 export const AI_WALLET_TEST_SERVICE = 'everywhereposter-ai-wallet-test';
 type Offer = { id: string; amountCents: number };
@@ -63,16 +64,18 @@ export class AiWalletCheckoutService {
   async balance(organizationId: string) {
     await this.assertPrepaidPlan(organizationId);
     this.assertTestAccount();
-    const [balance, entries, operations] = await this.db.$transaction([
-      this.db.aiWallet.findUnique({ where: { organizationId } }),
-      this.db.aiWalletLedger.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    const [holds, entries, operations] = await this.db.$transaction(tx => Promise.all([
+      walletHoldSnapshot(tx, organizationId),
+      tx.aiWalletLedger.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 20, select: { id: true, kind: true, amountNanos: true, createdAt: true } }),
-      this.db.aiWalletReservation.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      tx.aiWalletReservation.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 20, select: { id: true, provider: true, model: true, state: true, ceilingNanos: true, chargedNanos: true, createdAt: true } }),
-    ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
-    return { organizationId, currency: 'usd', status: balance?.status || 'ACTIVE',
+    ]), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    const balance = holds.wallet;
+    return { organizationId, currency: 'usd', status: holds.reconciled ? balance?.status || 'ACTIVE' : 'REVIEW',
       balanceNanos: (balance?.balanceNanos || 0n).toString(), heldNanos: (balance?.heldNanos || 0n).toString(),
-      availableNanos: ((balance?.balanceNanos || 0n) - (balance?.heldNanos || 0n)).toString(),
+      availableNanos: (holds.reconciled && (!balance || balance.status === 'ACTIVE')
+        ? (balance?.balanceNanos || 0n) - (balance?.heldNanos || 0n) : 0n).toString(),
       entries: entries.map(({ amountNanos, ...entry }) => ({ ...entry, amountNanos: amountNanos.toString() })),
       operations: operations.map(({ ceilingNanos, chargedNanos, ...operation }) => ({ ...operation,
         ceilingNanos: ceilingNanos.toString(), chargedNanos: chargedNanos?.toString() ?? null })) };
