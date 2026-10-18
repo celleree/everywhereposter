@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import warnings
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,16 +22,25 @@ def credential(prompt, pattern):
         raise ValueError("Unsupported credential format")
     return value
 
+def listen_port(value, fixture):
+    if not re.fullmatch(r"[1-9][0-9]{4}", value) or not 49152 <= int(value) <= 65535:
+        raise ValueError("Explicit high loopback listener port required")
+    if int(value) == urlsplit(fixture).port:
+        raise ValueError("Listener and database ports must differ")
+    return value
+
 def main():
     parser = argparse.ArgumentParser(description="One synthetic $5 Stripe TEST purchase; no refund creation.")
     parser.add_argument("--expected-account", required=True)
     parser.add_argument("--evidence", required=True, help="New private directory, outside the checkout")
     parser.add_argument("--fixture", required=True, help="Task-owned disposable fixture URL on a dedicated high loopback port")
+    parser.add_argument("--listen-port", required=True, help="Known loopback listener port, 49152-65535, distinct from database")
     args = parser.parse_args()
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise ValueError("Interactive unrecorded terminal required")
     if not re.fullmatch(r"acct_[A-Za-z0-9]{1,100}", args.expected_account):
         raise ValueError("Explicit expected account required")
+    port = listen_port(args.listen_port, args.fixture)
     # A child receives no .env, proxy, Connect, API-host, preload, cloud or AI configuration.
     node = shutil.which("node", path="/usr/local/bin:/usr/bin:/bin")
     if not node:
@@ -42,7 +52,8 @@ def main():
     if state.stdout:
         raise ValueError("Commit and independently review a clean exact HEAD first")
     child = dict(clean, EP_SANDBOX_ACCOUNT=args.expected_account,
-                 EP_SANDBOX_EVIDENCE=args.evidence, EP_SANDBOX_FIXTURE=args.fixture)
+                 EP_SANDBOX_EVIDENCE=args.evidence, EP_SANDBOX_FIXTURE=args.fixture,
+                 EP_SANDBOX_LISTEN_PORT=port)
     child["STRIPE_SECRET_KEY"] = credential("Stripe TEST secret/restricted key (hidden): ", r"(?:sk|rk)_test_[A-Za-z0-9]+")
     child["STRIPE_SIGNING_KEY"] = credential("Stripe signing key (hidden): ", r"whsec_[A-Za-z0-9]+")
     try:

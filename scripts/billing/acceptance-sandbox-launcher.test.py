@@ -29,7 +29,7 @@ class LauncherTests(unittest.TestCase):
             captured.update(argv=list(argv), env=dict(options["env"]))
             return 0
         args = ["acceptance-sandbox.py", "--expected-account", "acct_expected",
-                "--evidence", "/tmp/new-evidence", "--fixture", "postgresql://isolated:isolated@127.0.0.1:55485/ep_ai_wallet_test"]
+                "--evidence", "/tmp/new-evidence", "--listen-port", "55500", "--fixture", "postgresql://isolated:isolated@127.0.0.1:55485/ep_ai_wallet_test"]
         with patch.object(sys, "argv", args), patch.object(sys, "stdin", Mock(isatty=lambda: True)), \
              patch.object(sys, "stdout", Mock(isatty=lambda: True)), \
              patch.object(launcher.shutil, "which", return_value="/usr/bin/node"), \
@@ -38,13 +38,27 @@ class LauncherTests(unittest.TestCase):
              patch.object(launcher, "credential", side_effect=["sk_test_Synthetic", "whsec_Synthetic"]), \
              patch.dict(launcher.os.environ, {"HTTPS_PROXY": "private", "NODE_OPTIONS": "--require evil", "OPENAI_API_KEY": "private"}):
             self.assertEqual(launcher.main(), 0)
+        self.assertEqual(captured["env"]["EP_SANDBOX_LISTEN_PORT"], "55500")
         self.assertEqual(captured["env"]["STRIPE_SECRET_KEY"], "sk_test_Synthetic")
         self.assertEqual(captured["env"]["STRIPE_SIGNING_KEY"], "whsec_Synthetic")
         self.assertFalse(any(key in captured["env"] for key in ["HTTPS_PROXY", "NODE_OPTIONS", "OPENAI_API_KEY"]))
         self.assertFalse(any("Synthetic" in arg for arg in captured["argv"]))
 
+    def test_explicit_listener_port_boundaries_and_fixture_collision_before_keys(self):
+        fixture = "postgresql://isolated:isolated@127.0.0.1:55485/ep_ai_wallet_test"
+        for value in ["49152", "55500", "65535"]:
+            self.assertEqual(launcher.listen_port(value, fixture), value)
+        for value in ["", "0", "49151", "65536", "55500.0", "055500", "55500\n", "55485"]:
+            with self.subTest(value=value), patch.object(sys, "argv", ["launcher", "--expected-account", "acct_expected",
+                 "--evidence", "/tmp/e", "--fixture", fixture, "--listen-port", value]), \
+                 patch.object(sys, "stdin", Mock(isatty=lambda: True)), \
+                 patch.object(sys, "stdout", Mock(isatty=lambda: True)), patch.object(launcher, "credential") as key:
+                with self.assertRaises(ValueError):
+                    launcher.main()
+                key.assert_not_called()
+
     def test_redirected_input_refused_without_any_key_read(self):
-        with patch.object(sys, "argv", ["launcher", "--expected-account", "acct_expected", "--evidence", "/tmp/e", "--fixture", "unused"]), \
+        with patch.object(sys, "argv", ["launcher", "--expected-account", "acct_expected", "--evidence", "/tmp/e", "--fixture", "unused", "--listen-port", "55500"]), \
              patch.object(sys, "stdin", Mock(isatty=lambda: False)), \
              patch.object(launcher, "credential") as key:
             with self.assertRaises(ValueError):

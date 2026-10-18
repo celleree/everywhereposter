@@ -23,7 +23,7 @@ const Stripe = appRequire('stripe');
 const signing = 'whsec_offlineSynthetic';
 const signer = new Stripe('sk_test_offlineSynthetic');
 const env = { STRIPE_SECRET_KEY: 'sk_test_offlineSynthetic', STRIPE_SIGNING_KEY: signing,
-  EP_SANDBOX_ACCOUNT: 'acct_expected', EP_SANDBOX_FIXTURE: 'postgresql://isolated:isolated@127.0.0.1:55485/ep_ai_wallet_test' };
+  EP_SANDBOX_ACCOUNT: 'acct_expected', EP_SANDBOX_LISTEN_PORT: '55500', EP_SANDBOX_FIXTURE: 'postgresql://isolated:isolated@127.0.0.1:55485/ep_ai_wallet_test' };
 const makeEvent = (object, type = 'checkout.session.completed', changes = {}) => ({
   id: 'evt_' + require('node:crypto').randomUUID().replaceAll('-', ''), object: 'event',
   livemode: false, type, data: { object }, ...changes,
@@ -34,14 +34,17 @@ const sdkBase = () => ({ accounts: { retrieve: async (...args) => {
 
 test('strict credentials, clean environment and single explicit disposable fixture', () => {
   assert.equal(helper.config(env).expected, 'acct_expected');
+  assert.equal(helper.config(env).port, 55500);
   for (const patch of [{ STRIPE_SECRET_KEY: 'sk_live_never' }, { STRIPE_SECRET_KEY: 'rk_live_never' },
-    { STRIPE_SECRET_KEY: 'sk_test_bad\n' }, { STRIPE_SIGNING_KEY: 'bad' }, { EP_SANDBOX_ACCOUNT: '' },
+    { STRIPE_SECRET_KEY: 'sk_test_bad\n' },
+    ...['', '0', '49151', '65536', '55500.0', '055500', '55500\n', '55485'].map(EP_SANDBOX_LISTEN_PORT => ({ EP_SANDBOX_LISTEN_PORT })), { STRIPE_SIGNING_KEY: 'bad' }, { EP_SANDBOX_ACCOUNT: '' },
     { HTTPS_PROXY: 'http://127.0.0.1' }, { STRIPE_API_HOST: 'evil.invalid' }, { STRIPE_ACCOUNT: 'acct_other' },
     { NODE_OPTIONS: '--require evil' }, { EP_SANDBOX_FIXTURE: env.EP_SANDBOX_FIXTURE + '?schema=public' },
     { EP_SANDBOX_FIXTURE: env.EP_SANDBOX_FIXTURE.replace('55485', '5432') },
     { EP_SANDBOX_FIXTURE: env.EP_SANDBOX_FIXTURE.replace('127.0.0.1', 'remote.invalid') }])
     assert.throws(() => helper.config({ ...env, ...patch }));
   assert.equal(helper.config({ ...env, STRIPE_SECRET_KEY: 'rk_test_offlineSynthetic' }).expected, 'acct_expected');
+  for (const port of ['49152', '65535']) assert.equal(helper.config({ ...env, EP_SANDBOX_LISTEN_PORT: port }).port, Number(port));
 });
 
 test('current-account verification fails before any financial capability is returned', async () => {
@@ -66,9 +69,9 @@ test('early own-case refund uses a read-only bound-session PI and dispatches imm
   const topup = { id: 'topup_synthetic', organizationId: 'synthetic', sessionId: 'cs_test_early',
     customerId: 'cus_early', paymentId: null, amountCents: 500, currency: 'usd' };
   const db = { organization: { count: async () => 0 },
-    $transaction: async fn => fn({ $queryRaw: async () => {}, organization: { count: async () => 0, create: async () => {} }, subscription: { create: async () => {} } }),
+    $transaction: async fn => fn({ ...db, $queryRaw: async () => {}, organization: { count: async () => 0, create: async () => {} }, subscription: { create: async () => {} } }),
     aiWalletTopup: { findFirst: async () => topup },
-    aiWallet: { findUnique: async () => null }, aiWalletLedger: { count: async () => 0 }, aiWalletRefundEvent: { count: async () => 0 } };
+    aiWallet: { findUnique: async () => null }, aiWalletLedger: { count: async () => 0 }, aiWalletRefundEvent: { count: async () => 0 }, aiWalletRefundRequest: { findFirst: async () => null } };
   const Services = { Wallet: class {}, Refunds: class {}, Checkout: class {
     async handleVerifiedEvent() { dispatched++; }
   } };
@@ -101,10 +104,10 @@ for (const type of ['charge.dispute.funds_withdrawn', 'charge.dispute.funds_rein
       assert.equal(eventId, event.id); trace.push('account-event'); return accountEvent;
     } } };
     const gated = await helper.accountGate(sdk, 'acct_expected');
-    const db = { $transaction: async fn => fn({ $queryRaw: async () => {},
+    const db = { $transaction: async fn => fn({ ...db, $queryRaw: async () => {},
       organization: { count: async () => 0, create: async () => {} }, subscription: { create: async () => {} } }),
       aiWalletTopup: { findFirst: async () => topup }, aiWallet: { findUnique: async () => null },
-      aiWalletLedger: { count: async () => 0 }, aiWalletRefundEvent: { count: async () => 0 } };
+      aiWalletLedger: { count: async () => 0 }, aiWalletRefundEvent: { count: async () => 0 }, aiWalletRefundRequest: { findFirst: async () => null } };
     const Services = { Wallet: class {}, Refunds: class {}, Checkout: class {
       async handleVerifiedEvent(received) { assert.equal(received, event); trace.push('production-dispatch'); }
     } };
@@ -120,7 +123,31 @@ for (const type of ['charge.dispute.funds_withdrawn', 'charge.dispute.funds_rein
   });
 }
 
-test('real services: capped one purchase, raw signed ingress, rollback and refund-before-review BLOCKED', async () => {
+test('listener binds the explicit high loopback port and rejects invalid ports', async () => {
+  for (const port of [-1, 49151, 65536, '55500'])
+    await assert.rejects(helper.listen(signer, signing, {}, { append() {} }, port));
+  const server = await helper.listen(signer, signing, {}, { append() {} }, 55500);
+  try {
+    assert.equal(server.address().address, '127.0.0.1'); assert.equal(server.address().port, 55500);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('refund classifier requires complete monetary proof and exposes contradictions after debit', () => {
+  const clean = { status: 'REVIEW', requestStatus: 'REFUNDED', reconciliationState: 'SUCCEEDED',
+    funding: 1, reversals: 1, balanceNanos: '0', heldNanos: '0' };
+  assert.equal(helper.refundOutcome(clean), 'MONETARILY_RECONCILED_WALLET_FROZEN');
+  assert.equal(helper.refundOutcome({ ...clean, status: 'ACTIVE' }), 'MONETARILY_RECONCILED');
+  for (const patch of [{ requestStatus: undefined }, { requestStatus: 'REQUESTED' },
+    { reconciliationState: undefined }, { reconciliationState: 'PENDING' }, { reconciliationState: 'FAILED' },
+    { reconciliationState: 'UNCERTAIN' }, { reversals: 0 }, { reversals: 2 }, { funding: 0 },
+    { balanceNanos: '1' }, { heldNanos: '1' }, { status: 'EMPTY' }])
+    assert.equal(helper.refundOutcome({ ...clean, ...patch }), 'DEBIT_RECORDED_REVIEW_REQUIRED');
+  for (const reconciliationState of [undefined, 'PENDING', 'FAILED', 'UNCERTAIN'])
+    assert.equal(helper.refundOutcome({ ...clean, requestStatus: 'REQUESTED', reconciliationState,
+      reversals: 0, balanceNanos: '5000000000', heldNanos: '5000000000' }), 'BLOCKED_REFUND_RECONCILIATION');
+});
+
+test('real services: raw signed refund before explicit late review reconciles money with frozen wallet', async () => {
   const url = helper.fixture(testFixture);
   Object.assign(process.env, { BILLING_ENABLED: 'true', AI_WALLET_ENABLED: 'true',
     AI_WALLET_TEST_REFUNDS_ENABLED: 'true', STRIPE_SECRET_KEY: env.STRIPE_SECRET_KEY,
@@ -219,13 +246,38 @@ test('real services: capped one purchase, raw signed ingress, rollback and refun
     state = await acceptance.snapshot();
     assert.equal(state.status, 'REVIEW'); assert.equal(state.heldNanos, '5000000000');
     assert.equal(state.refundEvents, 1); assert.equal(state.reversals, 0);
-    await assert.rejects(acceptance.review('re_synthetic', 'ch_synthetic'), /Prior refund\/dispute evidence/);
+    assert.equal(state.requestStatus, 'REQUESTED'); assert.equal(state.reconciliationState, undefined);
+    assert.equal(state.refundOutcome, 'BLOCKED_REFUND_RECONCILIATION');
+    const audit = await db.aiWalletRefundEvent.findUnique({ where: { eventId: refund.id } });
+    await acceptance.review('re_synthetic', 'ch_synthetic');
+    state = await acceptance.snapshot();
+    assert.equal(state.status, 'REVIEW'); assert.equal(state.balanceNanos, '0'); assert.equal(state.heldNanos, '0');
+    assert.equal(state.requestStatus, 'REFUNDED'); assert.equal(state.reconciliationState, 'SUCCEEDED');
+    assert.equal(state.reversals, 1); assert.equal(state.refundOutcome, 'MONETARILY_RECONCILED_WALLET_FROZEN');
+    await acceptance.review('re_synthetic', 'ch_synthetic');
+    const restarted = new Services.Refunds({ model: db });
+    assert.equal((await restarted.reviewTestTopup(state.organizationId, state.requestId, 'synthetic-restarted-reviewer',
+      { topupId: state.topupId, refundId: 're_synthetic', chargeId: 'ch_synthetic' })).state, 'SUCCEEDED');
     assert.equal(await deliver(refund), 200); assert.equal((await acceptance.snapshot()).refundEvents, 1);
+    assert.equal((await acceptance.snapshot()).reversals, 1);
+    assert.deepEqual(await db.aiWalletRefundEvent.findUnique({ where: { eventId: refund.id } }), audit);
+    await assert.rejects(db.aiWalletRefundEvent.update({ where: { eventId: refund.id }, data: { outcome: 'SUCCEEDED' } }), /immutable/);
+    assert.equal(await deliver(makeEvent({ ...providerRefund, status: 'failed' }, 'refund.failed')), 200);
+    state = await acceptance.snapshot();
+    assert.equal(state.requestStatus, 'REFUNDED'); assert.equal(state.reconciliationState, 'UNCERTAIN');
+    assert.equal(state.status, 'REVIEW'); assert.equal(state.reversals, 1);
+    assert.equal(state.balanceNanos, '0'); assert.equal(state.heldNanos, '0');
+    assert.equal(state.refundOutcome, 'DEBIT_RECORDED_REVIEW_REQUIRED');
+    await acceptance.review('re_synthetic', 'ch_synthetic');
+    assert.equal((await acceptance.snapshot()).refundOutcome, 'DEBIT_RECORDED_REVIEW_REQUIRED');
     assert.throws(() => evidence.append({ status: signing }));
+    for (const field of ['requestStatus', 'reconciliationState', 'refundOutcome'])
+      assert.throws(() => evidence.append({ [field]: signing }));
     evidence.append({ status: 'STOPPED_LOCAL_RESOURCES_CLOSED', rawBody: 'PII secret',
       signature: signing, url: 'https://checkout.stripe.com/client_secret' });
     const saved = fs.readFileSync(path.join(out, 'evidence.jsonl'), 'utf8');
     assert.match(saved, /OFFLINE_SIMULATED/); assert.match(saved, /BLOCKED_REFUND_RECONCILIATION/);
+    assert.match(saved, /MONETARILY_RECONCILED_WALLET_FROZEN/); assert.match(saved, /DEBIT_RECORDED_REVIEW_REQUIRED/);
     assert.doesNotMatch(saved, /whsec_|sk_test_|PII|client_secret|stripe-signature|rawBody|https:/);
     await assert.rejects(helper.createCase(db, Services, gated, evidence), 'Never reuse existing tenants');
   } finally {
