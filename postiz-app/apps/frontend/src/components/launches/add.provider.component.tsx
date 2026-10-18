@@ -16,10 +16,10 @@ import { object, string } from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { web3List } from '@gitroom/frontend/components/launches/web3/web3.list';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import clsx from 'clsx';
 import copy from 'copy-to-clipboard';
 import { capitalize } from 'lodash';
 import { storeIntegrationReturnRoute } from '@gitroom/frontend/components/launches/helpers/integration.return-route';
+import { availableChannels } from './channel-catalog';
 const resolver = classValidatorResolver(ApiKeyDto);
 const INSTAGRAM_STANDALONE_INSTRUCTIONS_DISMISSED_KEY =
   'instagram-standalone-connect-instructions-dismissed';
@@ -27,11 +27,21 @@ const INSTAGRAM_STANDALONE_INSTRUCTIONS_DISMISSED_KEY =
 export const useAddProvider = (update?: () => void, invite?: boolean) => {
   const modal = useModals();
   const fetch = useFetch();
-  return useCallback(async () => {
+  return useCallback(async (event?: React.MouseEvent<HTMLElement>) => {
+    const trigger = event?.currentTarget || document.activeElement as HTMLElement | null;
     const data = await (await fetch('/integrations')).json();
     modal.openModal({
       title: 'Add Channel',
       withCloseButton: true,
+      contentClassName: 'add-channel-modal',
+      onClose: () => requestAnimationFrame(() => {
+        // The mobile drawer removes its Add Channel button when this picker opens.
+        const target = trigger?.isConnected ? trigger
+          : document.querySelector<HTMLElement>('[data-mobile-more-trigger]');
+        target?.focus();
+      }),
+      size: 'min(600px, calc(100vw - 24px))',
+      top: 'max(12px, env(safe-area-inset-top))',
       children: (
         <AddProviderComponent invite={!!invite} update={update} {...data} />
       ),
@@ -43,12 +53,13 @@ export const AddProviderButton: FC<{
 }> = (props) => {
   const { update } = props;
   const add = useAddProvider(update);
-  const invite = useAddProvider(update, true);
   const t = useT();
 
   return (
     <div className="flex group-[.sidebar]:block gap-[8px]">
       <button
+        type="button"
+        aria-label={t('add_channel', 'Add Channel')}
         className="flex-1 group-[.sidebar]:w-[100%] group-[.sidebar]:flex-none text-btnText bg-btnSimple h-[44px] pt-[12px] pb-[14px] ps-[16px] pe-[20px] justify-center items-center flex rounded-[8px] gap-[8px]"
         onClick={add}
       >
@@ -72,38 +83,6 @@ export const AddProviderButton: FC<{
         <div className="text-start text-[14px] group-[.sidebar]:hidden">
           {t('add_channel', 'Add Channel')}
         </div>
-      </button>
-      <button
-        onClick={invite}
-        data-tooltip-id="tooltip"
-        data-tooltip-content={t(
-          'invite_link',
-          'Send Invite Link to a customer to add channel'
-        )}
-        className="group-[.sidebar]:hidden min-h-[44px] min-w-[44px] bg-btnSimple justify-center items-center flex rounded-[8px] cursor-pointer"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="20"
-          height="20"
-          viewBox="0 0 16 16"
-          fill="none"
-        >
-          <g clipPath="url(#clip0_2452_193804)">
-            <path
-              d="M6.6668 8.66599C6.9531 9.04875 7.31837 9.36545 7.73783 9.59462C8.1573 9.82379 8.62114 9.96007 9.0979 9.99422C9.57466 10.0284 10.0532 9.95957 10.501 9.79251C10.9489 9.62546 11.3555 9.36404 11.6935 9.02599L13.6935 7.02599C14.3007 6.39732 14.6366 5.55531 14.629 4.68132C14.6215 3.80733 14.2709 2.97129 13.6529 2.35326C13.0348 1.73524 12.1988 1.38467 11.3248 1.37708C10.4508 1.36948 9.60881 1.70547 8.98013 2.31266L7.83347 3.45266M9.33347 7.33266C9.04716 6.94991 8.68189 6.6332 8.26243 6.40403C7.84297 6.17486 7.37913 6.03858 6.90237 6.00444C6.4256 5.97029 5.94708 6.03908 5.49924 6.20614C5.0514 6.3732 4.64472 6.63461 4.3068 6.97266L2.3068 8.97266C1.69961 9.60133 1.36363 10.4433 1.37122 11.3173C1.37881 12.1913 1.72938 13.0274 2.3474 13.6454C2.96543 14.2634 3.80147 14.614 4.67546 14.6216C5.54945 14.6292 6.39146 14.2932 7.02013 13.686L8.16013 12.546"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            ></path>
-          </g>
-          <defs>
-            <clipPath id="clip0_2452_193804">
-              <rect width="16" height="16" fill="textColor"></rect>
-            </clipPath>
-          </defs>
-        </svg>
       </button>
     </div>
   );
@@ -427,6 +406,7 @@ export const AddProviderComponent: FC<{
   social: Array<{
     identifier: string;
     name: string;
+    connectionAvailable?: boolean;
     toolTip?: string;
     isExternal: boolean;
     isWeb3: boolean;
@@ -450,8 +430,8 @@ export const AddProviderComponent: FC<{
   update?: () => void;
   onboarding?: boolean;
 }> = (props) => {
-  const { update, social, article, onboarding } = props;
-  const { isGeneral, extensionId } = useVariables();
+  const { social = [], onboarding } = props;
+  const { extensionId } = useVariables();
   const toaster = useToaster();
   const router = useRouter();
   const fetch = useFetch();
@@ -710,85 +690,28 @@ export const AddProviderComponent: FC<{
 
   const t = useT();
 
-  return (
-    <div className="w-full flex flex-col gap-[20px] rounded-[4px] relative]">
-      <div className="flex flex-col">
-        <div
-          className={clsx(
-            'grid grid-cols-5 gap-[10px] justify-items-center justify-center',
-            onboarding ? 'grid-cols-9' : 'grid-cols-5'
-          )}
-        >
-          {social
-            .filter((item) => {
-              if (!props.invite) {
-                return true;
-              }
+  const channels = availableChannels(social).filter((item) => !props.invite || (
+    !item.isExternal && !item.isWeb3 && !item.isChromeExtension && !item.customFields
+  ));
 
-              return (
-                !item.isExternal &&
-                !item.isWeb3 &&
-                !item.isChromeExtension &&
-                !item.customFields
-              );
-            })
-            .map((item) => (
-              <div
-                key={item.identifier}
-                onClick={getSocialLink(
-                  props.invite,
-                  item.identifier,
-                  item.isExternal,
-                  item.isWeb3,
-                  item.isChromeExtension,
-                  item.customFields
-                )}
-                {...(!!item.toolTip
-                  ? {
-                      'data-tooltip-id': 'tooltip',
-                      'data-tooltip-content': item.toolTip,
-                    }
-                  : {})}
-                className={
-                  'w-full h-[100px] text-[14px] p-[10px] rounded-[8px] bg-newTableHeader text-textColor relative justify-center items-center flex flex-col gap-[10px] cursor-pointer'
-                }
-              >
-                <div>
-                  {item.identifier === 'youtube' ? (
-                    <img src={`/icons/platforms/youtube.svg`} />
-                  ) : (
-                    <img
-                      className={clsx(
-                        'w-[32px] h-[32px]',
-                        item.identifier !== 'google_my_business' &&
-                          'rounded-full'
-                      )}
-                      src={`/icons/platforms/${item.identifier}.png`}
-                    />
-                  )}
-                </div>
-                <div className="whitespace-pre-wrap text-center">
-                  {item.name}
-                  {!!item.toolTip && (
-                    <svg
-                      width="15"
-                      height="15"
-                      viewBox="0 0 26 26"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="absolute top-[10px] end-[10px]"
-                    >
-                      <path
-                        d="M13 0C10.4288 0 7.91543 0.762437 5.77759 2.1909C3.63975 3.61935 1.97351 5.64968 0.989572 8.02512C0.0056327 10.4006 -0.251811 13.0144 0.249797 15.5362C0.751405 18.0579 1.98953 20.3743 3.80762 22.1924C5.6257 24.0105 7.94208 25.2486 10.4638 25.7502C12.9856 26.2518 15.5995 25.9944 17.9749 25.0104C20.3503 24.0265 22.3807 22.3603 23.8091 20.2224C25.2376 18.0846 26 15.5712 26 13C25.9964 9.5533 24.6256 6.24882 22.1884 3.81163C19.7512 1.37445 16.4467 0.00363977 13 0ZM13 21C12.7033 21 12.4133 20.912 12.1667 20.7472C11.92 20.5824 11.7277 20.3481 11.6142 20.074C11.5007 19.7999 11.471 19.4983 11.5288 19.2074C11.5867 18.9164 11.7296 18.6491 11.9393 18.4393C12.1491 18.2296 12.4164 18.0867 12.7074 18.0288C12.9983 17.9709 13.2999 18.0007 13.574 18.1142C13.8481 18.2277 14.0824 18.42 14.2472 18.6666C14.412 18.9133 14.5 19.2033 14.5 19.5C14.5 19.8978 14.342 20.2794 14.0607 20.5607C13.7794 20.842 13.3978 21 13 21ZM14 14.91V15C14 15.2652 13.8946 15.5196 13.7071 15.7071C13.5196 15.8946 13.2652 16 13 16C12.7348 16 12.4804 15.8946 12.2929 15.7071C12.1054 15.5196 12 15.2652 12 15V14C12 13.7348 12.1054 13.4804 12.2929 13.2929C12.4804 13.1054 12.7348 13 13 13C14.6538 13 16 11.875 16 10.5C16 9.125 14.6538 8 13 8C11.3463 8 10 9.125 10 10.5V11C10 11.2652 9.89465 11.5196 9.70711 11.7071C9.51958 11.8946 9.26522 12 9.00001 12C8.73479 12 8.48044 11.8946 8.2929 11.7071C8.10536 11.5196 8.00001 11.2652 8.00001 11V10.5C8.00001 8.01875 10.2425 6 13 6C15.7575 6 18 8.01875 18 10.5C18 12.6725 16.28 14.4913 14 14.91Z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  )}
-                </div>
-              </div>
-            ))}
+  return (
+    <div className="channel-picker">
+      <section aria-labelledby="available-channels-heading">
+        <h2 id="available-channels-heading">Available platforms</h2>
+        <div className="channel-picker-grid">
+          {channels.map((item) => (
+            <button key={item.identifier} type="button" className="channel-choice"
+              title={item.toolTip || undefined}
+              onClick={getSocialLink(props.invite, item.identifier, item.isExternal,
+                item.isWeb3, item.isChromeExtension, item.customFields)}>
+              <img alt="" width="24" height="24"
+                src={`/icons/platforms/${item.identifier}.${item.identifier === 'youtube' ? 'svg' : 'png'}`} />
+              <span>{item.name}</span>
+            </button>
+          ))}
         </div>
-      </div>
+        {!channels.length && <p>No connection options are currently available.</p>}
+      </section>
     </div>
   );
 };
