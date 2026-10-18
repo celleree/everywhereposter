@@ -476,6 +476,7 @@ cat > "$TASK_BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 printf 'gh:%s\n' "$*" >> "$TASK_LOG"
 if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
+  [[ "$*" == *'nameWithOwner'* ]] && { echo celleree/everywhereposter; exit 0; }
   [[ "$*" == *'visibility'* ]] && echo PRIVATE || echo celleree
   exit 0
 fi
