@@ -98,7 +98,7 @@ export class InstagramStandaloneProvider
     const state = makeId(6);
     return {
       url:
-        `https://www.instagram.com/oauth/authorize?enable_fb_login=0&client_id=${
+        `https://www.instagram.com/oauth/authorize?enable_fb_login=0&force_reauth=true&client_id=${
           process.env.INSTAGRAM_APP_ID
         }&redirect_uri=${encodeURIComponent(
           `${
