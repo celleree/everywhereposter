@@ -7,9 +7,12 @@ jest.mock('@gitroom/nestjs-libraries/track/track.service', () => ({ TrackService
 jest.mock('@gitroom/nestjs-libraries/database/prisma/notifications/notification.service', () => ({ NotificationService: class {} }));
 jest.mock('@gitroom/nestjs-libraries/crypto/nowpayments', () => ({ Nowpayments: class {} }));
 jest.mock('@gitroom/helpers/auth/auth.service', () => ({ AuthService: class {} }));
+const mockCancel = jest.fn(), mockMethods = jest.fn(), mockIntent = jest.fn(), mockVoid = jest.fn();
 const mockList = jest.fn(), mockUpdate = jest.fn(), mockCharges = jest.fn(), mockPortal = jest.fn(), mockConfig = jest.fn();
 jest.mock('stripe', () => ({ __esModule: true, default: jest.fn(() => ({
-  subscriptions: { list: (...args: any[]) => mockList(...args), update: (...args: any[]) => mockUpdate(...args) },
+  paymentMethods: { list: (...args: any[]) => mockMethods(...args) },
+  paymentIntents: { create: (...args: any[]) => mockIntent(...args), cancel: (...args: any[]) => mockVoid(...args) },
+  subscriptions: { cancel: (...args: any[]) => mockCancel(...args), list: (...args: any[]) => mockList(...args), update: (...args: any[]) => mockUpdate(...args) },
   charges: { list: (...args: any[]) => mockCharges(...args) },
   billingPortal: { sessions: { create: (...args: any[]) => mockPortal(...args) }, configurations: { retrieve: (...args: any[]) => mockConfig(...args) } },
 })) }));
@@ -101,4 +104,33 @@ it('completes administrator cancellation even when the notification fails', asyn
     { email: 'fixture@example.test' } as any, { feedback: 'offline fixture' });
   expect(result).toEqual({ cancel_at: 'fixture' }); expect(stripe.setToCancel).toHaveBeenCalledWith('org_fixture');
   expect(stripe.setToCancel.mock.invocationCallOrder[0]).toBeLessThan(notifications.sendEmail.mock.invocationCallOrder[0]);
+});
+
+it.each([
+  ['active', 'paid', false, 'period-end'], ['trialing', 'paid', false, 'period-end'],
+  ['past_due', 'open', false, 'immediate'], ['active', 'uncollectible', false, 'immediate'],
+  ['active', 'open', false, 'immediate'], ['active', 'paid', true, 'restore'],
+])('preserves cancellation behavior for %s/%s (already canceling=%s)', async (status, invoice, canceling, mode) => {
+  mockList.mockResolvedValue({ data: [{ ...subscription(true), status, cancel_at_period_end: canceling,
+    latest_invoice: { status: invoice } }] });
+  mockUpdate.mockResolvedValue({ cancel_at: 2000000000 }); mockCancel.mockResolvedValue({});
+  const local = { deleteSubscription: jest.fn() };
+  const stripe = new StripeService(local as any, { getOrgById: async () => ({ paymentId: 'cus_fixture' }) } as any, {} as any, {} as any);
+  await stripe.setToCancel('org_fixture');
+  if (mode === 'immediate') {
+    expect(mockCancel).toHaveBeenCalledWith('sub_fixture'); expect(local.deleteSubscription).toHaveBeenCalledWith('cus_fixture');
+    expect(mockUpdate).not.toHaveBeenCalled();
+  } else {
+    expect(mockUpdate).toHaveBeenCalledWith('sub_fixture', { cancel_at_period_end: mode === 'period-end',
+      metadata: { service: 'gitroom', id: expect.any(String) } });
+    expect(mockCancel).not.toHaveBeenCalled(); expect(local.deleteSubscription).not.toHaveBeenCalled();
+  }
+});
+it('validates a trial card with a one-dollar manual authorization then cancels without capture', async () => {
+  mockMethods.mockResolvedValue({ data: [{ id: 'pm_fixture', created: 1 }] });
+  mockIntent.mockResolvedValue({ id: 'pi_fixture', status: 'requires_capture' }); mockVoid.mockResolvedValue({});
+  const stripe = new StripeService({} as any, { getOrgByCustomerId: async () => ({ allowTrial: true }) } as any, {} as any, {} as any);
+  expect(await stripe.checkValidCard({ data: { object: { id: 'sub_fixture', customer: 'cus_fixture', status: 'trialing' } } } as any)).toBe(true);
+  expect(mockIntent).toHaveBeenCalledWith(expect.objectContaining({ amount: 100, currency: 'usd', capture_method: 'manual', confirm: true }));
+  expect(mockVoid).toHaveBeenCalledWith('pi_fixture');
 });

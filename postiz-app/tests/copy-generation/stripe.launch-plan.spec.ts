@@ -58,15 +58,20 @@ it.each(['embedded', 'subscribe', 'prorate'])('rejects forged legacy %s before a
   expect(mockPrices).not.toHaveBeenCalled(); expect(mockProducts).not.toHaveBeenCalled(); expect(mockCheckout).not.toHaveBeenCalled();
 });
 
-it.each(['MONTHLY', 'YEARLY'])('uses the configured immutable %s launch price and card-required trial', async (period) => {
+it.each(['subscribe', 'embedded'].flatMap(method => ['MONTHLY', 'YEARLY'].flatMap(period =>
+  [true, false].map(eligible => [method, period, eligible]))))('builds %s %s Checkout (trial eligible=%s)', async (method, period, eligible) => {
   mockPrices.mockResolvedValue({ data: [validPrice(period)] });
   const { service } = harness();
-  await service.subscribe('track', 'org_fixture', 'user', { billing: 'LAUNCH_V1', period } as any, true);
+  await (service as any)[method]('track', 'org_fixture', 'user', { billing: 'LAUNCH_V1', period } as any, eligible);
   expect(mockPrices).toHaveBeenCalledWith({ active: true, lookup_keys: [validPrice(period).lookup_key], limit: 2 });
   expect(mockProducts).not.toHaveBeenCalled(); expect(mockPriceCreate).not.toHaveBeenCalled();
   expect(mockCheckout.mock.calls[0][0]).toMatchObject({ payment_method_collection: 'always', payment_method_types: ['card'],
-    allow_promotion_codes: false, subscription_data: { trial_period_days: 7, metadata: { billing: 'LAUNCH_V1' } },
+    allow_promotion_codes: false, subscription_data: { metadata: { billing: 'LAUNCH_V1' } },
     line_items: [{ price: 'price_approved', quantity: 1 }] });
+  const payload = mockCheckout.mock.calls[0][0];
+  if (eligible) expect(payload.subscription_data.trial_period_days).toBe(7);
+  else expect(payload.subscription_data).not.toHaveProperty('trial_period_days');
+  if (method === 'embedded') expect(payload.ui_mode).toBe('custom');
 });
 
 it('does not silently convert a legacy subscriber to the launch plan', async () => {

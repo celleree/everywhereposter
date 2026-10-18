@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { validateSync } from 'class-validator';
 import { AiWalletTopupDto } from '@gitroom/nestjs-libraries/dtos/billing/ai-wallet-topup.dto';
 import Stripe from 'stripe';
+import { AiWalletTextService } from '@gitroom/nestjs-libraries/services/ai-wallet-text.service';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
 import { AiWalletCheckoutService, AI_WALLET_TEST_SERVICE } from '@gitroom/nestjs-libraries/services/ai-wallet-checkout.service';
 import { StripeController } from '../../apps/backend/src/api/routes/stripe.controller';
@@ -165,6 +166,46 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     expect(balance.entries.map((value) => value.kind).sort()).toEqual(['FUNDING', 'USAGE']);
     expect(balance.entries.find((value) => value.kind === 'USAGE')?.amountNanos).toBe('3000000');
     expect(JSON.parse(JSON.stringify(balance)).currency).toBe('usd');
+  });
+
+  it('funds once, executes authorized text once, then replays after revocation without a new debit', async () => {
+    jest.spyOn(checkout, 'assertPrepaidPlan').mockRestore();
+    await db.subscription.create({ data: { organizationId: org, subscriptionTier: 'LAUNCH_V1', totalChannels: 0, period: 'MONTHLY' } });
+    await create(); await deliver(paid());
+    const original = [process.env.AI_WALLET_TEXT_ENABLED, process.env.AI_WALLET_TEXT_RATE_CARDS];
+    try {
+      process.env.AI_WALLET_TEXT_ENABLED = 'true';
+      process.env.AI_WALLET_TEXT_RATE_CARDS = JSON.stringify({ 'gpt-6-luna': { billingContext: 'standard-text-receipt-no-extra-charges',
+        rateVersion: 'synthetic', per: '1', rates: { inputUncachedLow: '2', inputCachedLow: '1', outputLow: '5',
+          inputUncachedHigh: '4', inputCachedHigh: '2', outputHigh: '8' } } });
+      const adapter = new AiWalletTextService(wallet), key = `guided-text:${randomUUID()}:summary`;
+      const body = { model: 'gpt-6-luna', reasoning_effort: 'none', messages: [{ role: 'user', content: 'Synthetic facts' }],
+        response_format: { type: 'json_schema', json_schema: {} } };
+      const invoke = jest.fn(async () => ({ id: randomUUID(), model: body.model, service_tier: 'default',
+        choices: [{ finish_reason: 'stop', message: { parsed: { text: 'Synthetic draft' } } }],
+        usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13, prompt_tokens_details: { cached_tokens: 2 } } }));
+      const run = (operation = key, allowed = true) => adapter.run(org, operation, 'a'.repeat(64), body, allowed, invoke);
+      await run(); await db.subscription.delete({ where: { organizationId: org } });
+      await run(key, false); await expect(run(`${key}-new`)).rejects.toThrow('not included');
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(await db.aiWallet.findUniqueOrThrow({ where: { organizationId: org } })).toMatchObject({ balanceNanos: 1229999960n });
+      expect(await db.aiWalletLedger.count({ where: { organizationId: org, kind: 'USAGE' } })).toBe(1);
+    } finally {
+      ['AI_WALLET_TEXT_ENABLED', 'AI_WALLET_TEXT_RATE_CARDS'].forEach((key, i) => {
+        if (original[i] === undefined) delete process.env[key]; else process.env[key] = original[i];
+      });
+    }
+  });
+
+  it.each(['charge.refunded', 'refund.created', 'charge.dispute.created', 'charge.dispute.closed'])('records the unsupported %s wallet reconciliation gap', async type => {
+    await create(); await deliver(paid());
+    const object = { id: `fixture_${type}`, object: type.startsWith('charge.dispute') ? 'dispute' : type.startsWith('refund') ? 'refund' : 'charge',
+      amount: 123, amount_refunded: 123, currency: 'usd', payment_intent: paid().payment_intent, metadata: {} };
+    const receipt = request(event(object, { type }));
+    await hook.stripe(receipt); await hook.stripe(receipt);
+    // Characterization of a launch blocker, NOT successful refund/dispute acceptance.
+    expect((await checkout.balance(org)).balanceNanos).toBe('1230000000');
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(1);
   });
 
   it.each([{ customer: 'cus_other' }, { amount_total: 1 }, { currency: 'eur' },
