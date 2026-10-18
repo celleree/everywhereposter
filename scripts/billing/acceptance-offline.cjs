@@ -31,6 +31,7 @@ const groups = [
   ['subscriptions', 'jest.copy-generation.config.cjs', [
     'stripe.launch-plan', 'stripe.card-required-trial', 'stripe.launch-billing-boundaries',
     'stripe.billing-activation', 'stripe.entitlement-reconciliation', 'stripe.lifetime-claim', 'launch-ai-route-policies',
+    'refund-request.authorization', 'stripe.refund-refusal',
   ].map(name => `tests/copy-generation/${name}.spec.ts`)],
   ['wallet', 'jest.ai-wallet.config.cjs', []],
   ['browser-client', 'jest.post-set-review.config.cjs', [

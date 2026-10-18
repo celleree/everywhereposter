@@ -6,6 +6,7 @@ import { PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/pri
 
 import { PricingQuote, quotedCharge, validatePricingQuote, snapshotFingerprint, usageSnapshot, measuredSnapshot } from '../../../services/ai-wallet-pricing';
 import { MeasuredUsage } from '../../../services/ai-wallet-usage';
+import { assertWalletHolds } from '../../../services/ai-wallet-holds';
 
 const MAX_NANOS = 9223372036854775807n;
 const NANOS_PER_CENT = 10000000n;
@@ -106,6 +107,7 @@ export class AiWalletService {
         return existing;
       }
       if (wallet.status !== 'ACTIVE') throw new Error('Wallet requires reconciliation.');
+      await assertWalletHolds(tx, organizationId, wallet);
       if (wallet.balanceNanos - wallet.heldNanos < ceilingNanos) throw new Error('Insufficient prepaid AI balance.');
       const reservation = await tx.aiWalletReservation.create({
         data: { organizationId, operationKey, provider, model, ceilingNanos,
@@ -124,6 +126,7 @@ export class AiWalletService {
       const reservation = await this.reservation(tx, organizationId, id);
       this.storedQuote(reservation);
       if (reservation.state !== 'RESERVED') return { dispatch: false, reservation };
+      await assertWalletHolds(tx, organizationId, wallet);
       if (requireTextPlan) {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 2))::text`;
         const subscription = await tx.subscription.findFirst({ where: { organizationId, deletedAt: null },
@@ -143,6 +146,7 @@ export class AiWalletService {
       const reservation = await this.reservation(tx, organizationId, id);
       if (reservation.state === 'RELEASED' || reservation.state === 'SETTLED') return reservation;
       if (reservation.state !== 'RESERVED') throw new Error('Dispatched usage requires a provider receipt.');
+      await assertWalletHolds(tx, organizationId);
       await tx.aiWallet.update({ where: { organizationId }, data: { heldNanos: { decrement: reservation.ceilingNanos } } });
       return tx.aiWalletReservation.update({ where: { id }, data: { state: 'RELEASED' } });
     });
@@ -195,6 +199,7 @@ export class AiWalletService {
       if (reservation.state !== 'DISPATCHED' && reservation.state !== 'UNKNOWN') {
         throw new Error('Wallet operation has no dispatch to settle.');
       }
+      await assertWalletHolds(tx, organizationId);
       if (chargedNanos > reservation.ceilingNanos) {
         await tx.aiWallet.update({ where: { organizationId }, data: { status: 'REVIEW' } });
         return tx.aiWalletReservation.update({ where: { id }, data: {
@@ -291,6 +296,7 @@ export class AiWalletService {
       if (row.status !== 'PROCESSING') throw new Error('Transcription is no longer active.');
       if ((await this.wallet(tx, organizationId)).status !== 'ACTIVE') throw new Error('Wallet requires reconciliation.');
       if (reservation.state !== 'RESERVED') return { dispatch: false, reservation };
+      await assertWalletHolds(tx, organizationId);
       const subscription = await tx.subscription.findFirst({ where: { organizationId, deletedAt: null },
         select: { subscriptionTier: true } });
       this.enabled();
