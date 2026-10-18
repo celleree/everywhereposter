@@ -106,11 +106,37 @@ The customer's current subscription/customer association is not payment identity
 
 Because the wallet has aggregate accounting, eligibility deliberately requires
 exactly one funded top-up, exactly its FUNDING ledger entry, its full unspent
-balance held by this existing request, an ACTIVE reconciled wallet, and no
+balance held by this existing request, a reconciled wallet, and no
 reservation history whatsoever (including released or zero-charge operations).
 Mixed funding, partial spend/refund, missing evidence and unresolved/uncertain
 usage cannot use this path. Eligibility is rechecked inside the shared wallet
 lock at success; new funding or any competing usage rejects automatic reversal.
+The ordinary review-first and webhook paths require ACTIVE.
+
+An explicit later platform-superadmin test review can reconcile a held request
+quarantined in REVIEW solely because its review binding was absent. It rechecks
+all relevant immutable history by organization, payment, charge, refund and
+implicated organizations, including unmatched null-organization evidence. At least
+one exact signed persisted `refund.created`/`refund.updated` with `succeeded` is
+required. Otherwise exact pending events are compatible; pending-only history
+retains the full hold without a binding until an administrator explicitly retries
+after signed terminal success. Any failure, cancellation, unknown status, dispute
+(including closed or reinstated funds), incomplete charge summary, identity
+mismatch or cross-organization ambiguity refuses late review. Charge summaries
+are corroboration only and require one matching refund and persisted
+`refundsHasMore: false`; old summaries missing that completeness proof cannot be
+upgraded. Historical UNCERTAIN audit outcomes alone neither authorize nor veto
+late reconciliation; the complete evidence must prove only a missing binding.
+
+The late review atomically creates the immutable actor/time and financial binding,
+records one unique REVERSAL, reduces balance and held value equally, and marks the
+request REFUNDED and reconciliation SUCCEEDED. The wallet deliberately remains
+REVIEW and its summary retains `requiresReconciliation: true`; this operation
+reconciles the money without clearing wallet freezes. Identical retries preserve
+the original review identity/time and cannot debit again. Existing FAILED or
+UNCERTAIN bindings cannot be reset. This records a later review of an already
+executed test refund; it neither authorizes provider execution nor represents a
+separate administrative approval before that execution.
 
 Matching pending events retain the entire hold. Failed/canceled events record
 FAILED and retain the hold for follow-up; they cannot be withdrawn or rejected
@@ -137,9 +163,13 @@ credit becomes spendable. Namespace 4 serializes this quarantine with funding;
 namespace 3 serializes all wallet, request and reversal mutations (sorted wallet
 locks for conflicting organizations). Quarantine and funding both use retrying
 serializable transactions, including snapshots preceding a competing commit.
-Charge-only orphan evidence also blocks a later review of that charge. The orphan
-branch releases its payment/charge lock before retrying a known-wallet event,
-so it never takes a wallet lock while holding the payment lock.
+Charge-only and refund-ID-only orphan evidence also block a later review of those
+identities. Review and ingestion share sorted namespace 4 payment, charge and
+refund locks, including every refund ID embedded in charge summaries. Ingestion
+re-resolves bindings and the funded payment under those locks. If the required
+organization set or funding identity changes, it aborts and retries with the
+complete sorted wallet lock set before any writes. Orphan ingestion never adds
+wallet locks while holding identity locks. Retries are bounded.
 
 Review order: schema constraints/history; request eligibility and reconciliation;
 signed webhook routing and pre-funding quarantine; PostgreSQL races/rollback and
@@ -153,6 +183,12 @@ fully-unused-one-top-up tests are a narrower supported subcase, not provider
 acceptance or general refund/dispute implementation. Real Stripe transactions,
 production schema application, commercial policy approval, activation, merge and
 deployment remain separately gated.
+
+The late-review repair remains one coherent service change with focused signed
+history, tenant-lock races and transaction rollback tests; the test matrix exceeds
+the preferred small billing diff because splitting would leave its new reversal
+path without those directly connected safeguards. Review the history classifier,
+identity locking/re-resolution, atomic debit, then the PostgreSQL regressions.
 
 Contract references checked 18 October 2026 against installed Stripe 20.4.0 types:
 [Refund object](https://docs.stripe.com/api/refunds/object),
