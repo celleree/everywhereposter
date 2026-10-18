@@ -30,6 +30,11 @@ jobs:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: sh scripts/check-canonical-branch.sh
 
+      - name: Test agent repository and credential guards
+        run: |
+          bash scripts/agents/test-codex-task.sh
+          bash scripts/agents/test-codex-issue-queue.sh
+
   quality:
     name: Type checks and stable unit tests
     runs-on: ubuntu-latest
