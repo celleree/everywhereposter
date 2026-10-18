@@ -38,13 +38,20 @@ WORKFLOW_GH_TOKEN=${GH_TOKEN-}
 [ -n "$WORKFLOW_GH_TOKEN" ] || fail "GH_TOKEN must be supplied by GitHub Actions."
 
 OWNER=$(gh repo view --json owner --jq .owner.login)
+REPOSITORY=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+[ "$REPOSITORY" = "celleree/everywhereposter" ] ||
+  fail "Codex account automation is restricted to celleree/everywhereposter."
 VISIBILITY=$(gh repo view --json visibility --jq .visibility)
-[ "$VISIBILITY" = "PRIVATE" ] ||
-  fail "Codex account automation is restricted to this private repository."
+case "$VISIBILITY:$MODE" in
+  PRIVATE:*|PUBLIC:review) ;;
+  *) fail "Public repository automation is restricted to the review role." ;;
+esac
 
 ACTOR=${GITHUB_ACTOR:-$(gh api user --jq .login)}
 [ "$ACTOR" = "$OWNER" ] ||
   fail "Only the repository owner may launch Codex automation."
+[ "${GITHUB_TRIGGERING_ACTOR:-$ACTOR}" = "$OWNER" ] ||
+  fail "Only the repository owner may rerun Codex automation."
 
 TMP_ROOT=$(mktemp -d)
 ITEM="$TMP_ROOT/item.json"
@@ -240,7 +247,22 @@ if git config --local --get-all "$GIT_AUTH_KEY" >/dev/null 2>&1; then
   fail "GitHub credentials remain in the local Git configuration."
 fi
 
-if git ls-remote origin >/dev/null 2>&1; then
+if [ "$VISIBILITY" = "PUBLIC" ]; then
+  # Anonymous public reads succeed without credentials. Inspect credential
+  # sources instead; never print helper output or configured header values.
+  for CREDENTIAL_FILE in "$HOME/.netrc" "$HOME/_netrc" "$HOME/.git-credentials"; do
+    [ ! -e "$CREDENTIAL_FILE" ] || fail "A stored Git/HTTP credential file is present."
+  done
+  if git config --get-regexp '^(credential(\..*)?\.helper|http(\..*)?\.extraheader)$' >/dev/null 2>&1; then
+    fail "Git credential helpers or HTTP credentials remain configured."
+  else
+    [ "$?" -eq 1 ] || fail "Could not verify Git credential configuration."
+  fi
+  if printf 'url=%s\n\n' "$(git remote get-url origin)" |
+    GCM_INTERACTIVE=never git -c credential.interactive=false credential fill >/dev/null 2>&1; then
+    fail "Git credentials remain available before the Codex run."
+  fi
+elif git ls-remote origin >/dev/null 2>&1; then
   fail "Git credentials remain available before the Codex run."
 fi
 

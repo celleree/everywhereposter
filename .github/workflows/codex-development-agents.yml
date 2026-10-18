@@ -26,7 +26,14 @@ permissions: {}
 jobs:
   read-role:
     if: >-
+      github.repository == 'celleree/everywhereposter' &&
       github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner &&
+      (
+        github.event.repository.private == true ||
+        (github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review') ||
+        (github.event_name == 'workflow_dispatch' && inputs.mode == 'review')
+      ) &&
       (
         (github.event_name == 'issues' && github.event.label.name == 'agent-ready') ||
         (github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review') ||
@@ -94,7 +101,10 @@ jobs:
 
   write-role:
     if: >-
+      github.repository == 'celleree/everywhereposter' &&
       github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner &&
+      github.event.repository.private == true &&
       github.event_name == 'workflow_dispatch' &&
       (inputs.mode == 'implement' || inputs.mode == 'repair')
     runs-on: [self-hosted, linux, codex]

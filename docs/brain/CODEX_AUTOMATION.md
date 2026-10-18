@@ -7,7 +7,7 @@ This document describes the gated Codex development workflows in `.github/workfl
 These workflows are inactive until all of the following are true:
 
 1. The pull request adding the workflow has been reviewed and merged into `main`.
-2. A dedicated self-hosted runner has been registered for this private repository.
+2. A dedicated self-hosted runner has been registered for `celleree/everywhereposter`.
 3. The runner has been authenticated to Codex and verified to have no persistent GitHub credentials or production access.
 4. A harmless planning dry run and a documentation-only implementation dry run have passed.
 
@@ -36,7 +36,7 @@ Use a dedicated self-hosted Linux runner with the labels:
 
 The runner must:
 
-- Be used only for the private `celleree/publish-everywhere` repository.
+- Be used only for `celleree/everywhereposter`. Public operation permits only owner-triggered reviews of owner-controlled, same-repository PRs targeting `main`. Both the original actor and rerun actor must be the owner. Planning, implementation, repair, queue and post-merge memory automation remain private-only; public post-merge memory jobs are skipped.
 - Run under a dedicated operating-system user.
 - Have `git`, `gh`, `jq`, `base64`, `bubblewrap`, and the Codex CLI installed.
 - Be authenticated to Codex using the intended ChatGPT/Codex account.
@@ -46,7 +46,7 @@ The runner must:
 - Never process pull requests from forks or untrusted external contributors.
 - Store Codex credentials in the dedicated user's protected home directory and nowhere in the repository or GitHub secrets.
 
-OpenAI recommends API-key authentication as the default for programmatic CI. Reusing cached ChatGPT/Codex authentication is an advanced option for a trusted private runner and may require periodic reauthentication. This project uses that advanced route to consume the existing Codex allowance rather than API billing.
+OpenAI recommends API-key authentication as the default for programmatic CI. Reusing cached ChatGPT/Codex authentication is an advanced option for a trusted, isolated runner and may require periodic reauthentication. This project uses that advanced route to consume the existing Codex allowance rather than API billing.
 
 ## Activation Sequence
 
@@ -143,6 +143,7 @@ Every queue-created pull request must be a draft. The implementation role uses `
 - Credentials are removed before Codex receives untrusted issue content. The implementation role receives Git access only during the narrowly controlled setup, commit, push, and draft-PR operations performed by the trusted wrapper.
 - The token is removed from Git configuration and the process environment before Codex starts.
 - The script fails closed if persistent `gh` authentication or usable Git remote credentials remain.
+- Public reviews reject stored Git/netrc credential files, configured Git credential helpers/HTTP authentication headers and successful credential retrieval. Anonymous public Git reads are not evidence of authentication. The private-repository remote-access probe remains in place for private runs.
 - Codex runs with user configuration ignored so unrelated MCP servers and local automation settings are not loaded.
 - Read-only roles use the read-only sandbox.
 - Implementation and repair use the workspace-write sandbox with command network access disabled.
