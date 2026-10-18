@@ -148,3 +148,27 @@ test('Mobile channels: each configured provider retains its original keyboard co
   }
   expect(connections).toHaveLength(platforms.length);
 });
+
+
+test('Mobile channels: existing customer invite remains keyboard reachable and preserves its dispatch', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route('**/backend-api/integrations', route => route.fulfill({ json: catalog() }));
+  let requests = 0;
+  await page.route('**/backend-api/integrations/social/x', route => {
+    requests++;
+    return route.fulfill({ json: { url: 'https://example.test/synthetic-invite' } });
+  });
+  await openApp(page, '/create');
+  const invite = page.getByRole('button', { name: 'Send Invite Link to a customer to add channel', exact: true }).last();
+  await reachable(invite);
+  await invite.focus(); await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Add Channel', exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'X', exact: true }).click();
+  await expect(page.getByText('Invite link copied to clipboard, link will be available for 1 hour', { exact: true })).toBeVisible();
+  await expect(dialog).not.toBeVisible();
+  await expect(invite).toBeFocused();
+  await expect(page).toHaveURL(/\/create$/);
+  expect(requests).toBe(1);
+  await noHorizontalOverflow(page);
+});
