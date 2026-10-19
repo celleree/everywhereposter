@@ -1368,6 +1368,7 @@ model AiWalletReservation {
   quoteFingerprint String?
   usageSnapshot Json?
   usageFingerprint String?
+  resultFingerprint String?
   state AiWalletReservationState @default(RESERVED)
   providerRequestId String?
   createdAt DateTime @default(now())

@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { AiWalletTranscriptionService } from '@gitroom/nestjs-libraries/services/ai-wallet-transcription.service';
 import { MediaTranscriptionStatus } from '@prisma/client';
 import { execFile } from 'child_process';
 import { lookup } from 'mime-types';
@@ -49,7 +50,8 @@ export class MediaTranscriptionService {
   constructor(
     private readonly _repository: MediaTranscriptionRepository,
     private readonly _temporalService: TemporalService,
-    private readonly _copyGenerationModelService: CopyGenerationModelService
+    private readonly _copyGenerationModelService: CopyGenerationModelService,
+    private readonly _prepaid?: AiWalletTranscriptionService
   ) {}
 
   async ensureTranscriptionStarted(
@@ -200,6 +202,18 @@ export class MediaTranscriptionService {
     );
     if (!active) {
       return { discarded: true };
+    }
+
+    if (this._prepaid) {
+      const accounted = await this._prepaid.run(active.media.organizationId, transcriptionId, generation, async () => {
+        const prepared = await prepareVideoMediaFile(active.media.path, active.media.originalName || active.media.name);
+        try { return await this._copyGenerationModelService.preparePrepaidTranscription({ inputPath: prepared.inputPath,
+          originalName: active.media.originalName || active.media.name }); }
+        finally { await prepared.cleanup(); }
+      });
+      if (accounted) return { discarded: false, status: accounted.state === 'SETTLED' ? 'READY' as const : 'PROCESSING' as const };
+    } else if (process.env.AI_WALLET_ENABLED?.trim().toLowerCase() === 'true') {
+      throw new Error('Prepaid transcription adapter is unavailable.');
     }
 
     let preparedVideo:
