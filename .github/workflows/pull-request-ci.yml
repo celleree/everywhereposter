@@ -88,6 +88,7 @@ jobs:
       - name: Test production readiness checks
         working-directory: .
         run: |
+          python3 -B -m unittest discover -s tools/cooked-worker -p publication_test.py
           node --test scripts/test-check-postiz-readiness.mjs
           bash scripts/test-wait-for-container-health.sh
           bash scripts/test-wait-for-public-readiness.sh

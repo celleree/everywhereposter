@@ -234,26 +234,138 @@ class PublicationTests(unittest.TestCase):
             bundle.assert_called_once()
             self.assertFalse(any("build" in c.args or "push" in c.args for c in p.run.call_args_list))
 
-    def test_workflow_manual_owner_gate_permissions_and_publication_order(self):
-        workflow = Path(__file__).parents[2] / ".github/workflows/publish-cooked-worker.yml"
-        text = workflow.read_text()
-        self.assertIn("workflow_dispatch:", text)
-        self.assertIn("python3 -B -m unittest discover", text)
-        self.assertNotIn("  push:", text)
-        self.assertIn('"$GITHUB_ACTOR" == celleree', text)
-        self.assertIn('"$TRIGGERING_ACTOR" == celleree', text)
-        self.assertIn('"$SOURCE_SHA" == "$GITHUB_SHA"', text)
-        self.assertIn('"$count" -ge 1', text)
-        self.assertEqual(text.count("packages: write"), 1)
-        source, publication = text.split("  publication:\n", 1)
-        self.assertIn("pull-requests: read", source)
-        self.assertNotIn("pull-requests:", publication)
-        self.assertIn("pull-requests: read", (workflow.parent / "prepare-cooked-worker.yml").read_text())
-        self.assertNotIn("id-token:", text)
-        self.assertNotIn("${{ inputs.", "\n".join(line for line in text.splitlines() if "run:" in line))
-        self.assertLess(text.index('publication.py prepare '), text.index('publication.py publish '))
-        self.assertNotIn(":latest", text)
-        self.assertNotIn("secrets.", text)
+    def custody(self):
+        record = dict(schema=1, sourceSHA="c" * 40, baseArchiveSHA256="d" * 64,
+                      baseIndexDigest=p.BASE_INDEX, baseConfigDigest=p.BASE_CONFIG,
+                      nodeBase="node@sha256:" + "e" * 64, owner="celleree",
+                      allowedAccess=["owner", "deployment-automation"], independentRecipients=False,
+                      customerDelivery="edited-videos-only", attestedBy="celleree")
+        (self.root / "base.tar").write_bytes(b"fixture archive")
+        return record
+
+    def check_custody(self, raw):
+        (self.root / "custody.json").write_bytes(raw)
+        with patch.dict(p.os.environ, SOURCE_SHA="c" * 40, BASE_SHA256="d" * 64,
+                        NODE_BASE="node@sha256:" + "e" * 64, CUSTODY_SHA256=H(raw)):
+            return p.validate_custody(self.root)
+
+    def test_private_custody_exact_schema_identities_and_attestations(self):
+        record = self.custody()
+        self.assertEqual(self.check_custody(J(record)), H(J(record)))
+        changes = dict(schema=True, sourceSHA="f" * 40, baseArchiveSHA256="f" * 64,
+                       baseIndexDigest="sha256:" + "f" * 64, baseConfigDigest="sha256:" + "f" * 64,
+                       nodeBase="node:latest", owner="other", allowedAccess=["public"],
+                       independentRecipients=True, customerDelivery="image", attestedBy="other", extra=True)
+        for key, value in changes.items():
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.check_custody(J(dict(record, **{key: value})))
+        for raw in (J({k:v for k,v in record.items() if k != "owner"}),
+                    J(record)[:-1] + b',"owner":"celleree"}', b" " * 16385):
+            with self.assertRaises(ValueError):
+                self.check_custody(raw)
+        self.check_custody(J(record))
+        with patch.dict(p.os.environ, CUSTODY_SHA256="0" * 64), self.assertRaises(ValueError):
+            p.validate_custody(self.root)
+        for name in ("base.tar", "custody.json"):
+            path = self.root / name
+            raw = path.read_bytes()
+            path.unlink()
+            path.symlink_to(self.root / "missing")
+            with self.assertRaises(ValueError):
+                p.validate_custody(self.root)
+            path.unlink()
+            path.write_bytes(raw)
+        (self.root / "verification.json").write_text("preserve")
+        with self.assertRaises(ValueError):
+            p.validate_custody(self.root)
+
+    def test_private_preflight_refuses_changed_source_before_docker(self):
+        with patch.object(p, "validate_custody", return_value="f" * 64), \
+             patch.object(p, "run", return_value="different") as run, \
+             patch.dict(p.os.environ, SOURCE_SHA="c" * 40, NODE_BASE="node@sha256:" + "e" * 64):
+            with self.assertRaisesRegex(ValueError, "Exact clean source"):
+                p.prepare(self.root, private=True)
+            self.assertEqual(run.call_args_list[0].args, ("git", "rev-parse", "HEAD"))
+            self.assertEqual(len(run.call_args_list), 1)
+
+    def test_private_prepare_shared_checks_receipt_and_no_registry_or_pull(self):
+        # Synthetic orchestration fixture only; never a real image/custody receipt.
+        license_bytes = b"synthetic license"
+        staged = dict(sourceSHA="c" * 40, sourceFiles={}, runtimeHashes={"worker.js":"a" * 64})
+        loaded = dict(Id="sha256:" + "1" * 64, Os="linux", Architecture="amd64",
+                      RootFS=dict(Layers=["sha256:" + "2" * 64]), Config={})
+        final = dict(Id="sha256:" + "3" * 64, Os="linux", Architecture="amd64", Config=dict(User="10001:0"))
+        base = dict(debian=[], python=[], native=[], payload=[])
+        verified = dict(noticeHashes={"/opt/NODE-LICENSE":H(license_bytes)})
+        for failure in (None, "loaded", "node-version", "node-platform", "worker-user", "verify", "inventory", "license"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
+                work = Path(temp)
+                calls = []
+                def fake_run(*args, **kwargs):
+                    calls.append(args)
+                    if args[:2] == ("git", "rev-parse"):
+                        return "c" * 40
+                    if args[:2] == ("git", "status"):
+                        return ""
+                    if args[:2] == ("node", "tools/cooked-worker/stage-runtime.cjs"):
+                        (work / "context").mkdir()
+                        (work / "context/staging-manifest.json").write_bytes(J(staged))
+                    if args[:3] == ("docker", "image", "inspect"):
+                        image = copy.deepcopy(loaded if args[-1] == p.BASE_TAG else final)
+                        if args[-1].startswith("node@"):
+                            image = dict(Os="linux", Architecture="arm64" if failure == "node-platform" else "amd64")
+                        if args[-1] == p.BASE_TAG and failure == "loaded":
+                            image["RootFS"]["Layers"] = []
+                        if args[-1] == p.FINAL_TAG and failure == "worker-user":
+                            image["Config"]["User"] = "0:0"
+                        return J([image]).decode()
+                    if args[-1] == "--version":
+                        return "v0.0.0" if failure == "node-version" else "v22.20.0"
+                    return ""
+                def fake_offline(image, script, *args):
+                    if script == p.OBSERVER:
+                        return dict(changed=True) if image == p.FINAL_TAG and failure == "inventory" else base
+                    self.assertIn("runtimeHashes", json.loads(args[0]))
+                    self.assertIn("modelRepositoryRevision", json.loads(args[0]))
+                    if failure == "verify":
+                        raise ValueError("shared verifier rejected fixture")
+                    return dict(noticeHashes={"/opt/NODE-LICENSE":"0" * 64}) if failure == "license" else verified
+                with patch.object(p, "validate_custody", return_value="f" * 64), \
+                     patch.object(p, "validate_base", return_value={"rootfs":{"diff_ids":loaded["RootFS"]["Layers"]},"config":{}}), \
+                     patch.object(p, "run", side_effect=fake_run), \
+                     patch.object(p, "offline", side_effect=fake_offline), \
+                     patch.object(p.subprocess, "check_output", return_value=license_bytes), \
+                     patch.object(p, "validate_bundle", side_effect=AssertionError("public bundle path forbidden")), \
+                     patch.dict(p.os.environ, SOURCE_SHA="c" * 40, BASE_SHA256="d" * 64, NODE_BASE="node@sha256:" + "e" * 64):
+                    if failure:
+                        with self.assertRaises(ValueError):
+                            p.prepare(work, private=True)
+                        self.assertFalse((work / "verification.json").exists())
+                    else:
+                        p.prepare(work, private=True)
+                        receipt = json.loads((work / "verification.json").read_bytes())
+                        self.assertEqual(receipt["status"], "PRIVATE_PREPARED_NOT_PUBLISHED")
+                        self.assertEqual(receipt["custodySHA256"], "f" * 64)
+                        self.assertIsNone(receipt["registry"])
+                        self.assertIsNone(receipt["mainSHA"])
+                        self.assertEqual(receipt["importedDockerImageId"], loaded["Id"])
+                        self.assertEqual(receipt["workerDockerImageId"], final["Id"])
+                        self.assertEqual(receipt["baseIndexDigest"], p.BASE_INDEX)
+                        self.assertEqual(receipt["baseConfigDigest"], p.BASE_CONFIG)
+                    self.assertFalse(any(c[0] == "docker" and c[1] in ("pull", "login", "push", "tag") for c in calls))
+                    self.assertLess(calls.index(("node", "tools/cooked-worker/stage-runtime.cjs", "c" * 40, str(work / "context"))),
+                                    calls.index(("docker", "load", "--input", str(work / "load.tar"))))
+
+    def test_legacy_commands_and_workflow_refuse_without_external_io(self):
+        for command in ("download", "prepare", "publish", "unknown"):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, "retired"):
+                p.main([command, str(self.root)])
+        workflow = (Path(__file__).parents[2] / ".github/workflows/publish-cooked-worker.yml").read_text()
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("permissions: {}", workflow)
+        self.assertIn("exit 1", workflow)
+        for forbidden in ("uses:", "packages:", "GH_TOKEN", "publication.py", "docker", "secrets."):
+            self.assertNotIn(forbidden, workflow)
         self.assertEqual(p.PACKAGES, ("celleree/publish-everywhere-cooked-base", "celleree/publish-everywhere-cooked-worker"))
 
 
