@@ -167,6 +167,7 @@ it('waits for mode selection and keeps native mode during worker recovery', asyn
   expect(screen.getByRole('status').textContent).toContain('Loading editor');
   expect(screen.queryByRole('button', { name: 'Choose video' })).toBeNull();
   await act(async () => resolve({ ok: true, json: async () => ({ enabled: true, ready: false }) }));
-  expect(await screen.findByText('Choose or upload one video to start automatic transcription.')).toBeTruthy();
+  expect(await screen.findByText('Choose or upload one video, preview it, then prepare it for review.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Prepare video' })).toBeNull();
   expect(mockFetch.mock.calls.map(([url]) => url)).toEqual(['/media/cooked/status']);
 });

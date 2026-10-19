@@ -1,0 +1,28 @@
+Cooked native review UI test fixture
+
+Source: https://github.com/nextwork-projects/ai-video-editor-cooked/blob/bce911c1d0652f30b64fd5283cc4aa9fa92811c9/plugins/ai-editor/lib/ai_editor/review.html
+Uncompressed SHA-256: bfdffe39feb7891e07d70a0b31240d1aaa46c9ac8ec3b3dc754625fa8b5685bf
+
+This gzip is a byte-identical, deterministic test copy of the already pinned native document. It is served only by synthetic browser interception after the production HTML hash check. It adds no engine, renderer, model, provider, font, music or application dependency. Synthetic API responses do not prove transcription or rendering.
+
+MIT License
+
+Copyright (c) 2026 NextWork
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
