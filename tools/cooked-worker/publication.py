@@ -265,9 +265,40 @@ def download(asset, checksum, output):
     require(size == metadata["size"] and digest(output) == checksum, "Release asset checksum")
 
 
-def prepare(work):
+def validate_custody(work):
+    # An operator attestation binds custody intent; it does not prove access control.
+    require(work.is_dir() and not work.is_symlink() and
+            work.absolute() == work.resolve(), "Private work directory must be direct")
+    require({p.name for p in work.iterdir()} == {"base.tar", "custody.json"},
+            "Private directory requires only inputs; outputs must be new")
+    for name in ("base.tar", "custody.json"):
+        path = work / name
+        require(path.is_file() and not path.is_symlink(), "Private input must be a regular file")
+    path = work / "custody.json"
+    expected = os.environ["CUSTODY_SHA256"]
+    require(path.stat().st_size <= 16384 and re.fullmatch(SHA, expected) and
+            digest(path) == expected, "Custody checksum/size")
+    record = js(path.read_bytes())
+    identity = dict(schema=1, sourceSHA=os.environ["SOURCE_SHA"],
+                    baseArchiveSHA256=os.environ["BASE_SHA256"], baseIndexDigest=BASE_INDEX,
+                    baseConfigDigest=BASE_CONFIG, nodeBase=os.environ["NODE_BASE"],
+                    owner="celleree", allowedAccess=["owner", "deployment-automation"],
+                    independentRecipients=False, customerDelivery="edited-videos-only")
+    require(isinstance(record, dict) and set(record) == set(identity) | {"attestedBy"} and
+            all(type(record[k]) is type(v) and record[k] == v for k, v in identity.items()) and
+            record["attestedBy"] == "celleree",
+            "Private custody identity/access attestation")
+    return expected
+
+
+def prepare(work, *, private=False):
     require(re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"]) and
             re.fullmatch(r"(node|docker\.io/library/node)@sha256:" + SHA, os.environ["NODE_BASE"]), "Source/Node digest input")
+    custody_hash = validate_custody(work) if private else None
+    if private:
+        require(run("git", "rev-parse", "HEAD") == os.environ["SOURCE_SHA"] and
+                not run("git", "status", "--porcelain", "--untracked-files=normal"), "Exact clean source required")
+        run("node", "tools/cooked-worker/stage-runtime.cjs", os.environ["SOURCE_SHA"], str(work / "context"))
     archive_hash = os.environ["BASE_SHA256"]
     config = validate_base(work / "base.tar", archive_hash, work / "load.tar")
     run("docker", "load", "--input", str(work / "load.tar"))
@@ -277,18 +308,21 @@ def prepare(work):
             loaded["Config"] == config["config"], "Loaded config/rootfs mismatch")
     base_inventory = offline(BASE_TAG, OBSERVER)
     node = os.environ["NODE_BASE"]
-    run("docker", "pull", "--platform", "linux/amd64", node)
+    if not private:
+        run("docker", "pull", "--platform", "linux/amd64", node)
     node_inventory = dict(version=run("docker", "run", "--pull=never", "--rm", "--network", "none", "--entrypoint", "node", node, "--version"))
     license_text = subprocess.check_output(["docker", "run", "--pull=never", "--rm", "--network", "none", "--entrypoint", "cat", node, "/usr/local/LICENSE"])
     node_inventory["licenseSHA256"] = hashlib.sha256(license_text).hexdigest()
     require(node_inventory["version"] == "v22.20.0", "Pinned Node version")
     node_image = js(run("docker", "image", "inspect", node).encode())[0]
     require((node_image["Os"], node_image["Architecture"]) == ("linux", "amd64"), "Node platform")
-    run("node", "tools/cooked-worker/stage-runtime.cjs", os.environ["SOURCE_SHA"], str(work / "context"))
+    if not private:
+        run("node", "tools/cooked-worker/stage-runtime.cjs", os.environ["SOURCE_SHA"], str(work / "context"))
     staged = js((work / "context/staging-manifest.json").read_bytes())
     worker = {k:staged[k] for k in ("sourceSHA", "sourceFiles", "runtimeHashes")}
     inventory = dict(base=base_inventory, node=node_inventory, worker=worker)
-    validate_bundle(work / "bundle.tar", os.environ["BUNDLE_SHA256"], archive_hash, inventory, node)
+    if not private:
+        validate_bundle(work / "bundle.tar", os.environ["BUNDLE_SHA256"], archive_hash, inventory, node)
     run("docker", "build", "--platform", "linux/amd64", "--build-arg", "NODE_BASE=" + node,
         "--build-arg", "COOKED_BASE=" + BASE_TAG, "--tag", FINAL_TAG, str(work / "context"))
     final = js(run("docker", "image", "inspect", FINAL_TAG).encode())[0]
@@ -304,11 +338,15 @@ def prepare(work):
     verified = offline(FINAL_TAG, script, json.dumps(expected))
     require(offline(FINAL_TAG, OBSERVER) == base_inventory, "Final image base inventory changed")
     require(verified["noticeHashes"]["/opt/NODE-LICENSE"] == node_inventory["licenseSHA256"], "Copied Node license")
-    receipt = dict(sourceSHA=os.environ["SOURCE_SHA"], mainSHA=os.environ["GITHUB_SHA"],
+    receipt = dict(sourceSHA=os.environ["SOURCE_SHA"], mainSHA=None if private else os.environ["GITHUB_SHA"],
                    importedDockerImageId=loaded["Id"], workerDockerImageId=final["Id"], baseIndexDigest=BASE_INDEX,
-                   baseConfigDigest=BASE_CONFIG, baseArchiveSHA256=archive_hash, bundleSHA256=os.environ["BUNDLE_SHA256"],
+                   baseConfigDigest=BASE_CONFIG, baseArchiveSHA256=archive_hash, bundleSHA256=None if private else os.environ["BUNDLE_SHA256"],
                    nodeBase=node, verification=verified, staging=staged)
-    (work / "verification.json").write_text(json.dumps(receipt, indent=2))
+    if private:
+        receipt.update(status="PRIVATE_PREPARED_NOT_PUBLISHED", custodySHA256=custody_hash,
+                       registry=None, custodyEvidence="operator-attestation-only")
+    with (work / "verification.json").open("x") as output:
+        output.write(json.dumps(receipt, indent=2))
 
 
 class NoTokenRedirect(urllib.request.HTTPRedirectHandler):
@@ -365,21 +403,16 @@ def publish(work):
         (work / "publication-receipt.json").write_text(json.dumps(receipt, indent=2))
 
 
+def main(args):
+    require(len(args) == 2 and args[0] == "prepare-private",
+            "Public Release download/publication retired; private local preparation only")
+    prepare(Path(args[1]), private=True)
+
+
 if __name__ == "__main__":
     try:
-        command, directory = sys.argv[1:]
-        work = Path(directory)
-        if command == "download":
-            work.mkdir(mode=0o700)
-            download(os.environ["BASE_ASSET_ID"], os.environ["BASE_SHA256"], work / "base.tar")
-            download(os.environ["BUNDLE_ASSET_ID"], os.environ["BUNDLE_SHA256"], work / "bundle.tar")
-        elif command == "prepare":
-            prepare(work)
-        elif command == "publish":
-            publish(work)
-        else:
-            raise ValueError("Unknown command")
+        main(sys.argv[1:])
     except Exception as error:
         # Do not print HTTP bodies, credentials or signed asset redirect URLs.
-        print("Publication blocked: " + type(error).__name__, file=sys.stderr)
+        print("Private preparation blocked: " + type(error).__name__, file=sys.stderr)
         sys.exit(1)

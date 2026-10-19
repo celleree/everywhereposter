@@ -1,129 +1,125 @@
-# Cooked publication preparation
+# Owner-only private Cooked delivery preparation
 
-This manual workflow is preparation code, not permission to dispatch, upload
-Release assets, publish images, deploy, or activate the editor. Each needs its
-separate approval. It preserves the vetted Python/model image; it never runs apt,
-rebuilds that image, changes source/model pins, or changes either Dockerfile.
+This path prepares local images for the same owner's internal private use.
+Only `celleree` and its deployment automation may access registry/Hetzner copies;
+customers receive edited videos only. Preparation does not authorize registry
+login, push, host access, deployment or activation. Those remain separate gates.
+The retired #244 public same-repository Release-asset route must never be used:
+its workflow explicitly refuses, and legacy download/prepare/publish CLI commands
+reject before external I/O. No raw archive or companion is uploaded.
 
-**Release remains blocked.** Exact matching Debian source archives/patches,
-PyAV bundled-native provenance/source/notice mappings, and tested recipient
-delivery remain incomplete. Existing notices and a synthetic passing test bundle
-do not resolve those gaps. Revision-specific model evidence is already retained;
-that closed item must not be reopened as an unexplained blocker.
+Public redistribution remains unresolved: exact matching Debian source/patches,
+PyAV native provenance/source/notice mappings, recipient delivery, and GPL/OpenSSL
+questions require review if outside recipients ever receive copies. These are
+not automatic blockers to the confirmed same-owner internal use. Private access
+is neither legal clearance nor a licensing waiver. Preserve all collected source
+evidence and existing notices; do not reopen closed revision-specific model
+checks or claim that synthetic test bundles resolve public distribution.
 
-## Inputs and identities
+## Local inputs and preparation
 
-After independent review and separate execution approval, the repository owner
-`celleree` can dispatch `publish-cooked-worker.yml` on exact current `main`, which
-must be the merge commit of a merged PR. Inputs are full source SHA, approved
-official `node@sha256:<digest>` (also `docker.io/library/node`), and two numeric
-same-repository GitHub Release asset IDs with reviewed SHA256 checksums. Assets
-must be uncompressed regular-file tar archives: the original `docker image save`
-export and a completed recipient companion bundle. No arbitrary URL is accepted.
-No archive or source-bundle binary is uploaded as an artifact or Release asset.
-Separately approved future execution publishes only the two fixed GHCR images.
+After exact-source review and separate approval to run local Docker preparation,
+use a clean checkout at the reviewed full SHA, existing locked compiler tools,
+and an absolute real directory outside the checkout containing only regular,
+nonsymlink `base.tar` and `custody.json`. The archive is the already verified
+uncompressed dual OCI/legacy Docker export. No input download or credential is
+needed. The approved official Node 22.20.0 linux/amd64 digest must already exist
+in the local Docker store; this path never pulls it. Use a fresh directory for
+each attempt; retain failed outputs for diagnosis rather than overwriting them.
 
-The approved original Docker image identity is the OCI index
-`sha256:3d118a94c192655d02f186449f00d41a48a4f896cb93850006139dcba4b3a9d3`;
-its config is separately
-`sha256:eff48e58dd5a40c9bd9308b81232b6c520fdf81a1e40a8e424388726e35cc17c`.
-Those identities are not interchangeable. The dual OCI/legacy export's entire
-blob graph, config, compressed blob hashes and uncompressed rootfs diff IDs are
-checked before loading. A new legacy load archive preserves exact config and
-layer bytes and replaces archive-controlled tags with `cooked-import:verified`.
-Harmless normalized directory entries are ignored; links, specials, sparse files,
-traversal, duplicate names/JSON keys and excess member/byte/JSON bounds reject.
-Nothing uses `extractall`. Limits: 20,000 members, 8GiB member bytes, 4MiB JSON.
+`custody.json` is a <=16KiB JSON object with exactly these keys (no duplicates):
 
-The worker is built with the unchanged stager and Dockerfile for linux/amd64.
-The imported base config/rootfs, Node version/platform, UID10001:GID0, runtime
-hashes, upstream/model pins/files and retained notices must pass the existing
-shared `verify-image.py` contract before registry login (also used by the
-preparation workflow). The observer
-must also see identical base inventory in the final worker.
-
-## Companion schema 1
-
-`manifest.json` is JSON with these required fields:
-
-```text
-schema: 1
-sourceSHA: exact reviewed execution source SHA
-baseArchiveSHA256: full archive checksum
-baseIndexDigest: approved OCI index above
-baseConfigDigest: approved config above
-nodeBase: exact approved official Node digest input
-inventory:
-  base:
-    debian: [{binary, version, source, sourceVersion}, ...]
-    python: [{name, version}, ...]
-    native: [{path, sha256}, ...]
-    payload: [{path, sha256}, ...]
-  node: {version, licenseSHA256}
-  worker: {sourceSHA, sourceFiles, runtimeHashes} # from stager manifest
-components:
-  - kind: debian | python | native | payload | node | worker
-    identity: exact inventory row (entire node/worker object for those kinds)
-    disposition: bundled-source | source-present | notice-only
-    basis: substantive resolved component-specific explanation
-    sources: [bundle-relative source file paths]
-    notices: [bundle-relative notice file paths]
-    build: [bundle-relative build/patch/provenance mapping file paths]
-files: {bundle-relative path: sha256, ...}
-delivery: {owner, instructions: files-path, testedEvidence: files-path}
+```json
+{
+  "schema": 1,
+  "sourceSHA": "<reviewed full 40-character SHA>",
+  "baseArchiveSHA256": "<reviewed full archive SHA256>",
+  "baseIndexDigest": "sha256:3d118a94c192655d02f186449f00d41a48a4f896cb93850006139dcba4b3a9d3",
+  "baseConfigDigest": "sha256:eff48e58dd5a40c9bd9308b81232b6c520fdf81a1e40a8e424388726e35cc17c",
+  "nodeBase": "node@sha256:<reviewed official Node digest>",
+  "owner": "celleree",
+  "allowedAccess": ["owner", "deployment-automation"],
+  "independentRecipients": false,
+  "customerDelivery": "edited-videos-only",
+  "attestedBy": "celleree"
+}
 ```
 
-Every file except the manifest must occur in `files`; every mapping reference must
-exist and hash-match. No symlinks or external file references are accepted. Each
-observed inventory row requires exactly one component, with no extra/duplicate
-components. Notices/build mappings must be nonempty. Source dispositions require
-nonempty bundled source references; `source-present` uses recipient material
-explaining/preserving source already shipped. `notice-only` requires a documented
-basis. Empty, TODO, unknown, pending or unresolved dispositions fail validation.
-The parser checks mechanical completeness; it cannot certify licenses, whether
-source is corresponding, or whether a stated basis/delivery test is correct.
-The expected bundle checksum must receive responsible provenance/licensing review
-before execution; never fabricate a placeholder accepted manifest.
+This is a schema example, not a usable custody receipt. The owner must attest the
+actual identities and custody facts. Review and retain the record's SHA256
+independently; pass it as `CUSTODY_SHA256`. Operator statements attest intended
+custody, not proven package permissions, recipient facts or legal compliance.
+Synthetic fixtures and mocked tests never qualify as real evidence.
 
-The offline base observer records all installed Debian binary/source versions,
-Python distributions, all site-packages `.so` files and files under `.libs`
-directories, and payload hashes for all manifest-listed upstream/model files,
-the source manifest, model notices and CPython license. Node version and complete
-Node license hash come from the approved Node image and must match final notices.
-This observed inventory is a coverage key, not a claim to identify all historical
-layer content or all statically linked dependencies. Review must reconcile those
-through component source/build mappings, including Debian, CPython, Node and
-wheel-native component provenance. Bundled source archives may themselves contain
-links as opaque hash-verified files; this tool never extracts them.
+Set `SOURCE_SHA`, `BASE_SHA256`, `NODE_BASE` (also accepts
+`docker.io/library/node@sha256:<digest>`) and `CUSTODY_SHA256` to reviewed values,
+then, only with local execution approval, run:
 
-## Registry and evidence gates
+```sh
+python3 tools/cooked-worker/publication.py prepare-private /absolute/private-work
+```
 
-Only `ghcr.io/celleree/publish-everywhere-cooked-base:<full-sourceSHA>` and
-`ghcr.io/celleree/publish-everywhere-cooked-worker:<full-sourceSHA>` are written.
-There is no `latest`, arbitrary destination, production secret or activation path.
-The publication job alone requests `contents:read` and `packages:write`; the source
-gate uses contents-read plus pull-requests-read for the merged-PR provenance API.
-The preparation workflow needs the same narrow read permission. See the
-[GitHub endpoint permission requirement](https://docs.github.com/en/rest/commits/commits#list-pull-requests-associated-with-a-commit).
-Inputs enter shells only through environment values.
-Workflow concurrency serializes its own writers. Existing tags block publication;
-only authenticated structured HTTP404 `MANIFEST_UNKNOWN` or `NAME_UNKNOWN`
-proves absence for these fixed targets. Publication approval must explicitly name
-both packages, including first creation. 401/403, opaque404, server errors and
-unknown scope/state stop; no permission fallback or alternate target is used. Do not run competing external
-writers: GHCR provides no atomic create-only tag operation.
+The unchanged stager checks exact clean HEAD before Docker mutation. Existing
+archive validation checks the full blob graph, config, compressed layer hashes
+and uncompressed rootfs diff IDs, rejecting malformed/unsafe/bounded archive
+content. The load archive preserves exact config/layers while replacing
+archive-controlled tags with `cooked-import:verified`. The unchanged Dockerfile
+builds `cooked-final:verified` for linux/amd64. Shared `verify-image.py` retains
+upstream/model pins/files, runtime hashes, UID10001:GID0 and notices checks.
+Loaded config/rootfs, local Node version/platform/license, unchanged base/final
+inventory and copied Node license must match. No source/model rebuild, apt,
+Dockerfile or dependency change is introduced.
 
-A receipt records source/main SHA, imported config/index, archive/bundle checksums,
-Node digest, staging/image verification and actual registry manifest digests.
-Imported Docker image ID, worker Docker image ID, original index and config are
-recorded separately; rewrapping can change the Docker/registry manifest identity
-without changing original config/rootfs. A null registry value means a push was
-attempted but its resulting digest remains unverified.
-Partial publication can leave the first immutable tag if the second push fails;
-retain the receipt and stop for an approved recovery, without deleting/overwriting.
-Only JSON receipts are retained as workflow artifacts. Asset upload, completed
-source/notice acceptance, publication execution, deployment and activation remain
-separate gates.
+An exclusively created `verification.json` reports
+`PRIVATE_PREPARED_NOT_PUBLISHED`, source/custody/archive hashes, distinct original
+OCI index/config identities, imported Docker image ID, worker Docker image ID,
+Node digest, staging and verification results. `mainSHA`, `bundleSHA256` and
+`registry` remain null: preparation proves no current-main relationship, public
+bundle completeness, registry digest, visibility or pull access. It stops before
+registry login/push; no publication/deployment receipt is implied.
 
-Focused checks: `python3 -B -m unittest discover -s tools/cooked-worker -p publication_test.py`
+## Separately authorized publication and staging
+
+There is no new registry automation. A later explicitly approved operator uses
+existing Docker/GHCR tooling, with approval naming both fixed packages and any
+first creation:
+
+- `ghcr.io/celleree/publish-everywhere-cooked-base:<full-sourceSHA>`
+- `ghcr.io/celleree/publish-everywhere-cooked-worker:<full-sourceSHA>`
+
+Before any registry write, recheck exact reviewed clean source, local image IDs
+and retained input/verification hashes. Read-only authenticated package inspection
+must establish owner identity, private visibility and owner/deployment-only access
+(including inherited repository access and Actions grants). Verify intended pull
+access for existing packages. Public or ambiguous targets stop. Never repair
+visibility or permissions automatically. Credentials/access remain an approval
+gate; no credentials are introduced by this preparation.
+
+For a new package, obtain explicit first-creation approval and conclusive
+read-only absence evidence. GitHub documents new container packages as private
+by default; this is not visibility/access proof. A 401/403, opaque 404 or unknown
+state never proves absence. Only authenticated structured `MANIFEST_UNKNOWN` or
+`NAME_UNKNOWN` with HTTP404 establishes absent tags; inspect package existence
+and intended access separately. Existing immutable tags stop; no competing writer,
+overwrite, `latest`, fallback package or public Release path is allowed.
+
+With publication approval and access gates satisfied, log in using the approved
+credential mechanism, tag the two verified local image IDs to exactly the names
+above, then push each full-SHA tag using existing Docker commands. Record each
+actual registry manifest digest and confirm it against the push result; Docker
+image IDs, original index/config and registry manifests are distinct identities.
+Immediately inspect private visibility/access after first creation. Retain partial
+publication evidence and stop on any failure; never delete/overwrite to recover.
+Verify an owner/deployment-only authenticated pull of the exact digest before any
+separately authorized Hetzner staging. Host copy/pull, runtime/resource acceptance,
+deployment and editor activation each remain pending until explicitly approved.
+Customers must never receive independent image/archive/source-bundle copies under
+this private-use path; changed recipients require a fresh distribution review.
+
+[GitHub Container Registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+supports the default-private statement; live package settings/access still need
+verification during a future approved execution.
+
+Focused offline checks:
+`python3 -B -m unittest discover -s tools/cooked-worker -p publication_test.py`
 and `node --test tools/cooked-worker/stage-runtime.test.cjs`.
