@@ -124,11 +124,11 @@ for (const type of ['charge.dispute.funds_withdrawn', 'charge.dispute.funds_rein
 }
 
 test('listener binds the explicit high loopback port and rejects invalid ports', async () => {
-  for (const port of [-1, 49151, 65536, '55500'])
+  for (const port of [-1, 49151, 65536, '55501'])
     await assert.rejects(helper.listen(signer, signing, {}, { append() {} }, port));
-  const server = await helper.listen(signer, signing, {}, { append() {} }, 55500);
+  const server = await helper.listen(signer, signing, {}, { append() {} }, 55501);
   try {
-    assert.equal(server.address().address, '127.0.0.1'); assert.equal(server.address().port, 55500);
+    assert.equal(server.address().address, '127.0.0.1'); assert.equal(server.address().port, 55501);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 

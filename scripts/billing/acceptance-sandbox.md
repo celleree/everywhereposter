@@ -28,7 +28,7 @@ alone does not satisfy the remaining prerequisites:
 - A fresh task-owned disposable PostgreSQL database with existing migrations
   explicitly applied. Verification fixtures are removed after verification; they
   are not available for an operator run. The helper refuses all existing tenants,
-  including an interrupted run, and never resets or deletes audit rows.
+  including an interrupted run, unless the guarded validation-refusal recovery below is explicitly selected. It never resets or deletes audit rows.
 
 The database URL must use isolated:isolated, 127.0.0.1, dedicated port 49152-65535,
 database ep_ai_wallet_test and no query/fragment. The listener port must also be
@@ -91,6 +91,35 @@ account lookup cannot distinguish provider forwarding from a valid local replay.
 Provider delivery provenance needs separate evidence before any provider-forwarded
 end-to-end PASS claim. Signed local replay never establishes external acceptance.
 
+## One-time recovery after a known Checkout parameter-validation refusal
+
+Use this only after the operator has verified that the original `req_` failed
+before endpoint execution. A lost acknowledgment or uncertain provider outcome is
+not eligible. Keep the original customer, topup, operation key and Stripe idempotency key.
+
+1. In the old helper enter `status`, then `quit`. Preserve its private evidence.
+   Leave the separately approved CLI forwarding terminal running during handoff.
+2. Launch the reviewed corrected helper with the normal account/fixture/port flags,
+   a NEW evidence directory, plus `--resume-evidence /absolute/old/evidence.jsonl`
+   and `--validation-refusal req_ORIGINAL_VALIDATION_REFUSAL`. Enter the approved
+   test restricted key and matching signing secret only at hidden prompts.
+3. Enter `status` and verify the original IDs, zero balances and prior attempt count.
+   Startup makes no purchase. Only after that checkpoint, enter
+   `confirm-forwarder-ready` and one explicit `purchase usd_500`.
+
+The original log must be private, closed, unclaimed, from an ancestor HEAD and the
+same account, source and listener port. The database must contain exactly the
+original unfunded $5 case, an active zero wallet and valid prepaid plan, with no
+session/payment binding, reservation, ledger/payment/refund evidence or ambiguity.
+Checks repeat immediately before purchase and reject topups at least24 hours old.
+The helper restores the durable operation key and counter. A permanent exclusive
+`.resume-claimed` marker links the old log; never remove/copy it to reset recovery.
+New evidence links the original hash and request ID. Attempts are recorded and
+synced before provider calls. Exactly one resumed purchase is permitted; any
+failure, including idempotency conflict, stops further purchases. Do not force a
+new key or restart again after uncertainty. Startup failures after the claim also
+require investigation; the claim is intentionally not automatically removed.
+
 ## Evidence and focused local checks
 
 A new mode-0700 directory holds mode-0600 redacted evidence: safe IDs, counters,
@@ -98,7 +127,7 @@ HEAD, fingerprints, wallet/request/reconciliation states and refund outcome. No 
 signature, raw payload, customer PII or Checkout URL is saved; errors are suppressed.
 `quit` closes only this listener/Prisma connection. Synthetic rows and immutable
 audit remain until the owner removes its identified fixture after retaining evidence.
-No external objects are deleted; an interrupted run needs a fresh fixture.
+No external objects are deleted. Ordinary interrupted runs require investigation; the narrow validation-refusal recovery below preserves an eligible existing fixture.
 
 With installed dependencies and a fresh migrated disposable database:
 ```sh

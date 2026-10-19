@@ -15,6 +15,10 @@ const TYPES = new Set(['checkout.session.completed', 'checkout.session.async_pay
   'charge.refunded', 'charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed',
   'charge.dispute.funds_withdrawn', 'charge.dispute.funds_reinstated']);
 const BODY_LIMIT = 65536;
+const EVIDENCE_FIELDS = ['source', 'status', 'eventId', 'type', 'hash', 'head', 'accountId', 'organizationId',
+  'topupId', 'sessionId', 'paymentId', 'customerId', 'requestId', 'refundId', 'chargeId',
+  'balanceNanos', 'heldNanos', 'funding', 'reversals', 'refundEvents', 'attempts', 'port',
+  'requestStatus', 'reconciliationState', 'refundOutcome', 'validationRequestId'];
 function requireSafe(ok) { if (!ok) throw Error('Sandbox guard refused operation.'); }
 function fixture(value) {
   const u = new URL(value);
@@ -34,10 +38,72 @@ function config(env) {
     /^acct_[A-Za-z0-9]{1,100}$/.test(env.EP_SANDBOX_ACCOUNT || ''));
   for (const key of Object.keys(env)) requireSafe(['PATH', 'HOME', 'LANG', 'TMPDIR',
     'EP_SANDBOX_ACCOUNT', 'EP_SANDBOX_EVIDENCE', 'EP_SANDBOX_FIXTURE', 'EP_SANDBOX_LISTEN_PORT',
-    'STRIPE_SECRET_KEY', 'STRIPE_SIGNING_KEY'].includes(key));
+    'STRIPE_SECRET_KEY', 'STRIPE_SIGNING_KEY', 'EP_SANDBOX_RESUME_EVIDENCE', 'EP_SANDBOX_VALIDATION_REFUSAL'].includes(key));
   const database = fixture(env.EP_SANDBOX_FIXTURE);
   return { expected: env.EP_SANDBOX_ACCOUNT, database,
-    port: listenPort(env.EP_SANDBOX_LISTEN_PORT, database), signing: env.STRIPE_SIGNING_KEY };
+    port: listenPort(env.EP_SANDBOX_LISTEN_PORT, database), signing: env.STRIPE_SIGNING_KEY,
+    resumeEvidence: env.EP_SANDBOX_RESUME_EVIDENCE, refusal: env.EP_SANDBOX_VALIDATION_REFUSAL };
+}
+// One recovery only: the operator attests a known pre-execution validation refusal.
+function readResume(file, cfg, source = 'SIGNED_HTTP_ACCOUNT_VERIFIED_TRANSPORT_UNATTESTED') {
+  requireSafe(Boolean(file) === Boolean(cfg.refusal));
+  if (!file) return undefined;
+  requireSafe(/^req_[A-Za-z0-9]+$/.test(cfg.refusal) && path.isAbsolute(file) &&
+    path.basename(file) === 'evidence.jsonl' && !file.startsWith(root + path.sep));
+  const stat = fs.lstatSync(file), directory = fs.lstatSync(path.dirname(file));
+  requireSafe(stat.isFile() && !stat.isSymbolicLink() && stat.uid === process.getuid() &&
+    !(stat.mode & 0o077) && stat.size > 0 && stat.size <= 262144 && directory.isDirectory() &&
+    !directory.isSymbolicLink() && directory.uid === process.getuid() && !(directory.mode & 0o077) &&
+    fs.realpathSync(file) === file && !fs.existsSync(file + '.resume-claimed'));
+  const raw = fs.readFileSync(file, 'utf8'), rows = raw.trimEnd().split('\n').map(line => JSON.parse(line));
+  requireSafe(rows.every((row, i) => row.sequence === i + 1 && Object.entries(row).every(([key, value]) =>
+    (key === 'sequence' || EVIDENCE_FIELDS.includes(key)) &&
+    ((typeof value === 'number' && Number.isSafeInteger(value)) ||
+      (typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,200}$/.test(value))))) &&
+    rows.every(row => ['ACCOUNT_VERIFIED', 'LISTENING', 'EMPTY', 'ACTIVE',
+      'OPERATOR_CONFIRMED_FORWARDER_READY', 'REJECTED_OR_RETRY_REQUIRED', 'STOPPED_LOCAL_RESOURCES_CLOSED'].includes(row.status)) && rows[0].status === 'ACCOUNT_VERIFIED' &&
+    rows[0].accountId === cfg.expected && rows.filter(row => row.status === 'ACCOUNT_VERIFIED').length === 1 &&
+    rows.filter(row => row.status === 'STOPPED_LOCAL_RESOURCES_CLOSED').length === 1 && /^[a-f0-9]{40}$/.test(rows[0].head) &&
+    spawnSync('git', ['merge-base', '--is-ancestor', rows[0].head, 'HEAD'], { cwd: root }).status === 0 &&
+    rows.at(-1).status === 'STOPPED_LOCAL_RESOURCES_CLOSED' &&
+    !rows.some(row => ['DISPATCHED', 'RESUMED_VALIDATION_REFUSAL', 'RESUME_RETRY_STOPPED'].includes(row.status)) &&
+    rows.filter(row => row.status === 'LISTENING').length === 1 &&
+    rows.find(row => row.status === 'LISTENING').port === cfg.port);
+  const snapshots = rows.filter(row => row.attempts !== undefined), last = snapshots.at(-1);
+  requireSafe(last && last.source === source && last.status === 'ACTIVE' &&
+    Number.isInteger(last.attempts) && last.attempts > 0 && last.attempts < 3 &&
+    snapshots.every((row, i) => row.source === source && row.organizationId === last.organizationId &&
+      (!row.topupId || row.topupId === last.topupId) && (!row.customerId || row.customerId === last.customerId) &&
+      !row.sessionId && !row.paymentId && row.balanceNanos === '0' && row.heldNanos === '0' &&
+      row.funding === 0 && row.reversals === 0 && row.refundEvents === 0 && Number.isInteger(row.attempts) && row.attempts <= last.attempts &&
+      (!i || row.attempts >= snapshots[i - 1].attempts)) &&
+    /^stripe-acceptance-[a-f0-9-]{36}$/.test(last.organizationId) && /^[a-f0-9-]{36}$/.test(last.topupId) &&
+    /^cus_[A-Za-z0-9]+$/.test(last.customerId) && !last.sessionId && !last.paymentId && !last.requestId &&
+    !last.requestStatus && !last.reconciliationState && !last.refundOutcome &&
+    last.balanceNanos === '0' && last.heldNanos === '0' && last.funding === 0 &&
+    last.reversals === 0 && last.refundEvents === 0);
+  return { file, hash: crypto.createHash('sha256').update(raw).digest('hex'), refusal: cfg.refusal,
+    organizationId: last.organizationId, topupId: last.topupId, customerId: last.customerId, attempts: last.attempts };
+}
+async function verifyResume(db, resume) {
+  return db.$transaction(async tx => {
+    const org = await tx.organization.findUnique({ where: { id: resume.organizationId }, select: { paymentId: true } });
+    const plan = await tx.subscription.findUnique({ where: { organizationId: resume.organizationId },
+      select: { subscriptionTier: true, deletedAt: true } });
+    const t = await tx.aiWalletTopup.findFirst({ where: { id: resume.topupId, organizationId: resume.organizationId } });
+    const w = await tx.aiWallet.findUnique({ where: { organizationId: resume.organizationId } });
+    requireSafe(await tx.organization.count() === 1 && await tx.aiWalletTopup.count() === 1 &&
+      org?.paymentId === resume.customerId && plan?.subscriptionTier === 'LAUNCH_V1' && !plan.deletedAt &&
+      t?.customerId === resume.customerId && t.amountCents === 500 && t.currency === 'usd' &&
+      t.sessionId === null && t.paymentId === null && t.fundedAt === null &&
+      /^[A-Za-z0-9_-]{1,100}$/.test(t.operationKey) && w?.status === 'ACTIVE' &&
+      w.balanceNanos === 0n && w.heldNanos === 0n && Date.now() >= t.createdAt.getTime() &&
+      Date.now() < t.createdAt.getTime() + 86400000);
+    for (const model of ['aiWalletReservation', 'aiWalletLedger', 'aiWalletPaymentEvent',
+      'aiWalletRefundRequest', 'aiWalletRefundReconciliation', 'aiWalletRefundEvent'])
+      requireSafe(await tx[model].count() === 0);
+    return t;
+  }, { isolationLevel: 'Serializable' });
 }
 function loadServices() {
   appRequire('ts-node').register({ transpileOnly: true, project: path.join(app, 'tsconfig.json'),
@@ -93,7 +159,8 @@ function evidenceWriter(directory) {
       const statuses = new Set(['ACTIVE', 'REVIEW', 'EMPTY', 'DISPATCHED', 'ACCOUNT_VERIFIED', 'LISTENING',
         'BLOCKED_REFUND_RECONCILIATION', 'MONETARILY_RECONCILED',
         'MONETARILY_RECONCILED_WALLET_FROZEN', 'DEBIT_RECORDED_REVIEW_REQUIRED', 'OPERATOR_CONFIRMED_FORWARDER_READY',
-        'REJECTED_OR_RETRY_REQUIRED', 'STOPPED_LOCAL_RESOURCES_CLOSED']);
+        'REJECTED_OR_RETRY_REQUIRED', 'STOPPED_LOCAL_RESOURCES_CLOSED',
+        'RESUMED_VALIDATION_REFUSAL', 'RESUME_RETRY_STOPPED']);
       requireSafe(record.status === undefined || statuses.has(record.status));
       requireSafe(record.refundOutcome === undefined || ['BLOCKED_REFUND_RECONCILIATION',
         'MONETARILY_RECONCILED', 'MONETARILY_RECONCILED_WALLET_FROZEN',
@@ -102,10 +169,7 @@ function evidenceWriter(directory) {
       requireSafe(record.reconciliationState === undefined || ['PENDING', 'SUCCEEDED', 'FAILED', 'UNCERTAIN'].includes(record.reconciliationState));
       requireSafe(record.source === undefined || ['OFFLINE_SIMULATED', 'live_operator_run',
         'SIGNED_HTTP_ACCOUNT_VERIFIED_TRANSPORT_UNATTESTED'].includes(record.source));
-      for (const key of ['source', 'status', 'eventId', 'type', 'hash', 'head', 'accountId', 'organizationId',
-        'topupId', 'sessionId', 'paymentId', 'customerId', 'requestId', 'refundId', 'chargeId',
-        'balanceNanos', 'heldNanos', 'funding', 'reversals', 'refundEvents', 'attempts', 'port',
-        'requestStatus', 'reconciliationState', 'refundOutcome']) {
+      for (const key of EVIDENCE_FIELDS) {
         const value = record[key];
         if (value !== undefined) {
           requireSafe((typeof value === 'number' && Number.isSafeInteger(value)) ||
@@ -113,8 +177,9 @@ function evidenceWriter(directory) {
           safe[key] = value;
         }
       }
-      fs.appendFileSync(path.join(out, 'evidence.jsonl'), JSON.stringify({ sequence: ++count, ...safe }) + '\n',
-        { mode: 0o600, flag: 'a' });
+      const descriptor = fs.openSync(path.join(out, 'evidence.jsonl'), 'a', 0o600);
+      try { fs.appendFileSync(descriptor, JSON.stringify({ sequence: ++count, ...safe }) + '\n'); fs.fsyncSync(descriptor); }
+      finally { fs.closeSync(descriptor); }
     },
   };
 }
@@ -127,10 +192,13 @@ function refundOutcome(record) {
   if (debited) return 'DEBIT_RECORDED_REVIEW_REQUIRED';
   if (record.status === 'REVIEW') return 'BLOCKED_REFUND_RECONCILIATION';
 }
-async function createCase(db, Services, gated, evidence, source = 'SIGNED_HTTP_ACCOUNT_VERIFIED_TRANSPORT_UNATTESTED') {
+async function createCase(db, Services, gated, evidence, source = 'SIGNED_HTTP_ACCOUNT_VERIFIED_TRANSPORT_UNATTESTED', resume) {
   // A new run refuses ALL existing tenants, including its own interrupted prior run.
-  const organizationId = 'stripe-acceptance-' + crypto.randomUUID();
-  await db.$transaction(async tx => {
+  const organizationId = resume?.organizationId || 'stripe-acceptance-' + crypto.randomUUID();
+  const restored = resume && await verifyResume(db, resume);
+  const operation = restored?.operationKey || crypto.randomUUID();
+  const restoredTime = restored?.createdAt.getTime();
+  if (!resume) await db.$transaction(async tx => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(182736451, 1)::text`;
     requireSafe(await tx.organization.count() === 0);
     await tx.organization.create({ data: { id: organizationId, name: 'Synthetic local Stripe acceptance' } });
@@ -140,8 +208,18 @@ async function createCase(db, Services, gated, evidence, source = 'SIGNED_HTTP_A
   const refunds = new Services.Refunds({ model: db });
   const checkout = new Services.Checkout(db, wallet, refunds);
   checkout.client = () => gated.checkout;
-  const operation = crypto.randomUUID(), refundOperation = crypto.randomUUID();
-  let attempts = 0, busy = false, requestId, forwarderReady = false;
+  const refundOperation = crypto.randomUUID();
+  let attempts = resume?.attempts || 0, busy = false, requestId, forwarderReady = false, resumeAttempted = false;
+  if (resume) {
+    // Exclusive, permanent claim prevents resetting the attempt count from the old log.
+    const claim = fs.openSync(resume.file + '.resume-claimed', 'wx', 0o600);
+    try { fs.writeFileSync(claim, JSON.stringify({ hash: resume.hash, attempts })); fs.fsyncSync(claim); }
+    finally { fs.closeSync(claim); }
+    const directory = fs.openSync(path.dirname(resume.file), 'r');
+    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+    evidence.append({ status: 'RESUMED_VALIDATION_REFUSAL', hash: resume.hash, organizationId,
+      topupId: resume.topupId, customerId: resume.customerId, attempts, validationRequestId: resume.refusal });
+  }
   async function topup() { return db.aiWalletTopup.findFirst({ where: { organizationId } }); }
   async function snapshot() {
     // One database view prevents a concurrent event from mixing pre/post-debit state.
@@ -165,11 +243,21 @@ async function createCase(db, Services, gated, evidence, source = 'SIGNED_HTTP_A
     snapshot,
     confirmForwarder() { forwarderReady = true; evidence.append({ status: 'OPERATOR_CONFIRMED_FORWARDER_READY' }); },
     async purchase() {
-      requireSafe(forwarderReady && !busy && attempts < 3); busy = true; attempts++;
+      requireSafe(forwarderReady && !busy && attempts < 3 && !resumeAttempted); busy = true; attempts++;
+      if (resume) resumeAttempted = true;
       try {
+        if (resume) {
+          const current = await verifyResume(db, resume);
+          requireSafe(current.operationKey === operation && current.createdAt.getTime() === restoredTime);
+        }
+        await snapshot(); // Persist the consumed attempt before any provider call.
         const value = await checkout.createCheckout(organizationId, 'usd_500', operation);
-        requireSafe(await db.aiWalletTopup.count({ where: { organizationId } }) === 1);
+        requireSafe(await db.aiWalletTopup.count({ where: { organizationId } }) === 1 &&
+          (!resume || value.topupId === resume.topupId));
         await snapshot(); return value; // URL only to operator TTY, never evidence.
+      } catch (error) {
+        if (resume) evidence.append({ status: 'RESUME_RETRY_STOPPED', attempts });
+        throw error; // Every failed resumed attempt, including idempotency conflict, stops here.
       } finally { busy = false; }
     },
     async request() {
@@ -268,6 +356,7 @@ async function main() {
   requireSafe(state.status === 0 && !state.stdout.trim());
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
   requireSafe(head.status === 0);
+  const resume = readResume(cfg.resumeEvidence, cfg);
   const evidence = evidenceWriter(process.env.EP_SANDBOX_EVIDENCE);
   const Stripe = appRequire('stripe');
   const sdk = new Stripe(process.env.STRIPE_SECRET_KEY, { maxNetworkRetries: 0, timeout: 15000 });
@@ -280,7 +369,7 @@ async function main() {
     const Services = loadServices();
     db = new Services.PrismaClient({ datasources: { db: { url: cfg.database } }, log: [] });
     await db.$connect();
-    const acceptance = await createCase(db, Services, gated, evidence);
+    const acceptance = await createCase(db, Services, gated, evidence, undefined, resume);
     server = await listen(sdk, cfg.signing, acceptance, evidence, cfg.port);
     console.log('Loopback signed webhook endpoint: http://127.0.0.1:' + server.address().port + '/stripe');
     console.log('External forwarding/registration is NOT configured. Separate approval/setup is required.');
@@ -314,5 +403,5 @@ async function main() {
     evidence.append({ status: 'STOPPED_LOCAL_RESOURCES_CLOSED' });
   }
 }
-module.exports = { fixture, listenPort, refundOutcome, config, loadServices, accountGate, evidenceWriter, createCase, listen, fingerprint, BODY_LIMIT };
+module.exports = { fixture, listenPort, refundOutcome, config, readResume, verifyResume, loadServices, accountGate, evidenceWriter, createCase, listen, fingerprint, BODY_LIMIT };
 if (require.main === module) main().catch(() => { console.error('Sandbox stopped. Details suppressed to protect credentials.'); process.exitCode = 1; });

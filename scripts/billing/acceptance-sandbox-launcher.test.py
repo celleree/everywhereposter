@@ -29,7 +29,8 @@ class LauncherTests(unittest.TestCase):
             captured.update(argv=list(argv), env=dict(options["env"]))
             return 0
         args = ["acceptance-sandbox.py", "--expected-account", "acct_expected",
-                "--evidence", "/tmp/new-evidence", "--listen-port", "55500", "--fixture", "postgresql://isolated:isolated@127.0.0.1:55485/ep_ai_wallet_test"]
+                "--evidence", "/tmp/new-evidence", "--resume-evidence", "/tmp/old/evidence.jsonl",
+                "--validation-refusal", "req_Synthetic", "--listen-port", "55500", "--fixture", "postgresql://isolated:isolated@127.0.0.1:55485/ep_ai_wallet_test"]
         with patch.object(sys, "argv", args), patch.object(sys, "stdin", Mock(isatty=lambda: True)), \
              patch.object(sys, "stdout", Mock(isatty=lambda: True)), \
              patch.object(launcher.shutil, "which", return_value="/usr/bin/node"), \
@@ -38,6 +39,8 @@ class LauncherTests(unittest.TestCase):
              patch.object(launcher, "credential", side_effect=["sk_test_Synthetic", "whsec_Synthetic"]), \
              patch.dict(launcher.os.environ, {"HTTPS_PROXY": "private", "NODE_OPTIONS": "--require evil", "OPENAI_API_KEY": "private"}):
             self.assertEqual(launcher.main(), 0)
+        self.assertEqual(captured["env"]["EP_SANDBOX_RESUME_EVIDENCE"], "/tmp/old/evidence.jsonl")
+        self.assertEqual(captured["env"]["EP_SANDBOX_VALIDATION_REFUSAL"], "req_Synthetic")
         self.assertEqual(captured["env"]["EP_SANDBOX_LISTEN_PORT"], "55500")
         self.assertEqual(captured["env"]["STRIPE_SECRET_KEY"], "sk_test_Synthetic")
         self.assertEqual(captured["env"]["STRIPE_SIGNING_KEY"], "whsec_Synthetic")
@@ -53,6 +56,17 @@ class LauncherTests(unittest.TestCase):
                  "--evidence", "/tmp/e", "--fixture", fixture, "--listen-port", value]), \
                  patch.object(sys, "stdin", Mock(isatty=lambda: True)), \
                  patch.object(sys, "stdout", Mock(isatty=lambda: True)), patch.object(launcher, "credential") as key:
+                with self.assertRaises(ValueError):
+                    launcher.main()
+                key.assert_not_called()
+
+    def test_resume_requires_both_evidence_and_validation_refusal_before_keys(self):
+        base = ["launcher", "--expected-account", "acct_expected", "--evidence", "/tmp/new",
+                "--fixture", "unused", "--listen-port", "55500"]
+        for extra in [["--resume-evidence", "/tmp/old/evidence.jsonl"],
+                      ["--validation-refusal", "req_Synthetic"],
+                      ["--resume-evidence", "/tmp/old/evidence.jsonl", "--validation-refusal", "bad"]]:
+            with patch.object(sys, "argv", base + extra), patch.object(launcher, "credential") as key:
                 with self.assertRaises(ValueError):
                     launcher.main()
                 key.assert_not_called()

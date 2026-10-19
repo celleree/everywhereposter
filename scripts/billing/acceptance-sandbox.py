@@ -35,7 +35,13 @@ def main():
     parser.add_argument("--evidence", required=True, help="New private directory, outside the checkout")
     parser.add_argument("--fixture", required=True, help="Task-owned disposable fixture URL on a dedicated high loopback port")
     parser.add_argument("--listen-port", required=True, help="Known loopback listener port, 49152-65535, distinct from database")
+    parser.add_argument("--resume-evidence", help="Original closed private evidence.jsonl; one recovery only")
+    parser.add_argument("--validation-refusal", help="Original req_ ID; operator confirms pre-execution validation refusal")
     args = parser.parse_args()
+    if bool(args.resume_evidence) != bool(args.validation_refusal):
+        raise ValueError("Resume requires both original evidence and validation-refusal request ID")
+    if args.validation_refusal and not re.fullmatch(r"req_[A-Za-z0-9]+", args.validation_refusal):
+        raise ValueError("Invalid validation-refusal identity")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise ValueError("Interactive unrecorded terminal required")
     if not re.fullmatch(r"acct_[A-Za-z0-9]{1,100}", args.expected_account):
@@ -54,6 +60,9 @@ def main():
     child = dict(clean, EP_SANDBOX_ACCOUNT=args.expected_account,
                  EP_SANDBOX_EVIDENCE=args.evidence, EP_SANDBOX_FIXTURE=args.fixture,
                  EP_SANDBOX_LISTEN_PORT=port)
+    if args.resume_evidence:
+        child.update(EP_SANDBOX_RESUME_EVIDENCE=args.resume_evidence,
+                     EP_SANDBOX_VALIDATION_REFUSAL=args.validation_refusal)
     child["STRIPE_SECRET_KEY"] = credential("Stripe TEST secret/restricted key (hidden): ", r"(?:sk|rk)_test_[A-Za-z0-9]+")
     child["STRIPE_SIGNING_KEY"] = credential("Stripe signing key (hidden): ", r"whsec_[A-Za-z0-9]+")
     try:
