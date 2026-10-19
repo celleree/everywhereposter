@@ -40,7 +40,8 @@ export async function readAnalytics(
       (integration.tokenExpiration && new Date(integration.tokenExpiration).getTime() <= Date.now())) {
     return result('unavailable', 'reconnect_required');
   }
-  if (integration.type !== 'social' || (postId ? !provider?.postAnalytics || ['gmb', 'dribbble'].includes(provider.identifier) : !provider?.analytics)) {
+  if (integration.type !== 'social' || provider?.identifier === 'dribbble' ||
+      (postId ? !provider?.postAnalytics || provider.identifier === 'gmb' : !provider?.analytics)) {
     return result('unsupported');
   }
   try {

@@ -17,6 +17,7 @@ import { InstagramProvider } from '../../libraries/nestjs-libraries/src/integrat
 import { ThreadsProvider } from '../../libraries/nestjs-libraries/src/integrations/social/threads.provider';
 import { TiktokProvider } from '../../libraries/nestjs-libraries/src/integrations/social/tiktok.provider';
 import { GmbProvider } from '../../libraries/nestjs-libraries/src/integrations/social/gmb.provider';
+import { DribbbleProvider } from '../../libraries/nestjs-libraries/src/integrations/social/dribbble.provider';
 import { PinterestProvider } from '../../libraries/nestjs-libraries/src/integrations/social/pinterest.provider';
 import { XProvider } from '../../libraries/nestjs-libraries/src/integrations/social/x.provider';
 import { YoutubeProvider } from '../../libraries/nestjs-libraries/src/integrations/social/youtube.provider';
@@ -119,6 +120,13 @@ describe('read-only OAuth social analytics', () => {
     expect(await call('get_analytics', { integrationId: 'account' })).toMatchObject({ status: 'available', metrics: [{ data: [{ total: 0 }] }] });
     integrations._integrationRepository.getIntegrationById.mockRejectedValue(new Error('postgres://secret'));
     await expect(call('get_analytics', { integrationId: 'account' })).rejects.toThrow('Analytics resource unavailable in this organization');
+  });
+  it('reports Dribbble account and post analytics stubs as unsupported', async () => {
+    integrations._integrationRepository.getIntegrationById.mockResolvedValue({ ...integration, providerIdentifier: 'dribbble' });
+    integrations._integrationManager.getSocialIntegration.mockReturnValue(new DribbbleProvider());
+    expect(await call('get_analytics', { integrationId: 'account' })).toMatchObject({ status: 'unsupported', metrics: [] });
+    expect(await readAnalytics({ ...integration, providerIdentifier: 'dribbble' }, new DribbbleProvider(), 30, 'remote-post'))
+      .toMatchObject({ status: 'unsupported', metrics: [] });
   });
   it('lists at most 20 local post IDs, with a cursor and no analytics calls or content/secret leakage', async () => {
     repository.listPublishedPostsForAnalytics.mockResolvedValue(Array.from({ length: 21 }, (_, n) => ({ id: `post${n}`, publishDate: new Date(), token: 'secret', content: 'unrelated' })));
