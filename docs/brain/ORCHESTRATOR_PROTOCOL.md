@@ -182,6 +182,16 @@ Do not repeat the same failed approach without new evidence.
 - Two failed automated attempts on the same task should trigger root reassessment rather than blind retry.
 - Cross-phase architectural conflicts, repeated verification failure, or expensive-to-get-wrong infrastructure decisions should escalate to Astra / High.
 
+## Bound coordination cost
+
+- Prefer existing CI completion notifications. If unavailable, use one bounded watcher with backoff and change-only output; avoid short polling loops that repeatedly wake the model or reload unchanged logs.
+- Stabilize the selected candidate before broad CI and final review. Reuse passing evidence for the exact SHA and scope; rerun only checks invalidated by changes, failures, or unmet acceptance criteria. Preserve required repository checks and fresh exact-HEAD review.
+- Keep coordination context to scope, branch/base/HEAD, evidence paths, concrete blockers, and the next executable action. Retrieve raw logs only to resolve a specific failure.
+- Default to one bounded implementer. Delegate only when independent work saves total effort after handoff, review, and integration costs; avoid duplicate investigations.
+- Bound side investigations by a concrete question and finish line. Surface missing access, inputs, or authorization early, and continue only independent work that can change the outcome.
+- Ask each approval question once. While it is pending, do useful independent work; when none remains, stop at the gate instead of repeating unchanged status checks. Never infer approval from elapsed time.
+- When accounting is available, distinguish observed requests, uncached input, cached input, and output from billed credits. Leave unknown costs unknown; do not infer charges from raw token totals.
+
 ## Required compact handoff
 
 Workers and reviewers should return:
