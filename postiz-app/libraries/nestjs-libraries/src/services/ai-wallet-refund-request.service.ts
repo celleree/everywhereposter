@@ -2,10 +2,22 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException, 
 import { AiWalletRefundRequest, Prisma, AiWalletRefundReconciliation } from '@prisma/client';
 import { PrismaTransaction } from '../database/prisma/prisma.service';
 import Stripe from 'stripe';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { walletHoldSnapshot } from './ai-wallet-holds';
 
 class RefundIdentityChanged extends Error {}
+
+/** Server-only normalized read receipt. Never accepted from the HTTP review body.
+ * The operator adapter verifies the current Stripe account before issuing reads. */
+export interface TestRefundProviderProof {
+  accountId: string;
+  observedAt: number;
+  charge: { id: string; paymentId: string; customerId: string; amount: number;
+    amountRefunded: number; currency: string; livemode: boolean; paid: boolean;
+    captured: boolean; refunded: boolean; disputed: boolean };
+  refunds: { object: string; hasMore: boolean; data: { id: string; paymentId: string;
+    chargeId: string; amount: number; currency: string; status: string }[] };
+}
 
 /** Durable manual-review requests only. Never expires value or calls a payment,
  * email or refund provider. Request holds share the spend serialization lock. */
@@ -121,7 +133,7 @@ export class AiWalletRefundRequestService {
   /** Platform-superadmin route only. This binds reviewed synthetic evidence; it
    * never creates a refund, contacts Stripe, or approves a production policy. */
   async reviewTestTopup(organizationId: string, requestId: string, actorId: string,
-    expected: { topupId: string; chargeId: string; refundId: string }) {
+    expected: { topupId: string; chargeId: string; refundId: string }, providerProof?: TestRefundProviderProof) {
     this.assertTestRefunds();
     if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200 ||
         !actorId?.trim() || actorId.length > 200 || !expected || typeof expected.topupId !== 'string' || expected.topupId.length > 200 ||
@@ -148,6 +160,8 @@ export class AiWalletRefundRequestService {
       const late = history.length > 0;
       const held = late ? await this.fullyHeldTopup(tx, organizationId, requestId, expected.topupId)
         : await this.unusedTopup(tx, organizationId, requestId, expected.topupId);
+      if (providerProof) this.validateProviderProof(providerProof, held.topup, expected);
+      if (providerProof && !late) throw new ConflictException('Signed refund history is required.');
       if (late) {
         let succeeded = false;
         for (const audit of history) {
@@ -159,13 +173,33 @@ export class AiWalletRefundRequestService {
             audit.createdAt >= held.row.createdAt && audit.createdAt >= topup.fundedAt!;
           const refund = ['refund.created', 'refund.updated'].includes(e?.type) && e.object === 'refund' &&
             e.id === expected.refundId && ['pending', 'succeeded'].includes(e.status);
+          const complete = e?.refundsShape !== 'MALFORMED' && e?.refundsHasMore === false && Array.isArray(e.refundIds) &&
+            e.refundIds.length === 1 && e.refundIds[0] === expected.refundId;
+          // Pre-existing rows lost the distinction between absent and malformed.
+          // A fresh authoritative list can resolve only null/null summaries; known
+          // pagination, malformed lists and explicit contradictions still block.
+          const absent = providerProof && e?.refundIds === null && e.refundsHasMore === null &&
+            (e.refundsShape === undefined || e.refundsShape === 'ABSENT');
           const charge = e?.type === 'charge.refunded' && e.object === 'charge' && e.id === expected.chargeId &&
-            e.amountRefunded === topup.amountCents && e.refundsHasMore === false &&
-            Array.isArray(e.refundIds) && e.refundIds.length === 1 && e.refundIds[0] === expected.refundId;
+            e.amountRefunded === topup.amountCents && (complete || absent);
           if (!exact || (!refund && !charge)) throw new ConflictException('Prior refund/dispute evidence requires reconciliation.');
           succeeded ||= refund && e.status === 'succeeded';
         }
         if (!succeeded) throw new ConflictException('Prior refund/dispute evidence requires reconciliation: signed terminal success is required.');
+      }
+      if (providerProof) {
+        // Append a distinct API-read receipt atomically with the binding/debit.
+        // Original signed webhook rows remain byte-for-byte unchanged.
+        const evidence = JSON.parse(JSON.stringify({ source: 'STRIPE_TEST_API_READ', accountId: providerProof.accountId, observedAt: providerProof.observedAt,
+          charge: Object.fromEntries(['id', 'paymentId', 'customerId', 'amount', 'amountRefunded', 'currency',
+            'livemode', 'paid', 'captured', 'refunded', 'disputed'].map(k => [k, (providerProof.charge as any)[k]])),
+          refunds: { object: 'list', hasMore: false, data: providerProof.refunds.data.map(r => ({
+            id: r.id, paymentId: r.paymentId, chargeId: r.chargeId, amount: r.amount, currency: r.currency, status: r.status })) },
+          organizations: [organizationId], paymentId: topup.paymentId,
+          chargeId: expected.chargeId, refundId: expected.refundId, requestId, topupId: topup.id }));
+        await tx.aiWalletRefundEvent.create({ data: { eventId: `provider-read:${randomUUID()}`,
+          organizationId, paymentId: topup.paymentId, outcome: 'VERIFIED_PROVIDER_READ', evidence,
+          fingerprint: createHash('sha256').update(JSON.stringify(evidence)).digest('hex') } });
       }
       const row = await tx.aiWalletRefundReconciliation.create({ data: { requestId, organizationId, topupId: topup.id,
         paymentId: topup.paymentId, chargeId: expected.chargeId, refundId: expected.refundId,
@@ -177,6 +211,22 @@ export class AiWalletRefundRequestService {
       }
       return { state: row.state, reviewedAt: row.reviewedAt };
     });
+  }
+  private validateProviderProof(proof: TestRefundProviderProof, topup: { paymentId: string | null;
+    customerId: string; amountCents: number; currency: string; fundedAt: Date | null },
+    expected: { chargeId: string; refundId: string }) {
+    const c = proof?.charge, list = proof?.refunds, r = list?.data?.[0];
+    if (!/^acct_[A-Za-z0-9]{1,100}$/.test(proof?.accountId || '') ||
+        !Number.isSafeInteger(proof?.observedAt) || proof.observedAt > Date.now() ||
+        Date.now() - proof.observedAt > 30000 || proof.observedAt < topup.fundedAt!.getTime() ||
+        c?.id !== expected.chargeId || c.paymentId !== topup.paymentId || c.customerId !== topup.customerId ||
+        c.amount !== topup.amountCents || c.amountRefunded !== topup.amountCents || c.currency !== topup.currency ||
+        c.livemode !== false || c.paid !== true || c.captured !== true || c.refunded !== true || c.disputed !== false ||
+        list?.object !== 'list' || list.hasMore !== false || !Array.isArray(list.data) || list.data.length !== 1 ||
+        r?.id !== expected.refundId || r.chargeId !== expected.chargeId || r.paymentId !== topup.paymentId ||
+        r.amount !== topup.amountCents || r.currency !== topup.currency || r.status !== 'succeeded') {
+      throw new ConflictException('Complete current-account test refund proof is required.');
+    }
   }
   /** Signature verification is mandatory in the caller. Look up the funded
    * payment independently of metadata. Unmatched payment signals are quarantined without touching subscription state. */
@@ -206,6 +256,9 @@ export class AiWalletRefundRequestService {
         const evidence = { organizations, type: event.type, object: object.object ?? null, id: object.id ?? null, paymentId, chargeId,
           amount: object.amount ?? null, amountRefunded: object.amount_refunded ?? null, currency: object.currency ?? null,
           status: object.status ?? null, refundIds,
+          refundsShape: object.refunds == null ? 'ABSENT' :
+            (object.refunds?.object === 'list' && Array.isArray(object.refunds.data) &&
+              typeof object.refunds.has_more === 'boolean' ? 'LIST' : 'MALFORMED'),
           refundsHasMore: typeof object.refunds?.has_more === 'boolean' ? object.refunds.has_more : null };
         const organizationId = topup?.fundedAt ? topup.organizationId : null;
         const previous = await tx.aiWalletRefundEvent.findUnique({ where: { eventId: event.id } });

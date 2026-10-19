@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import Stripe from 'stripe';
 import { PrismaClient } from '@prisma/client';
 import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
@@ -28,7 +28,7 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     data: { object: { id: ids(item).refundId, object: 'refund', payment_intent: `pi_${item.topup.id}`,
       charge: ids(item).chargeId, amount: 500, currency: 'usd', status, ...changes } } });
   const summary = (changes: any = {}) => event('charge_status_is_not_refund_status', { id: ids().chargeId, object: 'charge',
-    amount_refunded: 500, refunds: { has_more: false, data: [{ id: ids().refundId }] }, ...changes }, 'charge.refunded');
+    amount_refunded: 500, refunds: { object: 'list', has_more: false, data: [{ id: ids().refundId }] }, ...changes }, 'charge.refunded');
   const deliver = (e: any, target = service) => {
     const hook = new StripeController({ validateRequest: (raw: Buffer, signature: string, secret: string) =>
       signer.webhooks.constructEvent(raw, signature, secret) } as any, new AiWalletCheckoutService(db as any, wallet, target));
@@ -260,4 +260,125 @@ const fixtureUrl = process.env.AI_WALLET_TEST_DATABASE_URL;
     await deliver(event()); await expect(review()).rejects.toThrow('unused');
     expect(await db.aiWalletLedger.count({ where: { organizationId: f.org, kind: 'REVERSAL' } })).toBe(0);
   });
+  describe('complete current-account provider proof supplements absent charge summaries', () => {
+    const receipt = () => ({ accountId: 'acct_synthetic', observedAt: Date.now(),
+      charge: { id: ids().chargeId, paymentId: `pi_${f.topup.id}`, customerId: f.topup.customerId,
+        amount: 500, amountRefunded: 500, currency: 'usd', livemode: false, paid: true, captured: true, refunded: true, disputed: false },
+      refunds: { object: 'list', hasMore: false, data: [{ id: ids().refundId, paymentId: `pi_${f.topup.id}`,
+        chargeId: ids().chargeId, amount: 500, currency: 'usd', status: 'succeeded' }] } });
+    const withProof = (proof: any = receipt(), target = service) => target.reviewTestTopup(f.org, f.request.id, 'platform-admin', ids(), proof);
+    const actualHistory = async () => { await deliver(summary({ refunds: undefined })); await deliver(event()); };
+    it.each(['charge-first', 'refund-first', 'legacy-null-fields'])('reconciles once with %s and preserves all signed audit rows', async order => {
+      const charge = summary({ refunds: undefined }), refund = event();
+      if (order === 'legacy-null-fields') {
+        await deliver(refund);
+        // Seed a separate synthetic pre-repair receipt; never edit persisted rows.
+        await db.aiWalletRefundEvent.create({ data: { eventId: charge.id, organizationId: f.org,
+          paymentId: `pi_${f.topup.id}`, fingerprint: createHash('sha256').update(JSON.stringify(charge)).digest('hex'),
+          outcome: 'UNCERTAIN', evidence: { organizations: [f.org], type: 'charge.refunded', object: 'charge',
+            id: ids().chargeId, chargeId: ids().chargeId, paymentId: `pi_${f.topup.id}`, amount: 500,
+            amountRefunded: 500, currency: 'usd', status: 'succeeded', refundIds: null, refundsHasMore: null } } });
+      } else if (order === 'refund-first') { await deliver(refund); await deliver(charge); }
+      else { await deliver(charge); await deliver(refund); }
+      const before = await audit(); await held(); await expect(review()).rejects.toThrow('reconciliation');
+      const results = await Promise.all([withProof(), withProof(receipt(), new AiWalletRefundRequestService({ model: db } as any))]);
+      expect(results[0]).toEqual(results[1]); await debited();
+      const after = await audit(); expect(after.filter(a => a.outcome !== 'VERIFIED_PROVIDER_READ')).toEqual(before);
+      expect(after.filter(a => a.outcome === 'VERIFIED_PROVIDER_READ')).toMatchObject([{ evidence: {
+        source: 'STRIPE_TEST_API_READ', accountId: 'acct_synthetic', refunds: { hasMore: false, data: [{ status: 'succeeded' }] } } }]);
+      await deliver(charge); await deliver(refund); await withProof(); await debited();
+      expect(await audit()).toEqual(after);
+    });
+    it('does not mistake user-supplied proof in the HTTP body for server-only read evidence', async () => {
+      await actualHistory(); await expect(service.reviewTestTopup(f.org, f.request.id, 'platform-admin',
+        { ...ids(), providerProof: receipt() } as any)).rejects.toThrow('reconciliation'); await held();
+    });
+    it.each([
+      ['stale', (p: any) => p.observedAt -= 30001], ['future', (p: any) => p.observedAt += 60000],
+      ['account', (p: any) => p.accountId = 'invalid'], ['live', (p: any) => p.charge.livemode = true],
+      ['wrong-charge', (p: any) => p.charge.id = 'ch_other'], ['wrong-payment', (p: any) => p.charge.paymentId = 'pi_other'],
+      ['wrong-customer', (p: any) => p.charge.customerId = 'cus_other'], ['partial-charge', (p: any) => p.charge.amountRefunded = 499],
+      ['charge-amount', (p: any) => p.charge.amount = 501], ['charge-currency', (p: any) => p.charge.currency = 'eur'],
+      ['provider-dispute', (p: any) => p.charge.disputed = true], ['unpaid', (p: any) => p.charge.paid = false], ['uncaptured', (p: any) => p.charge.captured = false],
+      ['not-refunded', (p: any) => p.charge.refunded = false], ['page', (p: any) => p.refunds.hasMore = true],
+      ['missing-completeness', (p: any) => delete p.refunds.hasMore], ['list-shape', (p: any) => p.refunds.object = 'refund'],
+      ['empty', (p: any) => p.refunds.data = []], ['multiple', (p: any) => p.refunds.data.push({ ...p.refunds.data[0] })],
+      ['wrong-refund', (p: any) => p.refunds.data[0].id = 're_other'], ['refund-charge', (p: any) => p.refunds.data[0].chargeId = 'ch_other'],
+      ['refund-payment', (p: any) => p.refunds.data[0].paymentId = 'pi_other'], ['partial-refund', (p: any) => p.refunds.data[0].amount = 499],
+      ['refund-currency', (p: any) => p.refunds.data[0].currency = 'eur'], ['pending', (p: any) => p.refunds.data[0].status = 'pending'],
+      ['failed', (p: any) => p.refunds.data[0].status = 'failed'], ['canceled', (p: any) => p.refunds.data[0].status = 'canceled'],
+    ])('refuses %s provider evidence without writing an audit receipt or debit', async (_, change) => {
+      await actualHistory(); const before = await audit(), p = receipt(); (change as Function)(p);
+      await expect(withProof(p)).rejects.toThrow('proof'); expect(await audit()).toEqual(before); await held();
+    });
+    it.each([
+      { refunds: { data: {}, has_more: false } }, { refunds: { data: [{ id: null }], has_more: false } },
+      { refunds: { has_more: true, data: [] } }, { refunds: { data: [{ id: 're_other' }], has_more: false } },
+      { refunds: { data: [{ id: 're_other' }, { id: 're_second' }], has_more: false } },
+      { amount_refunded: 499 }, { currency: 'eur' },
+    ])('cannot override explicit contradictory or malformed charge history %j', async changes => {
+      await deliver(event()); await deliver(summary(changes)); await expect(withProof()).rejects.toThrow('reconciliation'); await held();
+    });
+    it.each(['failed', 'canceled', 'dispute', 'other-refund'])('cannot override adverse %s signed history', async kind => {
+      await actualHistory(); await deliver(kind === 'dispute' ? event('closed', { object: 'dispute', id: 'dp_proof' }, 'charge.dispute.closed') :
+        event(kind === 'other-refund' ? 'succeeded' : kind, kind === 'other-refund' ? { id: 're_other' } : {}));
+      await expect(withProof()).rejects.toThrow('reconciliation'); await held();
+    });
+    it('requires signed terminal success even with complete provider reads', async () => {
+      await deliver(summary({ refunds: undefined })); await expect(withProof()).rejects.toThrow('terminal success'); await held();
+    });
+    it('keeps later omitted summaries uncertain without restoring or double-debiting value', async () => {
+      await actualHistory(); await withProof(); await deliver(summary({ refunds: undefined }));
+      expect((await withProof()).state).toBe('UNCERTAIN'); await deliver(event()); await debited();
+      expect((await withProof()).state).toBe('UNCERTAIN');
+    });
+    it('cannot override a malformed explicit list or an old known-incomplete list containing the expected ID', async () => {
+      await deliver(event()); await deliver(summary({ refunds: { object: 'wrong', has_more: false, data: [{ id: ids().refundId }] } }));
+      await expect(withProof()).rejects.toThrow('reconciliation'); await held();
+    });
+    it('does not accept API reads without signed history', async () => {
+      await expect(withProof()).rejects.toThrow('Signed refund history');
+      expect(await audit()).toHaveLength(0);
+      expect(await balance()).toMatchObject({ balanceNanos: 5000000000n, heldNanos: 5000000000n });
+    });
+    it.each(['released-reservation', 'spent', 'partial-hold'])('preserves full unused top-up checks with provider proof: %s', async kind => {
+      if (kind === 'partial-hold') await db.aiWallet.update({ where: { organizationId: f.org }, data: { heldNanos: 4990000000n } });
+      else {
+        await service.resolve(f.org, f.request.id, 'u', 'WITHDRAWN');
+        const r = await wallet.reserve(f.org, randomUUID(), 'fixture', 'offline', 10000000n);
+        if (kind === 'spent') { await wallet.dispatch(f.org, r.id); await wallet.settle(f.org, r.id, 10000000n, randomUUID()); }
+        else await wallet.cancelBeforeDispatch(f.org, r.id);
+        f.request = await service.request(f.org, 'requester', randomUUID());
+      }
+      await actualHistory(); await expect(withProof()).rejects.toThrow('unused');
+      expect(await db.aiWalletLedger.count({ where: { organizationId: f.org, kind: 'REVERSAL' } })).toBe(0);
+    });
+    it.each(['WITHDRAWN', 'REJECTED'] as const)('serializes provider-proof review against %s and spending', async outcome => {
+      await actualHistory();
+      const results = await Promise.allSettled([withProof(), service.resolve(f.org, f.request.id, 'resolver', outcome),
+        wallet.reserve(f.org, randomUUID(), 'fixture', 'offline', 1n)]);
+      expect(results.slice(0, 2).filter(r => r.status === 'fulfilled')).toHaveLength(1);
+      expect(results[2].status).toBe('rejected');
+      if (results[0].status === 'fulfilled') await debited();
+      else {
+        expect(await balance()).toMatchObject({ balanceNanos: 5000000000n, heldNanos: 0n, status: 'REVIEW' });
+        expect((await audit()).filter(a => a.outcome === 'VERIFIED_PROVIDER_READ')).toHaveLength(0);
+      }
+    });
+    it('rolls back the new proof receipt if the ledger debit fails', async () => {
+      await actualHistory(); const before = await audit();
+      const spy = jest.spyOn(service as any, 'debitRefund').mockRejectedValueOnce(Error('synthetic failure'));
+      await expect(withProof()).rejects.toThrow('synthetic failure'); spy.mockRestore();
+      expect(await audit()).toEqual(before); await held();
+    });
+    it('serializes review against a late adverse receipt', async () => {
+      await actualHistory(); const adverse = event('failed');
+      await Promise.allSettled([withProof(), deliver(adverse)]);
+      const w = await balance();
+      if (w.balanceNanos === 0n) {
+        await debited(); expect((await withProof()).state).toBe('UNCERTAIN');
+      } else { await held(); await expect(withProof()).rejects.toThrow('reconciliation'); }
+    });
+  });
+
 });
