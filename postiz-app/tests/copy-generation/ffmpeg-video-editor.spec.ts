@@ -43,6 +43,14 @@ describe('bounded FFmpeg editor', () => {
     await expect(editor.analyzeTalkingHeadVideo({ inputPath: path, mediaId: 'm', pacingPreset: 'balanced' })).rejects.toMatchObject({ code });
     expect(editor.calls).toHaveLength(1);
   });
+  it('uses native-only four-minute/720p/30fps limits while Phase1 stays at60s', async () => {
+    const native = new StubEditor(); native.responses.push(probe(240));
+    await expect(native.probeForCooked(path)).resolves.toMatchObject({ durationMs: 240_000 });
+    for (const source of [probe(240.001), probe(120, 1920), probe(120, 1280, '31/1')]) {
+      const editor = new StubEditor(); editor.responses.push(source);
+      await expect(editor.probeForCooked(path)).rejects.toBeDefined();
+    }
+  });
   it('cleans partial output when FFmpeg fails', async () => {
     const editor = new StubEditor();
     editor.responses.push(probe(), new Error('timeout'));

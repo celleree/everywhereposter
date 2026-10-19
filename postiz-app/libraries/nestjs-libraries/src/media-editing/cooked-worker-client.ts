@@ -4,12 +4,13 @@ import { stat } from 'fs/promises';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { IncomingMessage } from 'http';
+import { COOKED_EDITOR_LIMITS as LIMITS } from './cooked-editor-limits';
 
 /** Fixed Unix-socket dispatch; never accepts a browser host, port or filesystem path. */
 export class CookedWorkerClient {
   constructor(private readonly socket: string) {}
   private async call(path: string, method: string, org: string, media: string, body?: string, source?: string,
-    extra: Record<string, string> = {}, timeout = 270_000): Promise<IncomingMessage> {
+    extra: Record<string, string> = {}, timeout: number = LIMITS.requestTimeoutMs): Promise<IncomingMessage> {
     const size = source ? (await stat(source)).size : body ? Buffer.byteLength(body) : 0;
     if (size > 100 * 1024 * 1024) throw new Error('SOURCE_TOO_LARGE');
     return new Promise((resolve, reject) => {
@@ -39,7 +40,7 @@ export class CookedWorkerClient {
     const response = await this.call('/jobs', 'POST', org, media, undefined, path,
       { 'x-cooked-request': requestId, 'x-cooked-metadata': Buffer.from(JSON.stringify(metadata)).toString('base64') });
     const chunks: Buffer[] = []; let size = 0;
-    for await (const chunk of response) { size += chunk.length; if (size > 4096) { response.destroy(); throw new Error('WORKER_RESPONSE_LIMIT'); } chunks.push(chunk); }
+    for await (const chunk of response) { size += chunk.length; if (size > LIMITS.receiptBytes) { response.destroy(); throw new Error('WORKER_RESPONSE_LIMIT'); } chunks.push(chunk); }
     return JSON.parse(Buffer.concat(chunks).toString());
   }
   async download(org: string, media: string, job: string, round: number, path: string) {

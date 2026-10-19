@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -8,6 +9,8 @@ describe('private cooked native boundary', () => {
   let root: string, config: CookedConfig, input: PreparedCookedSource, calls: CookedCommand[];
   const runner = async (c: CookedCommand) => {
     calls.push(c);
+    if (c.stage === 'prepare_boundaries') await writeFile(join(c.workspace, 'edit/boundary-policy.json'), JSON.stringify({
+      version: 'quiet-block-v1', sourceSha256: createHash('sha256').update(await readFile(join(c.workspace, 'source.mp4'))).digest('hex'), blocks: [[1, 2], [3, 5]] }));
     if (c.stage === 'render') {
       await writeFile(join(c.workspace, 'edit/cut.mp4'), 'native cut');
       await writeFile(join(c.workspace, 'edit/cut.transcript.json'), 'stale cache');
@@ -26,17 +29,17 @@ describe('private cooked native boundary', () => {
     const sourcePath = join(root, 'source.mp4'); await writeFile(sourcePath, 'original');
     config = { sourceRoot: join(root, 'upstream'), modelPath: join(root, 'model'), workRoot: join(root, 'jobs'),
       python: '/usr/bin/python3', launcherPath: join(__dirname, '../../libraries/nestjs-libraries/src/media-editing/cooked-editor-launcher.py'), path: '/usr/bin:/bin' };
-    input = { orgId: 'o', mediaId: 'm', sourcePath, metadata: { durationMs: 10_000, width: 1920, height: 1080, fps: 30, hasAudio: true, alignedTimestamps: true } };
+    input = { orgId: 'o', mediaId: 'm', sourcePath, metadata: { durationMs: 10_000, width: 1280, height: 720, fps: 30, hasAudio: true, alignedTimestamps: true } };
   });
   afterEach(async () => { delete process.env.COOKED_SECRET_TEST; await rm(root, { recursive: true, force: true }); });
   it('uses native commands, excludes secrets, preserves source and scopes cleanup', async () => {
     process.env.COOKED_SECRET_TEST = 'never pass';
     const runtime = new CookedEditorRuntime(config, runner), receipt = await runtime.run(input);
-    expect(calls.map(c => c.stage)).toEqual(['transcribe', 'retakes', 'build_timeline', 'render', 'verify', 'review_start', 'review_final']);
+    expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe', 'build_timeline', 'render', 'audit_render', 'verify', 'review_start', 'review_final']);
     expect(calls[0].env).not.toHaveProperty('COOKED_SECRET_TEST');
     expect(calls[0].env.HOME).toBe(join(receipt.workspace, 'home'));
     expect(calls[0].env.HF_HUB_OFFLINE).toBe('1');
-    expect(calls[0].args).toContain('whisper');
+    expect(calls.find(c => c.stage === 'transcribe')!.args).toContain('whisper');
     expect(calls[0].rssBytes).toBe(768 * 1024 * 1024);
     expect(await readFile(receipt.cutPath, 'utf8')).toBe('native cut');
     await expect(runtime.cleanup(receipt.jobId, 'other')).rejects.toThrow('NOT_OWNED');
@@ -46,7 +49,7 @@ describe('private cooked native boundary', () => {
   });
   it('fails closed for unsupported metadata, missing files, symlinks, nonprivate roots and unsafe limits', async () => {
     const runtime = new CookedEditorRuntime(config, runner);
-    for (const metadata of [{ ...input.metadata, fps: 61 }, { ...input.metadata, durationMs: 60001 }, { ...input.metadata, alignedTimestamps: false }]) {
+    for (const metadata of [{ ...input.metadata, fps: 31 }, { ...input.metadata, width: 1920, height: 1080 }, { ...input.metadata, durationMs: 240001 }, { ...input.metadata, alignedTimestamps: false }]) {
       await expect(runtime.run({ ...input, metadata } as PreparedCookedSource)).rejects.toThrow('UNSUPPORTED_SOURCE');
     }
     await expect(runtime.run({ ...input, sourcePath: join(root, 'missing') })).rejects.toThrow();
@@ -57,6 +60,15 @@ describe('private cooked native boundary', () => {
     await expect(runtime.run(input)).rejects.toThrow('PRIVATE');
     expect(() => new CookedEditorRuntime({ ...config, rssBytes: 769 * 1024 * 1024 })).toThrow('INVALID_LIMIT');
     expect(calls).toHaveLength(0);
+  });
+  it('accepts four minutes with bounded stages and keeps source-byte/resource limits', async () => {
+    const runtime = new CookedEditorRuntime(config, runner);
+    const made = await runtime.run({ ...input, metadata: { ...input.metadata, durationMs: 240_000 } });
+    expect(calls[0].timeoutMs).toBeLessThanOrEqual(180_000);
+    expect(calls[0].workspaceBytes).toBe(512 * 1024 * 1024);
+    expect(() => new CookedEditorRuntime({ ...config, stageTimeoutMs: 180_001 })).toThrow('INVALID_LIMIT');
+    expect(() => new CookedEditorRuntime({ ...config, overallTimeoutMs: 600_001 })).toThrow('INVALID_LIMIT');
+    await runtime.cleanup(made.jobId, 'o');
   });
   it('rejects concurrent runs and protects active jobs', async () => {
     let release!: () => void;
@@ -97,10 +109,10 @@ describe('private cooked native boundary', () => {
     expect(initial.revision).toBe(0); calls = [];
     const cut = await runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0);
     expect(cut.revision).toBe(1);
-    expect(calls.map(c => c.stage)).toEqual(['apply_edits', 'build_timeline', 'render', 'verify', 'review_round']);
-    expect(JSON.parse(await readFile(calls[0].args[2], 'utf8'))).toEqual({ cut: [[1, 2]] });
-    expect(calls[0].script).toContain('cooked-editor-apply.py');
-    const restored = await runtime.revise(initial.jobId, 'o', { restore: [[1, 2]], pause: [[3, 4]] }, 1);
+    expect(calls.map(c => c.stage)).toEqual(['apply_edits', 'build_timeline', 'render', 'audit_render', 'verify', 'review_round']);
+    expect(JSON.parse(await readFile(calls[0].args.at(-1)!, 'utf8'))).toEqual({ cut: [[1, 2]] });
+    expect(calls[0].script).toContain('cooked-quiet-blocks.py');
+    const restored = await runtime.revise(initial.jobId, 'o', { restore: [[1, 2]] }, 1);
     expect(restored.revision).toBe(2); expect(restored.jobId).toBe(initial.jobId);
     expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
     await runtime.cleanup(initial.jobId, 'o');
@@ -144,17 +156,31 @@ describe('private cooked native boundary', () => {
       if (reject && c.stage === 'verify') throw new Error('NATIVE_verify_FAILED');
     });
     const initial = await runtime.run(input); reject = true;
-    const failure = await runtime.revise(initial.jobId, 'o', { cut: [[1.48, 1.62]] }, 0).catch(e => e);
+    const failure = await runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0).catch(e => e);
     expect(failure).toMatchObject({ message: 'NATIVE_verify_FAILED', revision: 0, previousRevisionRestored: true });
     expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
     expect(await readFile(join(initial.editDirectory, 'review.json'), 'utf8')).toBe('{"round":1}');
     expect(await readdir(initial.editDirectory)).not.toContain('decisions.json');
     expect((await readdir(initial.workspace)).some(name => name.startsWith('verified-edit-') || name === 'rejected-edit')).toBe(false);
     reject = false;
-    const next = await runtime.revise(initial.jobId, 'o', { cut: [[1.48, 2.08]] }, 0);
+    const next = await runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 0);
     expect(next.revision).toBe(1);
-    expect((await runtime.revise(initial.jobId, 'o', { restore: [[1.48, 2.08]] }, 1)).revision).toBe(2);
+    expect((await runtime.revise(initial.jobId, 'o', { restore: [[3, 5]] }, 1)).revision).toBe(2);
     expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
+    await runtime.cleanup(initial.jobId, 'o');
+  });
+  it('rejects captured word/arbitrary ranges and pause edits without mutation or revision loss', async () => {
+    const runtime = new CookedEditorRuntime(config, runner), initial = await runtime.run(input); calls = [];
+    for (const edits of [{ cut: [[1.48, 1.62]] }, { cut: [[1.48, 2.08]] }, { pause: [[3, 4]] },
+      { restore: [[1, 2]] }, { cut: [[1, 2], [1, 2]] }]) {
+      await expect(runtime.revise(initial.jobId, 'o', edits as any, 0)).rejects.toThrow('UNSUPPORTED_BLOCK_EDIT');
+    }
+    expect(calls).toHaveLength(0);
+    expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
+    expect(initial.blocks).toEqual([[1, 2], [3, 5]]);
+    expect((await runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 0)).removedBlocks).toEqual([[3, 5]]);
+    await expect(runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 1)).rejects.toThrow('UNSUPPORTED_BLOCK_EDIT');
+    expect((await runtime.revise(initial.jobId, 'o', { restore: [[3, 5]] }, 1)).removedBlocks).toEqual([]);
     await runtime.cleanup(initial.jobId, 'o');
   });
   it('never reports recovery when checkpoint restoration fails', async () => {
@@ -170,8 +196,8 @@ describe('private cooked native boundary', () => {
       return originalRename(from, to);
     }) as any);
     try {
-      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 1.62]] }, 0)).rejects.toMatchObject({ previousRevisionRestored: false });
-      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 2.08]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toMatchObject({ previousRevisionRestored: false });
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
     } finally { swap.mockRestore(); }
     await runtime.cleanup(initial.jobId, 'o');
   });
@@ -190,20 +216,20 @@ describe('private cooked native boundary', () => {
         }
       });
       const initial = await runtime.run(input); reject = true;
-      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 1.62]] }, 0)).rejects.toMatchObject({ previousRevisionRestored: false });
-      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 2.08]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toMatchObject({ previousRevisionRestored: false });
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
       await runtime.cleanup(initial.jobId, 'o');
     }
   });
   it('bounds checkpoint allocation before native mutation and rejects unsafe checkpoint files', async () => {
     const runtime = new CookedEditorRuntime({ ...config, workspaceBytes: 8 * 1024 * 1024 }, runner);
     const initial = await runtime.run(input); calls = [];
-    await expect(runtime.revise(initial.jobId, 'o', { cut: [[1.48, 1.62]] }, 0)).rejects.toThrow('CHECKPOINT_LIMIT');
+    await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('CHECKPOINT_LIMIT');
     expect(calls).toHaveLength(0); expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
     await runtime.cleanup(initial.jobId, 'o');
     const other = new CookedEditorRuntime(config, runner), job = await other.run(input); calls = [];
     await symlink(input.sourcePath, join(job.editDirectory, 'unsafe-link'));
-    await expect(other.revise(job.jobId, 'o', { cut: [[1.48, 1.62]] }, 0)).rejects.toThrow('WORKSPACE_SYMLINK');
+    await expect(other.revise(job.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('WORKSPACE_SYMLINK');
     expect(calls).toHaveLength(0); await other.cleanup(job.jobId, 'o');
   });
   it('supervises real subprocess affinity, nonzero exit, timeout, log and RSS limits', async () => {
