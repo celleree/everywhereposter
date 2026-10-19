@@ -82,6 +82,12 @@ describe('Cooked whole-block review adapter', () => {
     await h.elements['ep-retry'].onclick(); await flush();
     expect(h.elements['ep-block-list'].children).toHaveLength(1);
   });
+  it('keeps block buttons mounted across receipt refreshes', async () => {
+    const h = harness(); await flush();
+    const button = h.elements['ep-block-list'].children[0];
+    await h.context.load();
+    expect(h.elements['ep-block-list'].children[0]).toBe(button);
+  });
   it('leaves focused button keyboard activation to the browser', async () => {
     const h = harness(); await flush();
     const event = { key: ' ', target: { closest: () => true }, stopImmediatePropagation: jest.fn(), preventDefault: jest.fn() };

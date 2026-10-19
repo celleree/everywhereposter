@@ -64,7 +64,7 @@ export function adaptCookedReviewHtml(html: string) {
   panel.innerHTML='<h2>Whole-block edits</h2><p id="ep-block-status" role="status" aria-live="polite"></p><button id="ep-retry" type="button" hidden>Retry loading editing controls</button><div id="ep-block-list"></div>';
   document.querySelector('.left').append(panel);
   const status=document.getElementById('ep-block-status'),list=document.getElementById('ep-block-list'),retry=document.getElementById('ep-retry');
-  let receipt=null,busy=false,uncertain=true,refreshing=false,stopped=false,message='Loading editing controls…',frame=0;
+  let receipt=null,busy=false,uncertain=true,refreshing=false,stopped=false,message='Loading editing controls…',frame=0,blockKey='';
   const notify=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>parent.postMessage({type:'ep-cooked-review',height:Math.ceil(document.body.getBoundingClientRect().height),busy:busy||refreshing||!!S?.busy},location.origin))};
   const equal=(a,b)=>a[0]===b[0]&&a[1]===b[1];
   function validate(r){
@@ -77,12 +77,16 @@ export function adaptCookedReviewHtml(html: string) {
     const current=!!S&&isCur()&&S.revision===receipt?.revision;
     status.textContent=message||(!current?'Select the current version to edit whole blocks.':receipt.editing.blocks.length?'Only the listed whole blocks can be cut or restored.':'No eligible whole blocks are available for editing.');
     retry.hidden=!uncertain;retry.disabled=busy||refreshing;
-    list.replaceChildren();
+    const nextKey=receipt&&!uncertain?JSON.stringify(receipt.editing.blocks):'';
+    if(nextKey!==blockKey){
+      blockKey=nextKey;list.replaceChildren();
+      if(receipt&&!uncertain)receipt.editing.blocks.forEach(()=>{const button=document.createElement('button');button.type='button';list.append(button)});
+    }
     if(receipt&&!uncertain)receipt.editing.blocks.forEach((range,i)=>{
-      const removed=receipt.editing.removedBlocks.some(a=>equal(a,range)),button=document.createElement('button');
-      button.type='button';button.textContent=(removed?'Restore':'Cut')+' block '+(i+1)+' ('+fmtx(range[0])+'–'+fmtx(range[1])+')';
+      const removed=receipt.editing.removedBlocks.some(a=>equal(a,range)),button=list.children[i];
+      button.textContent=(removed?'Restore':'Cut')+' block '+(i+1)+' ('+fmtx(range[0])+'–'+fmtx(range[1])+')';
       button.disabled=busy||refreshing||!!S?.busy||!current;
-      button.onclick=()=>submit(removed?'restore':'cut',range);list.append(button);
+      button.onclick=()=>submit(removed?'restore':'cut',range);
     });
     notify();
   }

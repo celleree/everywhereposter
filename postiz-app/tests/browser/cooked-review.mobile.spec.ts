@@ -107,6 +107,8 @@ test('Cooked mobile: explicit preparation, exact blocks, recovery and saved comp
   await expect(restore(page)).toBeEnabled();
   await expect(frame(page).locator('#v')).toHaveAttribute('src', /k=cut-2/);
   await reachable(restore(page)); await restore(page).focus(); await page.keyboard.press('Enter'); await expect(cut(page)).toBeEnabled();
+  await cut(page).focus();
+  expect(await cut(page).evaluate(async el => { await (window as any).load(); return document.activeElement === el; })).toBe(true);
   await page.reload(); await expect(cut(page)).toBeEnabled(); expect(f.stats().creates).toBe(1);
   await expect.poll(() => frame(page).locator('#v').evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
   await frame(page).getByRole('button', { name: 'Compare', exact: true }).click();
