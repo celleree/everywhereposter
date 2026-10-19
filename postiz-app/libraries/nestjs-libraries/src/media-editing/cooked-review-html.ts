@@ -46,7 +46,7 @@ export function adaptCookedReviewHtml(html: string) {
   #txlines{padding:10px 8px 24px;touch-action:pan-y}#txlines .tw{touch-action:pan-y}
   body.canCompare #cmprow{display:flex!important}body.compare #p2{display:flex!important}
   #cmprow{flex-wrap:wrap;gap:8px}#cmprow .lead{flex-wrap:wrap;gap:8px}
-  #cmprow .hint{display:none!important}.transport{flex-wrap:wrap;height:auto;min-height:40px}
+  #cmprow .hint{min-width:0}#ver2{max-width:100%;min-height:44px}.transport{flex-wrap:wrap;height:auto;min-height:40px}
   #ep-blocks{border:1px solid var(--line);border-radius:12px;padding:12px;overflow-wrap:anywhere}
   #ep-blocks h2{font-size:15px;margin:0 0 8px}#ep-blocks p{margin:8px 0}
   #ep-block-list{display:flex;flex-wrap:wrap;gap:8px}

@@ -111,7 +111,9 @@ test('Cooked mobile: explicit preparation, exact blocks, recovery and saved comp
   await expect.poll(() => frame(page).locator('#v').evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
   await frame(page).getByRole('button', { name: 'Compare', exact: true }).click();
   await expect(frame(page).locator('#p2')).toBeVisible();
-  await expect(frame(page).locator('#v2')).toHaveAttribute('src', /k=cut-[12]/);
+  const comparison = frame(page).getByRole('combobox', { name: 'compare with', exact: true });
+  await reachable(comparison); await comparison.selectOption('1');
+  await expect(frame(page).locator('#v2')).toHaveAttribute('src', /k=cut-1/);
   await frame(page).getByRole('button', { name: 'Watch', exact: true }).click();
 
   for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
