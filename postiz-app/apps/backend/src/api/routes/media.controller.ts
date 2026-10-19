@@ -45,8 +45,6 @@ import { CreateVideoUploadDto } from '@gitroom/nestjs-libraries/dtos/media/creat
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 import { VideoEditorService } from '@gitroom/nestjs-libraries/media-editing/video-editor.service';
 import { CreateVideoEditDto } from '@gitroom/nestjs-libraries/dtos/media/create-video-edit.dto';
-import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
-import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('Media')
 @Controller('/media')
