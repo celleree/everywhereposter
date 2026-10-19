@@ -134,7 +134,12 @@ test('Resumable upload: restored completed transfers stay inline and do not cove
   expect(await tray.evaluate(element => getComputedStyle(element).position)).toBe('static');
   await tray.getByRole('button', { name: 'Dismiss transfer' }).first().click();
   await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toHaveCount(0);
+  // Reload hydration has the same bounded bootstrap budget as openApp.
+  const restoredUploads = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/backend-api/media/uploads' &&
+    response.request().method() === 'GET' && response.ok(), { timeout: 60_000 });
   await page.reload();
+  await Promise.all([restoredUploads, expect(choose).toBeVisible({ timeout: 60_000 })]);
   await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toHaveCount(0);
   await expect(tray.getByText('synthetic-1.mp4', { exact: true })).toBeVisible();
 });
