@@ -39,6 +39,14 @@ test('exact nine-file closure, required apply helper, unchanged Dockerfile and r
   const changed = JSON.parse(fs.readFileSync(path.join(c, 'staging-manifest.json')));
   assert.equal(changed.sourceSHA, next); assert.notEqual(changed.runtimeHashes['cooked-editor-apply.py'], manifest.runtimeHashes['cooked-editor-apply.py']);
 });
+test('runtime remains readable and traversable by the image user under umask077', t => {
+  const f = fixture(t), out = path.join(f.dir, 'restricted-umask');
+  const child = spawnSync(process.execPath, ['-e', 'process.umask(0o077); require(process.argv[1]).stage(process.argv[2], process.argv[3]);', path.join(f.repo, 'tools/cooked-worker/stage-runtime.cjs'), f.sha, out], {encoding: 'utf8'});
+  assert.equal(child.status, 0, child.stderr);
+  const mode = name => fs.statSync(path.join(out, name)).mode & 0o777;
+  assert.equal(mode('.'), 0o700); assert.equal(mode('runtime'), 0o755);
+  for (const name of ['Dockerfile', ...expected.map(n => 'runtime/' + n)]) assert.equal(mode(name), 0o644, name);
+});
 test('rejects invalid SHA, existing/relative/in-repo/symlink output and dirty sources', t => {
   const f = fixture(t), out = path.join(f.dir, 'output');
   assert.notEqual(f.run(out, 'main').status, 0); assert.notEqual(f.run(out, '0'.repeat(40)).status, 0);

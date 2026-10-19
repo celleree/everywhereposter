@@ -125,9 +125,13 @@ immutable base digests explicitly: the model base must be under
 `ghcr.io/celleree/`; Node must be official `node`/`docker.io/library/node` or under
 that GHCR namespace. Tags are rejected. Missing registry identities/access are
 blocked execution, not permission to rebuild or substitute bases. It uses the
-unchanged Dockerfile for linux/amd64, verifies UID10001:GID0 and actual runtime,
-source/model manifest bytes and retained notices, and retains JSON metadata only.
-It has contents-read permission and no registry login, push or image upload path.
+unchanged Dockerfile for linux/amd64 and verifies UID10001:GID0, runtime bytes,
+repository model policy, source files against the base's own manifest, and retained
+notices. Approved base provenance is required: recorded source/model/notice hashes
+must match that base's independent review receipt. A matching upstream pin label
+in the base manifest alone does not establish source provenance. Only JSON
+metadata is retained. It has contents-read permission and no registry login, push
+or image upload path.
 
 No workflow dispatch is part of this preparation change. External publication
 requires separately approved registry identities and completed redistribution

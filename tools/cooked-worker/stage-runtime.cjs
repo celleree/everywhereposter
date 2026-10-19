@@ -51,9 +51,15 @@ function stage(sha, output) {
     runtimeHashes: Object.fromEntries([...runtime].map(([name, bytes]) => [name, hash(bytes)])),
   };
   fs.mkdirSync(output, {mode: 0o700}); // Exclusive: an existing entry is never overwritten.
-  fs.mkdirSync(path.join(output, 'runtime'), {mode: 0o700});
-  for (const [name, bytes] of runtime) fs.writeFileSync(path.join(output, 'runtime', name), bytes, {flag: 'wx'});
-  fs.writeFileSync(path.join(output, 'Dockerfile'), validated.get('tools/cooked-worker/Dockerfile.worker'), {flag: 'wx'});
+  const runtimeDir = path.join(output, 'runtime');
+  fs.mkdirSync(runtimeDir, {mode: 0o755});
+  fs.chmodSync(runtimeDir, 0o755); // Docker copies root-owned content; UID10001 must traverse it.
+  const writeReadable = (file, bytes) => {
+    fs.writeFileSync(file, bytes, {flag: 'wx', mode: 0o644});
+    fs.chmodSync(file, 0o644); // Explicitly restore read permission after a restrictive host umask.
+  };
+  for (const [name, bytes] of runtime) writeReadable(path.join(runtimeDir, name), bytes);
+  writeReadable(path.join(output, 'Dockerfile'), validated.get('tools/cooked-worker/Dockerfile.worker'));
   fs.writeFileSync(path.join(output, 'staging-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', {flag: 'wx'});
   return manifest;
 }
