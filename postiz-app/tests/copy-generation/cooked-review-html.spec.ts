@@ -88,6 +88,19 @@ describe('Cooked whole-block review adapter', () => {
     await h.context.load();
     expect(h.elements['ep-block-list'].children[0]).toBe(button);
   });
+  it('keeps focusable controls during a receipt read while guarding mutations', async () => {
+    const h = harness(); await flush();
+    const button = h.elements['ep-block-list'].children[0];
+    let finish!: (value: any) => void;
+    h.fetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const loading = h.context.load();
+    expect(button.disabled).toBe(false);
+    expect(button.setAttribute).toHaveBeenLastCalledWith('aria-disabled', 'true');
+    await button.onclick();
+    expect(h.fetch).toHaveBeenCalledTimes(2);
+    finish({ ok: true, json: async () => receipt() }); await loading;
+    expect(button.setAttribute).toHaveBeenLastCalledWith('aria-disabled', 'false');
+  });
   it('leaves focused button keyboard activation to the browser', async () => {
     const h = harness(); await flush();
     const event = { key: ' ', target: { closest: () => true }, stopImmediatePropagation: jest.fn(), preventDefault: jest.fn() };

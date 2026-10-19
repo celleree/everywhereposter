@@ -65,7 +65,7 @@ export function adaptCookedReviewHtml(html: string) {
   document.querySelector('.left').append(panel);
   const status=document.getElementById('ep-block-status'),list=document.getElementById('ep-block-list'),retry=document.getElementById('ep-retry');
   let receipt=null,busy=false,uncertain=true,refreshing=false,stopped=false,message='Loading editing controls…',frame=0,blockKey='';
-  const notify=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>parent.postMessage({type:'ep-cooked-review',height:Math.ceil(document.body.getBoundingClientRect().height),busy:busy||refreshing||!!S?.busy},location.origin))};
+  const notify=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>parent.postMessage({type:'ep-cooked-review',height:Math.ceil(document.body.getBoundingClientRect().height),busy:busy||!!S?.busy},location.origin))};
   const equal=(a,b)=>a[0]===b[0]&&a[1]===b[1];
   function validate(r){
     const e=r?.editing,range=a=>Array.isArray(a)&&a.length===2&&a.every(Number.isFinite)&&a[0]>=0&&a[0]<a[1]&&a[1]<=Number.MAX_SAFE_INTEGER;
@@ -85,7 +85,9 @@ export function adaptCookedReviewHtml(html: string) {
     if(receipt&&!uncertain)receipt.editing.blocks.forEach((range,i)=>{
       const removed=receipt.editing.removedBlocks.some(a=>equal(a,range)),button=list.children[i];
       button.textContent=(removed?'Restore':'Cut')+' block '+(i+1)+' ('+fmtx(range[0])+'–'+fmtx(range[1])+')';
-      button.disabled=busy||refreshing||!!S?.busy||!current;
+      // Receipt polling must not blur focused controls in Chromium.
+      button.disabled=busy||!!S?.busy||!current;
+      button.setAttribute('aria-disabled',String(button.disabled||refreshing));
       button.onclick=()=>submit(removed?'restore':'cut',range);
     });
     notify();

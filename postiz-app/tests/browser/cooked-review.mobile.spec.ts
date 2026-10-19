@@ -109,6 +109,10 @@ test('Cooked mobile: explicit preparation, exact blocks, recovery and saved comp
   await reachable(restore(page)); await restore(page).focus(); await page.keyboard.press('Enter'); await expect(cut(page)).toBeEnabled();
   await cut(page).focus();
   expect(await cut(page).evaluate(async el => { await (window as any).load(); return document.activeElement === el; })).toBe(true);
+  const saveControl = page.getByRole('button', { name: 'Save current edit', exact: true });
+  await saveControl.focus();
+  await frame(page).locator('#ep-blocks').evaluate(async () => { await (window as any).load(); });
+  await expect(saveControl).toBeFocused();
   await page.reload(); await expect(cut(page)).toBeEnabled(); expect(f.stats().creates).toBe(1);
   await expect.poll(() => frame(page).locator('#v').evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
   await frame(page).getByRole('button', { name: 'Compare', exact: true }).click();
