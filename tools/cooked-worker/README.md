@@ -98,10 +98,43 @@ Build the local Python/model image using the pinned preparation instructions in
 `../cooked-pilot/README.md`. Compile `cooked-editor-runtime.ts` and
 `cooked-worker.ts` and their pure `video-edit-decision.ts` and `cooked-editor-limits.ts` dependencies to CommonJS using the repository TypeScript compiler. Stage
 those four JS files, `cooked-editor-launcher.py`, `cooked-quiet-blocks.py`,
-`worker-entry.cjs` and `worker-health.cjs` under a Docker build context's `runtime/`
+`cooked-editor-apply.py`, `worker-entry.cjs` and `worker-health.cjs` under a Docker build context's `runtime/`
 directory. Build `Dockerfile.worker` with exact `NODE_BASE` and `COOKED_BASE`
 image identities. No npm installation or application secrets are needed inside
 the worker. The image retains the Python/model/source licenses and Node license.
+
+### Publication preparation only
+
+From a clean exact-HEAD checkout with the existing locked repository dependencies:
+
+```sh
+node --test tools/cooked-worker/stage-runtime.test.cjs
+node tools/cooked-worker/stage-runtime.cjs <full-reviewed-HEAD-SHA> /new/outside-repository/context
+```
+
+The helper derives sources from its own checkout, compiles the four TypeScript
+files to CommonJS/ES2022, stages exactly nine runtime files and the unchanged
+Dockerfile, and records the source SHA, compiler identity, input and runtime
+hashes. It rejects dirty/wrong-SHA checkouts, existing output, repository-local
+output, symlink escapes and compiler diagnostics. Sources are taken from the
+selected SHA; runtime hashes are never frozen to an earlier candidate.
+
+`.github/workflows/prepare-cooked-worker.yml` is manual-only and requires the exact
+reviewed current canonical main SHA associated with a merged PR. Supply reviewed
+immutable base digests explicitly: the model base must be under
+`ghcr.io/celleree/`; Node must be official `node`/`docker.io/library/node` or under
+that GHCR namespace. Tags are rejected. Missing registry identities/access are
+blocked execution, not permission to rebuild or substitute bases. It uses the
+unchanged Dockerfile for linux/amd64, verifies UID10001:GID0 and actual runtime,
+source/model manifest bytes and retained notices, and retains JSON metadata only.
+It has contents-read permission and no registry login, push or image upload path.
+
+No workflow dispatch is part of this preparation change. External publication
+requires separately approved registry identities and completed redistribution
+review from `../cooked-pilot/README.md`, including corresponding source/notice
+obligations and revision-specific model evidence. Metadata verification does not
+certify redistribution clearance. Publication remains a separate approval, as do
+deployment and activation through the existing GitHub → GHCR → Hetzner route.
 
 The app streams only the selected source and sanitized metadata over a fixed Unix
 socket. The worker has no network, public listener, Docker socket, application
