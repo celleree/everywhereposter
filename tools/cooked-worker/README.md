@@ -14,8 +14,9 @@ organization-scoped request receipt; reloading does not start transcription.
 
 The source is prepared using existing storage code and probed using the existing
 video editor. The current transcription configuration is English speech. Accepted input is one audio-bearing MP4/MOV, at most240 seconds,
-100 MiB, 720p and30fps, with aligned timestamps. Uploading/selecting it starts
-offline transcription and the native timeline/render/verification pipeline.
+100 MiB, 720p and30fps, with aligned timestamps. After upload/selection and source
+preview, the explicit Prepare video action starts offline transcription and the
+native timeline/render/verification pipeline.
 Eligible whole-block cut/restore operations use optimistic revisions and native review
 snapshots. Saving streams a separate MP4 through the existing ordinary Media
 storage interface. Download and composer handoff use that saved Media; neither
@@ -88,8 +89,8 @@ exactly match a published block; restore must match a currently removed block.
 Unsupported ranges return422 before mutation, preserving the previous revision.
 No word/phrase request is silently expanded. Restores retain source ordering.
 Final source decisions and rendered A/V durations are checked against that exact
-plan before the unchanged transcript verifier. Old word-selection controls do not
-gain permission through this capability; UI selection wiring is not added here.
+plan before the unchanged transcript verifier. The pinned review UI exposes
+separate whole-block controls; arbitrary word-selection editing is disabled.
 
 ## Worker and app boundary
 
@@ -149,7 +150,7 @@ The recommended first action additionally loads `docker-compose.cooked-one-sessi
 (one CPU, 512 MiB memory with no swap) for one functional test with an owned
 synthetic clip of at most 15 seconds at 640x360, in one explicitly allowed organization, followed by
 disabling the pilot. This override also caps worker logs at two 1 MiB files.
-Check upload/automatic transcription, word cut/restore,
+Check upload/explicit preparation, whole-block cut/restore,
 playback, recovery, save/download and unchanged source. Do not publish, perform
 a production load test or broaden the allowlist as part of this action.
 
