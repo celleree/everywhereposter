@@ -160,7 +160,7 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
       expect(init.method).toBe('POST');
       const topupId = body.get('client_reference_id');
       expect(new Map(init.headers).get('Idempotency-Key')).toBe(`ai-wallet-topup:${topupId}`);
-      return new Response(JSON.stringify({ id: 'cs_test_serialized', livemode: false, mode: 'payment',
+      return new Response(JSON.stringify({ id: `cs_test_serialized_${topupId}`, livemode: false, mode: 'payment',
         customer: 'cus_synthetic', client_reference_id: topupId,
         metadata: { service: AI_WALLET_TEST_SERVICE, topupId }, currency: 'usd', amount_total: 123,
         status: 'open', url: 'https://checkout.stripe.com/c/pay/synthetic' }),
