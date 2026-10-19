@@ -137,6 +137,59 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     expect((await checkout.balance(org)).balanceNanos).toBe('0');
   });
 
+  it('opts this card-only prepaid session out of an account Managed Payments default', async () => {
+    const original = sdk.checkout.sessions.create.getMockImplementation();
+    sdk.checkout.sessions.create.mockImplementation(async (params: any, options: any) => {
+      if (params.managed_payments?.enabled !== false) throw new Stripe.errors.StripeInvalidRequestError({
+        type: 'invalid_request_error', param: 'payment_method_types', message: 'Synthetic Managed Payments default',
+      });
+      return original(params, options);
+    });
+    await create('direct_merchant');
+    expect(sdk.checkout.sessions.create.mock.calls[0][0]).toMatchObject({
+      managed_payments: { enabled: false }, payment_method_types: ['card'], mode: 'payment',
+    });
+    expect((await checkout.balance(org)).balanceNanos).toBe('0');
+  });
+
+  it('serializes the documented opt-out through the pinned SDK without an external request', async () => {
+    const transport = jest.fn(async (_url: any, init: any) => {
+      const body = new URLSearchParams(init.body);
+      expect(body.get('managed_payments[enabled]')).toBe('false');
+      expect(body.get('payment_method_types[0]')).toBe('card');
+      expect(init.method).toBe('POST');
+      const topupId = body.get('client_reference_id');
+      expect(new Map(init.headers).get('Idempotency-Key')).toBe(`ai-wallet-topup:${topupId}`);
+      return new Response(JSON.stringify({ id: 'cs_test_serialized', livemode: false, mode: 'payment',
+        customer: 'cus_synthetic', client_reference_id: topupId,
+        metadata: { service: AI_WALLET_TEST_SERVICE, topupId }, currency: 'usd', amount_total: 123,
+        status: 'open', url: 'https://checkout.stripe.com/c/pay/synthetic' }),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    const actual = new Stripe(fixtureEnv.STRIPE_SECRET_KEY, { maxNetworkRetries: 0, telemetry: false,
+      httpClient: Stripe.createFetchHttpClient(transport) });
+    (checkout as any).client.mockReturnValue(actual);
+    await create('serialized_direct_merchant');
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves customer, topup and idempotency when retrying a parameter-validation refusal', async () => {
+    await db.organization.update({ where: { id: org }, data: { paymentId: null } });
+    sdk.checkout.sessions.create.mockRejectedValueOnce(new Stripe.errors.StripeInvalidRequestError({
+      type: 'invalid_request_error', param: 'payment_method_types', message: 'Synthetic validation refusal',
+    }));
+    await expect(create('validation_retry')).rejects.toThrow('Synthetic validation refusal');
+    const topup = await db.aiWalletTopup.findFirstOrThrow({ where: { organizationId: org } });
+    expect(topup).toMatchObject({ sessionId: null, paymentId: null, fundedAt: null });
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(0);
+    await create('validation_retry');
+    expect(sdk.customers.create).toHaveBeenCalledTimes(1);
+    expect(await db.aiWalletTopup.count({ where: { organizationId: org } })).toBe(1);
+    expect(sdk.checkout.sessions.create.mock.calls[0]).toEqual(sdk.checkout.sessions.create.mock.calls[1]);
+    expect(sdk.checkout.sessions.create.mock.calls[1][1].idempotencyKey).toBe(`ai-wallet-topup:${topup.id}`);
+    expect((await checkout.balance(org)).balanceNanos).toBe('0');
+  });
+
   it('binds one test customer for a new organization under concurrent Checkout requests', async () => {
     await db.organization.update({ where: { id: org }, data: { paymentId: null } });
     await Promise.all([create('new_org'), create('new_org')]);

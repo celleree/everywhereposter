@@ -10,6 +10,10 @@ import { walletHoldSnapshot } from './ai-wallet-holds';
 
 export const AI_WALLET_TEST_SERVICE = 'everywhereposter-ai-wallet-test';
 type Offer = { id: string; amountCents: number };
+// Stripe 20.4 serializes this documented field but does not yet declare its type.
+type DirectMerchantCheckoutParams = Stripe.Checkout.SessionCreateParams & {
+  managed_payments: { enabled: false };
+};
 
 /** Test-mode adapter only. Approved manual packs; live Stripe accounts are rejected. */
 @Injectable()
@@ -112,15 +116,17 @@ export class AiWalletCheckoutService {
     // Re-read the durable plan immediately before contacting Stripe. The
     // controller/UI decision may have raced a subscription change.
     await this.assertPrepaidPlan(organizationId);
+    const params: DirectMerchantCheckoutParams = { mode: 'payment', customer: intent.customerId,
+      client_reference_id: intent.id, metadata: { service: AI_WALLET_TEST_SERVICE, topupId: intent.id },
+      // Preserve direct-merchant, card-only Checkout even if the account defaults to Managed Payments.
+      managed_payments: { enabled: false }, payment_method_types: ['card'], allow_promotion_codes: false,
+      line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: intent.amountCents,
+        product_data: { name: 'Prepaid AI credits (test)' } } }],
+      success_url: `${callback.href}?wallet=return`, cancel_url: `${callback.href}?wallet=cancel`,
+    };
     const session = intent.sessionId
       ? await this.client().checkout.sessions.retrieve(intent.sessionId)
-      : await this.client().checkout.sessions.create({ mode: 'payment', customer: intent.customerId,
-          client_reference_id: intent.id, metadata: { service: AI_WALLET_TEST_SERVICE, topupId: intent.id },
-          payment_method_types: ['card'], allow_promotion_codes: false,
-          line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: intent.amountCents,
-            product_data: { name: 'Prepaid AI credits (test)' } } }],
-          success_url: `${callback.href}?wallet=return`, cancel_url: `${callback.href}?wallet=cancel`,
-        }, { idempotencyKey: `ai-wallet-topup:${intent.id}` });
+      : await this.client().checkout.sessions.create(params, { idempotencyKey: `ai-wallet-topup:${intent.id}` });
     if (session.livemode !== false || session.mode !== 'payment' || session.customer !== intent.customerId ||
         session.amount_total !== intent.amountCents || session.currency !== 'usd' ||
         session.client_reference_id !== intent.id || session.metadata?.service !== AI_WALLET_TEST_SERVICE ||
