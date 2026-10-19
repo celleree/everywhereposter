@@ -98,7 +98,7 @@ export function createOAuthAnalyticsTools(deps: Dependencies) {
       execute: async ({ integrationId, period, cursor }) => {
         const { organizationId } = requireOAuthScope('analytics:read');
         const integration = await safeRead(() => deps.integrations.getIntegrationById(organizationId, integrationId));
-        if (!integration || integration.deletedAt) throw new Error('Account unavailable in this organization');
+        if (!integration || integration.type !== 'social' || integration.deletedAt) throw new Error('Account unavailable in this organization');
         const range = analyticsPeriod(period);
         const rows = await safeRead(() => deps.posts.listPublishedPostsForAnalytics(organizationId, integrationId,
           new Date(range.startDate), new Date(range.endDate), cursor));

@@ -74,6 +74,11 @@ describe('read-only OAuth social analytics', () => {
     await expect(call(name, { integrationId: 'foreign' })).rejects.toThrow('organization');
     expect(provider.analytics).not.toHaveBeenCalled(); expect(repository.listPublishedPostsForAnalytics).not.toHaveBeenCalled();
   });
+  it('does not expose non-social integration identity through analytics', async () => {
+    integrations._integrationRepository.getIntegrationById.mockResolvedValue({ ...integration, type: 'article', name: 'unrelated' });
+    for (const name of ['get_analytics', 'list_published_posts']) await expect(call(name, { integrationId: 'account' })).rejects.toThrow('organization');
+    expect(provider.analytics).not.toHaveBeenCalled(); expect(repository.listPublishedPostsForAnalytics).not.toHaveBeenCalled();
+  });
   it.each([0, 6, 31, 91, '30', null, 7.5])('rejects invalid period %p before reads', (period) => {
     for (const name of Object.keys(tools)) expect(() => call(name, { ...(name === 'get_post_analytics' ? { postId: 'post' } : { integrationId: 'account' }), period })).toThrow();
     expect(provider.analytics).not.toHaveBeenCalled();
@@ -152,7 +157,7 @@ describe('analytics database boundary', () => {
     const model = { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) };
     const repository = new PostsRepository({ model: { post: model } } as any, null, null, null, null, null);
     await repository.getAnalyticsPost('org', 'post');
-    expect(model.findFirst.mock.calls[0][0].where).toMatchObject({ organizationId: 'org', id: 'post', deletedAt: null, state: 'PUBLISHED', releaseId: { notIn: ['', 'missing'] }, integration: { organizationId: 'org', deletedAt: null } });
+    expect(model.findFirst.mock.calls[0][0].where).toMatchObject({ organizationId: 'org', id: 'post', deletedAt: null, state: 'PUBLISHED', releaseId: { notIn: ['', 'missing'] }, integration: { organizationId: 'org', deletedAt: null, type: 'social' } });
     await repository.listPublishedPostsForAnalytics('org', 'account', new Date(0), new Date());
     expect(model.findMany.mock.calls[0][0]).toMatchObject({ where: { organizationId: 'org', integrationId: 'account', parentPostId: null, state: 'PUBLISHED', deletedAt: null }, take: 21 });
     await expect(repository.listPublishedPostsForAnalytics('org', 'account', new Date(0), new Date(), 'foreign')).rejects.toThrow('cursor');

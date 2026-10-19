@@ -411,7 +411,7 @@ export class IntegrationService {
   ): Promise<AnalyticsData[] | AnalyticsReadResult> {
     if (typeof options === 'object' && 'readOnly' in options) {
       const account = await this.getIntegrationById(org.id, integration);
-      if (!account) throw new Error('Account unavailable in this organization');
+      if (!account || account.type !== 'social') throw new Error('Account unavailable in this organization');
       return readAnalytics(account, this._integrationManager.getSocialIntegration(account.providerIdentifier), +date);
     }
     const forceRefresh =

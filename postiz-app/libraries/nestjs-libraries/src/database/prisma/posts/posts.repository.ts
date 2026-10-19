@@ -899,7 +899,7 @@ export class PostsRepository {
   getAnalyticsPost(orgId: string, id: string) {
     return this._post.model.post.findFirst({
       where: { id, organizationId: orgId, deletedAt: null, state: 'PUBLISHED',
-        releaseId: { notIn: ['', 'missing'] }, integration: { organizationId: orgId, deletedAt: null } },
+        releaseId: { notIn: ['', 'missing'] }, integration: { organizationId: orgId, deletedAt: null, type: 'social' } },
       select: { id: true, publishDate: true, releaseId: true, integration: true },
     });
   }
@@ -907,7 +907,7 @@ export class PostsRepository {
   async listPublishedPostsForAnalytics(orgId: string, integrationId: string, start: Date, end: Date, cursor?: string) {
     const where: Prisma.PostWhereInput = { organizationId: orgId, integrationId, state: 'PUBLISHED', deletedAt: null,
       parentPostId: null, releaseId: { notIn: ['', 'missing'] }, publishDate: { gte: start, lte: end },
-      integration: { organizationId: orgId, deletedAt: null } };
+      integration: { organizationId: orgId, deletedAt: null, type: 'social' } };
     const boundary = cursor ? await this._post.model.post.findFirst({
       where: { ...where, id: cursor }, select: { id: true, publishDate: true },
     }) : null;

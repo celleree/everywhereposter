@@ -22,7 +22,7 @@ const tokens = { pos_read: 'accounts:read', pos_write: 'posts:write', pos_both: 
       const analytics = (org) => ({ status: 'available', account: { id: `${org}-account`, displayName: 'Account', platform: 'instagram' },
         metrics: [{ label: 'Views', seriesType: 'total_value', summaryType: 'latest', data: [{ total: 0, date: '2026-10-19' }] }] });
       if (provider.name === 'IntegrationService') return {
-        getIntegrationById: async (org, id) => id === `${org}-account` ? { id, name: 'Account', providerIdentifier: 'instagram' } : null,
+        getIntegrationById: async (org, id) => id === `${org}-account` ? { id, name: 'Account', providerIdentifier: 'instagram', type: 'social' } : null,
         getIntegrationsList: async (org) => [{ id: `${org}-account`, providerIdentifier: 'linkedin', name: 'Account', token: 'secret', disabled: false, refreshNeeded: false, inBetweenSteps: false }],
         checkAnalytics: async (org, id, period, options) => {
           assert.equal(options.readOnly, true); assert.equal(period, '30');
