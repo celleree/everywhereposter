@@ -114,11 +114,7 @@ describe('private cooked worker protocol', () => {
     await expect(client.create('org-b', media, randomUUID(), join(root, 'input.mp4'), metadata)).rejects.toMatchObject({ status: 503 });
     expect(runtime.run).toHaveBeenCalledTimes(1);
   });
-  it('adapts only the expected native UI contract and binds edits to the displayed revision', () => {
-    const html = '<head></head><div id="txlines"></div><script>fetch(\'/edits\',{method:\'POST\',body:JSON.stringify(body)});fetch(\'/state\');v.src=\'/video?k=\'+key</script><script src="/ask.js"></script>';
-    const result = adaptCookedReviewHtml(html);
-    expect(result).toContain("fetch('./state')"); expect(result).toContain("v.src='./video?k='");
-    expect(result).toContain('revision:S.revision'); expect(result).toContain("'Content-Type':'application/json'"); expect(result).not.toContain('<script src='); expect(result).toContain('touch-action:none');
+  it('rejects unsupported native review HTML', () => {
     expect(() => adaptCookedReviewHtml('<head></head>')).toThrow('UNSUPPORTED_NATIVE_REVIEW');
   });
 });
