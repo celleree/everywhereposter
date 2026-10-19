@@ -162,6 +162,12 @@ describe('analytics database boundary', () => {
 
 describe('real provider error and missing-value behavior', () => {
   afterEach(() => jest.restoreAllMocks());
+  it.each([{}, { like: null }])('does not manufacture Facebook reaction totals from missing breakdown counts: %p', async (value) => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({ status: 200, json: async () => ({ data: [{ name: 'post_reactions_by_type_total', values: [{ value }] }] }) } as any);
+    const provider = new FacebookProvider();
+    expect(await readAnalytics({ ...integration, providerIdentifier: 'facebook' }, provider, 30, 'remote-post'))
+      .toMatchObject({ status: 'unavailable', reason: 'incomplete_metrics', metrics: [] });
+  });
   it('bounds X timeline calls without returning incomplete sums or interpreting a successful empty timeline as a failure', async () => {
     const timeline = jest.fn().mockResolvedValue({ data: { data: Array.from({ length: 100 }, (_, i) => ({ id: `${i}` })) }, meta: { next_token: 'more' } });
     const tweets = jest.fn();

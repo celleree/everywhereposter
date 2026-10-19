@@ -1,4 +1,4 @@
-import { failAnalyticsRead } from '../analytics-read';
+import { failAnalyticsRead, analyticsValue } from '../analytics-read';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -852,9 +852,10 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
           case 'post_clicks_by_type':
             // This returns an object with click types
             if (typeof value === 'object') {
+              if (!value || Object.keys(value).length === 0) failAnalyticsRead('incomplete_metrics');
               const totalClicks = Object.values(
                 value as Record<string, number>
-              ).reduce((sum: number, v: number) => sum + v, 0);
+              ).reduce((sum: number, v: number) => sum + analyticsValue(v, 0), 0);
               label = 'Clicks by Type';
               total = String(totalClicks);
             }
@@ -862,9 +863,10 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
           case 'post_reactions_by_type_total':
             // This returns an object with reaction types
             if (typeof value === 'object') {
+              if (!value || Object.keys(value).length === 0) failAnalyticsRead('incomplete_metrics');
               const totalReactions = Object.values(
                 value as Record<string, number>
-              ).reduce((sum: number, v: number) => sum + v, 0);
+              ).reduce((sum: number, v: number) => sum + analyticsValue(v, 0), 0);
               label = 'Reactions';
               total = String(totalReactions);
             }

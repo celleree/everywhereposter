@@ -47,9 +47,9 @@ export function projectAnalytics(result: AnalyticsReadResult, requestedPeriod: R
     const incomplete = data.some((point) => point.total === null || point.date === null) || !Array.isArray(metric.data);
     const status = incomplete ? (usable ? 'partial' : 'unavailable') : usable ? 'available' : 'empty';
     const window = seriesType === 'range_total_snapshot' ? 'rolling_period_snapshots' :
-      post ? (seriesType === 'time_series' ? 'requested_period' : 'provider_total') :
+      post ? (seriesType === 'time_series' ? 'provider_period' : 'provider_total') :
         platform === 'tiktok' ? (['Views', 'Recent Likes', 'Recent Comments', 'Recent Shares'].includes(metric.label) ? 'recent_20_posts' : 'latest') :
-          platform === 'x' ? 'posts_published_in_requested_period' : seriesType ? 'requested_period' : 'provider_unspecified';
+          platform === 'x' ? 'posts_published_in_requested_period' : seriesType ? 'provider_period' : 'provider_unspecified';
     return { label: text(metric.label), metricName: text(metric.metricName), seriesType,
       summaryType: average ? null : ['sum', 'latest'].includes(metric.summaryType) ? metric.summaryType :
         seriesType === 'time_series' ? 'sum' : ['total_value', 'range_total_snapshot'].includes(seriesType) ? 'latest' : null,
