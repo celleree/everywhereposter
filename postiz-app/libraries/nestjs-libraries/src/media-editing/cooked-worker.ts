@@ -55,7 +55,7 @@ async function media(req: IncomingMessage, res: ServerResponse, path: string) {
  */
 export function createCookedWorker(runtime: CookedEditorRuntime, workRoot: string, sourceRoot: string) {
   const jobs = new Map<string, Job>(); let active = false, retiring = false;
-  const receipt = (j: Job) => ({ requestId: j.request, jobId: j.receipt?.jobId, revision: j.receipt?.revision, status: j.status });
+  const receipt = (j: Job) => ({ requestId: j.request, jobId: j.receipt?.jobId, revision: j.receipt?.revision, status: j.status, editing: { mode: 'quiet-block-v1', wordCuts: false, arbitraryPhrases: false, pauseEdits: false, blocks: j.receipt?.blocks ?? [], removedBlocks: j.receipt?.removedBlocks ?? [] } });
   async function cleanup(j: Job) {
     if (j.status === 'working') return;
     if (server.listenerCount('sessionClosed')) retiring = true;
