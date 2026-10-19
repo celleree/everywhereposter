@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { connectionAvailable } from './connection-availability';
 
 import { Injectable } from '@nestjs/common';
 import { XProvider } from '@gitroom/nestjs-libraries/integrations/social/x.provider';
@@ -82,6 +83,7 @@ export class IntegrationManager {
         socialIntegrationList.map(async (p) => ({
           name: p.name,
           identifier: p.identifier,
+          connectionAvailable: connectionAvailable(p.identifier),
           toolTip: p.toolTip,
           editor: p.editor,
           isExternal: !!p.externalUrl,
