@@ -1,3 +1,5 @@
+// Keep the pure media/model unit fixture independent of Prisma's child_process imports.
+jest.mock('@gitroom/nestjs-libraries/services/prepaid-copy-context.service', () => ({ PrepaidCopyContextService: class {} }));
 import {
   buildFrameTimestamps,
   CopyGenerationModelService,
@@ -50,6 +52,18 @@ const getExecFileMock = () =>
 describe('CopyGenerationModelService video processing', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('makes a prepaid single-block request with zero SDK retries and retained transport identity', async () => {
+    const withResponse = jest.fn().mockResolvedValue({ data: { text: 'offline' }, request_id: 'req_synthetic' });
+    getOpenAiMocks().createTranscription.mockReturnValueOnce({ withResponse });
+    const service = new CopyGenerationModelService();
+    expect(await service.transcribePrepaidAudio('synthetic-file' as any)).toMatchObject({ request_id: 'req_synthetic' });
+    const [body, options] = getOpenAiMocks().createTranscription.mock.calls[0];
+    expect(body).toEqual({ file: 'synthetic-file', model: 'gpt-4o-mini-transcribe' });
+    expect(body.chunking_strategy).toBeUndefined();
+    expect(options).toEqual({ timeout: 120000, maxRetries: 0 });
+    expect(withResponse).toHaveBeenCalledTimes(1);
   });
 
   it('extracts compressed audio from an existing media file before transcription', async () => {

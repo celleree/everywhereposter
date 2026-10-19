@@ -42,6 +42,7 @@ export class AutopostRepository {
       where: {
         id,
         deletedAt: null,
+        NOT: { organization: { subscription: { is: { subscriptionTier: 'LAUNCH_V1' as any } } } },
       },
     });
   }
