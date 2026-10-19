@@ -22,7 +22,7 @@ Every render invalidates the generated verification transcript: upstream render 
 - Ownership records are in memory. They do not survive restarts and do not establish durable jobs, retention, or crash recovery.
 - Cleanup checks organization, workspace containment, owner marker and active state. Only generated job workspaces are eligible.
 
-The adapter is not an authorization gateway. The app gateway now checks source Media ownership on every operation, binds mutations to the adapter revision and exposes only bounded review/state/data/video/edit/save routes. It uses `revise()` as the single mutation owner; the upstream local HTTP server is never exposed. Local agent, capture, update, learning and unrelated routes are denied. A small pinned-HTML adapter makes URLs relative, sets JSON edit headers and preserves word selection on phone layouts. The worker admits one retained session globally and retires its entire namespace between sessions.
+The adapter is not an authorization gateway. The app gateway now checks source Media ownership on every operation, binds mutations to the adapter revision and exposes only bounded review/state/data/video/edit/save routes. It uses `revise()` as the single mutation owner; the upstream local HTTP server is never exposed. Local agent, capture, update, learning and unrelated routes are denied. The pinned-HTML adapter keeps authenticated URLs relative and exposes only exact eligible whole-block cut/restore from the revision-bound `quiet-block-v1` receipt. Arbitrary word, phrase and pause edits are unavailable. The mobile wrapper requires explicit preparation and retains saved-copy download/composer handoff. Current native input limits are defined in `cooked-editor-limits.ts` (4 minutes, 100 MiB, 1280×720 in either orientation, 30 fps). The worker admits one retained session globally and retires its entire namespace between sessions.
 
 ## Isolated evidence
 
@@ -30,7 +30,7 @@ An owned 10.73-second synthetic speech fixture ran with network disabled and an 
 
 The tiny model retained the repeated phrase but normalized both synthetic filler words; filler-removal quality is not accepted. This synthetic smoke test does not establish real-person quality, maximum-source capacity, authenticated app integration, physical-phone usability or production capacity.
 
-The original unchanged desktop review UI accepted selecting words and Cut/Apply. The original native phone layout hid the transcript editor; the current small app adapter keeps it visible and handles touch compatibility clicks. Basic captions were separately demonstrated using upstream `plan.chunk_captions`, `export_nle.srt` and FFmpeg subtitles; this is not proof of kinetic captions or the styled renderer.
+The original unchanged desktop review UI accepted selecting words and Cut/Apply. The original native phone layout hid the transcript editor. The current app adapter keeps the transcript visible for playback navigation and offers separate whole-block controls for corrections. Basic captions were separately demonstrated using upstream `plan.chunk_captions`, `export_nle.srt` and FFmpeg subtitles; this is not proof of kinetic captions or the styled renderer.
 
 ## Dependency decision before packaging
 
