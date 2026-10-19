@@ -16,7 +16,12 @@ module.exports = function videoEditorRuntime(fixtureOptions = {}) {
   fs.writeFileSync(markerPath, marker, { flag: 'wx' });
   Object.assign(process.env, { STORAGE_PROVIDER: 'local', UPLOAD_DIRECTORY: directory, FRONTEND_URL: 'http://127.0.0.1:' + frontendPort });
   const sourceFile = path.join(directory, 'source.mp4');
-  if (fixtureOptions.cooked) execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:size=640x360:rate=25', '-f', 'lavfi', '-i', 'flite=text=Here is the plan. Um I want to I want to show you how this works. We record one useful video. Uh then we review the cuts before publishing. The original always stays available.:voice=slt', '-c:v', 'libx264', '-threads', '2', '-c:a', 'aac', '-shortest', sourceFile], { timeout: 15000, env: clean });
+  // Two owned speech blocks with quiet separation and frame-aligned ends.
+  if (fixtureOptions.cooked) execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:size=640x360:rate=25:duration=16',
+    '-f', 'lavfi', '-i', 'flite=text=We record one useful video and explain the first step.:voice=slt',
+    '-f', 'lavfi', '-i', 'flite=text=The original always stays available while we review the next step.:voice=slt',
+    '-filter_complex', '[1:a]apad=whole_dur=6[a1];[2:a]apad=whole_dur=6[a2];[a1][a2]concat=n=2:v=0:a=1,adelay=1500,apad,atrim=duration=16[a]',
+    '-map', '0:v', '-map', '[a]', '-c:v', 'libx264', '-threads', '2', '-c:a', 'aac', '-t', '16', sourceFile], { timeout: 15000, env: clean });
   else execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=size=160x120:duration=4', '-f', 'lavfi', '-i', 'sine=duration=4', '-filter:a', "volume=0:enable='between(t,1,3)'", '-c:v', 'libx264', '-threads', '2', '-c:a', 'aac', '-shortest', sourceFile], { timeout: 15000, env: clean });
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
   const sourceBytes = fs.readFileSync(sourceFile), originalHash = hash(sourceBytes);
