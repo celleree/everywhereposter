@@ -1,0 +1,109 @@
+name: Manually activate or disable bounded Cooked pilot
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed current main helper SHA
+        required: true
+        type: string
+      operation:
+        description: Separately approved one-session action
+        required: true
+        type: choice
+        options: [activate, disable]
+      acceptance_json:
+        description: Owner-reviewed acceptance record (schema 1, at most 16KiB)
+        required: true
+        type: string
+      acceptance_sha256:
+        description: SHA256 of exact acceptance_json UTF-8 bytes
+        required: true
+        type: string
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+jobs:
+  pilot:
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      OPERATION: ${{ inputs.operation }}
+      COOKED_ACCEPTANCE_JSON: ${{ inputs.acceptance_json }}
+      COOKED_ACCEPTANCE_SHA256: ${{ inputs.acceptance_sha256 }}
+      TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Require owner, exact current main, merged PR and passing CI
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == celleree/everywhereposter && "$DEFAULT_BRANCH" == main ]]
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_ACTOR" == celleree && "$TRIGGERING_ACTOR" == celleree && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          [[ "$OPERATION" == activate || "$OPERATION" == disable ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$SOURCE_SHA" ]]
+          python3 - <<'GATE'
+          import json, os, subprocess
+          repo = os.environ['GITHUB_REPOSITORY']; sha = os.environ['SOURCE_SHA']
+          def api(path): return json.loads(subprocess.check_output(['gh', 'api', 'repos/' + repo + '/' + path], text=True))
+          prs = api('commits/' + sha + '/pulls')
+          tree = subprocess.check_output(['git', 'rev-parse', sha + '^{tree}'], text=True).strip()
+          candidates = [p for p in prs if p['merged_at'] and p['merge_commit_sha'] == sha and p['base']['ref'] == 'main' and p['base']['repo']['full_name'] == repo and p['head']['repo'] and p['head']['repo']['full_name'] == repo]
+          assert candidates, 'missing same-repository merged PR provenance'
+          def successful(head, event, branch):
+              path = 'actions/workflows/pull-request-ci.yml/runs?head_sha=' + head + '&event=' + event + '&per_page=100'
+              while path:
+                  page = api(path)
+                  if any(r['head_sha'] == head and r['event'] == event and r['head_branch'] == branch and r['status'] == 'completed' and r['conclusion'] == 'success' for r in page['workflow_runs']): return True
+                  # GitHub returns the newest 100; absent proof fails closed.
+                  path = None
+              return False
+          verified = None
+          for p in candidates:
+              head = p['head']['sha']
+              if api('git/commits/' + head)['tree']['sha'] == tree and successful(head, 'pull_request', p['head']['ref']):
+                  verified = head; break
+          if verified is None:
+              assert successful(sha, 'workflow_dispatch', 'main'), 'missing successful CI for identical merged tree or exact main SHA'
+              verified = sha
+          print(json.dumps(dict(sourceSHA=sha, ciHeadSHA=verified, ciTreeSHA=tree)))
+          GATE
+          bash scripts/cooked-pilot.sh validate
+          APP_SHA="$(python3 -c 'import json,os; print(json.loads(os.environ["COOKED_ACCEPTANCE_JSON"])["appSHA"])')"
+          git merge-base --is-ancestor "$APP_SHA" "$SOURCE_SHA"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/build-postiz-ghcr.yml/runs?head_sha=$APP_SHA&branch=main&event=push" | APP_SHA="$APP_SHA" python3 -c 'import json,os,sys; assert any(r["head_sha"] == os.environ["APP_SHA"] and r["head_branch"] == "main" and r["event"] == "push" and r["status"] == "completed" and r["conclusion"] == "success" for p in json.load(sys.stdin) for r in p["workflow_runs"])'
+      - name: Test the bounded helper offline
+        run: node --test scripts/cooked-pilot.test.cjs
+      - name: Execute only the approved existing-host action
+        env:
+          SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+          SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT || '22' }}
+          SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_HOST" && -n "$SSH_USER" && "$SSH_PORT" =~ ^[0-9]+$ && -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" ]]
+          SSH_DIR="$(mktemp -d "$RUNNER_TEMP/cooked-ssh.XXXXXX")"
+          trap 'rm -rf -- "$SSH_DIR"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$SSH_DIR/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$SSH_DIR/known_hosts"
+          chmod 600 "$SSH_DIR/key" "$SSH_DIR/known_hosts"
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$SOURCE_SHA" ]]
+          bash scripts/cooked-pilot.sh validate >/dev/null
+          python3 -c 'import json,os; print(json.dumps({k:os.environ[k] for k in ("SOURCE_SHA","OPERATION","COOKED_ACCEPTANCE_JSON","COOKED_ACCEPTANCE_SHA256")}))' |
+            ssh -i "$SSH_DIR/key" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$SSH_DIR/known_hosts" "$SSH_USER@$SSH_HOST" \
+            "cd /home/arund/publish-everywhere-git && python3 -c 'import json,os,subprocess,sys; p=json.load(sys.stdin); e=os.environ.copy(); e.update(COOKED_APPROVED_SOURCE_SHA=p[\"SOURCE_SHA\"],COOKED_ACCEPTANCE_JSON=p[\"COOKED_ACCEPTANCE_JSON\"],COOKED_ACCEPTANCE_SHA256=p[\"COOKED_ACCEPTANCE_SHA256\"]); sys.exit(subprocess.call([\"bash\",\"scripts/cooked-pilot.sh\",p[\"OPERATION\"]],env=e))'"

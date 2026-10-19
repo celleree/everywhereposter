@@ -93,6 +93,7 @@ jobs:
           bash scripts/test-wait-for-public-readiness.sh
           bash scripts/test-reload-public-proxy.sh
           sh scripts/test-backup-postgres.sh
+          node --test scripts/cooked-pilot.test.cjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

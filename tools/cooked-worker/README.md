@@ -230,3 +230,115 @@ model can normalize filler words, and retake proposals are suggestions, not
 automatic semantic edits. Do not advertise reliable filler removal or the full
 upstream caption/creative feature set from this pilot. Licensing notices and
 historical model-card limitations remain in `../cooked-pilot/MODEL-NOTICES.md`.
+
+### Prepared manual activation path (execution remains gated)
+
+`.github/workflows/cooked-pilot.yml` is manual-only, owner-dispatched and uses the
+existing protected `production` environment and `production-deployment` lock.
+This change prepares code; it authorizes no workflow dispatch, registry access,
+SSH, deployment or activation. No accepted real production record is supplied.
+Future human approval must review the underlying evidence and the exact reviewed
+helper SHA; passing JSON validation or a Boolean is not evidence of acceptance.
+
+The only supported profile is `one-session`: one owned/licensed human-speech
+fixture of at most 15 seconds, exactly 640x360, in one organization, with one CPU,
+512 MiB RAM, no swap and two 1 MiB worker log files. This is a functional pilot.
+The product's four-minute native duration goal remains explicit; full-duration
+production resource acceptance needs separate evidence and approval. The helper
+has no general/full-profile switch and does not claim that goal is accepted.
+
+Before requesting the protected action, the owner must assemble one small JSON
+record. The exact schema is below (all keys required, no additional keys, duplicate
+keys rejected, UTF-8 at most 16 KiB). Do not copy these descriptions as evidence:
+
+| Key | Required value |
+| --- | --- |
+| `schema` | Integer `1` |
+| `appSHA` | Reviewed deployed app's 40 lowercase hex commit; ancestor of helper main |
+| `appImage` | `ghcr.io/celleree/publish-everywhere-postiz@sha256:` plus 64 lowercase hex |
+| `workerImage` | Reviewed `ghcr.io/celleree/publish-everywhere-cooked-worker@sha256:` plus 64 lowercase hex |
+| `organizationId` | One exact ID, 1–128 letters/digits/underscore/hyphen; no comma/wildcard |
+| `ipcDirectory` | Existing absolute canonical path using letters/digits/underscore/hyphen/slash; no repeated slash, dot segment or symlink component |
+| `profile` | Literal `one-session` |
+| `sourceNoticeEvidence` | SHA256 of owner-reviewed source/notice delivery and redistribution disposition evidence |
+| `nonproductionEvidence` | SHA256 of exact-image authenticated restricted-block nonpublishing acceptance evidence, including named Chromium/WebKit mobile-browser evidence; physical hardware is supplemental |
+| `resourceEvidence` | SHA256 of owner-reviewed exact-image one-session shared-host capacity/security assessment |
+| `fixture` | Object with exactly `sha256` (64 lowercase hex), `owned:true`, `durationSeconds` (number >0 and <=15), `width:640`, `height:360` |
+
+Evidence artifacts must identify the reviewed app/worker digests, organization,
+profile and fixture where applicable; the record binds them by checksum, but the
+helper does not fetch or certify them. The owner must inspect the corresponding
+artifacts and retain their relationship to this record. Offline fixtures in the
+test suite are synthetic records, never production acceptance receipts.
+
+Supply the exact JSON bytes as the workflow's `acceptance_json` input and their
+SHA256 as `acceptance_sha256`; values enter shell steps only through environment
+variables. For local *validation only*, set `COOKED_ACCEPTANCE_JSON` and
+`COOKED_ACCEPTANCE_SHA256`, then run `bash scripts/cooked-pilot.sh validate`.
+Validation emits `RECORD_VALID_ONLY` without host admission or runtime calls.
+The workflow's `source_sha` identifies the helper's reviewed current main commit,
+which can differ from `appSHA`. It requires merged same-repository PR provenance
+and successful existing PR CI on the exact identical merged Git tree (reporting
+its separate CI head SHA), or successful existing manual CI at that exact main
+SHA. The deployed app also needs a successful main app-image build for `appSHA`.
+No CI dispatch is performed automatically.
+
+Execution requires the existing production checkout already clean on exact
+`source_sha` and synchronized with its recorded `origin/main`; the helper never
+fetches, checks out, repairs or deploys another app version. Both immutable images
+must already exist locally with exact RepoDigests and linux/amd64 identity. The
+local full-app-SHA tag, existing runtime tag and running healthy `postiz` image ID
+must all equal the approved app digest's image ID. Missing images, stale checkout
+or mismatches stop; there is no pull/build/login/retag/migration fallback. Publishing
+or staging absent images is separately approved work.
+
+The IPC directory must already exist as a nonsymlink directory owned by 10001:0,
+mode 0710. The helper checks the actual app's numeric UID and groups for traversal
+and socket access; it grants nothing. Activation requires at least two logical
+CPUs and 1 GiB currently available RAM; these capacity guards do not block a
+separately authorized disable. This conservative admission guard is not
+sustained-capacity proof. Resource/security evidence and underlying human review
+remain required. Missing path/ownership/capacity must stop for separate scope;
+there is no mkdir/chown/chmod/path normalization or automatic provisioning.
+
+Before host admission, the helper takes a nonblocking exclusive lock on the
+existing checkout directory inode, held until exit. Contention refuses immediately;
+no lockfile or directory is created. Workflow concurrency additionally coordinates
+with ordinary deployments. Direct operators must not bypass either action path.
+
+`activate` starts only the owned worker with the existing base plus candidate and
+one-session Compose overrides, waits for healthy hardened worker identity, then
+recreates only the same verified app image with `--no-deps --no-build --pull never`.
+It verifies configuration, mount and health, then tests/reloads the existing public
+nginx process so it resolves the recreated app. No proxy recreation is attempted.
+A duplicate activation with matching healthy state reports `ALREADY_ENABLED` and
+preserves the session. A verified stopped owned worker may restart with
+`--no-recreate`; a running orphan worker while the app is off is refused.
+Do not perform ordinary app deployment while the pilot is enabled.
+
+After the approved nonpublishing authenticated check (upload, explicit preparation,
+whole-block cut/restore, playback, recovery, save/download and unchanged source),
+request a separate manual `disable` action using the same reviewed record. Disable
+recreates the same app image with only base Compose configuration, confirms feature
+off and no IPC mount, reloads nginx, then stops the matching owned worker. It never
+removes containers, IPC, source or saved Media. Stopping the worker discards its
+temporary edit session; retain saved output before explicitly requesting disable.
+No automatic rollback, retry or cleanup hides a failure. A failure after mutation
+reports `FAILED_PARTIAL_STATE_POSSIBLE` with its phase: app recreation, proxy reload
+or worker stop may be incomplete. Inspect safe identity/health facts and obtain a
+separate approved repair action; never blindly redispatch. No logs, raw environment,
+full Docker inspect, credentials or customer content are collected.
+
+The successful activation receipt is `ENABLED_ACCEPTANCE_PENDING` with
+`productAcceptance:NOT_RUN`. It establishes only the checked runtime/configuration
+state. Authenticated human acceptance, named Chromium/WebKit mobile-browser evidence, source integrity,
+no publishing and shared-host behavior must be recorded separately. Offline tests
+cannot prove production readiness or any of those outcomes.
+
+Offline checks (no actual SSH, Docker or network commands):
+`node --test scripts/cooked-pilot.test.cjs` and `bash -n scripts/cooked-pilot.sh`.
+Review order: record/provenance gates, action-time identity/ownership admission,
+mutation/partial-failure ordering, then fixtures, the added PR-CI test command and documentation. The coherent
+five-file change exceeds the preferred 400-line guideline because an independently
+usable mutation path without its fail-closed gates and offline fixtures would be
+unsafe; it adds no dependencies or changes to ordinary deployment.
