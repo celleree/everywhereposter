@@ -1,0 +1,126 @@
+name: Publish reviewed Cooked images
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed current main SHA
+        required: true
+        type: string
+      node_base:
+        description: Reviewed official Node 22.20.0 digest (node@sha256 or docker.io/library/node@sha256)
+        required: true
+        type: string
+      base_asset_id:
+        description: Same-repository Release asset ID for vetted docker save archive
+        required: true
+        type: string
+      base_sha256:
+        description: Reviewed base archive SHA256
+        required: true
+        type: string
+      bundle_asset_id:
+        description: Same-repository Release asset ID for complete reviewed recipient bundle
+        required: true
+        type: string
+      bundle_sha256:
+        description: Reviewer-approved recipient bundle SHA256
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cooked-image-publication
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  NODE_BASE: ${{ inputs.node_base }}
+  BASE_ASSET_ID: ${{ inputs.base_asset_id }}
+  BASE_SHA256: ${{ inputs.base_sha256 }}
+  BUNDLE_ASSET_ID: ${{ inputs.bundle_asset_id }}
+  BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+
+jobs:
+  source-gate:
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require owner-dispatched exact current merged main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REPOSITORY" == celleree/everywhereposter ]]
+          [[ "$GITHUB_ACTOR" == celleree && "$TRIGGERING_ACTOR" == celleree && "$DEFAULT_BRANCH" == main ]]
+          [[ "$GITHUB_REF" == refs/heads/main && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" ]]
+          [[ "$NODE_BASE" =~ ^(node|docker\.io/library/node)@sha256:[0-9a-f]{64}$ ]]
+          [[ "$BASE_ASSET_ID" =~ ^[1-9][0-9]{0,18}$ && "$BUNDLE_ASSET_ID" =~ ^[1-9][0-9]{0,18}$ ]]
+          [[ "$BASE_SHA256" =~ ^[0-9a-f]{64}$ && "$BUNDLE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$SOURCE_SHA" ]]
+          count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "main" and .base.repo.full_name == "celleree/everywhereposter" and .merge_commit_sha == env.SOURCE_SHA)] | length')"
+          [[ "$count" -ge 1 ]]
+
+  publication:
+    needs: source-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Verify canonical branch safeguards
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: sh scripts/check-canonical-branch.sh
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+      - name: Install existing locked compiler dependencies
+        working-directory: postiz-app
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Run focused publication and staging tests
+        run: |
+          set -eu
+          python3 -B -m unittest discover -s tools/cooked-worker -p publication_test.py
+          node --test tools/cooked-worker/stage-runtime.test.cjs
+      - name: Download hash-bound same-repository Release inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/cooked-worker/publication.py download "$RUNNER_TEMP/cooked-publication"
+      - name: Verify base, bundle and final worker before registry login
+        run: python3 tools/cooked-worker/publication.py prepare "$RUNNER_TEMP/cooked-publication"
+      - name: Recheck current main then publish verified immutable tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$SOURCE_SHA" ]]
+          python3 tools/cooked-worker/publication.py publish "$RUNNER_TEMP/cooked-publication"
+      - name: Retain verification and publication receipt only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cooked-publication-${{ inputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/cooked-publication/verification.json
+            ${{ runner.temp }}/cooked-publication/publication-receipt.json
+          if-no-files-found: warn
+          retention-days: 90
