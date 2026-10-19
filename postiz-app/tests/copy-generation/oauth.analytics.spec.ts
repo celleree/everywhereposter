@@ -167,6 +167,11 @@ describe('analytics database boundary', () => {
 
 describe('real provider error and missing-value behavior', () => {
   afterEach(() => jest.restoreAllMocks());
+  it('does not classify TikTok publication-status error envelopes as successful empty analytics', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({ status: 200, json: async () => ({ error: { code: 'access_token_invalid', message: 'provider-secret' } }) } as any);
+    expect(await readAnalytics({ ...integration, providerIdentifier: 'tiktok' }, new TiktokProvider(), 30, 'v_pub_url-receipt'))
+      .toMatchObject({ status: 'unavailable', reason: 'provider_error', metrics: [] });
+  });
   it.each([{}, { like: null }])('does not manufacture Facebook reaction totals from missing breakdown counts: %p', async (value) => {
     jest.spyOn(global, 'fetch').mockResolvedValue({ status: 200, json: async () => ({ data: [{ name: 'post_reactions_by_type_total', values: [{ value }] }] }) } as any);
     const provider = new FacebookProvider();

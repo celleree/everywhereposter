@@ -1201,6 +1201,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       ).json();
 
       if (!post?.data?.publicaly_available_post_id?.[0]) {
+        failAnalyticsRead();
         return [];
       }
 
