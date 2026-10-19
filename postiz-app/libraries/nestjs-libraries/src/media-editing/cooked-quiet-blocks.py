@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 
 def read(path):
@@ -166,6 +167,49 @@ def build(source, edit, policy, current, B):
     preview_cut.write_all(edit, toks, model, spans, policy['duration'], final)
 
 
+
+def preserve_uncut_audio(source, edit, policy):
+    # An untouched draft needs no AAC re-encode/fades. Preserve its actual ASR
+    # source audio; edited timelines continue through the unchanged renderer.
+    if read(edit/'safe-cuts.json'):
+        return False
+    if read(edit/'report.json')['frames'] != [[0, policy['total']]] or read(edit/'decisions.json') != [
+            dict(start=0, end=policy['total']/policy['fps'])]:
+        raise ValueError('UNSAFE_NATIVE_TIMELINE')
+    meta = probe(source)
+    # The pinned transcriber uses FFmpeg automatic audio selection. With one
+    # source audio stream it necessarily decodes the explicit stream copied here.
+    if sum(s['codec_type'] == 'audio' for s in meta['streams']) != 1:
+        return False
+    av = {kind: next(s for s in meta['streams'] if s['codec_type'] == kind) for kind in ('audio', 'video')}
+    if av['audio']['codec_name'] != 'aac' or any(abs(float(s['start_time'])) > .001 for s in av.values()) or abs(
+            float(av['audio']['duration'])-float(av['video']['duration'])) > .001:
+        return False
+
+    def packets(path, kind):
+        return json.loads(command(['ffprobe', '-v', 'error', '-protocol_whitelist', 'file', '-select_streams', kind+':0',
+            '-show_packets', '-show_data_hash', 'sha256', '-show_entries',
+            'packet=pts_time,dts_time,duration_time,data_hash,side_data_list', '-of', 'json', str(path)]).stdout)
+
+    def pcm(path):
+        # Exactly the pinned transcriber's mono16k signed16 extraction, without WAV headers.
+        return command(['ffmpeg', '-nostdin', '-v', 'error', '-protocol_whitelist', 'file', '-i', str(path),
+            '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
+            '-f', 'hash', '-hash', 'sha256', '-']).stdout.strip()
+
+    cut = edit/'cut.mp4'
+    audio, video, source_pcm = packets(source, 'a'), packets(cut, 'v'), pcm(source)
+    with tempfile.TemporaryDirectory(prefix='uncut-audio-', dir=edit) as folder:
+        output = Path(folder)/'cut.mp4'
+        command(['ffmpeg', '-nostdin', '-v', 'error', '-protocol_whitelist', 'file', '-i', str(cut), '-i', str(source),
+            '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-map_metadata', '-1', '-movflags', '+faststart', str(output)])
+        if packets(output, 'a') != audio or packets(output, 'v') != video or pcm(output) != source_pcm:
+            raise ValueError('UNCUT_MEDIA_CHANGED')
+        output.replace(cut)
+    print('Uncut AAC packets, video packets and ASR PCM preserved', flush=True)
+    return True
+
+
 def audit(edit, policy):
     current = read(edit/'safe-cuts.json')
     if any(r not in policy['blocks'] for r in current):
@@ -208,6 +252,8 @@ def main():
         build(source, edit, policy, read(edit/'safe-cuts.json'), B)
     elif action == 'audit':
         audit(edit, policy)
+        if preserve_uncut_audio(source, edit, policy):
+            audit(edit, policy)
     else:
         raise ValueError('UNSUPPORTED_ACTION')
 

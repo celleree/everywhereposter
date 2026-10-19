@@ -12,10 +12,13 @@ describe('private cooked native boundary', () => {
     if (c.stage === 'prepare_boundaries') await writeFile(join(c.workspace, 'edit/boundary-policy.json'), JSON.stringify({
       version: 'quiet-block-v1', sourceSha256: createHash('sha256').update(await readFile(join(c.workspace, 'source.mp4'))).digest('hex'), blocks: [[1, 2], [3, 5]] }));
     if (c.stage === 'render') {
+      await mkdir(join(c.workspace, 'edit/.segments/key'), { recursive: true });
+      await writeFile(join(c.workspace, 'edit/.segments/key/0-300.mp4'), 'regenerable video');
       await writeFile(join(c.workspace, 'edit/cut.mp4'), 'native cut');
       await writeFile(join(c.workspace, 'edit/cut.transcript.json'), 'stale cache');
     }
     if (c.stage === 'review_start') await writeFile(join(c.workspace, 'edit/review.json'), '{"round":1}');
+    if (c.stage === 'audit_render' || c.stage === 'verify') expect(await readdir(join(c.workspace, 'edit'))).not.toContain('.segments');
     if (c.stage === 'verify') expect(await readdir(join(c.workspace, 'edit'))).not.toContain('cut.transcript.json');
   };
   beforeEach(async () => {
@@ -46,6 +49,38 @@ describe('private cooked native boundary', () => {
     await expect(runtime.cleanup('../../source.mp4', 'o')).rejects.toThrow('NOT_OWNED');
     expect(await runtime.cleanup(receipt.jobId, 'o')).toMatchObject({ removed: true });
     expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
+  });
+  it('rejects unsafe render-cache paths or changed ownership before audit and preserves external files', async () => {
+    const outside = join(root, 'outside'); await mkdir(outside); await writeFile(join(outside, 'keep'), 'external');
+    for (const sabotage of ['link', 'file', 'owner']) {
+      calls = []; let marker = '';
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c);
+        if (c.stage !== 'render') return;
+        const cache = join(c.workspace, 'edit/.segments');
+        await rm(cache, { recursive: true });
+        if (sabotage === 'link') await symlink(outside, cache);
+        else if (sabotage === 'file') await writeFile(cache, 'invalid');
+        else { marker = await readFile(join(c.workspace, '.cooked-owner'), 'utf8'); await writeFile(join(c.workspace, '.cooked-owner'), '{}'); }
+      });
+      const failure = await runtime.run(input).catch(e => e);
+      expect(failure.message).toBe(sabotage === 'link' ? 'WORKSPACE_SYMLINK' : sabotage === 'file' ? 'CACHE_PATH_MISMATCH' : 'OWNERSHIP_MISMATCH');
+      expect(calls.some(c => c.stage === 'audit_render' || c.stage === 'verify')).toBe(false);
+      const workspace = calls[0].workspace;
+      expect(await readFile(join(workspace, 'edit/cut.mp4'), 'utf8')).toBe('native cut');
+      expect(await readFile(join(outside, 'keep'), 'utf8')).toBe('external');
+      if (sabotage === 'owner') await writeFile(join(workspace, '.cooked-owner'), marker);
+      await runtime.cleanup(failure.jobId, 'o');
+    }
+  });
+  it('allows a successful renderer without a segment cache', async () => {
+    const runtime = new CookedEditorRuntime(config, async c => {
+      await runner(c);
+      if (c.stage === 'render') await rm(join(c.workspace, 'edit/.segments'), { recursive: true });
+    });
+    const made = await runtime.run(input);
+    expect(await readFile(made.cutPath, 'utf8')).toBe('native cut');
+    await runtime.cleanup(made.jobId, 'o');
   });
   it('fails closed for unsupported metadata, missing files, symlinks, nonprivate roots and unsafe limits', async () => {
     const runtime = new CookedEditorRuntime(config, runner);
@@ -128,7 +163,7 @@ describe('private cooked native boundary', () => {
     await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('SOURCE_CHANGED');
     expect(calls).toHaveLength(0);
   });
-  it('serializes revisions with runs and makes a failed native mutation cleanup-only', async () => {
+  it('serializes mutations and restores the verified draft after a failed native edit', async () => {
     let release!: () => void, entered!: () => void;
     const pending = new Promise<void>(resolve => { release = resolve; });
     const entry = new Promise<void>(resolve => { entered = resolve; });
@@ -141,9 +176,28 @@ describe('private cooked native boundary', () => {
     await expect(runtime.run(input)).rejects.toThrow('BUSY');
     await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('BUSY');
     await expect(runtime.cleanup(initial.jobId, 'o')).rejects.toThrow('ACTIVE'); release();
-    await expect(revise).rejects.toMatchObject({ message: 'native edit failed', revision: 1, jobId: initial.jobId });
-    await expect(runtime.revise(initial.jobId, 'o', { restore: [[1, 2]] }, 1)).rejects.toThrow('STALE_OR_FAILED');
+    await expect(revise).rejects.toMatchObject({ message: 'native edit failed', revision: 0, jobId: initial.jobId, previousRevisionRestored: true });
+    expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
+    await expect(runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 0)).rejects.toMatchObject({ previousRevisionRestored: true, revision: 0 });
     await runtime.cleanup(initial.jobId, 'o');
+  });
+  it('recovers the exact draft after render, resource, audit or review failure without accepting the edit', async () => {
+    for (const [stage, message] of [['render', 'NATIVE_render_FAILED'], ['render', 'RSS_LIMIT'],
+      ['audit_render', 'STAGE_TIMEOUT'], ['review_round', 'NATIVE_review_round_FAILED']]) {
+      let fail = false;
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c);
+        if (fail && c.stage === stage) { await writeFile(join(c.workspace, 'edit/cut.mp4'), 'unverified partial'); throw Error(message); }
+      });
+      const initial = await runtime.run(input); fail = true;
+      await expect(runtime.revise(initial.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toMatchObject({ message, revision: 0, previousRevisionRestored: true });
+      expect(await readFile(initial.cutPath, 'utf8')).toBe('native cut');
+      expect(await readFile(join(initial.editDirectory, 'review.json'), 'utf8')).toBe('{"round":1}');
+      fail = false;
+      expect((await runtime.revise(initial.jobId, 'o', { cut: [[3, 5]] }, 0)).revision).toBe(1);
+      expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
+      await runtime.cleanup(initial.jobId, 'o');
+    }
   });
   it('rejects an unverified edit but restores the exact native draft and revision for a deliberate new choice', async () => {
     let reject = false;
