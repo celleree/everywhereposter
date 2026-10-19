@@ -1,3 +1,4 @@
+import { failAnalyticsRead, analyticsValue } from '../analytics-read';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -963,6 +964,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
       const userStatsData = await userStatsResponse.json();
       const userStats = userStatsData?.data?.user;
+      if (!userStats) failAnalyticsRead();
 
       const result: AnalyticsData[] = [];
 
@@ -1015,6 +1017,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
       const videoListData = await videoListResponse.json();
       const videos = videoListData?.data?.videos;
+      if (!Array.isArray(videos)) failAnalyticsRead();
 
       if (videos && videos.length > 0) {
         const videoIds = videos.map((v: { id: string }) => v.id);
@@ -1036,6 +1039,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
         const videoQueryData = await videoQueryResponse.json();
         const videoDetails = videoQueryData?.data?.videos;
+        if (!Array.isArray(videoDetails)) failAnalyticsRead();
 
         if (videoDetails && videoDetails.length > 0) {
           let totalViews = 0;
@@ -1044,10 +1048,10 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
           let totalShares = 0;
 
           for (const video of videoDetails) {
-            totalViews += video.view_count || 0;
-            totalLikes += video.like_count || 0;
-            totalComments += video.comment_count || 0;
-            totalShares += video.share_count || 0;
+            totalViews += analyticsValue(video.view_count, 0);
+            totalLikes += analyticsValue(video.like_count, 0);
+            totalComments += analyticsValue(video.comment_count, 0);
+            totalShares += analyticsValue(video.share_count, 0);
           }
 
           result.push({
@@ -1078,6 +1082,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.error('Error fetching TikTok analytics:', err);
       return [];
     }
@@ -1222,6 +1227,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
       const data = await response.json();
       const video = data?.data?.videos?.[0];
+      if (!Array.isArray(data?.data?.videos)) failAnalyticsRead();
 
       if (!video) {
         return [];
@@ -1263,6 +1269,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.error('Error fetching TikTok post analytics:', err);
       return [];
     }

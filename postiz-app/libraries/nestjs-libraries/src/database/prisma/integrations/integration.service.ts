@@ -26,6 +26,7 @@ import utc from 'dayjs/plugin/utc';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { TemporalService } from 'nestjs-temporal-core';
+import { AnalyticsReadResult, readAnalytics } from '../../../integrations/analytics-read';
 
 dayjs.extend(utc);
 
@@ -400,12 +401,19 @@ export class IntegrationService {
     return { success: true };
   }
 
+  checkAnalytics(org: Organization, integration: string, date: string, options: { readOnly: true }): Promise<AnalyticsReadResult>;
+  checkAnalytics(org: Organization, integration: string, date: string, options?: boolean | CheckAnalyticsOptions): Promise<AnalyticsData[]>;
   async checkAnalytics(
     org: Organization,
     integration: string,
     date: string,
-    options: boolean | CheckAnalyticsOptions = false
-  ): Promise<AnalyticsData[]> {
+    options: boolean | CheckAnalyticsOptions | { readOnly: true } = false
+  ): Promise<AnalyticsData[] | AnalyticsReadResult> {
+    if (typeof options === 'object' && 'readOnly' in options) {
+      const account = await this.getIntegrationById(org.id, integration);
+      if (!account) throw new Error('Account unavailable in this organization');
+      return readAnalytics(account, this._integrationManager.getSocialIntegration(account.providerIdentifier), +date);
+    }
     const forceRefresh =
       typeof options === 'boolean' ? options : !!options.forceRefresh;
     const forceAnalyticsRefresh =

@@ -52,6 +52,7 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+import { AnalyticsReadResult, readAnalytics } from '../../../integrations/analytics-read';
 
 type PostWithConditionals = Post & {
   integration?: Integration;
@@ -200,12 +201,25 @@ export class PostsService {
     return this._postRepository.updateReleaseId(postId, orgId, releaseId);
   }
 
+  listPublishedPostsForAnalytics(orgId: string, integrationId: string, start: Date, end: Date, cursor?: string) {
+    return this._postRepository.listPublishedPostsForAnalytics(orgId, integrationId, start, end, cursor);
+  }
+
+  checkPostAnalytics(orgId: string, postId: string, date: number, options: { readOnly: true }): Promise<AnalyticsReadResult>;
+  checkPostAnalytics(orgId: string, postId: string, date: number, forceRefresh?: boolean): Promise<AnalyticsData[] | { missing: true }>;
   async checkPostAnalytics(
     orgId: string,
     postId: string,
     date: number,
-    forceRefresh = false
-  ): Promise<AnalyticsData[] | { missing: true }> {
+    forceRefresh: boolean | { readOnly: true } = false
+  ): Promise<AnalyticsData[] | { missing: true } | AnalyticsReadResult> {
+    if (typeof forceRefresh === 'object' && forceRefresh.readOnly) {
+      const post = await this._postRepository.getAnalyticsPost(orgId, postId);
+      if (!post) throw new Error('Published post unavailable in this organization');
+      const analytics = await readAnalytics(post.integration,
+        this._integrationManager.getSocialIntegration(post.integration.providerIdentifier), date, post.releaseId);
+      return { ...analytics, post: { id: post.id, publishedAt: post.publishDate.toISOString() } };
+    }
     const post = await this._postRepository.getPostById(postId, orgId);
     if (!post || !post.releaseId) {
       return [];

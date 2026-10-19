@@ -1,3 +1,4 @@
+import { failAnalyticsRead } from '../analytics-read';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -688,6 +689,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     ).json();
 
     if (!Array.isArray(response?.data)) {
+      failAnalyticsRead();
       console.log(
         'Facebook analytics unavailable',
         response?.error || 'Invalid insights response'
@@ -824,6 +826,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         )
       ).json();
 
+      if (!data) failAnalyticsRead();
       if (!data || data.length === 0) {
         return [];
       }
@@ -910,11 +913,13 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
           });
         }
       } catch (err) {
+        failAnalyticsRead(err);
         console.error('Error fetching Facebook post like/comment counts:', err);
       }
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.error('Error fetching Facebook post analytics:', err);
       return [];
     }

@@ -186,6 +186,9 @@ export default function OAuthAuthorizePage() {
               {authorization.scope?.split(' ').includes('posts:write') && (
                 <li>Upload media and publish or schedule posts to your connected accounts after confirmation</li>
               )}
+              {authorization.scope?.split(' ').includes('analytics:read') && (
+                <li>Read social account and published-post analytics, including account identity and a limited list of published posts in the selected organization.</li>
+              )}
             </ul>
           </div>
 

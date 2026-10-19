@@ -1,3 +1,4 @@
+import { failAnalyticsRead, isReadOnlyAnalytics } from '../analytics-read';
 import { suppressPublishingRetry } from '../publishing-attempt.context';
 import {
   AnalyticsData,
@@ -667,6 +668,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         sort: 'day',
       });
 
+      if (isReadOnlyAnalytics() && !data?.rows?.length) return [];
       const columns = data?.columnHeaders?.map((p) => p.name)!;
       const mappedData = data?.rows?.map((p) => {
         return columns.reduce((acc, curr, index) => {
@@ -736,6 +738,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
 
       return acc;
     } catch (err) {
+      failAnalyticsRead(err);
       return [];
     }
   }
@@ -802,6 +805,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.error('Error fetching YouTube post analytics:', err);
       return [];
     }

@@ -1,3 +1,4 @@
+import { failAnalyticsRead } from '../analytics-read';
 import { suppressPublishingRetry } from '../publishing-attempt.context';
 import {
   AnalyticsData,
@@ -2462,12 +2463,14 @@ export class InstagramProvider
           return response.data;
         }
 
+        failAnalyticsRead();
         console.log(
           `Instagram analytics ${metricGroup} unavailable`,
           response?.error || 'Invalid insights response'
         );
         return [];
       } catch (err) {
+        failAnalyticsRead(err);
         console.log(`Instagram analytics ${metricGroup} failed`, err);
         return [];
       }
@@ -2606,6 +2609,7 @@ export class InstagramProvider
         )
       ).json();
 
+      if (!data) failAnalyticsRead();
       if (!data || data.length === 0) {
         return [];
       }
@@ -2653,6 +2657,7 @@ export class InstagramProvider
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.error('Error fetching Instagram post analytics:', err);
       return [];
     }

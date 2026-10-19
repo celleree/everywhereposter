@@ -1,3 +1,4 @@
+import { failAnalyticsRead, analyticsValue } from '../analytics-read';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -411,6 +412,7 @@ export class LinkedinPageProvider
         })
       ).json();
 
+    if (!Array.isArray(shareElements)) failAnalyticsRead();
     // Also fetch social actions (likes, comments, shares) for the specific post
     let socialActions: SocialActionsResponse | null = null;
     try {
@@ -427,6 +429,7 @@ export class LinkedinPageProvider
         })
       ).json();
     } catch (e) {
+      failAnalyticsRead(e);
       // Social actions may not be available for all posts
     }
 
@@ -437,37 +440,37 @@ export class LinkedinPageProvider
           const dateStr = dayjs(current.timeRange.start).format('YYYY-MM-DD');
 
           all['Impressions'].push({
-            total: current.totalShareStatistics.impressionCount || 0,
+            total: analyticsValue(current.totalShareStatistics.impressionCount, 0),
             date: dateStr,
           });
 
           all['Unique Impressions'].push({
-            total: current.totalShareStatistics.uniqueImpressionsCount || 0,
+            total: analyticsValue(current.totalShareStatistics.uniqueImpressionsCount, 0),
             date: dateStr,
           });
 
           all['Clicks'].push({
-            total: current.totalShareStatistics.clickCount || 0,
+            total: analyticsValue(current.totalShareStatistics.clickCount, 0),
             date: dateStr,
           });
 
           all['Likes'].push({
-            total: current.totalShareStatistics.likeCount || 0,
+            total: analyticsValue(current.totalShareStatistics.likeCount, 0),
             date: dateStr,
           });
 
           all['Comments'].push({
-            total: current.totalShareStatistics.commentCount || 0,
+            total: analyticsValue(current.totalShareStatistics.commentCount, 0),
             date: dateStr,
           });
 
           all['Shares'].push({
-            total: current.totalShareStatistics.shareCount || 0,
+            total: analyticsValue(current.totalShareStatistics.shareCount, 0),
             date: dateStr,
           });
 
           all['Engagement'].push({
-            total: current.totalShareStatistics.engagement || 0,
+            total: analyticsValue(current.totalShareStatistics.engagement, 0),
             date: dateStr,
           });
         }
@@ -484,6 +487,7 @@ export class LinkedinPageProvider
       }
     );
 
+    const usesTimeSeries = Object.values(analytics).some((data) => data.length > 0);
     // If no time series data but we have social actions, create a single data point
     if (
       Object.values(analytics).every((arr) => arr.length === 0) &&
@@ -491,11 +495,11 @@ export class LinkedinPageProvider
     ) {
       const today = dayjs().format('YYYY-MM-DD');
       analytics['Likes'].push({
-        total: socialActions.likesSummary?.totalLikes || 0,
+        total: analyticsValue(socialActions.likesSummary?.totalLikes, 0),
         date: today,
       });
       analytics['Comments'].push({
-        total: socialActions.commentsSummary?.totalFirstLevelComments || 0,
+        total: analyticsValue(socialActions.commentsSummary?.totalFirstLevelComments, 0),
         date: today,
       });
     }
@@ -507,6 +511,8 @@ export class LinkedinPageProvider
         label,
         data,
         percentageChange: 0,
+        seriesType: usesTimeSeries ? 'time_series' : 'total_value',
+        summaryType: usesTimeSeries ? 'sum' : 'latest',
       }));
 
     return result as any;

@@ -9,6 +9,7 @@ import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/in
 import { runWithContext } from './async.storage';
 import { createOAuthMiddleware } from './oauth-middleware';
 import { createOAuthPublishingTools } from './oauth-publishing.tools';
+import { analyticsInputSchemas, createOAuthAnalyticsTools } from './oauth-analytics.tools';
 import { MediaService } from '../database/prisma/media/media.service';
 import { PostsService } from '../database/prisma/posts/posts.service';
 import { ioRedis } from '../redis/redis.service';
@@ -60,10 +61,13 @@ export const startMcp = async (app: INestApplication) => {
     } as Pick<typeof ioRedis, 'get' | 'set'>,
   });
   const oauthServers = new Map<string, MCPServer>();
-  for (const scopes of [['accounts:read'], ['posts:write'], ['accounts:read', 'posts:write']]) {
+  const analyticsTools = createOAuthAnalyticsTools({ integrations: integrationService, posts: app.get(PostsService, { strict: false }) });
+  for (let mask = 1; mask < 1 << OAUTH_SCOPES.length; mask++) {
+    const scopes = OAUTH_SCOPES.filter((_, index) => mask & (1 << index)).sort();
     oauthServers.set(scopes.join(' '), new MCPServer({
       name: 'EverywherePoster OAuth', version: '1.0.0',
       tools: { ...(scopes.includes('accounts:read') ? readTools : {}),
+        ...(scopes.includes('analytics:read') ? analyticsTools : {}),
         ...(scopes.includes('posts:write') ? { ...writeTools,
           ingest_chatgpt_file: createChatGPTFileTool(app.get(MediaService, { strict: false })) } : {}) },
     }));
@@ -162,6 +166,13 @@ export const startMcp = async (app: INestApplication) => {
       !chatgptFileInput.safeParse(req.body.params.arguments).success) {
       res.status(200).json({ jsonrpc: '2.0', id: req.body.id ?? null,
         result: { isError: true, content: [{ type: 'text', text: 'Invalid ChatGPT file input' }] } });
+      return;
+    }
+    const toolName = req.body?.params?.name;
+    if (req.body?.method === 'tools/call' && Object.prototype.hasOwnProperty.call(analyticsInputSchemas, toolName) &&
+      !analyticsInputSchemas[toolName as keyof typeof analyticsInputSchemas].safeParse(req.body.params.arguments).success) {
+      res.status(200).json({ jsonrpc: '2.0', id: req.body.id ?? null,
+        result: { isError: true, content: [{ type: 'text', text: 'Invalid analytics input' }] } });
       return;
     }
     fixAcceptHeader(req);
