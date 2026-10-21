@@ -38,8 +38,32 @@ const states = ['empty','selected','uploading','preparing','review','no-blocks',
       await page.getByLabel('Caption',{exact:true}).fill('A test caption from the preview.'); await expect(page.locator('.post-preview')).toContainText('A test caption from the preview.');
       await page.getByRole('button',{name:'Attach to preview draft'}).click(); await expect(page.getByRole('status')).toContainText('Nothing was saved to your account');
       await page.goto(origin+'/?state=uncertain-save'); await expect(page.getByRole('button',{name:'Save a separate copy'})).toHaveCount(0); await page.getByRole('button',{name:'Check sample Media Library'}).click(); await expect(page.getByRole('button',{name:'Open post composer'})).toBeEnabled();
+      await page.goto(origin+'/?state=no-blocks'); await expect(page.getByRole('button',{name:/^Cut block/})).toHaveCount(0); await page.getByRole('button',{name:'Save a separate copy'}).click(); await expect(page.getByRole('button',{name:/^Cut block/})).toHaveCount(0); await expect(page.getByRole('button',{name:'Open post composer'})).toBeEnabled(); await expect(page.getByRole('button',{name:/^Cut block/})).toHaveCount(0);
       await page.goto(origin+'/?state=preparing'); await page.reload(); await expect(page.getByRole('button',{name:'Preparing video…'})).toBeDisabled();
       await page.goto(origin); await page.getByLabel('Upload prototype video').setInputFiles({name:'sample.mov',mimeType:'video/quicktime',buffer:Buffer.from('fixture')}); await expect(page.getByRole('button',{name:'Uploading video…'})).toBeDisabled(); await expect(page.getByRole('button',{name:'Prepare for review'})).toBeEnabled();
+      for (const keyboardState of ['review','composer']) {
+        await page.goto(origin+'/?state='+keyboardState);
+        await expect(page.getByLabel('Upload prototype video')).toHaveAttribute('tabindex','-1');
+        const seen = new Set();
+        for (let tab = 0; tab < 24; tab++) {
+          await page.keyboard.press('Tab');
+          const focus = await page.evaluate(() => {
+            const el = document.activeElement;
+            if (!el || !['BUTTON','INPUT','SELECT','TEXTAREA','SUMMARY'].includes(el.tagName)) return null;
+            return { label: el.getAttribute('aria-label') || el.id || el.getAttribute('type') || el.textContent?.trim(), hiddenFile: el.matches('.file-input') };
+          });
+          if (!focus) continue;
+          expect(focus.hiddenFile, name+'/'+keyboardState+' hidden tab stop').toBe(false);
+          await expect.poll(() => page.evaluate(() => {
+            const el = document.activeElement, r = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+            return !!hit && el.contains(hit);
+          }), { message: name+'/'+keyboardState+' unobscured Tab focus: '+focus.label }).toBe(true);
+          if (seen.has(focus.label)) break;
+          seen.add(focus.label);
+        }
+        expect(seen.has(keyboardState === 'review' ? 'Cut block 3' : 'checkbox')).toBe(true);
+      }
       expect(await page.evaluate(()=>localStorage.length)).toBe(0);
       expect(hash(fs.readFileSync(sourceFixture))).toBe(originalHash);
       results.push({name,journey:'PASS',sourceFixtureHashUnchanged:true});
