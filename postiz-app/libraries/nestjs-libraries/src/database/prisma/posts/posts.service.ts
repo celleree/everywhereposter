@@ -22,7 +22,7 @@ import { ShortLinkService } from '@gitroom/nestjs-libraries/short-linking/short.
 import { CreateTagDto } from '@gitroom/nestjs-libraries/dtos/posts/create.tag.dto';
 import { minifyPostsList, minifyPosts } from '@gitroom/helpers/utils/posts.list.minify';
 import axios from 'axios';
-import sharp from 'sharp';
+import { prepareProviderImage, ProviderImageError } from '@gitroom/nestjs-libraries/upload/provider-media';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { Readable } from 'stream';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
@@ -797,7 +797,7 @@ export class PostsService {
     );
   }
 
-  async updateMedia(id: string, imagesList: any[], convertToJPEG = false) {
+  async updateMedia(id: string, imagesList: any[], convertToJPEG: boolean | string = false) {
     try {
       let imageUpdateNeeded = false;
       const getImageList = await Promise.all(
@@ -859,22 +859,14 @@ export class PostsService {
               });
 
               const imageBuffer = Buffer.from(response.data);
+              const prepared = await prepareProviderImage(imageBuffer, convertToJPEG === 'tiktok' ? 'tiktok' : 'instagram');
+              if (prepared.buffer === imageBuffer) return m;
               imageUpdateNeeded = true;
-              const buffer = await sharp(imageBuffer, { failOn: 'error' })
-                .rotate()
-                .flatten({ background: '#ffffff' })
-                .toColorspace('srgb')
-                .withMetadata({ density: 72 })
-                .jpeg({
-                  quality: 90,
-                  progressive: false,
-                  mozjpeg: false,
-                })
-                .toBuffer();
+              const buffer = prepared.buffer;
 
               const { path, originalname } = await this.storage.uploadFile({
                 buffer,
-                mimetype: 'image/jpeg',
+                mimetype: prepared.mimeType,
                 size: buffer.length,
                 path: '',
                 fieldname: '',
@@ -921,6 +913,7 @@ export class PostsService {
 
       return getImageList;
     } catch (err: any) {
+      if (err instanceof ProviderImageError) throw new BadRequestException(err.message);
       if (err instanceof BadRequestException) {
         throw err;
       }
@@ -1663,7 +1656,7 @@ export class PostsService {
         media: await this.updateMedia(
           post.id,
           JSON.parse(post.image || '[]'),
-          integrationProvider?.convertToJPEG || false
+          integrationProvider?.convertToJPEG ? integrationProvider.identifier : false
         ),
       }))
     );
