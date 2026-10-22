@@ -74,7 +74,7 @@ it('offers add or reconnect navigation when the only Instagram connection needs 
   mockIntegrations = [{ ...goodInstagram, disabled: true }];
   render(<CreatorAudit />);
   const link = await screen.findByRole('link', { name: 'Add or reconnect a channel' });
-  expect(link.getAttribute('href')).toBe('/launches');
+  expect(link.getAttribute('href')).toBe('/channels');
   expect(screen.queryByRole('button', { name: 'Start audit' })).toBeNull();
 });
 

@@ -332,6 +332,16 @@ export const Menu: FC<{
   return (
     <div
       className="cursor-pointer relative select-none flex"
+      role="button"
+      tabIndex={0}
+      aria-label="Manage channel"
+      aria-expanded={!!show}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          event.currentTarget.click();
+        }
+      }}
       onClick={changeShow}
       ref={ref}
     >
