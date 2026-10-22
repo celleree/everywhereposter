@@ -93,9 +93,14 @@ export function UploadTransfers() {
   const view = useContext(TransferViewContext);
   if (!transfers || !view || !view.items.length) return null;
   const { items, optIntoQuickUpload, errors, pending, busy, action } = view;
-  return <section aria-label="Video transfers" className="mt-[16px] min-w-0 text-newTextColor">
-      {items.some(item => item.state === 'Uploading') && <div className="text-[12px] hidden mobile:block"><p>Keep this browser open and on screen while uploading.</p><p>You can browse other pages in this app while the upload continues.</p></div>}
-      {items.map(item => <div key={item.id} className="mt-[8px] border-t border-newBorder pt-[8px]">
+  // Ordinary completed transfers are history, not active upload work. Preserve
+  // pending choices, errors and Quick Upload results in the visible list.
+  const completed = items.filter(item => item.state === 'Transfer complete'
+    && !item.session?.quickIntent && !item.quickRequested && !item.quickError
+    && !errors[item.id] && !pending[item.id] && transfers.canDismiss(item));
+  const completedIds = new Set(completed.map(item => item.id));
+  const renderTransfer = (item: Transfer) => (
+<div key={item.id} className="mt-[8px] border-t border-newBorder pt-[8px]">
         {errors[item.id] && !(errors[item.id]?.cancellation && item.state === 'Transfer complete') && <p role="alert">{errors[item.id]?.message}</p>}
         <p className="break-all text-[13px] font-[600]">{item.name}</p>
         <p role="status" className="text-[12px]">{item.state}</p>
@@ -116,6 +121,16 @@ export function UploadTransfers() {
         {!pending[item.id] && item.state !== 'Uploading' && <RetryUpload transfers={transfers} item={item} />}
           <button className="mt-[8px] !min-h-[44px] rounded-[8px] border border-newBorder bg-newBgColorInner px-[14px] py-[8px] font-[600] disabled:opacity-50" disabled={pending[item.id] || item.state === 'Finalizing'} onClick={() => void action(item.id, () => transfers.cancel(item.id), true)}>{pending[item.id] ? 'Cancelling…' : 'Cancel upload'}</button>
         </>}
-      </div>)}
+      </div>
+  );
+  return <section aria-label="Video transfers" className="mt-[16px] min-w-0 max-h-[240px] shrink-0 overflow-y-auto text-newTextColor">
+      {items.some(item => item.state === 'Uploading') && <div className="text-[12px] hidden mobile:block"><p>Keep this browser open and on screen while uploading.</p><p>You can browse other pages in this app while the upload continues.</p></div>}
+      {items.filter(item => !completedIds.has(item.id)).map(renderTransfer)}
+      {!!completed.length && <details>
+        <summary className="cursor-pointer min-h-[44px] py-[12px] text-[13px]">
+          Completed uploads ({completed.length})
+        </summary>
+        {completed.map(renderTransfer)}
+      </details>}
   </section>;
 }
