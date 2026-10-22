@@ -20,7 +20,7 @@ type PlatformVideoItem = {
   url: string;
   thumbnail?: string;
   name: string;
-  type: 'video' | 'image';
+  type: 'video' | 'image' | 'link' | 'text' | 'unknown';
   publishedAt?: string;
   postId?: string;
   rootPostId?: string;
@@ -97,7 +97,7 @@ export const PlatformVideoGrid: FC<{
             <div className="text-[13px] text-newTableText/60 mt-[4px]">
               {t(
                 'recent_published_media_description',
-                'Latest published images and videos from this connected platform.'
+                'Latest published posts from this connected platform.'
               )}
             </div>
           </div>
@@ -119,7 +119,7 @@ export const PlatformVideoGrid: FC<{
         <div className="flex items-center justify-center min-h-[180px] rounded-[14px] border border-dashed border-newTableBorder bg-newTableHeader text-newTableText/60 text-[14px] text-center px-[24px]">
           {t(
             'no_published_media_found',
-            'No published images or videos were found for this channel yet.'
+            'No published posts were found for this channel yet.'
           )}
         </div>
       )}

@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { PlatformVideoGrid } from '../../apps/frontend/src/components/platform-analytics/platform.video.grid';
 const mockItems = [
   { id: 'photo', name: 'Cover photo', type: 'image', thumbnail: '/photo.jpg', url: 'https://example.test/photo' },
+  { id: 'text', name: 'Text update', type: 'text', url: 'https://example.test/update' },
   { id: 'reel', name: 'A reel', type: 'video', thumbnail: '/reel.jpg', url: 'https://example.test/reel' },
 ];
 jest.mock('swr', () => ({ __esModule: true, default: () => ({ data: { results: mockItems, pages: 1 }, isLoading: false }) }));
@@ -17,5 +18,5 @@ it('describes mixed published media honestly and marks only videos with a play o
   const overlays = screen.getAllByLabelText('Video');
   expect(overlays).toHaveLength(1);
   expect(overlays[0].parentElement?.querySelector('img')?.getAttribute('alt')).toBe('A reel');
-  expect(screen.getAllByRole('link', { name: 'Open on platform' })).toHaveLength(2);
+  expect(screen.getAllByRole('link', { name: 'Open on platform' })).toHaveLength(3);
 });
