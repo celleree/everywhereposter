@@ -53,3 +53,13 @@ it('offers retry instead of an empty success state on loading failure', () => {
   expect(mockMutate).toHaveBeenCalled();
   expect(screen.queryByText(/No channels connected/)).toBeNull();
 });
+
+it('keeps API-key accounts on their existing credential-update menu instead of OAuth reconnect', () => {
+  mockChannels = [{ id: 'api', name: 'API account', identifier: 'devto', internalId: 'provider-api',
+    refreshNeeded: true, isCustomFields: true }];
+  render(<ChannelsComponent />);
+  expect(screen.getByText('Update credentials in the channel menu')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
+  expect(screen.getByTestId('api')).toBeTruthy();
+  expect(mockFetch).not.toHaveBeenCalled();
+});

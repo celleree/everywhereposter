@@ -10,7 +10,7 @@ import { Menu } from '../launches/menu/menu';
 import { useUser } from '../layout/user.context';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 
-type Channel = Integrations & { internalId: string };
+type Channel = Integrations & { internalId: string; isCustomFields?: boolean };
 
 export function ChannelsComponent() {
   const { data, isLoading, error, mutate } = useIntegrationList();
@@ -57,7 +57,7 @@ export function ChannelsComponent() {
                 <div className="min-w-0 flex-1">
                   <h2 className="break-words font-[600]">{channel.name}</h2>
                   <p className="text-[13px] break-words">{channel.identifier} · {channel.display}</p>
-                  <p className="text-[13px]">{channel.refreshNeeded ? 'Reconnect required' : channel.inBetweenSteps ? 'Setup incomplete' : channel.disabled ? 'Disabled' : 'Connected'}</p>
+                  <p className="text-[13px]">{channel.refreshNeeded && !channel.isCustomFields ? (channel.isCustomFields ? 'Update credentials in the channel menu' : 'Reconnect required') : channel.inBetweenSteps ? 'Setup incomplete' : channel.disabled ? 'Disabled' : 'Connected'}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-[8px]">
                   {channel.refreshNeeded ? (
