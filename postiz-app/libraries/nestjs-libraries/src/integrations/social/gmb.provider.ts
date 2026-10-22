@@ -1,3 +1,4 @@
+import { failAnalyticsRead, analyticsValue } from '../analytics-read';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -543,6 +544,8 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
       const dailyMetricTimeSeries =
         data.multiDailyMetricTimeSeries?.[0]?.dailyMetricTimeSeries;
 
+      if (data.error || !Array.isArray(data.multiDailyMetricTimeSeries)) failAnalyticsRead();
+
       if (!dailyMetricTimeSeries || dailyMetricTimeSeries.length === 0) {
         return [];
       }
@@ -564,7 +567,7 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
         const datedValues = series.timeSeries?.datedValues || [];
 
         const dataPoints = datedValues.map((dv: any) => ({
-          total: parseInt(dv.value || '0', 10),
+          total: parseInt(analyticsValue(dv.value, '0'), 10),
           date: `${dv.date.year}-${String(dv.date.month).padStart(
             2,
             '0'
@@ -582,6 +585,7 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
 
       return analytics;
     } catch (error) {
+      failAnalyticsRead(error);
       console.error('Error fetching GMB analytics:', error);
       return [];
     }

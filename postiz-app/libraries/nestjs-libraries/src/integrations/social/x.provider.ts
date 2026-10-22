@@ -1,3 +1,4 @@
+import { failAnalyticsRead, analyticsValue, isReadOnlyAnalytics } from '../analytics-read';
 import { TweetV2, TwitterApi } from 'twitter-api-v2';
 import {
   AnalyticsData,
@@ -627,6 +628,8 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       ...(token ? { pagination_token: token } : {}),
     });
 
+    if (isReadOnlyAnalytics() && tweets.meta.result_count === 0) return [];
+    if (isReadOnlyAnalytics() && tweets.data.data.length === 100) failAnalyticsRead('query_limit');
     return [
       ...tweets.data.data,
       ...(tweets.data.data.length === 100
@@ -647,6 +650,7 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     date: number
   ): Promise<AnalyticsData[]> {
     if (process.env.DISABLE_X_ANALYTICS) {
+      failAnalyticsRead('disabled');
       return [];
     }
 
@@ -687,17 +691,17 @@ export class XProvider extends SocialAbstract implements SocialProvider {
         (all, current) => {
           all.impression_count =
             (all.impression_count || 0) +
-            +current.public_metrics.impression_count;
+            +analyticsValue(current.public_metrics.impression_count, 0);
           all.bookmark_count =
-            (all.bookmark_count || 0) + +current.public_metrics.bookmark_count;
+            (all.bookmark_count || 0) + +analyticsValue(current.public_metrics.bookmark_count, 0);
           all.like_count =
-            (all.like_count || 0) + +current.public_metrics.like_count;
+            (all.like_count || 0) + +analyticsValue(current.public_metrics.like_count, 0);
           all.quote_count =
-            (all.quote_count || 0) + +current.public_metrics.quote_count;
+            (all.quote_count || 0) + +analyticsValue(current.public_metrics.quote_count, 0);
           all.reply_count =
-            (all.reply_count || 0) + +current.public_metrics.reply_count;
+            (all.reply_count || 0) + +analyticsValue(current.public_metrics.reply_count, 0);
           all.retweet_count =
-            (all.retweet_count || 0) + +current.public_metrics.retweet_count;
+            (all.retweet_count || 0) + +analyticsValue(current.public_metrics.retweet_count, 0);
 
           return all;
         },
@@ -721,6 +725,7 @@ export class XProvider extends SocialAbstract implements SocialProvider {
         ],
       }));
     } catch (err) {
+      failAnalyticsRead(err);
       console.log(err);
     }
     return [];
@@ -733,6 +738,7 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     date: number
   ): Promise<AnalyticsData[]> {
     if (process.env.DISABLE_X_ANALYTICS) {
+      failAnalyticsRead('disabled');
       return [];
     }
 
@@ -810,6 +816,7 @@ export class XProvider extends SocialAbstract implements SocialProvider {
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.log('Error fetching X post analytics:', err);
     }
 

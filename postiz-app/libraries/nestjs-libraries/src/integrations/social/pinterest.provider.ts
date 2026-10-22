@@ -1,3 +1,4 @@
+import { failAnalyticsRead } from '../analytics-read';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -385,6 +386,7 @@ export class PinterestProvider
       const data = await response.json();
 
       if (!data || !data.all) {
+        failAnalyticsRead();
         return [];
       }
 
@@ -429,6 +431,7 @@ export class PinterestProvider
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.error('Error fetching Pinterest post analytics:', err);
       return [];
     }

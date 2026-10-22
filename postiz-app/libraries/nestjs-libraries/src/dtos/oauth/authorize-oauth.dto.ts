@@ -4,7 +4,9 @@ import {
   IsOptional,
   IsString,
   Matches,
+  ValidateBy,
 } from 'class-validator';
+import { parseOAuthScopes } from './oauth-scopes';
 
 export class AuthorizeOAuthQueryDto {
   @IsString()
@@ -20,7 +22,7 @@ export class AuthorizeOAuthQueryDto {
   @IsDefined()
   redirect_uri: string;
 
-  @Matches(/^(accounts:read|posts:write|accounts:read posts:write|posts:write accounts:read)$/)
+  @ValidateBy({ name: 'oauthScopes', validator: { validate: (value) => parseOAuthScopes(value).length > 0 } })
   scope: string;
 
   @IsString()

@@ -1,3 +1,4 @@
+import { failAnalyticsRead } from '../analytics-read';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -562,9 +563,12 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
       )
     ).json();
 
+    if (!Array.isArray(data)) failAnalyticsRead();
     return (
       data?.map((d: any) => ({
         label: capitalize(d.name),
+        seriesType: d.total_value ? 'total_value' as const : 'time_series' as const,
+        summaryType: d.total_value ? 'latest' as const : 'sum' as const,
         data: d.total_value
           ? [{ total: d.total_value.value, date: dayjs().format('YYYY-MM-DD') }]
           : d.values.map((v: any) => ({
@@ -701,6 +705,7 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
         )
       ).json();
 
+      if (!data) failAnalyticsRead();
       if (!data || data.length === 0) {
         return [];
       }
@@ -742,6 +747,7 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.error('Error fetching Threads post analytics:', err);
       return [];
     }

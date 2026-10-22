@@ -2,6 +2,10 @@
 jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 import { createHash } from 'crypto';
 import { OAuthService, getMcpResource } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
+import { OAUTH_SCOPES, parseOAuthScopes } from '../../libraries/nestjs-libraries/src/dtos/oauth/oauth-scopes';
+import { AuthorizeOAuthQueryDto } from '../../libraries/nestjs-libraries/src/dtos/oauth/authorize-oauth.dto';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { createOAuthMiddleware } from '@gitroom/nestjs-libraries/chat/oauth-middleware';
 import { runWithContext } from '@gitroom/nestjs-libraries/chat/async.storage';
@@ -95,6 +99,26 @@ describe('OAuth accounts:read boundary', () => {
     expect(repository.createAuthorization).toHaveBeenCalledWith(expect.objectContaining({
       scope: 'accounts:read', resource: getMcpResource(), redirectUri: request().redirect_uri, codeChallenge: challenge,
     }));
+  });
+  const scopePermutations = (remaining: string[]): string[][] => remaining.flatMap((scope, i) =>
+    [[scope], ...scopePermutations(remaining.filter((_, index) => index !== i)).map((rest) => [scope, ...rest])]);
+  it.each(scopePermutations(OAUTH_SCOPES).map((scopes) => scopes.join(' ')))('preserves exactly the approved scopes through DTO, consent, redemption and lookup: %s', async (scope) => {
+    expect(await validate(plainToInstance(AuthorizeOAuthQueryDto, { ...request(), scope }))).toEqual([]);
+    await service.validateAuthorizationRequest({ ...request(), scope });
+    await service.createAuthorizationCode('app', 'user', 'org', { ...request(), scope });
+    expect(repository.createAuthorization).toHaveBeenCalledWith(expect.objectContaining({ scope }));
+    repository.findByCode.mockResolvedValue({ ...grant(), scope });
+    expect(await service.exchangeCodeForToken(exchange())).toMatchObject({ scope });
+    repository.findByAccessToken.mockResolvedValue({ ...grant(), scope });
+    for (const permission of OAUTH_SCOPES) {
+      const found = await service.getOrgByOAuthToken('pos_token', getMcpResource(), permission);
+      expect(!!found).toBe(parseOAuthScopes(scope).includes(permission));
+    }
+  });
+  it.each(['analytics:read analytics:read', ' analytics:read', 'analytics:read ', 'analytics:read  accounts:read', 'analytics:read\tposts:write', 'analytics:read admin:write', '', null])('rejects malformed/unsupported scopes consistently: %p', async (scope) => {
+    expect(parseOAuthScopes(scope)).toEqual([]);
+    expect(await validate(plainToInstance(AuthorizeOAuthQueryDto, { ...request(), scope }))).not.toEqual([]);
+    await expect(service.validateAuthorizationRequest({ ...request(), scope })).rejects.toThrow();
   });
   it.each([
     { scope: 'accounts:read admin:write' }, { scope: 'accounts:read accounts:read' }, { resource: 'https://other.test' },

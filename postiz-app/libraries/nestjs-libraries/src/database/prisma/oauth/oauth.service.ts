@@ -8,15 +8,8 @@ import { TokenExchangeDto } from '@gitroom/nestjs-libraries/dtos/oauth/token-exc
 
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 
-export const ACCOUNTS_READ_SCOPE = 'accounts:read';
-export const POSTS_WRITE_SCOPE = 'posts:write';
-export const OAUTH_SCOPES = [ACCOUNTS_READ_SCOPE, POSTS_WRITE_SCOPE];
-export const parseOAuthScopes = (scope: unknown): string[] => {
-  if (typeof scope !== 'string') return [];
-  const scopes = scope.split(' ');
-  return scopes.length > 0 && scopes.every((s) => OAUTH_SCOPES.includes(s)) &&
-    new Set(scopes).size === scopes.length ? scopes : [];
-};
+import { OAUTH_SCOPES, parseOAuthScopes } from '../../../dtos/oauth/oauth-scopes';
+export { ACCOUNTS_READ_SCOPE, POSTS_WRITE_SCOPE, ANALYTICS_READ_SCOPE, OAUTH_SCOPES, parseOAuthScopes } from '../../../dtos/oauth/oauth-scopes';
 export const getOAuthIssuer = () =>
   process.env.NEXT_PUBLIC_BACKEND_URL!.replace(/\/$/, '');
 export const getMcpResource = () => `${getOAuthIssuer()}/mcp-oauth`;

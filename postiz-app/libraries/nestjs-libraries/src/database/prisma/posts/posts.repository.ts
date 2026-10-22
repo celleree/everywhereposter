@@ -896,6 +896,32 @@ export class PostsRepository {
     });
   }
 
+  getAnalyticsPost(orgId: string, id: string) {
+    return this._post.model.post.findFirst({
+      where: { id, organizationId: orgId, deletedAt: null, state: 'PUBLISHED',
+        releaseId: { notIn: ['', 'missing'] }, integration: { organizationId: orgId, deletedAt: null, type: 'social' } },
+      select: { id: true, publishDate: true, releaseId: true, integration: true },
+    });
+  }
+
+  async listPublishedPostsForAnalytics(orgId: string, integrationId: string, start: Date, end: Date, cursor?: string) {
+    const where: Prisma.PostWhereInput = { organizationId: orgId, integrationId, state: 'PUBLISHED', deletedAt: null,
+      parentPostId: null, releaseId: { notIn: ['', 'missing'] }, publishDate: { gte: start, lte: end },
+      integration: { organizationId: orgId, deletedAt: null, type: 'social' } };
+    const boundary = cursor ? await this._post.model.post.findFirst({
+      where: { ...where, id: cursor }, select: { id: true, publishDate: true },
+    }) : null;
+    if (cursor && !boundary) throw new Error('Post cursor unavailable in this account and period');
+    return this._post.model.post.findMany({
+      where: { ...where, ...(boundary ? { OR: [
+        { publishDate: { lt: boundary.publishDate } },
+        { publishDate: boundary.publishDate, id: { lt: boundary.id } },
+      ] } : {}) },
+      select: { id: true, publishDate: true, releaseURL: true },
+      orderBy: [{ publishDate: 'desc' }, { id: 'desc' }], take: 21,
+    });
+  }
+
   getPostById(id: string, org?: string) {
     return this._post.model.post.findUnique({
       where: {

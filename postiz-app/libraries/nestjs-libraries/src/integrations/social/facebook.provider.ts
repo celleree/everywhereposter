@@ -1,3 +1,4 @@
+import { failAnalyticsRead, analyticsValue } from '../analytics-read';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -688,6 +689,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     ).json();
 
     if (!Array.isArray(response?.data)) {
+      failAnalyticsRead();
       console.log(
         'Facebook analytics unavailable',
         response?.error || 'Invalid insights response'
@@ -824,6 +826,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         )
       ).json();
 
+      if (!data) failAnalyticsRead();
       if (!data || data.length === 0) {
         return [];
       }
@@ -849,9 +852,10 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
           case 'post_clicks_by_type':
             // This returns an object with click types
             if (typeof value === 'object') {
+              if (!value || Object.keys(value).length === 0) failAnalyticsRead('incomplete_metrics');
               const totalClicks = Object.values(
                 value as Record<string, number>
-              ).reduce((sum: number, v: number) => sum + v, 0);
+              ).reduce((sum: number, v: number) => sum + analyticsValue(v, 0), 0);
               label = 'Clicks by Type';
               total = String(totalClicks);
             }
@@ -859,9 +863,10 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
           case 'post_reactions_by_type_total':
             // This returns an object with reaction types
             if (typeof value === 'object') {
+              if (!value || Object.keys(value).length === 0) failAnalyticsRead('incomplete_metrics');
               const totalReactions = Object.values(
                 value as Record<string, number>
-              ).reduce((sum: number, v: number) => sum + v, 0);
+              ).reduce((sum: number, v: number) => sum + analyticsValue(v, 0), 0);
               label = 'Reactions';
               total = String(totalReactions);
             }
@@ -910,11 +915,13 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
           });
         }
       } catch (err) {
+        failAnalyticsRead(err);
         console.error('Error fetching Facebook post like/comment counts:', err);
       }
 
       return result;
     } catch (err) {
+      failAnalyticsRead(err);
       console.error('Error fetching Facebook post analytics:', err);
       return [];
     }
