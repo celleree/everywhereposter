@@ -4,9 +4,10 @@ import { useContext, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CalendarContext, Integrations } from '../launches/calendar.context';
 import { useIntegrationList } from '../launches/helpers/use.integration.list';
-import { AddProviderButton } from '../launches/add.provider.component';
+import { AddProviderButton, UrlModal } from '../launches/add.provider.component';
 import { storeIntegrationReturnRoute } from '../launches/helpers/integration.return-route';
 import { Menu } from '../launches/menu/menu';
+import { useModals } from '../layout/new-modal';
 import { useUser } from '../layout/user.context';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 
@@ -19,17 +20,18 @@ export function ChannelsComponent() {
   const user = useUser();
   const fetch = useFetch();
   const router = useRouter();
+  const modals = useModals();
   const [issue, setIssue] = useState('');
   const [reconnecting, setReconnecting] = useState('');
   const reload = () => { void mutate(); };
   const enabledCount = channels.filter(channel => !channel.disabled).length;
 
-  const reconnect = (channel: { id: string; identifier: string; internalId: string }) => async () => {
+  const startReconnect = async (channel: { id: string; identifier: string; internalId: string }, externalUrl?: string) => {
     if (reconnecting) return;
     setIssue('');
     setReconnecting(channel.id);
     try {
-      const response = await fetch(`/integrations/social/${encodeURIComponent(channel.identifier)}?refresh=${encodeURIComponent(channel.internalId)}`, { method: 'GET' });
+      const response = await fetch(`/integrations/social/${encodeURIComponent(channel.identifier)}?refresh=${encodeURIComponent(channel.internalId)}${externalUrl ? `&externalUrl=${encodeURIComponent(externalUrl)}` : ''}`, { method: 'GET' });
       const body = response.ok ? await response.json() : null;
       if (!body?.url) throw new Error('Reconnect could not be started. Try again.');
       storeIntegrationReturnRoute('/channels');
@@ -37,6 +39,21 @@ export function ChannelsComponent() {
     } catch {
       setIssue('Reconnect could not be started. Try again.');
     } finally { setReconnecting(''); }
+  };
+
+  const reconnect = (channel: { id: string; identifier: string; internalId: string }) => () => {
+    if (channel.identifier === 'mastodon-custom') {
+      modals.openModal({
+        title: 'Instance URL',
+        withCloseButton: true,
+        children: <UrlModal gotoUrl={(url) => {
+          modals.closeCurrent();
+          void startReconnect(channel, url);
+        }} />,
+      });
+      return;
+    }
+    void startReconnect(channel);
   };
 
   return (
@@ -57,10 +74,10 @@ export function ChannelsComponent() {
                 <div className="min-w-0 flex-1">
                   <h2 className="break-words font-[600]">{channel.name}</h2>
                   <p className="text-[13px] break-words">{channel.identifier} · {channel.display}</p>
-                  <p className="text-[13px]">{channel.refreshNeeded && !channel.isCustomFields ? (channel.isCustomFields ? 'Update credentials in the channel menu' : 'Reconnect required') : channel.inBetweenSteps ? 'Setup incomplete' : channel.disabled ? 'Disabled' : 'Connected'}</p>
+                  <p className="text-[13px]">{channel.refreshNeeded ? (channel.isCustomFields ? 'Update credentials in the channel menu' : 'Reconnect required') : channel.inBetweenSteps ? 'Setup incomplete' : channel.disabled ? 'Disabled' : 'Connected'}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-[8px]">
-                  {channel.refreshNeeded ? (
+                  {channel.refreshNeeded && !channel.isCustomFields ? (
                     <button type="button" className="min-h-[44px] px-[8px]" disabled={!!reconnecting} onClick={reconnect(channel)}>
                       {reconnecting === channel.id ? 'Reconnecting…' : 'Reconnect'}
                     </button>

@@ -1,9 +1,14 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { ChannelsComponent } from '../../apps/frontend/src/components/channels/channels.component';
 
 const mockMutate = jest.fn();
 const mockFetch = jest.fn();
+const mockOpenModal = jest.fn();
+const mockCloseModal = jest.fn();
+jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
+  useModals: () => ({ openModal: mockOpenModal, closeCurrent: mockCloseModal }),
+}));
 let mockChannels: any[] = [];
 let mockError: Error | undefined;
 jest.mock('@gitroom/frontend/components/launches/helpers/use.integration.list', () => ({
@@ -17,11 +22,12 @@ jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({ useFetch: () => mockFe
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }));
 jest.mock('@gitroom/frontend/components/launches/add.provider.component', () => ({
   AddProviderButton: () => <button>Add Channel</button>,
+  UrlModal: () => null,
 }));
 jest.mock('@gitroom/frontend/components/launches/menu/menu', () => ({
   Menu: ({ id, canDisable, canEnable }: any) => <div data-testid={id}>{canDisable ? 'Can disable' : canEnable ? 'Can enable' : 'At limit'}</div>,
 }));
-beforeEach(() => { mockChannels = []; mockError = undefined; mockFetch.mockReset(); mockMutate.mockClear(); });
+beforeEach(() => { mockChannels = []; mockError = undefined; mockFetch.mockReset(); mockMutate.mockClear(); mockOpenModal.mockClear(); mockCloseModal.mockClear(); });
 
 it('shows an empty state and a way to connect the first account', () => {
   render(<ChannelsComponent />);
@@ -62,4 +68,23 @@ it('keeps API-key accounts on their existing credential-update menu instead of O
   expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
   expect(screen.getByTestId('api')).toBeTruthy();
   expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('asks for the Mastodon instance before reconnecting and includes it in the authorization request', async () => {
+  mockChannels = [{ id: 'instance', name: 'My Mastodon', identifier: 'mastodon-custom',
+    internalId: 'provider-instance', refreshNeeded: true }];
+  mockFetch.mockResolvedValue({ ok: false });
+  render(<ChannelsComponent />);
+  fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+  expect(mockFetch).not.toHaveBeenCalled();
+  expect(mockOpenModal).toHaveBeenCalledWith(expect.objectContaining({ title: 'Instance URL' }));
+  await act(async () => {
+    mockOpenModal.mock.calls.at(-1)[0].children.props.gotoUrl('https://social.example.test');
+  });
+  expect(mockFetch).toHaveBeenCalledWith(
+    '/integrations/social/mastodon-custom?refresh=provider-instance&externalUrl=https%3A%2F%2Fsocial.example.test',
+    { method: 'GET' }
+  );
+  expect(mockCloseModal).toHaveBeenCalled();
+  expect((await screen.findByRole('alert')).textContent).toContain('Reconnect could not be started');
 });

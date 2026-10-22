@@ -422,7 +422,7 @@ export const Menu: FC<{
           </div>
           {canDisable &&
             findIntegration?.refreshNeeded &&
-            !findIntegration.customFields && (
+            !findIntegration.customFields && !findIntegration.isCustomFields && (
               <div
                 className="flex gap-[12px] items-center py-[8px] px-[10px]"
                 onClick={refreshChannel(findIntegration!)}
