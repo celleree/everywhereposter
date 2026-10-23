@@ -38,9 +38,17 @@ const tokens = { pos_read: 'accounts:read', pos_write: 'posts:write', pos_both: 
       const names = data.result.tools.map((t) => t.name);
       if (token === 'pos_read') assert.deepEqual(names, ['list_connected_accounts']);
       else {
-        for (const name of ['integrationSchema', 'triggerTool', 'prepare_post', 'publish_post', 'ingest_chatgpt_file']) assert(names.includes(name));
+        for (const name of ['integrationSchema', 'triggerTool', 'prepare_post', 'publish_post', 'ingest_chatgpt_file', 'lemmy_communities']) assert(names.includes(name));
         assert.equal(names.includes('list_connected_accounts'), token === 'pos_both');
+        const tool = (name) => data.result.tools.find((t) => t.name === name);
+        assert.equal(tool('prepare_post').annotations.readOnlyHint, true);
+        assert.equal(tool('prepare_post').annotations.destructiveHint, false);
+        assert.equal(tool('publish_post').annotations.readOnlyHint, false);
+        assert.equal(tool('publish_post').annotations.destructiveHint, true);
+        assert.equal(tool('publish_post').annotations.openWorldHint, true);
+        assert.equal(tool('lemmy_communities').annotations.readOnlyHint, false);
         const file = data.result.tools.find((t) => t.name === 'ingest_chatgpt_file');
+        assert.equal(file.annotations.readOnlyHint, false);
         assert.deepEqual(file._meta['openai/fileParams'], ['file']);
         assert.deepEqual(file.inputSchema.properties.file.required.sort(), ['download_url', 'file_id']);
         assert.deepEqual(Object.keys(file.inputSchema.properties.file.properties).sort(), ['download_url', 'file_id', 'file_name', 'mime_type']);
