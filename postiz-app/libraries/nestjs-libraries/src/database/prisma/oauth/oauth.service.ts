@@ -2,9 +2,10 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { OAuthRepository } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.repository';
 import { CreateOAuthAppDto } from '@gitroom/nestjs-libraries/dtos/oauth/create-oauth-app.dto';
 import { UpdateOAuthAppDto } from '@gitroom/nestjs-libraries/dtos/oauth/update-oauth-app.dto';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { AuthorizeOAuthQueryDto } from '@gitroom/nestjs-libraries/dtos/oauth/authorize-oauth.dto';
 import { TokenExchangeDto } from '@gitroom/nestjs-libraries/dtos/oauth/token-exchange.dto';
+import { RevokeTokenDto } from '@gitroom/nestjs-libraries/dtos/oauth/revoke-token.dto';
 
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 
@@ -21,6 +22,8 @@ export const getOAuthIssuer = () =>
   process.env.NEXT_PUBLIC_BACKEND_URL!.replace(/\/$/, '');
 export const getMcpResource = () => `${getOAuthIssuer()}/mcp-oauth`;
 const TOKEN_LIFETIME_SECONDS = 3600;
+const REFRESH_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
+const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 
 @Injectable()
 export class OAuthService {
@@ -170,11 +173,15 @@ export class OAuthService {
     }
 
     const token = 'pos_' + randomBytes(32).toString('base64url');
+    const refreshToken = 'por_' + randomBytes(32).toString('base64url');
     const redeemed = await this._oauthRepository.exchangeCodeForToken(
       auth,
       encryptedCode,
       AuthService.fixedEncryption(token),
-      new Date(Date.now() + TOKEN_LIFETIME_SECONDS * 1000)
+      new Date(Date.now() + TOKEN_LIFETIME_SECONDS * 1000),
+      { tokenHash: tokenHash(refreshToken), familyId: randomUUID(),
+        expiresAt: new Date(Date.now() + REFRESH_LIFETIME_SECONDS * 1000) },
+      app.clientSecret
     );
     if (redeemed.count !== 1) {
       throw new HttpException(
@@ -184,10 +191,40 @@ export class OAuthService {
     }
     return {
       access_token: token,
+      refresh_token: refreshToken,
       token_type: 'bearer',
       expires_in: TOKEN_LIFETIME_SECONDS,
       scope: auth.scope,
     };
+  }
+
+  async refreshToken(request: TokenExchangeDto) {
+    const app = await this._oauthRepository.getAppByClientId(request.client_id);
+    if (!app || app.clientSecret !== AuthService.fixedEncryption(request.client_secret)) {
+      throw new HttpException({ error: 'invalid_client' }, HttpStatus.UNAUTHORIZED);
+    }
+    const invalidGrant = () => new HttpException({ error: 'invalid_grant' }, HttpStatus.BAD_REQUEST);
+    if (!/^por_[A-Za-z0-9_-]{43}$/.test(request.refresh_token || '')) throw invalidGrant();
+    const refresh = await this._oauthRepository.findByRefreshToken(tokenHash(request.refresh_token!));
+    const auth = refresh?.authorization;
+    if (!auth || auth.oauthAppId !== app.id || auth.revokedAt ||
+        auth.refreshFamilyId !== refresh.familyId || refresh.expiresAt <= new Date() ||
+        auth.resource !== getMcpResource() || !parseOAuthScopes(auth.scope).length ||
+        (request.resource !== undefined && request.resource !== auth.resource)) throw invalidGrant();
+    const scope = request.scope === undefined ? auth.scope! : request.scope;
+    if (!parseOAuthScopes(scope).length ||
+        parseOAuthScopes(scope).some((s) => !parseOAuthScopes(auth.scope).includes(s))) {
+      throw new HttpException({ error: 'invalid_scope' }, HttpStatus.BAD_REQUEST);
+    }
+    const accessToken = 'pos_' + randomBytes(32).toString('base64url');
+    const refreshToken = 'por_' + randomBytes(32).toString('base64url');
+    const rotated = await this._oauthRepository.rotateRefreshToken(refresh, {
+      tokenHash: tokenHash(refreshToken), accessToken: AuthService.fixedEncryption(accessToken),
+      tokenExpiresAt: new Date(Date.now() + TOKEN_LIFETIME_SECONDS * 1000), scope,
+    }, app.clientSecret);
+    if (!rotated) throw invalidGrant();
+    return { access_token: accessToken, refresh_token: refreshToken,
+      token_type: 'bearer', expires_in: TOKEN_LIFETIME_SECONDS, scope };
   }
 
   async getOrgByOAuthToken(token: string, resource: string, scope?: string) {
@@ -222,6 +259,16 @@ export class OAuthService {
 
   async getApprovedApps(userId: string) {
     return this._oauthRepository.getApprovedApps(userId);
+  }
+
+  async revokeToken(request: RevokeTokenDto) {
+    const app = await this._oauthRepository.getAppByClientId(request.client_id);
+    if (!app || app.clientSecret !== AuthService.fixedEncryption(request.client_secret)) {
+      throw new HttpException({ error: 'invalid_client' }, HttpStatus.UNAUTHORIZED);
+    }
+    // RFC 7009: unknown tokens and tokens belonging to another client are no-ops.
+    await this._oauthRepository.revokeToken(app.id, tokenHash(request.token),
+      AuthService.fixedEncryption(request.token));
   }
 
   async revokeApp(userId: string, authId: string) {

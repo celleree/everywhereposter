@@ -61,9 +61,11 @@ describe('public OAuth discovery and issuer callbacks', () => {
       expect(await response.json()).toEqual({
         issuer, authorization_response_iss_parameter_supported: true,
         authorization_endpoint: `${origin}/oauth/authorize`, token_endpoint: `${issuer}/oauth/token`,
-        response_types_supported: ['code'], grant_types_supported: ['authorization_code'],
+        response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'],
         code_challenge_methods_supported: ['S256'], scopes_supported: ['accounts:read', 'posts:write'],
         token_endpoint_auth_methods_supported: ['client_secret_post'],
+        revocation_endpoint: `${issuer}/oauth/revoke`,
+        revocation_endpoint_auth_methods_supported: ['client_secret_post'],
       });
     }
   );
