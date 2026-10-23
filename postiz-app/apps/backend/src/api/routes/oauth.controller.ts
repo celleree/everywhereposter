@@ -8,6 +8,10 @@ import {
   HttpStatus,
   Post,
   Query,
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  UseFilters,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { getOAuthIssuer, OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
@@ -16,11 +20,35 @@ import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.reque
 import { User, Organization } from '@prisma/client';
 import { AuthorizeOAuthQueryDto, ApproveOAuthDto } from '@gitroom/nestjs-libraries/dtos/oauth/authorize-oauth.dto';
 import { TokenExchangeDto } from '@gitroom/nestjs-libraries/dtos/oauth/token-exchange.dto';
+import { RevokeTokenDto } from '@gitroom/nestjs-libraries/dtos/oauth/revoke-token.dto';
+
+@Catch(HttpException)
+class OAuthTokenExceptionFilter implements ExceptionFilter {
+  catch(exception: HttpException, host: ArgumentsHost) {
+    const response = host.switchToHttp().getResponse();
+    const body = exception.getResponse();
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('Pragma', 'no-cache');
+    response.status(exception.getStatus()).json(
+      typeof body === 'object' && 'error' in body && typeof body.error === 'string' &&
+        ['invalid_client', 'invalid_grant', 'invalid_scope', 'unsupported_grant_type'].includes(body.error)
+        ? { error: body.error } : { error: 'invalid_request' }
+    );
+  }
+}
 
 @ApiTags('OAuth')
 @Controller('/oauth')
 export class OAuthController {
   constructor(private _oauthService: OAuthService) {}
+
+  @Post('/revoke')
+  @UseFilters(OAuthTokenExceptionFilter)
+  @HttpCode(HttpStatus.OK)
+  @Header('Cache-Control', 'no-store')
+  async revoke(@Body() body: RevokeTokenDto) {
+    await this._oauthService.revokeToken(body);
+  }
 
   @Get('/authorize')
   async authorize(@Query() query: AuthorizeOAuthQueryDto) {
@@ -41,10 +69,14 @@ export class OAuthController {
   }
 
   @Post('/token')
+  @UseFilters(OAuthTokenExceptionFilter)
   @HttpCode(HttpStatus.OK)
   @Header('Cache-Control', 'no-store')
   @Header('Pragma', 'no-cache')
   async token(@Body() body: TokenExchangeDto) {
+    if (body.grant_type === 'refresh_token') {
+      return this._oauthService.refreshToken(body);
+    }
     if (body.grant_type !== 'authorization_code') {
       throw new HttpException(
         { error: 'unsupported_grant_type' },
