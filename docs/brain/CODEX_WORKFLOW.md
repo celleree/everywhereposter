@@ -44,17 +44,7 @@ Do not infer that a merged repository change is deployed, that external provider
 
 ## ChatGPT-managed checkpoints
 
-For bounded work being coordinated manually through ChatGPT, use these checkpoints instead of one giant prompt:
-
-1. Investigation/plan only; no edits yet.
-2. Return the plan to ChatGPT for scope and architecture review.
-3. Continue the same implementation session to make only the approved changes.
-4. Use a fresh independent Codex session for review when review is required.
-5. Send verified findings back to the original implementation session for repair.
-6. Re-run focused verification after repairs.
-7. If the reviewed HEAD changed, obtain a fresh exact-SHA review when required. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
-
-Simple low-risk mechanical changes may combine planning and implementation when there is no meaningful design decision or review benefit from a separate checkpoint.
+Follow the [ChatGPT/Codex implementation cycle](CHATGPT_CODEX_HANDOFF.md#chatgpt-managed-implementation-cycle) for manual handoffs. It owns checkpoint order, final pushed-HEAD identity, matching CI before independent review, and repair verification. Continue already-authorized bounded implementation in the same session; resolve only missing decisions or actions outside authorization. Preserve every existing merge, deployment, and production gate.
 
 ## Review depth
 

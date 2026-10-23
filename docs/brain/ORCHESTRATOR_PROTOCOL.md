@@ -1,6 +1,6 @@
 # Root Orchestrator Protocol
 
-Updated: 2026-09-14
+Updated: 2026-10-23
 
 ## Purpose
 
@@ -8,52 +8,23 @@ Define the default hands-off coordination loop for EverywherePoster when a long-
 
 Automatic merge is authorized only for pull requests bounded to `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md` and only under the five conditions below. Production deployment and all merges outside that roadmap remain explicit human gates.
 
-## Recommended root route
+## Model and reasoning routing
 
-- Primary: GPT-6 Astra / High
-- Fallback: GPT-5.6 Sol / High when Astra is unavailable
-- Local worker: `qwen3:8b` through Ollama under the Codex `--oss` harness for cheap, bounded, low-risk work
-- Default non-local implementation worker: GPT-5.6 Terra / Medium
-- Mechanical cloud worker: GPT-5.6 Luna / Low or Medium
-- Independent reviewer: GPT-5.6 Sol / High
-- Escalate difficult architecture, repeated failures, high-risk root-cause work, or large-context integration decisions to GPT-6 Astra / High
+Permitted coding-agent model IDs:
 
-Choose model and reasoning separately. Optimize for the lowest expected total cost of a correct verified result, including retries and rework.
+- `gpt-6-luna`: lighter inspection, extraction, mechanical work, and bounded evidence reporting.
+- `gpt-6.1-sol`: ordinary coding, coordination, debugging, and independent review.
+- `gpt-6-astra`: only when the permitted smaller models cannot adequately handle the task.
 
-### Local worker routing
+Choose model and reasoning separately. Preserve the configured model and effort unless the user authorizes a change; these role recommendations do not switch a running session. Verify current supported options before recommending a different setting. Do not guess pricing or availability. If a configured model is outside this allowlist, resolve the conflict before launching another agent.
 
-Use `qwen3:8b` first when the task is narrowly bounded and low risk, especially for:
-
-- repository inspection and targeted file reading;
-- extraction, classification, and summarization;
-- simple documentation edits;
-- repetitive or mechanical edits;
-- straightforward tests and test updates;
-- very bounded low-risk code changes with clear acceptance criteria.
-
-Run it through the local Ollama-backed Codex harness, for example:
-
-`codex --oss -m qwen3:8b`
-
-Escalate from the local worker to Terra / Medium when:
-
-- implementation contains meaningful business or application logic;
-- scope grows beyond the original bounded contract;
-- requirements or root cause are ambiguous;
-- local verification fails;
-- the local worker struggles, stalls, or produces low-confidence output.
-
-Do not use the local worker as the final independent reviewer or for architecture, authentication/security, database migrations, deployment/infrastructure decisions, destructive operations, or other high-risk work.
-
-The local worker is an optional lowest-cost tier, not a requirement. If Ollama or the local model is unavailable, route directly to the appropriate cloud worker instead of blocking the task.
+Record observed model, effort, elapsed time, rework, and usage when available; leave unknown values unknown. Do not retry a failed configuration unchanged without new evidence. Model choice never replaces fresh reviewer context or a safety/release gate.
 
 ## Bounded release coordinator
 
 After bounded implementation, use the [release-coordinator lifecycle](../GITHUB-HOSTED-DEPLOYMENT.md#bounded-release-coordinator-lifecycle) to coordinate commit/push, PR, CI, exact-HEAD independent review, and subsequent release gates. It owns release transitions; this protocol retains implementation/review roles and existing human gates.
 
-- GPT-6 Luna: routine evidence checking, polling/waiting, deterministic release coordination, and concise reporting.
-- GPT-6.1 Sol: ambiguous failures or substantive diagnosis/repair; escalation itself does not authorize repair.
-- GPT-6 Astra: unusually complex/high-risk architecture or repeated-failure situations.
+Apply the model and effort policy above to release coordination. Routine evidence checking and reporting can use the lighter route; substantive diagnosis follows the ordinary coding route. Escalation itself does not authorize repair.
 
 Model names are routing guidance, not safety mechanisms. Repository gates and matching live evidence remain authoritative. The release coordinator cannot replace the independent reviewer, general merge approval, or production approval. The roadmap-specific merge exception below remains narrowly scoped.
 
@@ -108,7 +79,7 @@ Do not recursively load all repository docs, old PRs, or Git history.
 For each task:
 
 1. Define a narrow task contract with objective, scope, explicit exclusions, verification, and return format.
-2. Choose the cheapest model/reasoning combination likely to complete it correctly.
+2. Apply the model and reasoning policy above while preserving the configured session settings.
 3. Create an isolated WSL-native branch/worktree from current `main` with START provenance.
 4. Dispatch one implementation worker by default.
 5. Let the worker investigate and implement only the approved bounded scope.
@@ -178,9 +149,9 @@ Do not use parallel implementation for authentication, security, migrations, des
 Do not repeat the same failed approach without new evidence.
 
 - First failure: inspect the failure evidence and make the smallest bounded correction.
-- Repeated failure or ambiguous root cause: escalate reasoning/model strength before widening scope.
+- Repeated failure or ambiguous root cause: reassess the evidence and approach; recommend a model/effort change only under the policy above.
 - Two failed automated attempts on the same task should trigger root reassessment rather than blind retry.
-- Cross-phase architectural conflicts, repeated verification failure, or expensive-to-get-wrong infrastructure decisions should escalate to Astra / High.
+- Use `gpt-6-astra` only when the permitted smaller models cannot adequately handle the task and the model change is authorized.
 
 ## Bound coordination cost
 
@@ -266,14 +237,4 @@ The GitHub unattended queue may remain more restrictive than the local root orch
 
 ## Current deployment-performance roadmap
 
-For `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`:
-
-- Phase 0 is complete.
-- Phase 1A is complete via PR #100.
-- Phase 1B is complete via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). The same already-running image was redeployed with pruning disabled and no pending or applied migrations; this was not a cold-pull measurement.
-- Phase 4's excluded-Markdown classifier change is repository-complete via PR #103.
-- The planned Phase 2 patch remains blocked by the prior pre-edit automatic approval review; the merge exception above does not itself authorize that rejected action.
-- Phase 3 read-only analysis is complete; implementation waits for a settled Phase 2 image and representative measurements.
-- Phase 5 bounded readiness work is underway from initial startup evidence: frontend readiness appeared about 31.5s after container start, while orchestrator Nest startup appeared about 50.9s after start. The fixed 45s process check can precede all managed-process startup and does not establish full application readiness. Existing frontend and orchestrator health routes returned HTTP 200 after deployment.
-- Phase 6 benchmark preparation is complete; final measurements remain pending.
-- Do not redo Phase 0 unless new evidence materially contradicts the recorded baseline.
+Use [CURRENT_WORK.md](CURRENT_WORK.md#3-ci--docker--hetzner-deployment-performance--repository-checkpoint) for the dated repository checkpoint and [DEPLOYMENT_PERFORMANCE_ROADMAP.md](DEPLOYMENT_PERFORMANCE_ROADMAP.md) for historical measurements and phase acceptance criteria. Recheck the referenced live Issues/PRs before choosing remaining work. This protocol does not duplicate phase status or turn an old blocker or measurement into current evidence.
