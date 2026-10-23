@@ -172,6 +172,39 @@ class QuietBlockContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'UNSAFE_NATIVE_TIMELINE'):
                 audit(edit, self.policy)
 
+    def test_output_timing_rejects_unknown_metadata_and_direct_av_drift(self):
+        audit = functions['audit']
+        original_probe = audit.__globals__['probe']
+        with tempfile.TemporaryDirectory() as folder:
+            edit = Path(folder)
+            (edit/'safe-cuts.json').write_text('[[1,2]]')
+            (edit/'decisions.json').write_text('[{"start":0,"end":1},{"start":2,"end":10}]')
+            def metadata(audio=9, video=9):
+                return dict(streams=[dict(codec_type='video', start_time='0', duration=str(video)),
+                    dict(codec_type='audio', start_time='0', duration=str(audio), sample_rate='48000')])
+            try:
+                # Keep ordinary frame/AAC rounding within the existing 45ms tolerance.
+                for meta in [metadata(), metadata(audio=9.02, video=8.98)]:
+                    audit.__globals__['probe'] = lambda _, result=meta: result
+                    audit(edit, self.policy)
+                invalid = [metadata(audio=9.042, video=8.958)]
+                for stream in (0, 1):
+                    for field in ('start_time', 'duration'):
+                        for value in ('NaN', 'Infinity', '-Infinity', 'N/A', None):
+                            meta = metadata(); meta['streams'][stream][field] = value
+                            invalid.append(meta)
+                        meta = metadata(); del meta['streams'][stream][field]
+                        invalid.append(meta)
+                for rate in ('0', '-48000', 'N/A', None):
+                    meta = metadata(); meta['streams'][1]['sample_rate'] = rate
+                    invalid.append(meta)
+                for meta in invalid:
+                    with self.subTest(metadata=meta), self.assertRaisesRegex(ValueError, 'INVALID_OUTPUT_SYNC'):
+                        audit.__globals__['probe'] = lambda _, result=meta: result
+                        audit(edit, self.policy)
+            finally:
+                audit.__globals__['probe'] = original_probe
+
 
 if __name__ == '__main__':
     unittest.main()
