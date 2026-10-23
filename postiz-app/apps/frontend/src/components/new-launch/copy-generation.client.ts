@@ -10,6 +10,7 @@ import type {
 import type { GenerateMediaCopyResponse } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
 
 export interface MediaCopyGenerationRequest {
+  requestKey?: string;
   mediaId: string;
   platforms: CopyPlatform[];
   captionMode?: CaptionMode;
@@ -178,6 +179,17 @@ export const requestMediaCopyGeneration = async (
   onStage?: CopyGenerationStageHandler,
   signal?: AbortSignal
 ) => {
+  // Keep the same operation after an interrupted/partial stream. Store only a
+  // fingerprint and opaque key, never source content. Unsupported storage fails
+  // before a Launch provider call; the server requires a stable request key.
+  let pendingStorageKey: string | undefined;
+  if (!body.requestKey && typeof window !== 'undefined' && globalThis.crypto?.subtle) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(body)));
+    pendingStorageKey = `guided-copy:${Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')}`;
+    const requestKey = localStorage.getItem(pendingStorageKey) || crypto.randomUUID();
+    localStorage.setItem(pendingStorageKey, requestKey);
+    body = { ...body, requestKey };
+  }
   const request = await fetch('/posts/copy/generate', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -199,7 +211,9 @@ export const requestMediaCopyGeneration = async (
     );
   }
 
-  return parseCopyGenerationStream(request, onStage);
+  const result = await parseCopyGenerationStream(request, onStage);
+  if (pendingStorageKey && result.status === 'complete') localStorage.removeItem(pendingStorageKey);
+  return result;
 };
 
 export const requestMediaCopyGenerationForDestinations = async <

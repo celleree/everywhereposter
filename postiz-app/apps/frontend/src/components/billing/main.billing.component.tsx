@@ -11,7 +11,7 @@ import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import dayjs from 'dayjs';
 import clsx from 'clsx';
-import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
+import { pricing, LAUNCH_PLAN, purchasePlans } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { FAQComponent } from '@gitroom/frontend/components/billing/faq.component';
 import { useSWRConfig } from 'swr';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
@@ -77,11 +77,12 @@ export const Prorate: FC<{
   );
 };
 export const Features: FC<{
-  pack: 'FREE' | 'STANDARD' | 'PRO';
+  pack: 'FREE' | 'STANDARD' | 'PRO' | 'LAUNCH_V1';
 }> = (props) => {
   const { pack } = props;
   const features = useMemo(() => {
     const currentPricing = pricing[pack];
+    if (pack === LAUNCH_PLAN) return ['Unlimited connected accounts', 'Unlimited publishing and scheduling', 'One user', 'AI uses a separate prepaid balance'];
     const channelsOr = currentPricing.channel;
     const list = [];
     list.push(`${channelsOr} ${channelsOr === 1 ? 'channel' : 'channels'}`);
@@ -453,14 +454,13 @@ export const MainBillingComponent: FC<{
 
       {finishTrial && <FinishTrial close={() => setFinishTrial(false)} />}
       <div className="flex gap-[16px] [@media(max-width:1024px)]:flex-col [@media(max-width:1024px)]:text-center">
-        {Object.entries(pricing)
-          .filter((f) => !isGeneral || f[0] !== 'FREE')
+        {purchasePlans(subscription?.subscriptionTier)
           .map(([name, values]) => (
             <div
               key={name}
               className="flex-1 bg-sixth border border-customColor6 rounded-[4px] p-[24px] gap-[16px] flex flex-col [@media(max-width:1024px)]:items-center"
             >
-              <div className="text-[18px]">{name}</div>
+              <div className="text-[18px]">{name === LAUNCH_PLAN ? 'Launch' : name}</div>
               <div className="text-[38px] flex gap-[2px] items-center">
                 <div>
                   $

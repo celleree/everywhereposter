@@ -104,6 +104,19 @@ jobs:
           DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
         run: pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
 
+      - name: Prepare isolated prepaid wallet database
+        env:
+          DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
+        run: |
+          docker exec "${{ job.services.publication-fixtures.id }}" createdb -U isolated ep_ai_wallet_test
+          pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
+
+      - name: Test prepaid wallet transactions against PostgreSQL
+        env:
+          AI_WALLET_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
+          LAUNCH_ENTITLEMENT_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
+        run: pnpm exec jest --config jest.ai-wallet.config.cjs --runInBand
+
       - name: Verify default Jest configuration loads
         run: |
           node -e "require('./jest.preset.js')"
@@ -128,6 +141,11 @@ jobs:
           EP_FACEBOOK_BROWSER: '1'
           EP_SUBMISSION_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
         run: pnpm run test:browser:ci
+
+      - name: Test isolated prepaid wallet presentation
+        env:
+          EP_WALLET_BROWSER: '1'
+        run: pnpm exec playwright test prepaid-wallet.spec.ts --project=phone-chromium
 
       - name: Run isolated Business Discovery Chromium regressions
         env:
@@ -193,6 +211,12 @@ jobs:
 
       - name: Type-check orchestrator
         run: pnpm exec tsc -p apps/orchestrator/tsconfig.build.json --noEmit
+
+      - name: Test Stripe billing activation boundary
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/stripe.billing-activation.spec.ts tests/copy-generation/stripe.entitlement-reconciliation.spec.ts
+
+      - name: Test image credit billing boundary
+        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/media.service.image-credits.spec.ts
 
       - name: Test video media acquisition
         run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand tests/copy-generation/video-media-file.spec.ts

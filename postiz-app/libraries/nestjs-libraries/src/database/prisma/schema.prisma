@@ -9,6 +9,7 @@ datasource db {
 }
 
 model Organization {
+  aiWallet AiWallet?
   uploadSessions VideoUploadSession[]
   quickUploadIntents QuickUploadIntent[]
   id                  String               @id @default(uuid())
@@ -414,6 +415,7 @@ model Integration {
   type                  String
   token                 String
   disabled              Boolean                @default(false)
+  disabledByBilling     Boolean                @default(false)
   tokenExpiration       DateTime?
   refreshToken          String?
   profile               String?
@@ -1188,6 +1190,7 @@ enum State {
 }
 
 enum SubscriptionTier {
+  LAUNCH_V1
   STANDARD
   PRO
   TEAM
@@ -1333,4 +1336,182 @@ model QuickUploadIntent {
   organization    Organization @relation(fields: [organizationId], references: [id])
 
   @@index([dispatched, createdAt])
+}
+
+
+enum AiWalletStatus {
+  ACTIVE
+  REVIEW
+}
+
+enum AiWalletReservationState {
+  RESERVED
+  DISPATCHED
+  UNKNOWN
+  SETTLED
+  RELEASED
+}
+
+enum AiWalletLedgerKind {
+  FUNDING
+  USAGE
+  REVERSAL
+}
+
+model AiWallet {
+  organizationId String @id
+  balanceNanos BigInt @default(0)
+  heldNanos BigInt @default(0)
+  status AiWalletStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id])
+  reservations AiWalletReservation[]
+  ledger AiWalletLedger[]
+  topups AiWalletTopup[]
+  refundRequests AiWalletRefundRequest[]
+  refundEvents AiWalletRefundEvent[]
+}
+
+model AiWalletReservation {
+  id String @id @default(uuid())
+  organizationId String
+  operationKey String
+  provider String
+  model String
+  ceilingNanos BigInt
+  reportedNanos BigInt?
+  chargedNanos BigInt?
+  quoteSnapshot Json?
+  quoteFingerprint String?
+  usageSnapshot Json?
+  usageFingerprint String?
+  resultFingerprint String?
+  textResult AiTextResult?
+  state AiWalletReservationState @default(RESERVED)
+  providerRequestId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
+  ledger AiWalletLedger?
+  @@unique([organizationId, operationKey])
+  @@unique([id, organizationId])
+  @@unique([provider, providerRequestId])
+  @@index([organizationId, state])
+}
+
+model AiWalletLedger {
+  id String @id @default(uuid())
+  organizationId String
+  externalKey String @unique
+  kind AiWalletLedgerKind
+  amountNanos BigInt
+  reservationId String? @unique
+  topupId String? @unique
+  refundRequestId String? @unique
+  refundRequest AiWalletRefundRequest? @relation(fields: [refundRequestId, organizationId], references: [id, organizationId])
+  createdAt DateTime @default(now())
+  wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
+  reservation AiWalletReservation? @relation(fields: [reservationId, organizationId], references: [id, organizationId])
+  topup AiWalletTopup? @relation(fields: [topupId, organizationId], references: [id, organizationId])
+  @@index([organizationId, createdAt])
+  @@unique([refundRequestId, organizationId])
+  @@unique([reservationId, organizationId])
+  @@unique([topupId, organizationId])
+}
+
+model AiWalletTopup {
+  id String @id @default(uuid())
+  organizationId String
+  operationKey String
+  customerId String
+  amountCents Int
+  currency String
+  sessionId String? @unique
+  paymentId String? @unique
+  fundedAt DateTime?
+  createdAt DateTime @default(now())
+  wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
+  ledger AiWalletLedger?
+  events AiWalletPaymentEvent[]
+  refundReconciliation AiWalletRefundReconciliation?
+  @@unique([organizationId, operationKey])
+  @@unique([id, organizationId])
+}
+
+model AiWalletPaymentEvent {
+  eventId String @id
+  topupId String
+  organizationId String
+  fingerprint String
+  credited Boolean
+  createdAt DateTime @default(now())
+  topup AiWalletTopup @relation(fields: [topupId, organizationId], references: [id, organizationId])
+}
+
+// Recoverable business output; financial metadata retains only its fingerprint.
+model AiTextResult {
+  reservationId String @id
+  output Json
+  reservation AiWalletReservation @relation(fields: [reservationId], references: [id])
+}
+
+enum AiWalletRefundRequestStatus {
+  REQUESTED
+  WITHDRAWN
+  REJECTED
+  REFUNDED
+}
+
+// Review holds; only the default-off test reconciliation can mark REFUNDED.
+model AiWalletRefundRequest {
+  id String @id @default(uuid())
+  organizationId String
+  operationKey String
+  requestedByUserId String
+  requestedNanos BigInt
+  createdAt DateTime @default(now())
+  status AiWalletRefundRequestStatus @default(REQUESTED)
+  resolvedByUserId String?
+  resolvedAt DateTime?
+  wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
+  reconciliation AiWalletRefundReconciliation?
+  reversal AiWalletLedger?
+  @@unique([id, organizationId])
+  @@unique([organizationId, operationKey])
+  @@index([organizationId, createdAt])
+  @@index([status, createdAt, id])
+}
+
+// Synthetic/test mode only. No provider execution authority or live policy approval.
+model AiWalletRefundReconciliation {
+  requestId String @id
+  organizationId String
+  topupId String @unique
+  paymentId String @unique
+  chargeId String @unique
+  refundId String @unique
+  amountCents Int
+  currency String
+  reviewedByUserId String
+  reviewedAt DateTime @default(now())
+  state String @default("PENDING")
+  request AiWalletRefundRequest @relation(fields: [requestId, organizationId], references: [id, organizationId])
+  topup AiWalletTopup @relation(fields: [topupId, organizationId], references: [id, organizationId])
+  @@unique([requestId, organizationId])
+  @@unique([topupId, organizationId])
+}
+
+// Append-only audit: intentionally keeps normalized financial evidence, no raw payload.
+model AiWalletRefundEvent {
+  eventId String @id
+  organizationId String?
+  paymentId String?
+  fingerprint String
+  evidence Json
+  outcome String
+  createdAt DateTime @default(now())
+  wallet AiWallet? @relation(fields: [organizationId], references: [organizationId])
+  @@index([organizationId, createdAt])
+  @@index([paymentId])
 }
