@@ -1,6 +1,6 @@
 # Current Work
 
-Updated: 2026-10-17
+Updated: 2026-10-23
 
 Use this file when the user asks to continue the project, continue a roadmap, decide what to do next, or coordinate work across multiple EverywherePoster workstreams. Do not load it for a narrow bug with an already-named issue or file unless the current priority matters.
 
@@ -14,11 +14,17 @@ Get EverywherePoster to a safe early paid launch with the core repurposing/publi
 
 ## Priority workstreams
 
-### User-requested engineering priority — Video Editor completion
+### Agent context consistency — bounded remediation
 
-Continue the existing PR #214 integration; the user reactivated completion on October 17. Phase 1 performs local FFmpeg pause editing, creates a separate ordinary organization media item and hands it to the composer. It makes no paid model/transcription call and adds no schema, queue or worker. See `docs/VIDEO-EDITOR-BACKEND.md` for the implemented limits and runtime contract.
+The current documentation repair reconciles assistant entry instructions, subsystem routing, model guidance, and stale checkpoints. Remaining work is separate: immutable candidate review and review receipts; context-validation/recovery checks; dispatch-CI identity and runner diagnosis; approved-path and validation-evidence safeguards before any unattended write activation. Documentation changes do not establish those executable protections or authorize their activation.
 
-Preserve the paused billing candidate. Current editor eligibility inherits the existing Create/AI guard: with the Stripe publishable key absent, all authenticated organization roles are eligible; it is not an internal-only gate or payment-status check. Capacity and acceptance evidence, current-main integration, matching CI and fresh exact-HEAD review remain release gates. Ordinary reviewed safe releases are authorized through October 19 Pacific; genuinely major infrastructure, business-policy, credential or spending changes still need a scoped decision.
+### Video Editor — integration merged; design checkpoint separate
+
+Verified against GitHub on 2026-10-23: [PR #214](https://github.com/celleree/everywhereposter/pull/214) merged on October 17. Do not reopen it as an unfinished integration. Use [VIDEO-EDITOR-BACKEND.md](../VIDEO-EDITOR-BACKEND.md) and current code/tests for implemented behavior.
+
+[PR #251](https://github.com/celleree/everywhereposter/pull/251) remains an open draft design preview; its description records a visual-feedback checkpoint and paused production integration. Recheck that PR's current evidence and user direction before resuming its implementation. Preserve the separate paused billing candidate and existing entitlement behavior.
+
+The previous ordinary-release authorization expired on October 19 Pacific. It is historical evidence, not current permission. A new release must have applicable current authorization; this checkpoint grants none.
 
 ### 1. External platform verification — ACTIVE
 
@@ -40,33 +46,18 @@ Before calling the product launch-ready or recommending that paid acquisition be
 
 Do not turn launch-readiness work into broad cleanup. Fix only blockers that materially affect launch.
 
-### 3. CI / Docker / Hetzner deployment performance — ACTIVE
+### 3. CI / Docker / Hetzner deployment performance — REPOSITORY CHECKPOINT
 
-Canonical roadmap: `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`.
+Verified on 2026-10-23 against GitHub and repository sources:
 
-The current pipeline is much slower than the TRA/Vercel workflow because EverywherePoster performs full GitHub Actions validation, Docker packaging/cache export, GHCR transfer, image extraction, and container startup work.
+- [Issue #15](https://github.com/celleree/everywhereposter/issues/15), the production runtime image, is closed. Both image-build workflows use `postiz-app/Dockerfile.production`.
+- [Issue #16](https://github.com/celleree/everywhereposter/issues/16), removing automatic Prisma db push from routine startup, is closed. The operating manual owns explicit schema preparation and migration procedures.
+- [Issue #18](https://github.com/celleree/everywhereposter/issues/18), application health checks, is closed. Existing readiness entry points are listed in [REPOSITORY_ROUTING.md](REPOSITORY_ROUTING.md#deployment-docker-ci-and-production-operations).
+- [Issue #17](https://github.com/celleree/everywhereposter/issues/17), Temporal persistence/backup work, remains open; selecting it requires its own bounded operational plan and applicable approvals.
 
-Current checkpoint:
+[DEPLOYMENT_PERFORMANCE_ROADMAP.md](DEPLOYMENT_PERFORMANCE_ROADMAP.md) retains historical measurements and phase acceptance criteria. Old repair/blocker descriptions and timings are not current task status or evidence of current performance. Verify remaining benchmark/cache work before selecting it; do not repeat Phase 0 without contradictory new evidence.
 
-- Phase 0 baseline / dependency graph — COMPLETE.
-- Phase 1A — COMPLETE via PR #100. PR CI fell from the 13m46s–13m55s baseline to 10m05s on the measured post-change run, with 3m56s of actual quality/Docker overlap (about 27% faster).
-- Phase 1B — COMPLETE via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). The deploy script measured 56s total at whole-second resolution: pull 2s, runtime-image preparation 0s, migration 3s, recreate 3s, fixed wait 45s, container verification 0s, and proxy reload 3s. The full workflow took 91s.
-- Controlled runtime/public smoke — LIMITED PASS: Nginx-proxied backend `/api/`, frontend `/auth/login`, and orchestrator `/health/status` returned HTTP 200; the orchestrator response was `{"status":"ok"}`. A fresh anonymous browser context rendered `/auth/login` with the expected title and login controls. One React hydration error #418 appeared; authenticated login, form submission, and publishing were not tested.
-- Phase 4 — REPOSITORY COMPLETE via PR #103 for the bounded excluded-Markdown classifier change; no production timing claim is attached to it.
-- Phase 2 — CI STORAGE REPAIR UNDERWAY: required CI run [34915195225](https://github.com/celleree/everywhereposter/actions/runs/34915195225) failed during Docker image loading when the hosted runner exhausted its disk. The local runtime build/verifier and independent exact-head review passed, but they do not replace required CI. Merge and production adoption remain gated; Phase 3 still waits for the settled image.
-- Phase 3 — READ-ONLY ANALYSIS COMPLETE: implementation waits for a settled Phase 2 image and representative post-Phase-2 measurements.
-- Phase 5 — REPOSITORY COMPLETE; COMBINED DEPLOYMENT VALIDATION PENDING. Phase 5A internal readiness was production-verified via PR #105/run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122). Phase 5B bounded public retry/backoff merged via PR #108 (merge `a4cd3c16e63729d5afb65d8a7b6e6efb16109a11`; reviewed head `a1386c62d93f88ab62250eadb120679517f10b80`). Exact-head CI run [34915571174](https://github.com/celleree/everywhereposter/actions/runs/34915571174) passed, and a merged-helper live probe returned HTTP 307 on attempt 1 in 1s. No deployment ran after PR #108, so the combined internal/public workflow stage still requires a separately approved production validation.
-- Phase 6 — PARTIAL: docs-only PR #104 run [34912004960](https://github.com/celleree/everywhereposter/actions/runs/34912004960) completed in 313s with a 285s active critical path and skipped Docker validation/package work. This single observation does not establish causal speedup or complete the representative matrix.
-- Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
-
-Remaining roadmap:
-
-1. Phase 2 — complete and verify the production multi-stage runtime image under Issue #15.
-2. Phase 3 — optimize BuildKit/pnpm caching against the settled Phase 2 image and measurements.
-3. Phase 5 — run a separately approved production validation of the combined internal and public readiness path under Issue #18.
-4. Phase 6 — finish the representative frontend, backend, dependency, Docker, and config benchmark matrix and update operating documentation to verified behavior.
-
-Preserve the GitHub -> GHCR -> Hetzner architecture unless a separately approved architecture decision changes it.
+Use [OPERATING-MANUAL.md](../../OPERATING-MANUAL.md) for current procedures and [RELEASE-LEDGER.md](../RELEASE-LEDGER.md) for recorded release evidence. Closed issues and implemented scripts do not prove current production or feature acceptance. Preserve the GitHub -> GHCR -> Hetzner architecture unless separately approved.
 
 ### 4. TRA-quality media intelligence and image generation — PLANNED
 
@@ -91,34 +82,19 @@ Create a bounded issue/plan before runtime implementation.
 
 Do not automatically prioritize these above provider verification or release blockers; assess whether each one is required for the intended launch slice.
 
-## Recently completed repository work
+## Repository completion and release evidence
 
-- PR #93 — public Terms/Privacy links from signup for reviewer access.
-- PR #94 — Docker dependency-install cache layering.
-- PR #95 — production deploy path uses the verified `noreply@everywhereposter.com` sender and checks the container value.
-- PR #96 — agent grounding/current-work system.
-- PR #97 — deployment-performance roadmap.
-- Deployment-performance Phase 0 — completed as an audit-only checkpoint with no repository or production changes.
-- PR #100 — Phase 1A parallel PR Docker validation, measured at 10m05s versus the 13m46s–13m55s baseline.
-- PR #101 — Phase 1B observational deployment-stage timing instrumentation, exercised successfully in controlled run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355).
-- PR #103 — Phase 4 Docker classifier skips explicitly excluded Markdown changes while retaining fail-closed behavior.
-- PR #104 — deployment-performance policy and measurement checkpoint; its docs-only CI run skipped Docker validation/package work.
-- PR #105 — bounded application readiness and deployment health polling; internal readiness production-verified in controlled run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122).
-- PR #108 — bounded public readiness retry/backoff; repository-complete with a direct live-helper HTTP 307 response, while combined deployment verification remains pending.
-
-A merged production/config fix is not proof of runtime behavior until the applicable production deployment/configuration has been verified.
+Use the dated checkpoints above and live Issues/PRs for repository completion. Historical performance measurements remain in the roadmap; verified release records belong in [RELEASE-LEDGER.md](../RELEASE-LEDGER.md). A merged change is not proof of runtime or external-provider acceptance.
 
 ## Parked / not current by default
 
-- PR #83 prompt-guided video editor work remains parked. The current reactivation applies to the existing PR #214 local FFmpeg integration, not a replacement implementation.
+- PR #83 prompt-guided video editor work remains parked. PR #214 is merged; PR #251 is a separate design checkpoint, not authorization for replacement implementation.
 - PR #82 Codex verification-loop automation remains separate from ordinary local Codex orchestration. Do not treat the draft PR as required for the root orchestrator protocol.
 - Broad rebrand cleanup in Issue #47 is a tracker. Use its outstanding items when they block launch or external verification rather than reopening completed rebrand work.
 
-## Next bounded engineering task
+## Next bounded agent-system task
 
-Complete PR #214 against current main: verify source selection, bounded local rendering, preview/download and exact edited-media composer handoff; resolve the measured render-memory concern with ordinary code where possible. Preserve existing billing and entitlement behavior. Record any unresolved capacity or activation decision precisely instead of treating ordinary release approval as missing.
-
-The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
+After the documentation consistency change, pin automated review to an immutable candidate/base and preserve exact-SHA review evidence. Decide whether automated review is advisory or required before changing GitHub enforcement. Runner recovery, CI-dispatch repair, context checks, and unattended-write safeguards stay separate bounded tasks. Follow the active user request when choosing the next workstream; this list does not authorize merge, deployment, provider calls, or runner activation.
 
 ## Update rule
 

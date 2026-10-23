@@ -1,4 +1,8 @@
-This project is Postiz, a tool to schedule social media and chat posts to 28+ channels.
+# EverywherePoster app guidance
+
+This workspace contains EverywherePoster, built on Postiz. Follow the repository [AGENTS.md](../AGENTS.md) for scope, verification, and human gates; use [PRODUCT_TRUTH.md](../docs/brain/PRODUCT_TRUTH.md) for product promises and [REPOSITORY_ROUTING.md](../docs/brain/REPOSITORY_ROUTING.md) for source/test entry points. Read [OPERATING-MANUAL.md](../OPERATING-MANUAL.md) before runtime, database, environment, or deployment work.
+
+Use the Node engine and exact pnpm pin in [package.json](package.json), and choose focused validation from [tests/README.md](tests/README.md). Paths below are relative to `postiz-app/`.
 You can add posts to the calendar, they will be added into a workflow and posted at the right time.
 You can find things like:
 - Schedule posts
@@ -13,7 +17,7 @@ We have 3 important folders
 
 - apps/backend - this is where the API code is (NESTJS)
 - apps/orchestrator - this is temporal, it's for background jobs (NESTJS) it contains all the workflows and activities
-- apps/frontend - this is the code of the frontend (Vite ReactJS)
+- apps/frontend - this is the code of the frontend (Next.js / React)
 - /libraries contains a lot of services shared between backend and orchestrator and frontend components.
 
 We are using only pnpm, don't use any other dependency manager.
@@ -33,8 +37,8 @@ Controller >> Service >> Repository (no shortcuts)
 In some cases we will have
 Controller >> Mananger >> Service >> Repository.
 
-Most of the server logic should be inside of libs/server.
-The backend repository is mostly used to write controller, and import files from libs.server.
+Shared backend services and persistence code live in `libraries/nestjs-libraries/src/`.
+Backend API controllers live in `apps/backend/src/api/routes/` and call the relevant shared services.
 
 For the frontend follow this:
 - Many of the UI components lives in /apps/frontend/src/components/ui
@@ -57,5 +61,5 @@ const useCommunity = () => {
   };
 }
 
-- Linting of the project can run only from the root.
+- Run workspace commands from `postiz-app/`; use the specific package/test configuration for the affected area.
 - Use only pnpm.

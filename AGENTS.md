@@ -117,26 +117,7 @@ Meaningful MEDIUM integration/runtime changes should receive independent review.
 
 ## Model and reasoning routing
 
-Optimize for the lowest expected total cost of a correct, verified result, including retries and rework. Choose model and reasoning effort separately.
-
-Starting points:
-
-- Local `qwen3:8b` via Ollama/Codex `--oss`: targeted inspection, extraction/classification, simple docs, repetitive edits, straightforward tests, and very bounded low-risk code changes.
-- Luna: mechanical/repetitive cloud work, extraction/classification, targeted inspection, very easy tasks when the local worker is unavailable or unsuitable.
-- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation, and the default escalation from the local worker when meaningful logic, ambiguity, or failed verification appears.
-- Sol: difficult but bounded planning, debugging, unfamiliar subsystems, complex implementation, substantial independent review.
-- Astra: architecture, cross-workstream decisions, difficult root-cause debugging, high-risk review, large-context orchestration, repeated failures, or expensive mistakes.
-
-Do not use the local worker as the final independent reviewer or for architecture, authentication/security, database migrations, deployment/infrastructure decisions, destructive operations, or other high-risk work. Follow `docs/brain/ORCHESTRATOR_PROTOCOL.md` for the complete local-worker escalation policy.
-
-Reasoning:
-
-- Low: straightforward/local work.
-- Medium: normal implementation/investigation.
-- High: difficult ambiguity/integration/consequential review.
-- Extra-high: only when clearly justified.
-
-Do not retry a failed model/reasoning configuration unchanged without new evidence. Escalate only when difficulty, ambiguity, context, risk, or failed verification warrants it.
+Use the permitted model IDs and role guidance in [ORCHESTRATOR_PROTOCOL.md](docs/brain/ORCHESTRATOR_PROTOCOL.md#model-and-reasoning-routing). Preserve the configured model and reasoning effort unless the user authorizes a change; verify support before recommending another setting. Model choice does not replace independent review or release gates.
 
 ## Operational rules for this repo
 

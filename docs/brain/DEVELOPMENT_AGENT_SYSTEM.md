@@ -4,7 +4,7 @@
 
 Use ChatGPT, Codex, GitHub, and CI as a controlled multi-agent development workflow without requiring a paid orchestration API.
 
-This system is intentionally human-supervised. Agents may plan, investigate, implement, review, repair, document, and prepare releases. They may not merge, deploy, access production secrets, or perform destructive operations without explicit human approval.
+This system is intentionally human-supervised. Agents may plan, investigate, implement, review, repair, document, and prepare releases. Merge, deployment, production-secret access, and destructive operations follow the [existing human gates and narrow roadmap exception](../../AGENTS.md#human-approval-gates).
 
 For manual ChatGPT <-> Codex handoffs, routing headers, review depth, PR reviewability, and parallel decisions, follow `CHATGPT_CODEX_HANDOFF.md`.
 
@@ -74,23 +74,13 @@ Responsibilities:
 - Prefer tests, guards, helpers, and code/config enforcement over extra Markdown when practical.
 - Update brain files only when stronger enforcement is not the better home.
 - Track the exact commit and required deployment verification.
-- Never merge or deploy without explicit human approval.
+- Follow the [existing merge and deployment gates](../../AGENTS.md#human-approval-gates); preparing a release grants no new authority.
 
 ## Standard Workflow
 
-1. A ChatGPT project conversation defines the desired outcome.
-2. The planner creates or improves a bounded GitHub issue or investigation plan.
-3. A human/ChatGPT checkpoint approves scope before meaningful implementation.
-4. The implementer creates a branch from current `main` and performs only the approved work.
-5. Focused local validation runs.
-6. A draft pull request is opened.
-7. A separate fresh-context reviewer checks the exact current HEAD, issue, diff, tests, and product contracts.
-8. The original implementation session or repair agent addresses verified findings.
-9. Verification and, when required, fresh exact-SHA review run again after any HEAD change. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
-10. GitHub Actions runs the full pull-request checks.
-11. A human decides whether to merge.
-12. The coordinator prepares deployment steps and any proposed durable learning.
-13. A human explicitly approves any production deployment.
+The [ChatGPT/Codex implementation cycle](CHATGPT_CODEX_HANDOFF.md#chatgpt-managed-implementation-cycle) owns the lifecycle. Commit/push the completed scoped change and obtain matching PR CI before required fresh independent review of the exact live HEAD. Repair concrete findings and reverify affected evidence; a changed HEAD invalidates its review.
+
+Continue already-authorized bounded work in the same session. Separate planning checkpoints apply to manual ChatGPT coordination or unresolved decisions, not as a repeated approval requirement for implementation the user has already authorized. Merge and deployment follow the [existing human gates and narrow roadmap exception](../../AGENTS.md#human-approval-gates).
 
 ## Review Depth
 
@@ -165,7 +155,7 @@ Explicit human approval is required before:
 - Database schema changes or migrations.
 - Changing authentication or permissions.
 - Changing product promises or billing behavior.
-- Merging a pull request.
+- Merging a pull request outside the existing [deployment-performance roadmap exception](ORCHESTRATOR_PROTOCOL.md#deployment-performance-roadmap-merge-authorization).
 - Deploying to production.
 - Accessing production data or secrets.
 - Running destructive Docker, database, filesystem, or Git commands.
@@ -219,7 +209,7 @@ Agents must not:
 
 - Push directly to `main`.
 - Force-push.
-- Merge pull requests.
+- Merge pull requests outside the existing human gates and narrowly scoped roadmap exception.
 - Deploy to production.
 - Run destructive database or Docker commands.
 - Modify production secrets.

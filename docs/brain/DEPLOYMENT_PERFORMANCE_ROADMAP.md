@@ -1,6 +1,8 @@
 # Deployment Performance Roadmap
 
-Updated: 2026-09-14
+Measurement/phase snapshot: 2026-09-14. Repository checkpoint refreshed: 2026-10-23.
+
+Use [CURRENT_WORK.md](CURRENT_WORK.md#3-ci--docker--hetzner-deployment-performance--repository-checkpoint) for current repository status: Issues #15, #16, and #18 are closed. Phase progress, blockers, and timings below retain their historical context; do not treat them as current authorization or unfinished work without checking live evidence. Acceptance criteria remain useful for deliberately selected follow-ups.
 
 ## Purpose
 
@@ -28,11 +30,7 @@ Do not set a target solely by comparison with Vercel. EverywherePoster runs a di
 
 ### Root / orchestrator
 
-Recommended route:
-
-- Model: Astra
-- Reasoning: High
-- Role: architecture, sequencing, phase status, PR sizing, model routing, integration decisions, checkpoint ownership
+Follow the [canonical model and reasoning policy](ORCHESTRATOR_PROTOCOL.md#model-and-reasoning-routing), preserving the configured session settings. The root owns architecture, sequencing, phase status, PR sizing, integration decisions, and checkpoint evidence.
 
 The root orchestrator should not ingest large terminal logs or implement every phase itself. After each bounded implementation/review session, keep only a compact checkpoint containing:
 
@@ -46,11 +44,7 @@ The root orchestrator should not ingest large terminal logs or implement every p
 
 ### Implementation sessions
 
-Use the cheapest model likely to complete the bounded task correctly:
-
-- Terra / Medium: straightforward workflow or script edits once the design is settled.
-- Sol / High: Docker architecture, BuildKit/cache design, unfamiliar infrastructure debugging, substantial independent review.
-- Astra / High: only for cross-phase architecture, repeated failures, or unusually consequential infrastructure decisions.
+Use the [canonical model and reasoning policy](ORCHESTRATOR_PROTOCOL.md#model-and-reasoning-routing) for bounded implementation and independent review; do not select a different model or effort from historical phase notes.
 
 Use a fresh independent reviewer when repository policy requires it. Infrastructure/deployment safeguards should be treated as high risk.
 

@@ -12,6 +12,7 @@ Use this file to choose the smallest initial file set for an EverywherePoster ta
 
 - Backend auth entry points: `postiz-app/apps/backend/src/api/routes/auth.controller.ts`
 - Authentication/account supporting services: inspect only the directly referenced backend/library files reached from the route.
+- ChatGPT OAuth MCP: `docs/CHATGPT-OAUTH-MCP.md`, `oauth.controller.ts`, and the dedicated `oauth-*`/`oauth.*` modules under `postiz-app/libraries/nestjs-libraries/src/chat/`; use focused OAuth tests under `postiz-app/tests/copy-generation/`.
 - Authentication, authorization, reviewer-account, and security changes are high-risk. Do not parallelize or deploy autonomously.
 
 ## Social integrations and publishing
@@ -33,6 +34,7 @@ Use this file to choose the smallest initial file set for an EverywherePoster ta
 - Media upload/acquisition: start from `media.controller.ts`, the directly referenced media service/storage code, and focused media/copy-generation tests.
 - Guided transcription: begin from the guided composer source-media state plus the backend transcription/media path reached by that flow.
 - Video/frame analysis: start from the existing copy-generation video-media/frame services and `postiz-app/tests/copy-generation/` frame/media tests.
+- Video Editor: `postiz-app/apps/frontend/src/components/video-editor/`, `media.controller.ts`, and `postiz-app/libraries/nestjs-libraries/src/media-editing/`; start with `docs/VIDEO-EDITOR-BACKEND.md` and the focused `video-editor` tests under `postiz-app/tests/copy-generation/`.
 - Before importing TRA media-intelligence concepts, audit EverywherePoster contracts first; do not copy TRA-specific business rules or permissions.
 
 ## Image assets and image generation
@@ -72,9 +74,9 @@ Read `OPERATING-MANUAL.md` first.
 - Pull-request CI: `.github/workflows/pull-request-ci.yml`
 - Production deploy: `.github/workflows/deploy-production.yml`
 - Docker build classification: `scripts/classify-docker-build.sh`
-- App image definition: currently `postiz-app/Dockerfile.dev`; GitHub Issue #15 owns the planned production multi-stage runtime image.
+- App image definition: `postiz-app/Dockerfile.production`, selected by both image-build workflows; image checks live in `scripts/verify-production-image.sh`.
 - Compose/runtime: `docker-compose.yaml` and deployment scripts referenced by the production workflow.
-- Health/readiness: GitHub Issue #18 owns real application health-check work.
+- Health/readiness: `scripts/check-postiz-readiness.mjs`, `scripts/wait-for-container-health.sh`, and `scripts/wait-for-public-readiness.sh`; focused checks are their adjacent `test-*` scripts.
 
 Infrastructure/deployment work is high-risk. Default to one implementation agent and require explicit human merge/deploy approval.
 
