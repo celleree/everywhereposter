@@ -133,3 +133,28 @@ it.each([true, false])('protects an attached transfer while Quick Upload lookup 
   }
   view.unmount();
 });
+
+it('collapses ordinary completed history while keeping recovery and publishing results visible', async () => {
+  localStorage.clear();
+  const sessions = [
+    ...Array.from({ length: 8 }, (_, index) => ({ id: 'done-' + index,
+      originalName: 'done-' + index + '.mp4', byteSize: 10, status: 'COMPLETE',
+      parts: [], manifest: [], media: { id: 'media-' + index } })),
+    { id: 'paused', originalName: 'resume.mp4', byteSize: 10, status: 'UPLOADING', parts: [], manifest: [] },
+    { id: 'quick', originalName: 'published.mp4', byteSize: 10, status: 'COMPLETE', parts: [], manifest: [],
+      media: { id: 'quick-media' }, quickIntent: { id: 'intent', status: 'COMPLETE',
+        results: [{ integrationId: 'channel', name: 'Channel', state: 'Published' }] } },
+  ];
+  const fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions }) });
+  (useFetch as jest.Mock).mockReturnValue(fetch);
+  const { UploadTransfers } = require('../../apps/frontend/src/components/media/resumable-upload.provider');
+  const view = render(<ResumableUploadProvider><UploadTransfers /></ResumableUploadProvider>);
+  await view.findByText('Completed uploads (8)');
+  const history = view.getByText('Completed uploads (8)').closest('details')!;
+  expect(history.hasAttribute('open')).toBe(false);
+  expect(history.contains(view.getByText('done-0.mp4'))).toBe(true);
+  expect(history.contains(view.getByText('resume.mp4'))).toBe(false);
+  expect(history.contains(view.getByText('Channel: Published'))).toBe(false);
+  expect(view.getByRole('region', { name: 'Video transfers' }).className).toContain('max-h-[240px]');
+  view.unmount();
+});

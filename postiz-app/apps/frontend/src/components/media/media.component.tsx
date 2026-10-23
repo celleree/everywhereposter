@@ -674,6 +674,7 @@ export const MediaBox: FC<{
           ref={gridRef}
           className={clsx(
             'flex-1 relative',
+            !compactPicker && 'min-h-[240px]',
             compactPicker && 'upload-picker-grid-area',
             !error &&
               !isLoading &&
