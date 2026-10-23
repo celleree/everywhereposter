@@ -18,6 +18,39 @@ states and null values, including when other stages produce a partial report.
 Owned and collaboration outcomes remain separate. Unknown ownership never grants
 private Insights access. Watch-time metrics are withheld until units are verified.
 
+### Extended metrics contract
+
+The collector finishes views, reach, shares, saves, likes and comments across the
+cohort before requesting optional average/total watch time, skip rate, reposts,
+total interactions, follows, profile visits/activity, Facebook views and
+cross-posted views. A follower-count snapshot is collected for the verified
+connected account. The existing request/time limits and checkpoint resume apply;
+large cohorts may require additional attempts. A capability probe can select at
+most six allowlisted metrics and retains its eight-request ceiling.
+
+The installed official Meta Business SDK supplies metric/field names; explicit
+v25 candidate names cover omissions in its older enums. Transport keeps the
+existing host, header authorization, retry and byte-budget guards. No SDK global
+initialization, version upgrade, new dependency or OAuth permission change is
+included. A name in an SDK enum does not establish account/media availability.
+
+Every measurement retains its status, source, API version, observation time,
+period, definition and provider-returned definition when safe. Watch-time values
+require a provider-returned unit or a definition naming seconds/milliseconds;
+skip rates require verified percent/ratio units. Unknown units and empty responses
+stay null. Watch time does not establish completion rate or a retention curve.
+Shares, saves, reposts, interactions, follows and profile visits per reach require
+compatible periods/versions and observations within two minutes. Cross-posted
+views remain separate counters. Follower change compares compatible saved
+account observations and never attributes that change to an individual Reel.
+
+Deploy the matching Creator Audit receiver before this producer. The receiver
+accepts older snapshots, stores full evidence and up to 90 follower observations
+inside the existing report JSON, and returns only the bounded selected-sample
+report/processing projection to browsers. It shows measurements independently of
+content-analysis success and exports raw units/provenance in Markdown. No schema
+migration, repeated paid analysis or background polling schedule is introduced.
+
 The standalone discovery and reporting pipeline remains available in standalone
 mode. Integrated controls use the connected start/resume surface; legacy mutations
 cannot refresh a profile after it contains connected state. Settings and existing
