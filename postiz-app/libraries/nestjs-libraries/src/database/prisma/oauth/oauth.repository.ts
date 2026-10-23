@@ -1,12 +1,13 @@
-import { OAuthAuthorization } from '@prisma/client';
+import { OAuthAuthorization, OAuthRefreshToken } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
-import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { PrismaRepository, PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 
 @Injectable()
 export class OAuthRepository {
   constructor(
     private _oauthApp: PrismaRepository<'oAuthApp'>,
-    private _oauthAuth: PrismaRepository<'oAuthAuthorization'>
+    private _oauthAuth: PrismaRepository<'oAuthAuthorization'>,
+    private _transaction: PrismaTransaction
   ) {}
 
   getAppByOrgId(orgId: string) {
@@ -147,6 +148,7 @@ export class OAuthRepository {
         ...data,
         tokenExpiresAt: null,
         accessToken: null,
+        refreshFamilyId: null,
         revokedAt: null,
       },
     });
@@ -165,29 +167,89 @@ export class OAuthRepository {
     auth: OAuthAuthorization,
     encryptedCode: string,
     encryptedToken: string,
-    tokenExpiresAt: Date
+    tokenExpiresAt: Date,
+    refresh: { tokenHash: string; familyId: string; expiresAt: Date },
+    clientSecret: string
   ) {
-    // One conditional UPDATE is the redemption lock, including current membership.
-    return this._oauthAuth.model.oAuthAuthorization.updateMany({
-      where: {
-        id: auth.id,
-        authorizationCode: encryptedCode,
-        revokedAt: null,
-        codeExpiresAt: { gt: new Date() },
-        oauthApp: { deletedAt: null },
-        user: {
-          activated: true,
-          organizations: {
-            some: { organizationId: auth.organizationId, disabled: false },
+    return this._transaction.model.$transaction(async (tx) => {
+      // The code is consumed and the refresh family created in the same transaction.
+      const redeemed = await tx.oAuthAuthorization.updateMany({
+        where: {
+          id: auth.id,
+          authorizationCode: encryptedCode,
+          oauthAppId: auth.oauthAppId, userId: auth.userId, organizationId: auth.organizationId,
+          scope: auth.scope, resource: auth.resource,
+          revokedAt: null,
+          codeExpiresAt: { gt: new Date() },
+          oauthApp: { deletedAt: null, clientSecret },
+          user: {
+            activated: true,
+            organizations: {
+              some: { organizationId: auth.organizationId, disabled: false },
+            },
           },
         },
-      },
-      data: {
-        accessToken: encryptedToken,
-        tokenExpiresAt,
-        authorizationCode: null,
-        codeExpiresAt: null,
-      },
+        data: {
+          accessToken: encryptedToken,
+          refreshFamilyId: refresh.familyId,
+          tokenExpiresAt,
+          authorizationCode: null,
+          codeExpiresAt: null,
+        },
+      });
+      if (redeemed.count === 1) {
+        await tx.oAuthRefreshToken.create({ data: { ...refresh, authorizationId: auth.id } });
+      }
+      return redeemed;
+    });
+  }
+
+  findByRefreshToken(tokenHash: string) {
+    return this._transaction.model.$transaction((tx) =>
+      tx.oAuthRefreshToken.findUnique({ where: { tokenHash }, include: { authorization: true } })
+    );
+  }
+
+  rotateRefreshToken(
+    refresh: OAuthRefreshToken & { authorization: OAuthAuthorization },
+    next: { tokenHash: string; accessToken: string; tokenExpiresAt: Date; scope: string },
+    clientSecret: string
+  ) {
+    return this._transaction.model.$transaction(async (tx) => {
+      const auth = refresh.authorization;
+      // Serialize with rotation, revocation and new consent on this grant.
+      await tx.$queryRaw`SELECT "id" FROM "OAuthAuthorization" WHERE "id" = ${auth.id} FOR UPDATE`;
+      const active = await tx.oAuthAuthorization.findFirst({ where: {
+        id: auth.id, oauthAppId: auth.oauthAppId, userId: auth.userId,
+        organizationId: auth.organizationId, refreshFamilyId: refresh.familyId,
+        scope: auth.scope, resource: auth.resource, revokedAt: null,
+        oauthApp: { deletedAt: null, clientSecret },
+        user: { activated: true, organizations: {
+          some: { organizationId: auth.organizationId, disabled: false },
+        } },
+      } });
+      if (!active || refresh.expiresAt <= new Date()) return false;
+      if (refresh.usedAt) {
+        // A previously consumed credential is replay: revoke only its current
+        // family, never a later consent. Commit this before returning invalid_grant.
+        await tx.oAuthAuthorization.update({ where: { id: auth.id }, data: { revokedAt: new Date() } });
+        return false;
+      }
+      const consumed = await tx.oAuthRefreshToken.updateMany({
+        where: { tokenHash: refresh.tokenHash, usedAt: null, expiresAt: { gt: new Date() } },
+        data: { usedAt: new Date() },
+      });
+      // Both callers observed an unused token: only one rotates. A losing
+      // in-flight request cannot revoke the winner or mint another descendant.
+      if (consumed.count !== 1) return false;
+      await tx.oAuthAuthorization.update({ where: { id: auth.id }, data: {
+        accessToken: next.accessToken, tokenExpiresAt: next.tokenExpiresAt, scope: next.scope,
+      } });
+      await tx.oAuthRefreshToken.create({ data: {
+        tokenHash: next.tokenHash, authorizationId: auth.id, familyId: refresh.familyId,
+        expiresAt: refresh.expiresAt,
+      } });
+      return true;
     });
   }
 
@@ -228,12 +290,11 @@ export class OAuthRepository {
         revokedAt: null,
         accessToken: { not: null },
       },
-      include: {
-        oauthApp: {
-          include: {
-            picture: true,
-          },
-        },
+      select: {
+        id: true, createdAt: true,
+        oauthApp: { select: {
+          name: true, description: true, picture: { select: { path: true } },
+        } },
       },
       orderBy: {
         createdAt: 'desc',
@@ -250,6 +311,16 @@ export class OAuthRepository {
       data: {
         revokedAt: new Date(),
       },
+    });
+  }
+
+  revokeToken(oauthAppId: string, tokenHash: string, accessToken: string) {
+    return this._transaction.model.$transaction(async (tx) => {
+      const refresh = await tx.oAuthRefreshToken.findUnique({ where: { tokenHash } });
+      return tx.oAuthAuthorization.updateMany({ where: {
+        oauthAppId, revokedAt: null,
+        OR: [{ accessToken }, ...(refresh ? [{ id: refresh.authorizationId, refreshFamilyId: refresh.familyId }] : [])],
+      }, data: { revokedAt: new Date() } });
     });
   }
 
