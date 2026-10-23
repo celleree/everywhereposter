@@ -229,8 +229,17 @@ def audit(edit, policy):
     av = {s['codec_type']: s for s in streams}
     if set(av) != {'audio', 'video'} or len(streams) != 2:
         raise ValueError('INVALID_OUTPUT_SYNC')
-    tolerance = max(1/policy['fps'], 1024/int(av['audio']['sample_rate']))+.005
-    if any(abs(float(s['start_time'])) > .001 or abs(float(s['duration'])-expected) > tolerance for s in av.values()):
+    try:
+        timings = {kind: (float(s['start_time']), float(s['duration'])) for kind, s in av.items()}
+        sample_rate = int(av['audio']['sample_rate'])
+        if sample_rate <= 0:
+            raise ValueError('Invalid audio sample rate')
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise ValueError('INVALID_OUTPUT_SYNC') from None
+    tolerance = max(1/policy['fps'], 1024/sample_rate)+.005
+    if any(not math.isfinite(start) or not math.isfinite(duration) or duration <= 0 or
+            abs(start) > .001 or abs(duration-expected) > tolerance for start, duration in timings.values()) or abs(
+            timings['audio'][1]-timings['video'][1]) > tolerance:
         raise ValueError('INVALID_OUTPUT_SYNC')
 
 
