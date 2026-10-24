@@ -46,7 +46,7 @@ const fixture = process.env.LAUNCH_CHECKOUT_TEST_DATABASE_URL;
       return { ...sessions.get(prior.id) };
     }
     const id = `cs_${randomUUID()}`;
-    const session = { ...params, id, status: 'open', subscription: null,
+    const session = { ...params, id, status: 'open', subscription: null, after_expiration: null,
       line_items: { data: [{ price: price(params.subscription_data.metadata.period), quantity: 1 }], has_more: false },
       url: `https://checkout.stripe.com/c/pay/${id}`, client_secret: `${id}_secret` };
     sessions.set(id, session);
@@ -282,6 +282,21 @@ const fixture = process.env.LAUNCH_CHECKOUT_TEST_DATABASE_URL;
     sessions.set('cs_unknown', { id: 'cs_unknown', mode: 'subscription', customer: `cus_${org}`, status });
     await expect(request(setup().service)).rejects.toThrow('requires reconciliation');
     expect(mockCreate).not.toHaveBeenCalled(); expect(mockExpire).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, {}, { recovery: { enabled: true, expires_at: 9999999999 } }])('keeps an unknown expired recovery path blocked: %p', async policy => {
+    sessions.set('cs_historical', { id: 'cs_historical', mode: 'subscription', customer: `cus_${org}`,
+      status: 'expired', after_expiration: policy });
+    await expect(request(setup().service)).rejects.toThrow('requires reconciliation');
+    expect(mockCreate).not.toHaveBeenCalled(); expect(mockExpire).not.toHaveBeenCalled();
+    expect((await attempts())[0]).toMatchObject({ state: 'PREPARED', firstDispatchedAt: null });
+  });
+
+  it('allows a new path when historical expiration has explicitly no recovery', async () => {
+    sessions.set('cs_historical', { id: 'cs_historical', mode: 'subscription', customer: `cus_${org}`,
+      status: 'expired', after_expiration: null });
+    await request(setup().service);
+    expect(mockCreate).toHaveBeenCalledTimes(1); expect(mockExpire).not.toHaveBeenCalled();
   });
 
   it('refuses multiple matching sessions without attempting cleanup', async () => {

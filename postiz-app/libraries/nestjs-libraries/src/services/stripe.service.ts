@@ -239,6 +239,12 @@ export class StripeService {
     }
   }
 
+  private hasNoCheckoutRecovery(session: Stripe.Checkout.Session) {
+    const policy = session.after_expiration;
+    // Missing metadata is not proof that an expired link cannot be recovered.
+    return policy === null || policy?.recovery === null || policy?.recovery?.enabled === false;
+  }
+
   private async launchSessionId(attempt: LaunchCheckoutAttempt, subscriptions: Stripe.Subscription[]) {
     const history = await stripe.checkout.sessions.list({ customer: attempt.customerId, limit: 100 }, launchRequestOptions);
     if (history.has_more !== false || !Array.isArray(history.data)) {
@@ -253,7 +259,8 @@ export class StripeService {
       if (session.mode !== 'subscription' || providerId(session.customer) !== attempt.customerId) {
         throw new ConflictException('Unknown checkout history requires reconciliation');
       }
-      if (session.id === attempt.sessionId || owned.includes(session) || session.status === 'expired') continue;
+      if (session.id === attempt.sessionId || owned.includes(session)) continue;
+      if (session.status === 'expired' && this.hasNoCheckoutRecovery(session)) continue;
       const settled = session.status === 'complete' && subscriptions.some(sub =>
         sub.id === providerId(session.subscription) && providerId(sub.customer) === attempt.customerId &&
         ['canceled', 'incomplete_expired'].includes(sub.status));
@@ -277,7 +284,7 @@ export class StripeService {
         !items.data[0].price || items.data[0].price.id !== params.line_items?.[0].price ||
         !this.validLaunchPrice(items.data[0].price, period) || ![false, null].includes(session.allow_promotion_codes) ||
         session.payment_method_collection !== 'always' || session.payment_method_types.length !== 1 ||
-        session.payment_method_types[0] !== 'card' || session.after_expiration?.recovery?.enabled) {
+        session.payment_method_types[0] !== 'card' || !this.hasNoCheckoutRecovery(session)) {
       throw new ConflictException('Checkout does not match its approved immutable request');
     }
     return session;

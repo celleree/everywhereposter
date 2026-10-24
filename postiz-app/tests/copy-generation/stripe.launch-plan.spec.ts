@@ -76,7 +76,7 @@ beforeEach(() => {
   mockRetrieve.mockImplementation(async id => ({ ...sessions.get(id) }));
   mockCheckout.mockImplementation(async params => {
     const id = `cs_fixture_${sessions.size + 1}`;
-    const session = { ...params, id, status: 'open', subscription: null,
+    const session = { ...params, id, status: 'open', subscription: null, after_expiration: null,
       line_items: { data: [{ price: validPrice(params.subscription_data.metadata.period), quantity: 1 }], has_more: false },
       url: `https://checkout.stripe.com/c/pay/${id}`, client_secret: `${id}_secret` };
     sessions.set(id, session);
@@ -208,6 +208,20 @@ it('refuses unknown open subscription sessions and unknown settlement', async ()
   sessions.get('cs_unknown').status = 'complete';
   await expect(launch(service)).rejects.toThrow('unknown checkout');
   expect(mockCheckout).not.toHaveBeenCalled();
+});
+
+it.each([undefined, {}, { recovery: { enabled: true } }])('refuses an unknown expired session unless recovery is ruled out: %p', async recovery => {
+  const { service } = harness();
+  sessions.set('cs_historical', { id: 'cs_historical', mode: 'subscription', customer: 'cus_fixture', status: 'expired', after_expiration: recovery });
+  await expect(launch(service)).rejects.toThrow('requires reconciliation');
+  expect(mockCheckout).not.toHaveBeenCalled(); expect(mockExpire).not.toHaveBeenCalled();
+});
+
+it.each([null, { recovery: null }, { recovery: { enabled: false } }])('allows historical expiration with explicitly disabled recovery: %p', async recovery => {
+  const { service } = harness();
+  sessions.set('cs_historical', { id: 'cs_historical', mode: 'subscription', customer: 'cus_fixture', status: 'expired', after_expiration: recovery });
+  await launch(service);
+  expect(mockCheckout).toHaveBeenCalledTimes(1); expect(mockExpire).not.toHaveBeenCalled();
 });
 
 it('refuses multiple matching sessions rather than picking one', async () => {
