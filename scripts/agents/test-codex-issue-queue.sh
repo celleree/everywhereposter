@@ -458,7 +458,7 @@ cat > "$TASK_BIN/git" <<'EOF'
 printf 'git:%s\n' "$*" >> "$TASK_LOG"
 case "${1:-} ${2:-}" in
   'rev-parse --show-toplevel') printf '%s\n' "$TASK_REPO" ;;
-  'rev-parse HEAD') echo task-head ;;
+  'rev-parse HEAD') echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
   'status --porcelain') ;;
   'remote get-url') echo 'https://github.com/celleree/publish-everywhere.git' ;;
   'branch --show-current') printf 'agent/issue-%s\n' "$TASK_NUMBER" ;;
@@ -493,6 +493,13 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
 fi
 if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
   echo 'https://github.test/pull/task'
+  exit 0
+fi
+if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+  jq -cn '{baseRefOid:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",headRefOid:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+  exit 0
+fi
+if [[ "${1:-}" == "pr" && "${2:-}" == "edit" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "workflow" && "${2:-}" == "run" ]]; then
