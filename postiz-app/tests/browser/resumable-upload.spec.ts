@@ -34,6 +34,9 @@ test('Resumable upload: navigation, browser return and safe completion', async (
     }
     return route.fulfill({ json: session });
   });
+  // Bootstrap the development route before testing navigation with a held upload chunk.
+  await openApp(page, '/settings');
+  await expect(page.getByRole('heading', { name: 'Global Settings', exact: true })).toBeVisible();
   await openApp(page, '/media');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'resume.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('region', { name: 'Video transfers' });
