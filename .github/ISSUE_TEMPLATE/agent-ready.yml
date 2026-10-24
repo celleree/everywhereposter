@@ -47,7 +47,14 @@ body:
     id: scope
     attributes:
       label: Expected scope
-      description: Name the likely files, directories, services, or product surfaces. This may be refined during investigation.
+      description: Declare exact owned paths and any shared paths or dependencies. Write "None" for shared paths when there are none. A shared path must be assigned to one workstream before editing.
+      placeholder: |
+        Owned paths:
+        - path/to/owned-file.ts
+        - path/to/owned-directory/
+
+        Shared paths or dependencies:
+        - None
     validations:
       required: true
 
@@ -55,7 +62,13 @@ body:
     id: exclusions
     attributes:
       label: Explicitly out of scope
-      description: State what must not change.
+      description: Declare prohibited paths and any services, settings, or product behavior that must not change. Write "None" for prohibited paths when there are none.
+      placeholder: |
+        Prohibited paths:
+        - None
+
+        Other behavior exclusions:
+        - State what must not change.
     validations:
       required: true
 
@@ -95,7 +108,7 @@ body:
           required: true
         - label: Product decisions that still require a human are listed above.
           required: true
-        - label: The task has explicit exclusions and validation requirements.
+        - label: Owned paths, shared paths or dependencies, explicit exclusions, and validation requirements are declared.
           required: true
         - label: I understand that a repository owner must apply `agent-ready` separately.
           required: true

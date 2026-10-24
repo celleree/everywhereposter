@@ -3,9 +3,11 @@ set -Eeuo pipefail
 ROOT=$(git rev-parse --show-toplevel)
 REAL_GIT=$(command -v git)
 TEST_ROOT=$(mktemp -d)
+BASE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+HEAD_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/repo"
-export REAL_GIT TEST_ROOT
+export REAL_GIT TEST_ROOT BASE_SHA HEAD_SHA
 
 cat > "$TEST_ROOT/bin/git" <<'MOCK'
 #!/usr/bin/env bash
@@ -14,6 +16,7 @@ case "$*" in
   'rev-parse --show-toplevel') echo "$TEST_ROOT/repo" ;;
   'status --porcelain') ;;
   'remote get-url origin') echo https://github.com/celleree/everywhereposter.git ;;
+  'config --local http.https://github.com/.extraheader '*) ;;
   'config --local --get-all '*) [[ "$SCENARIO" == local-header ]] && exit 0; exit 1 ;;
   'config --get-regexp '*)
     case "$SCENARIO" in
@@ -21,6 +24,7 @@ case "$*" in
       scoped-helper) key=credential.https://github.com.helper ;;
       header) key=http.extraheader ;;
       scoped-header) key=http.https://github.com/.extraheader ;;
+      filter-driver) key=filter.reviewfixture.process ;;
       config-error) exit 128 ;;
       *) exit 1 ;;
     esac
@@ -32,6 +36,17 @@ case "$*" in
     echo password=synthetic-sensitive-credential
     ;;
   'ls-remote origin') [[ "$VISIBILITY" == PUBLIC || "$SCENARIO" == private-credentials ]] && exit 0; exit 1 ;;
+  'fetch --quiet --no-tags origin '*) ;;
+  'rev-parse --verify '*)
+    case "$3" in
+      "${BASE_SHA}^{commit}") echo "$BASE_SHA" ;;
+      "${HEAD_SHA}^{commit}") echo "$HEAD_SHA" ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  '-c core.hooksPath=/dev/null worktree add --detach '*) mkdir -p "$6" ;;
+  'worktree remove --force '*) ;;
+  '--no-pager diff --no-ext-diff --no-textconv --binary '*) echo 'Synthetic pinned review fixture' ;;
   'config --local --unset-all '*) ;;
   *) echo "Unexpected git invocation: $*" >&2; exit 2 ;;
 esac
@@ -49,8 +64,18 @@ case "$*" in
     case "$SCENARIO" in
       fork) cross=true ;; closed) state=CLOSED ;; other-base) base=other ;; author) author=stranger ;;
     esac
+    head_sha=$HEAD_SHA
+    base_sha=$BASE_SHA
+    count_file="$TEST_ROOT/$SCENARIO/pr-view-count"
+    count=0; [[ ! -f "$count_file" ]] || count=$(cat "$count_file")
+    count=$((count + 1)); printf '%s\n' "$count" > "$count_file"
+    [[ "$SCENARIO" != stale || "$count" -eq 1 ]] || head_sha=cccccccccccccccccccccccccccccccccccccccc
+    [[ "$SCENARIO" != missing-head ]] || head_sha=
+    [[ "$SCENARIO" != missing-base ]] || base_sha=
+    [[ "$SCENARIO" != malformed-head ]] || head_sha=not-a-full-commit-sha
     jq -cn --arg state "$state" --argjson cross "$cross" --arg base "$base" --arg author "$author" \
-      '{state:$state,isCrossRepository:$cross,baseRefName:$base,author:{login:$author}}' ;;
+      --arg baseOid "$base_sha" --arg headOid "$head_sha" \
+      '{state:$state,isCrossRepository:$cross,baseRefName:$base,baseRefOid:$baseOid,headRefOid:$headOid,author:{login:$author}}' ;;
   'pr diff '*) echo 'Synthetic review fixture' ;;
   'pr comment '*) echo posted >> "$TEST_LOG" ;;
   *) echo "Unexpected gh invocation: $*" >&2; exit 2 ;;
@@ -61,9 +86,10 @@ cat > "$TEST_ROOT/bin/codex" <<'MOCK'
 [[ "$*" == 'login status' ]] && exit 0
 [[ -z "${GH_TOKEN-}" && -z "${GITHUB_TOKEN-}" ]] || exit 9
 printf 'codex:%s\n' "$*" >> "$TEST_LOG"
+printf 'codex-cwd:%s\n' "$PWD" >> "$TEST_LOG"
 cat >/dev/null
 while [[ $# -gt 0 ]]; do
-  if [[ "$1" == --output-last-message ]]; then echo 'Fixture review result.' > "$2"; exit 0; fi
+  if [[ "$1" == --output-last-message ]]; then echo "Fixture review result for $HEAD_SHA." > "$2"; exit 0; fi
   shift
 done
 exit 2
@@ -90,8 +116,11 @@ run_case() {
   if [[ "$expected" == 0 ]]; then
     grep -Fq -- '--sandbox read-only' "$case_dir/log"
     grep -Fxq posted "$case_dir/log"
-  elif grep -Fq 'codex:' "$case_dir/log"; then
+  elif [[ "$name" != stale ]] && grep -Fq 'codex:' "$case_dir/log"; then
     echo "FAIL $name reached Codex"; exit 1
+  fi
+  if [[ "$expected" != 0 && "$name" != stale ]] && grep -Fq 'worktree add --detach' "$case_dir/log"; then
+    echo "FAIL $name materialized the review worktree"; exit 1
   fi
   if grep -Fq synthetic-sensitive-credential "$case_dir/output"; then echo 'FAIL credential output leaked'; exit 1; fi
   echo "PASS $name"
@@ -99,9 +128,15 @@ run_case() {
 
 run_case public-review review PUBLIC 0
 ! grep -Fq 'git:ls-remote' "$TEST_ROOT/public-review/log"
+grep -Fq 'git:-c core.hooksPath=/dev/null worktree add --detach ' "$TEST_ROOT/public-review/log"
+grep -Fq "git:--no-pager diff --no-ext-diff --no-textconv --binary $BASE_SHA...$HEAD_SHA" "$TEST_ROOT/public-review/log"
+grep -Eq 'codex-cwd:.*/review-tree$' "$TEST_ROOT/public-review/log"
 run_case private-review review PRIVATE 0
+run_case stale review PUBLIC 1
+grep -Fq 'codex:' "$TEST_ROOT/stale/log"
+! grep -Fxq posted "$TEST_ROOT/stale/log"
 for mode in plan implement repair memory; do run_case "public-$mode" "$mode" PUBLIC 1; done
-for scenario in other-repo actor rerunner fork closed other-base author gh-credentials local-header helper scoped-helper header scoped-header retrievable config-error netrc windows-netrc stored-credentials; do
+for scenario in other-repo actor rerunner fork closed other-base author missing-base missing-head malformed-head gh-credentials local-header helper scoped-helper header scoped-header filter-driver retrievable config-error netrc windows-netrc stored-credentials; do
   run_case "$scenario" review PUBLIC 1
 done
 run_case private-credentials review PRIVATE 1
