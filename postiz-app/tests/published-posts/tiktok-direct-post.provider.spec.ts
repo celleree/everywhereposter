@@ -83,7 +83,7 @@ const createProvider = ({
 const publish = async (
   provider: any,
   settings: Record<string, unknown> = {},
-  media = basePost.media
+  media: Array<{ type?: 'image' | 'video'; path: string }> = basePost.media
 ) => {
   const result = await provider.post(
     'creator-id',
@@ -128,6 +128,52 @@ describe('TikTok Direct Post provider safety', () => {
       }
     }
     consoleSpy.mockRestore();
+  });
+
+  it.each([
+    ['DIRECT_POST', 'image', 'https://media.example.com/photo.jpg?source=mp4'],
+    ['UPLOAD', 'image', 'https://media.example.com/photo.webp#mp4'],
+    ['DIRECT_POST', 'image', 'https://media.example.com/photo.mp4'],
+    ['DIRECT_POST', undefined, 'https://media.example.com/photo.jpg?source=mp4'],
+  ] as const)(
+    'keeps a preserved photo in the photo flow: %s %s %s',
+    async (method, type, path) => {
+      const provider = createProvider();
+      const { requestBody } = await publish(
+        provider,
+        { content_posting_method: method, title: 'Photo title' },
+        [{ type, path }]
+      );
+
+      expect(provider.probeVideoDuration).not.toHaveBeenCalled();
+      expect(provider.fetch.mock.calls[0][0]).toBe(
+        'https://open.tiktokapis.com/v2/post/publish/content/init/'
+      );
+      expect(requestBody).toMatchObject({
+        media_type: 'PHOTO',
+        source_info: { source: 'PULL_FROM_URL', photo_images: [path] },
+        post_info: { title: 'Photo title', description: 'Caption' },
+      });
+      expect(requestBody.source_info).not.toHaveProperty('video_url');
+    }
+  );
+
+  it.each([
+    ['video', 'https://media.example.com/original?download=1'],
+    [undefined, 'https://media.example.com/original.MOV?download=1'],
+  ] as const)('keeps video classification consistent: %s %s', async (type, path) => {
+    const provider = createProvider();
+    const { requestBody } = await publish(provider, {}, [{ type, path }]);
+
+    expect(provider.probeVideoDuration).toHaveBeenCalledWith(path);
+    expect(provider.fetch.mock.calls[0][0]).toBe(
+      'https://open.tiktokapis.com/v2/post/publish/video/init/'
+    );
+    expect(requestBody.source_info).toEqual({
+      source: 'PULL_FROM_URL', video_url: path,
+    });
+    expect(requestBody.post_info.title).toBe('Caption');
+    expect(requestBody).not.toHaveProperty('media_type');
   });
 
   it('rejects an over-limit video through the public posting path', async () => {

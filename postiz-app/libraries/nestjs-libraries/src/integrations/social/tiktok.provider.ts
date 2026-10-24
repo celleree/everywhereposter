@@ -675,11 +675,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       );
     }
 
-    const selectedMedia = firstPost.media?.[0];
-    const isVideo =
-      selectedMedia?.type === 'video' ||
-      (selectedMedia?.path?.indexOf('mp4') ?? -1) > -1;
-    if (isVideo) {
+    if (this.isVideo(firstPost.media?.[0])) {
       let duration: number;
       try {
         duration = await this.probeVideoDuration(
@@ -793,6 +789,13 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     }
   }
 
+  private isVideo(media?: { type?: string; path?: string }): boolean {
+    if (media?.type === 'image') return false;
+    if (media?.type === 'video') return true;
+    // Legacy attachments may lack a type; ignore query and fragment text.
+    return /\.(mp4|mov)$/i.test((media?.path || '').split(/[?#]/)[0]);
+  }
+
   private postingMethod(
     method: TikTokDto['content_posting_method'],
     isPhoto: boolean
@@ -807,7 +810,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   }
 
   private buildTikokPostInfoBody(firstPost: PostDetails<TikTokDto>) {
-    const isPhoto = (firstPost?.media?.[0]?.path?.indexOf('mp4') || -1) === -1;
+    const isPhoto = !this.isVideo(firstPost.media?.[0]);
     const method = firstPost?.settings?.content_posting_method;
 
     if (method === 'DIRECT_POST') {
@@ -856,7 +859,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   }
 
   private buildTikokSourceInfoBody(firstPost: PostDetails<TikTokDto>) {
-    const isPhoto = (firstPost?.media?.[0]?.path?.indexOf('mp4') || -1) === -1;
+    const isPhoto = !this.isVideo(firstPost.media?.[0]);
 
     if (isPhoto) {
       return {
@@ -910,7 +913,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       await this.fetch(
         `https://open.tiktokapis.com/v2/post/publish${this.postingMethod(
           firstPost.settings.content_posting_method,
-          (firstPost?.media?.[0]?.path?.indexOf('mp4') || -1) === -1
+          !this.isVideo(firstPost.media?.[0])
         )}`,
         {
           method: 'POST',
