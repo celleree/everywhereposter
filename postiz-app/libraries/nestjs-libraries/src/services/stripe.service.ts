@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
-import { ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { Organization, User } from '@prisma/client';
+import { ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { LaunchCheckoutAttempt, Organization, Prisma, User } from '@prisma/client';
+import { createHash, randomUUID } from 'crypto';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
@@ -14,6 +15,16 @@ import { TrackEnum } from '@gitroom/nestjs-libraries/user/track.enum';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_nothing');
+const launchRequestOptions = { timeout: 10000, maxNetworkRetries: 0 };
+// Stripe retains v1 idempotency keys for at least 24h. Leave a full hour for
+// request latency/clock margin; an empty list never releases an uncertain POST.
+const launchRetryWindowMs = 23 * 60 * 60 * 1000;
+const launchCheckoutOwner = 'everywhereposter-launch-v1';
+const canonicalJson = (value: any): string => JSON.stringify(value, (_key, item) =>
+  item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+const launchFingerprint = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
+const providerId = (value: any): string | undefined => typeof value === 'string' ? value : value?.id;
 
 @Injectable()
 export class StripeService {
@@ -52,9 +63,10 @@ export class StripeService {
       price.metadata?.plan_version === 'LAUNCH_V1';
   }
 
-  private async launchPrice(period: 'MONTHLY' | 'YEARLY') {
+  private async launchPrice(period: 'MONTHLY' | 'YEARLY', bounded = false) {
     const lookupKey = period === 'MONTHLY' ? 'everywhereposter_launch_v1_monthly' : 'everywhereposter_launch_v1_yearly';
-    const prices = await stripe.prices.list({ active: true, lookup_keys: [lookupKey], limit: 2 });
+    const query = { active: true, lookup_keys: [lookupKey], limit: 2 };
+    const prices = bounded ? await stripe.prices.list(query, launchRequestOptions) : await stripe.prices.list(query);
     if (prices.data.length !== 1 || !prices.data[0].active || !this.validLaunchPrice(prices.data[0], period)) {
       throw new ServiceUnavailableException('The approved launch price is not configured');
     }
@@ -155,11 +167,221 @@ export class StripeService {
     }
   }
 
-  private async currentCustomerSubscriptions(customer: string) {
+  private async currentCustomerSubscriptions(customer: string, complete = false) {
     const history = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 },
       { timeout: 10000, maxNetworkRetries: 0 });
-    if (history.has_more) throw new ServiceUnavailableException('Subscription history is incomplete');
+    if (history.has_more || (complete && (history.has_more !== false || !Array.isArray(history.data)))) {
+      throw new ServiceUnavailableException('Subscription history is incomplete');
+    }
     return history.data;
+  }
+
+  private assertNoLiveSubscriptions(history: Stripe.Subscription[], customer: string) {
+    if (history.some(sub => providerId(sub.customer) !== customer ||
+      !['canceled', 'incomplete_expired'].includes(sub.status))) {
+      throw new ConflictException('A subscription exists or its settlement is pending; refresh billing');
+    }
+  }
+
+  private async launchCustomer(organizationId: string, userId: string) {
+    let binding = await this._subscriptionService.getLaunchCustomer(organizationId);
+    if (!binding) throw new ConflictException('Billing organization is unavailable');
+    if (!binding.paymentId) {
+      // Only this immutable metadata participates in customer idempotency. An
+      // orphaned race loser can never receive a Checkout request.
+      const customer = await stripe.customers.create({ metadata: { service: 'gitroom', organizationId } },
+        { ...launchRequestOptions, idempotencyKey: `launch-customer:${organizationId}` });
+      binding = await this._subscriptionService.bindLaunchCustomer(organizationId, customer.id);
+    }
+    const customer = binding.paymentId!;
+    const user = await this._userService.getUserById(userId);
+    // Contact synchronization is optional; it cannot change the canonical ID.
+    try {
+      await stripe.customers.update(customer, {
+        email: user.email.includes('@') ? user.email : `${user.email}@postiz.com`,
+      }, launchRequestOptions);
+    } catch (_error) {}
+    return { customer, allowTrial: binding.allowTrial };
+  }
+
+  private launchParameters(id: string, mode: 'hosted' | 'custom', customer: string,
+    price: string, body: BillingSubscribeDto, userId: string, ud: string, allowTrial: boolean) {
+    const isUtm = body.utm ? `&utm_source=${body.utm}` : '';
+    const success = process.env['FRONTEND_URL'] + `/launches?onboarding=true&check=${id}${isUtm}`;
+    // JSON round-trip drops absent tracking fields before persisting/fingerprinting.
+    return JSON.parse(JSON.stringify({
+      ui_mode: mode, customer, client_reference_id: id, mode: 'subscription',
+      ...(mode === 'custom' ? { return_url: success } : {
+        success_url: success, cancel_url: process.env['FRONTEND_URL'] + `/billing?cancel=true${isUtm}`,
+      }),
+      payment_method_collection: 'always', payment_method_types: ['card'], allow_promotion_codes: false,
+      line_items: [{ price, quantity: 1 }],
+      subscription_data: { ...(allowTrial ? { trial_period_days: 7 } : {}),
+        metadata: { ...body, service: 'gitroom', billing: 'LAUNCH_V1', userId, uniqueId: id, ud } },
+      metadata: { service: launchCheckoutOwner, launchAttemptId: id,
+        ...(body.datafast_session_id && body.datafast_visitor_id ? {
+          datafast_session_id: body.datafast_session_id, datafast_visitor_id: body.datafast_visitor_id,
+        } : {}) },
+    })) as Stripe.Checkout.SessionCreateParams;
+  }
+
+  private launchParametersFor(attempt: LaunchCheckoutAttempt) {
+    if (launchFingerprint(attempt.parameters) !== attempt.requestFingerprint) {
+      throw new ConflictException('Checkout request identity requires reconciliation');
+    }
+    return attempt.parameters as unknown as Stripe.Checkout.SessionCreateParams;
+  }
+
+  private assertLaunchLease(attempt: LaunchCheckoutAttempt) {
+    // Do not dispatch a new provider mutation near the end of this short lease.
+    if (!attempt.leaseUntil || attempt.leaseUntil.getTime() - Date.now() < 15000) {
+      throw new ConflictException('Checkout ownership expired; retry shortly');
+    }
+  }
+
+  private async launchSessionId(attempt: LaunchCheckoutAttempt, subscriptions: Stripe.Subscription[]) {
+    const history = await stripe.checkout.sessions.list({ customer: attempt.customerId, limit: 100 }, launchRequestOptions);
+    if (history.has_more !== false || !Array.isArray(history.data)) {
+      throw new ServiceUnavailableException('Checkout history is incomplete');
+    }
+    const owned = history.data.filter(s => s.client_reference_id === attempt.id || s.metadata?.launchAttemptId === attempt.id);
+    if (owned.length > 1 || (attempt.sessionId && owned.some(s => s.id !== attempt.sessionId))) {
+      throw new ConflictException('Multiple checkout identities require reconciliation');
+    }
+    for (const session of history.data) {
+      if (session.mode === 'payment' || session.mode === 'setup') continue;
+      if (session.mode !== 'subscription' || providerId(session.customer) !== attempt.customerId) {
+        throw new ConflictException('Unknown checkout history requires reconciliation');
+      }
+      if (session.id === attempt.sessionId || owned.includes(session) || session.status === 'expired') continue;
+      const settled = session.status === 'complete' && subscriptions.some(sub =>
+        sub.id === providerId(session.subscription) && providerId(sub.customer) === attempt.customerId &&
+        ['canceled', 'incomplete_expired'].includes(sub.status));
+      if (!settled) throw new ConflictException('An unknown checkout or settlement requires reconciliation');
+    }
+    return attempt.sessionId || owned[0]?.id;
+  }
+
+  private async verifiedLaunchSession(attempt: LaunchCheckoutAttempt, id: string) {
+    const session = await stripe.checkout.sessions.retrieve(id, { expand: ['line_items.data.price'] }, launchRequestOptions);
+    const params = this.launchParametersFor(attempt);
+    const period = params.subscription_data?.metadata?.period as 'MONTHLY' | 'YEARLY';
+    const items = session.line_items;
+    if (session.id !== id || (attempt.sessionId && session.id !== attempt.sessionId) ||
+        session.mode !== 'subscription' || providerId(session.customer) !== attempt.customerId ||
+        session.ui_mode !== params.ui_mode || session.client_reference_id !== attempt.id ||
+        session.metadata?.service !== launchCheckoutOwner || session.metadata?.launchAttemptId !== attempt.id ||
+        session.metadata?.requestFingerprint !== attempt.requestFingerprint ||
+        !['MONTHLY', 'YEARLY'].includes(period) || !['open', 'complete', 'expired'].includes(session.status || '') ||
+        !items || items.has_more !== false || items.data.length !== 1 || items.data[0].quantity !== 1 ||
+        !items.data[0].price || items.data[0].price.id !== params.line_items?.[0].price ||
+        !this.validLaunchPrice(items.data[0].price, period) || ![false, null].includes(session.allow_promotion_codes) ||
+        session.payment_method_collection !== 'always' || session.payment_method_types.length !== 1 ||
+        session.payment_method_types[0] !== 'card' || session.after_expiration?.recovery?.enabled) {
+      throw new ConflictException('Checkout does not match its approved immutable request');
+    }
+    return session;
+  }
+
+  private async closeTerminalLaunch(attempt: LaunchCheckoutAttempt, session: Stripe.Checkout.Session) {
+    if (session.status === 'complete') {
+      attempt = await this._subscriptionService.transitionLaunchCheckout(attempt, [attempt.state],
+        { state: 'SETTLEMENT_PENDING', sessionId: session.id });
+    } else if (session.status !== 'expired') {
+      throw new ConflictException('Checkout expiration is pending; retry shortly');
+    }
+    const current = await this.currentCustomerSubscriptions(attempt.customerId, true);
+    this.assertNoLiveSubscriptions(current, attempt.customerId);
+    // Completion is never inferred to be harmless from an empty subscription list.
+    if (session.status === 'complete' && !current.some(sub => sub.id === providerId(session.subscription))) {
+      throw new ConflictException('Checkout settlement is pending; refresh billing');
+    }
+    await this._subscriptionService.transitionLaunchCheckout(attempt, [attempt.state], { state: 'CLOSED', sessionId: session.id });
+  }
+
+  private async launchCheckout(mode: 'hosted' | 'custom', ud: string, organizationId: string,
+    userId: string, body: BillingSubscribeDto, allowTrial: boolean) {
+    await this.assertSaleEligible(organizationId, body);
+    const price = await this.launchPrice(body.period, true);
+    const binding = await this.launchCustomer(organizationId, userId);
+    if (allowTrial && !binding.allowTrial) throw new ConflictException('Trial eligibility changed; refresh billing');
+    for (let round = 0; round < 2; round++) {
+      const id = randomUUID();
+      const parameters = this.launchParameters(id, mode, binding.customer, price.id, body, userId, ud, allowTrial);
+      let attempt = await this._subscriptionService.claimLaunchCheckout(organizationId, binding.customer, {
+        id, operationKey: `launch-checkout:${id}`, parameters: parameters as unknown as Prisma.InputJsonObject,
+        requestFingerprint: launchFingerprint(parameters), allowTrial,
+      }, randomUUID());
+      try {
+        const saved = this.launchParametersFor(attempt);
+        const subscriptions = await this.currentCustomerSubscriptions(binding.customer, true);
+        let sessionId = await this.launchSessionId(attempt, subscriptions);
+        if (!sessionId) {
+          this.assertNoLiveSubscriptions(subscriptions, binding.customer);
+          if (saved.ui_mode !== mode || saved.subscription_data?.metadata?.period !== body.period ||
+              saved.line_items?.[0].price !== price.id || Boolean(saved.subscription_data?.trial_period_days) !== allowTrial) {
+            throw new ConflictException('A different checkout request is unresolved; resume it before changing selection');
+          }
+          if (attempt.state !== 'PREPARED' && (!attempt.firstDispatchedAt ||
+              Date.now() - attempt.firstDispatchedAt.getTime() >= launchRetryWindowMs)) {
+            await this._subscriptionService.transitionLaunchCheckout(attempt, [attempt.state], { state: 'REVIEW' });
+            throw new ConflictException('Checkout outcome is uncertain beyond the retry window; reconciliation required');
+          }
+          this.assertLaunchLease(attempt);
+          if (attempt.state === 'PREPARED') {
+            attempt = await this._subscriptionService.transitionLaunchCheckout(attempt, ['PREPARED'],
+              { state: 'DISPATCHED', firstDispatchedAt: new Date(Date.now()) });
+          }
+          // Both the key and every POST parameter survive response loss/restart.
+          const created = await stripe.checkout.sessions.create({ ...saved,
+            metadata: { ...saved.metadata, requestFingerprint: attempt.requestFingerprint } },
+            { ...launchRequestOptions, idempotencyKey: attempt.operationKey });
+          if (!created.id) throw new ConflictException('Checkout response is incomplete; retry shortly');
+          attempt = await this._subscriptionService.transitionLaunchCheckout(attempt, [attempt.state], { sessionId: created.id });
+          sessionId = created.id;
+        }
+        let session = await this.verifiedLaunchSession(attempt, sessionId);
+        if (!attempt.sessionId) {
+          attempt = await this._subscriptionService.transitionLaunchCheckout(attempt, [attempt.state], { sessionId: session.id });
+        }
+        if (session.status !== 'open') {
+          await this.closeTerminalLaunch(attempt, session);
+          continue;
+        }
+        this.assertNoLiveSubscriptions(subscriptions, binding.customer);
+        if (attempt.state === 'SETTLEMENT_PENDING' || saved.ui_mode !== mode ||
+            Boolean(saved.subscription_data?.trial_period_days) !== allowTrial ||
+            (saved.subscription_data?.metadata?.period === body.period && saved.line_items?.[0].price !== price.id)) {
+          throw new ConflictException('Checkout mode or contract changed; the existing session must finish or expire');
+        }
+        if (saved.subscription_data?.metadata?.period !== body.period || attempt.state === 'EXPIRING') {
+          this.assertLaunchLease(attempt);
+          attempt = await this._subscriptionService.transitionLaunchCheckout(attempt, [attempt.state], { state: 'EXPIRING' });
+          try {
+            await stripe.checkout.sessions.expire(session.id, {},
+              { ...launchRequestOptions, idempotencyKey: `launch-expire:${attempt.id}` });
+          } catch (_error) {
+            // Completion or response loss may win. Only a fresh terminal read
+            // and subscription recheck can release this attempt's unique lane.
+          }
+          session = await this.verifiedLaunchSession(attempt, session.id);
+          if (session.status === 'complete') {
+            await this._subscriptionService.transitionLaunchCheckout(attempt, ['EXPIRING'], { state: 'SETTLEMENT_PENDING' });
+            throw new ConflictException('Checkout completed before replacement; refresh billing');
+          }
+          await this.closeTerminalLaunch(attempt, session);
+          continue;
+        }
+        attempt = await this._subscriptionService.transitionLaunchCheckout(attempt, [attempt.state], { state: 'OPEN' });
+        if (mode === 'custom' && session.client_secret) return { client_secret: session.client_secret };
+        if (mode === 'hosted' && session.url?.startsWith('https://checkout.stripe.com/')) return { url: session.url };
+        throw new ConflictException('Checkout response is incomplete; retry shortly');
+      } finally {
+        // Release only this request's lease, never the unresolved attempt.
+        await this._subscriptionService.releaseLaunchCheckout(attempt);
+      }
+    }
+    throw new ConflictException('Checkout state changed; retry shortly');
   }
 
   private async reconcileLaunchEvent(event: Stripe.CustomerSubscriptionCreatedEvent | Stripe.CustomerSubscriptionUpdatedEvent | Stripe.CustomerSubscriptionDeletedEvent) {
@@ -272,11 +494,11 @@ export class StripeService {
       email: users.users[0].user.email.indexOf('@') > -1 ? users.users[0].user.email : `${users.users[0].user.email}@postiz.com`,
       name: organization.name,
     });
-    await this._subscriptionService.updateCustomerId(
+    const canonical = await this._subscriptionService.bindLaunchCustomer(
       organization.id,
       customer.id
     );
-    return customer.id;
+    return canonical.paymentId!;
   }
 
   async getPackages() {
@@ -802,13 +1024,14 @@ export class StripeService {
     allowTrial: boolean
   ) {
     this.assertBillingEnabled();
+    if (body.billing === 'LAUNCH_V1') {
+      return this.launchCheckout('custom', uniqueId, organizationId, userId, body, allowTrial);
+    }
     const id = makeId(10);
     const priceData = pricing[body.billing];
     const org = await this._organizationService.getOrgById(organizationId);
     await this.assertSaleEligible(organizationId, body);
-    const findPrice = body.billing === 'LAUNCH_V1'
-      ? await this.launchPrice(body.period)
-      : await (async () => {
+    const findPrice = await (async () => {
     const allProducts = await stripe.products.list({
       active: true,
       expand: ['data.prices'],
@@ -875,6 +1098,9 @@ export class StripeService {
     allowTrial: boolean
   ) {
     this.assertBillingEnabled();
+    if (body.billing === 'LAUNCH_V1' && !(await this._subscriptionService.getSubscription(organizationId))) {
+      return this.launchCheckout('hosted', uniqueId, organizationId, userId, body, allowTrial);
+    }
     const id = makeId(10);
     const priceData = pricing[body.billing];
     const org = await this._organizationService.getOrgById(organizationId);
@@ -933,6 +1159,10 @@ export class StripeService {
       await this._subscriptionService.getSubscription(organizationId);
 
     if (!getCurrentSubscriptions) {
+      // A subscription may have disappeared since the initial routing read.
+      if (body.billing === 'LAUNCH_V1') {
+        return this.launchCheckout('hosted', uniqueId, organizationId, userId, body, allowTrial);
+      }
       return this.createCheckoutSession(
         uniqueId,
         id,

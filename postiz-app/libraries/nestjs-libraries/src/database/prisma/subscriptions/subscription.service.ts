@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { pricing, channelAllowance } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
-import { LifetimeSubscriptionSnapshot, SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
+import { LaunchCheckoutProposal, LifetimeSubscriptionSnapshot, SubscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.repository';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
-import { Organization, Prisma } from '@prisma/client';
+import { LaunchCheckoutAttempt, LaunchCheckoutState, Organization, Prisma } from '@prisma/client';
 import dayjs, { Dayjs } from 'dayjs';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
@@ -27,6 +27,39 @@ export class SubscriptionService {
     private readonly _organizationService: OrganizationService,
     private readonly _transaction?: PrismaTransaction
   ) {}
+
+  getLaunchCustomer(organizationId: string) {
+    return this._subscriptionRepository.getLaunchCustomer(organizationId);
+  }
+
+  bindLaunchCustomer(organizationId: string, customerId: string) {
+    // This commit completes before any Checkout request is dispatched.
+    return this._subscriptionRepository.bindLaunchCustomer(organizationId, customerId);
+  }
+
+  private withLaunchCheckoutLock<T>(organizationId: string, work: (tx: Prisma.TransactionClient) => Promise<T>) {
+    if (!this._transaction) throw new Error('Checkout transaction is unavailable');
+    return this._transaction.model.$transaction(async tx => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId}, 2))::text`;
+      return work(tx);
+    }, { maxWait: 3000, timeout: 5000 });
+  }
+
+  claimLaunchCheckout(organizationId: string, customerId: string, proposal: LaunchCheckoutProposal, token: string) {
+    return this.withLaunchCheckoutLock(organizationId,
+      tx => this._subscriptionRepository.claimLaunchCheckout(tx, organizationId, customerId, proposal, token));
+  }
+
+  transitionLaunchCheckout(attempt: LaunchCheckoutAttempt, states: LaunchCheckoutState[],
+    data: Partial<Pick<LaunchCheckoutAttempt, 'state' | 'sessionId' | 'firstDispatchedAt'>>) {
+    return this.withLaunchCheckoutLock(attempt.organizationId,
+      tx => this._subscriptionRepository.transitionLaunchCheckout(tx, attempt, states, data));
+  }
+
+  releaseLaunchCheckout(attempt: LaunchCheckoutAttempt) {
+    return this.withLaunchCheckoutLock(attempt.organizationId,
+      tx => this._subscriptionRepository.releaseLaunchCheckout(tx, attempt));
+  }
 
   getSubscriptionByOrganizationId(organizationId: string) {
     return this._subscriptionRepository.getSubscriptionByOrganizationId(

@@ -39,6 +39,7 @@ model Organization {
   sets                Sets[]
   signatures          Signatures[]
   subscription        Subscription?
+  launchCheckoutAttempts LaunchCheckoutAttempt[]
   tags                Tags[]
   thirdParty          ThirdParty[]
   usedCodes           UsedCodes[]
@@ -372,6 +373,36 @@ model Credits {
 
   @@index([organizationId])
   @@index([createdAt])
+}
+
+enum LaunchCheckoutState {
+  PREPARED
+  DISPATCHED
+  OPEN
+  EXPIRING
+  SETTLEMENT_PENDING
+  REVIEW
+  CLOSED
+}
+
+model LaunchCheckoutAttempt {
+  id                 String              @id
+  organizationId     String
+  customerId         String
+  operationKey       String              @unique
+  requestFingerprint String
+  parameters         Json
+  sessionId          String?             @unique
+  state              LaunchCheckoutState @default(PREPARED)
+  firstDispatchedAt  DateTime?
+  leaseToken         String?
+  leaseUntil         DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  // The additive SQL migration also enforces one non-CLOSED attempt per org.
+  @@index([organizationId, state])
 }
 
 model Subscription {

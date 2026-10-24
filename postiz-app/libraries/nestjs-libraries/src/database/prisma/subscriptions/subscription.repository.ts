@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import dayjs from 'dayjs';
-import { Organization, Prisma, Subscription } from '@prisma/client';
+import { LaunchCheckoutAttempt, LaunchCheckoutState, Organization, Prisma, Subscription } from '@prisma/client';
+
+export type LaunchCheckoutProposal = Pick<LaunchCheckoutAttempt,
+  'id' | 'operationKey' | 'requestFingerprint'> & { parameters: Prisma.InputJsonObject; allowTrial: boolean };
 
 export type LifetimeSubscriptionSnapshot = Pick<Subscription, 'id' | 'updatedAt' | 'identifier'>;
 
@@ -14,6 +17,66 @@ export class SubscriptionRepository {
     private readonly _credits: PrismaRepository<'credits'>,
     private _usedCodes: PrismaRepository<'usedCodes'>
   ) {}
+
+  getLaunchCustomer(organizationId: string) {
+    return this._organization.model.organization.findUnique({ where: { id: organizationId },
+      select: { paymentId: true, allowTrial: true } });
+  }
+
+  async bindLaunchCustomer(organizationId: string, customerId: string) {
+    await this._organization.model.organization.updateMany({
+      where: { id: organizationId, paymentId: null }, data: { paymentId: customerId },
+    });
+    // The winner may be a concurrent customer creator. Never use the losing ID.
+    const canonical = await this.getLaunchCustomer(organizationId);
+    if (!canonical?.paymentId) throw new ConflictException('Billing customer binding is pending');
+    return canonical;
+  }
+
+  async claimLaunchCheckout(tx: Prisma.TransactionClient, organizationId: string,
+    customerId: string, proposal: LaunchCheckoutProposal, token: string) {
+    const org = await tx.organization.findUnique({ where: { id: organizationId } });
+    const subscribed = await tx.subscription.findFirst({ where: { organizationId, deletedAt: null } });
+    if (!org || org.paymentId !== customerId || subscribed) {
+      throw new ConflictException('Subscription or canonical customer state changed; refresh billing');
+    }
+    if (proposal.allowTrial && !org.allowTrial) throw new ConflictException('Trial eligibility changed; refresh billing');
+    let attempt = await tx.launchCheckoutAttempt.findFirst({ where: { organizationId, state: { not: 'CLOSED' } } });
+    const now = new Date(Date.now());
+    if (attempt?.leaseUntil && attempt.leaseUntil > now) throw new ConflictException('Launch checkout is pending; retry shortly');
+    if (!attempt) {
+      const { allowTrial: _allowTrial, ...data } = proposal;
+      attempt = await tx.launchCheckoutAttempt.create({ data: { ...data, organizationId, customerId } });
+    }
+    if (attempt.customerId !== customerId) throw new ConflictException('Checkout customer requires reconciliation');
+    return tx.launchCheckoutAttempt.update({ where: { id: attempt.id },
+      data: { leaseToken: token, leaseUntil: new Date(now.getTime() + 120000) } });
+  }
+
+  async transitionLaunchCheckout(tx: Prisma.TransactionClient, attempt: LaunchCheckoutAttempt,
+    states: LaunchCheckoutState[], data: Partial<Pick<LaunchCheckoutAttempt, 'state' | 'sessionId' | 'firstDispatchedAt'>>) {
+    if (data.state && ['DISPATCHED', 'OPEN', 'CLOSED'].includes(data.state)) {
+      const org = await tx.organization.findUnique({ where: { id: attempt.organizationId } });
+      const subscribed = await tx.subscription.findFirst({ where: { organizationId: attempt.organizationId, deletedAt: null } });
+      if (!org || org.paymentId !== attempt.customerId || subscribed) {
+        throw new ConflictException('Subscription or canonical customer state changed; refresh billing');
+      }
+      const parameters = attempt.parameters as { subscription_data?: { trial_period_days?: number } };
+      if (data.state !== 'CLOSED' && parameters.subscription_data?.trial_period_days && !org.allowTrial) {
+        throw new ConflictException('Trial eligibility changed; refresh billing');
+      }
+    }
+    const changed = await tx.launchCheckoutAttempt.updateMany({ where: { id: attempt.id,
+      organizationId: attempt.organizationId, leaseToken: attempt.leaseToken,
+      leaseUntil: { gt: new Date(Date.now()) }, state: { in: states } }, data });
+    if (changed.count !== 1) throw new ConflictException('Checkout ownership changed; refresh billing');
+    return tx.launchCheckoutAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
+  }
+
+  releaseLaunchCheckout(tx: Prisma.TransactionClient, attempt: LaunchCheckoutAttempt) {
+    return tx.launchCheckoutAttempt.updateMany({ where: { id: attempt.id, leaseToken: attempt.leaseToken },
+      data: { leaseToken: null, leaseUntil: null } });
+  }
 
   getUserAccount(userId: string) {
     return this._user.model.user.findFirst({
