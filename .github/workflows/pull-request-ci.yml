@@ -96,7 +96,6 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       NODE_OPTIONS: --max-old-space-size=4096
-      BILLING_FIXTURE_ID: ${{ job.services.publication-fixtures.id }}
       ACCEPTANCE_BASE_SHA: ${{ needs.resolve-revisions.outputs.base_sha }}
       ACCEPTANCE_HEAD_SHA: ${{ needs.resolve-revisions.outputs.head_sha }}
       ACCEPTANCE_CHECKOUT_SHA: ${{ needs.resolve-revisions.outputs.checkout_ref }}
@@ -153,7 +152,11 @@ jobs:
 
       - name: Prepare billing acceptance guards and evidence
         shell: bash
+        env:
+          BILLING_FIXTURE_ID: ${{ job.services.publication-fixtures.id }}
         run: |
+          [[ "$BILLING_FIXTURE_ID" =~ ^[0-9a-f]{64}$ ]]
+          printf 'BILLING_FIXTURE_ID=%s\n' "$BILLING_FIXTURE_ID" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/billing-acceptance"
           cat > "$RUNNER_TEMP/billing-acceptance/check.py" <<'PY'
           import hashlib, json, os, re, subprocess, sys
