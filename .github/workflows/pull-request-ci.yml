@@ -96,6 +96,10 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       NODE_OPTIONS: --max-old-space-size=4096
+      BILLING_FIXTURE_ID: ${{ job.services.publication-fixtures.id }}
+      ACCEPTANCE_BASE_SHA: ${{ needs.resolve-revisions.outputs.base_sha }}
+      ACCEPTANCE_HEAD_SHA: ${{ needs.resolve-revisions.outputs.head_sha }}
+      ACCEPTANCE_CHECKOUT_SHA: ${{ needs.resolve-revisions.outputs.checkout_ref }}
     defaults:
       run:
         working-directory: postiz-app
@@ -147,23 +151,221 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare billing acceptance guards and evidence
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/billing-acceptance"
+          cat > "$RUNNER_TEMP/billing-acceptance/check.py" <<'PY'
+          import hashlib, json, os, re, subprocess, sys
+          from pathlib import Path
+
+          def require(condition, message):
+              if not condition:
+                  raise ValueError(message)
+
+          def migrations(root):
+              files = sorted((root / "postiz-app/libraries/nestjs-libraries/src/database/prisma/migrations").glob("*/migration.sql"))
+              require(len(files) == 16, "Expected exactly 16 candidate migrations")
+              return {p.parent.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+
+          def verify_service(data, expected):
+              require(re.fullmatch(r"[0-9a-f]{64}", expected or ""), "Invalid job service identity")
+              require(isinstance(data, list) and len(data) == 1, "Ambiguous service inspection")
+              service = data[0]
+              require(service["Id"] == expected, "Service does not match this job")
+              require(service["State"]["Running"] and service["State"]["Health"]["Status"] == "healthy", "Service not healthy")
+              require(service["Config"]["Image"] == "postgres:17-alpine", "Unexpected fixture image")
+              env = dict(item.split("=", 1) for item in service["Config"]["Env"])
+              for key, value in {"POSTGRES_USER": "isolated", "POSTGRES_PASSWORD": "isolated", "POSTGRES_DB": "isolated"}.items():
+                  require(env.get(key) == value, "Unexpected synthetic fixture configuration")
+              require(not env.get("POSTGRES_PASSWORD_FILE"), "File-backed credentials are prohibited")
+              ports = service["NetworkSettings"]["Ports"].get("5432/tcp", [])
+              require(ports and all(p["HostPort"] == "55462" and p["HostIp"] in ("0.0.0.0", "127.0.0.1", "::") for p in ports), "Unexpected fixture binding")
+              require(re.fullmatch(r"sha256:[0-9a-f]{64}", service["Image"]), "Invalid fixture image identity")
+              return {"container_id": expected, "created": service["Created"], "image_id": service["Image"]}
+
+          def verify_migrations(text, expected):
+              rows = [line.split("|") for line in text.splitlines() if line]
+              require(len(rows) == 16 and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
+              require(len({row[0] for row in rows}) == 16, "Duplicate migration evidence")
+              require({row[0]: row[1] for row in rows} == expected and all(row[2] == "t" for row in rows), "Migrations differ or did not finish")
+
+          def verify_tap(text, expected):
+              for key, count in {"tests": expected, "pass": expected, "fail": 0, "cancelled": 0, "skipped": 0, "todo": 0}.items():
+                  require(re.findall(r"^# " + key + r" (\d+)\s*$", text, re.M) == [str(count)], "Invalid TAP " + key)
+              require(re.findall(r"^ok ([1-9]\d*) - .+$", text, re.M) == [str(i) for i in range(1, expected + 1)], "Missing TAP case evidence")
+              require(re.findall(r"^1\.\.(\d+)\s*$", text, re.M) == [str(expected)], "Invalid TAP plan")
+              require(not re.search(r"^ok .*#\s*(SKIP|TODO)\b", text, re.M | re.I), "Skipped TAP case")
+              require(not re.search(r"^not ok\b|^Bail out!", text, re.M), "TAP reports failure")
+
+          def verify_unittest(text, expected):
+              require(re.findall(r"^Ran (\d+) tests? in .+$", text, re.M) == [str(expected)], "Unexpected unittest count")
+              require(text.rstrip().endswith("\nOK") and len(re.findall(r"^test_.* \.\.\. ok$", text, re.M)) == expected, "Unittest failure or skipped coverage")
+
+          def verify_jest(data, group, wallet_names=None):
+              require(isinstance(data, dict) and data.get("success") is True, "Missing or unsuccessful Jest result")
+              results = data.get("testResults")
+              require(isinstance(results, list) and results, "Missing Jest suite evidence")
+              if group == "wallet":
+                  for key, expected in {"numTotalTestSuites": 16, "numPassedTestSuites": 16, "numTotalTests": 364, "numPassedTests": 364, "numFailedTests": 0, "numPendingTests": 0, "numTodoTests": 0, "numPendingTestSuites": 0}.items():
+                      require(data.get(key) == expected, "Invalid wallet " + key)
+                  require(len(results) == 16 and len({r["name"] for r in results}) == 16, "Invalid wallet suite inventory")
+                  require(wallet_names is not None and len(wallet_names) == 16 and {r["name"].replace("\\", "/") for r in results} == wallet_names, "Wallet suites differ from candidate")
+                  require(sum(len(r.get("assertionResults", [])) for r in results) == 364, "Missing wallet assertion evidence")
+                  selected = results
+              else:
+                  names = {
+                      "frontend": ["ai-wallet", "copy-generation.client", "copy-generation.retry-identity"],
+                      "copy": ["stripe.launch-plan", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
+                  }[group]
+                  directory, extension = ("frontend", "tsx") if group == "frontend" else ("copy-generation", "ts")
+                  selected = []
+                  for name in names:
+                      suffix = "/tests/" + directory + "/" + name + ".spec." + extension
+                      found = [r for r in results if r.get("name", "").replace("\\", "/").endswith(suffix)]
+                      require(len(found) == 1, "Missing or duplicate required suite: " + name)
+                      selected.extend(found)
+              for result in selected:
+                  assertions = result.get("assertionResults")
+                  require(result.get("status") == "passed" and isinstance(assertions, list) and assertions and all(a.get("status") == "passed" for a in assertions), "Required suite failed or skipped")
+
+          def main():
+              root, out = Path(os.environ["GITHUB_WORKSPACE"]), Path(os.environ["RUNNER_TEMP"]) / "billing-acceptance"
+              mode, *args = sys.argv[1:]
+              if mode == "identity":
+                  def git(*arguments):
+                      return subprocess.check_output(["git", "-C", str(root), *arguments], text=True).strip()
+                  require(all(re.fullmatch(r"[0-9a-f]{40}", os.environ.get(key, "")) for key in ("ACCEPTANCE_BASE_SHA", "ACCEPTANCE_HEAD_SHA", "ACCEPTANCE_CHECKOUT_SHA")), "Invalid acceptance revisions")
+                  actual = git("rev-parse", "HEAD")
+                  require(actual == os.environ["ACCEPTANCE_CHECKOUT_SHA"], "Unexpected checkout")
+                  receipt = {key: os.environ.get(key) for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_EVENT_NAME", "ACCEPTANCE_BASE_SHA", "ACCEPTANCE_HEAD_SHA", "RUNNER_OS", "RUNNER_ARCH", "ImageOS", "ImageVersion")}
+                  receipt.update(checkout=actual, tree=git("rev-parse", "HEAD^{tree}"), head_tree=git("rev-parse", os.environ["ACCEPTANCE_HEAD_SHA"] + "^{tree}"), workflow_blob=git("rev-parse", "HEAD:.github/workflows/pull-request-ci.yml"))
+                  (out / "identity.json").write_text(json.dumps(receipt, indent=2))
+                  (out / "migrations.json").write_text(json.dumps(migrations(root), indent=2))
+              elif mode == "service":
+                  receipt = verify_service(json.load(sys.stdin), os.environ.get("BILLING_FIXTURE_ID"))
+                  image = json.loads(subprocess.check_output(["docker", "image", "inspect", receipt["image_id"]], text=True))[0]
+                  require(image["Id"] == receipt["image_id"], "Image identity changed")
+                  receipt["repo_digests"] = image.get("RepoDigests", [])
+                  (out / "service.json").write_text(json.dumps(receipt, indent=2))
+              elif mode == "migrations":
+                  verify_migrations(Path(args[0]).read_text(), migrations(root))
+              elif mode == "tap":
+                  verify_tap(Path(args[0]).read_text(), int(args[1]))
+              elif mode == "unittest":
+                  verify_unittest(Path(args[0]).read_text(), int(args[1]))
+              elif mode == "jest":
+                  names = {str(p).replace("\\", "/") for p in (root / "postiz-app/tests/ai-wallet").rglob("*.spec.ts")}
+                  verify_jest(json.loads(Path(args[0]).read_text()), args[1], names)
+              else:
+                  raise ValueError("Unknown evidence mode")
+              print("PASS billing acceptance evidence:", mode, *args)
+
+          if __name__ == "__main__":
+              main()
+          PY
+          cat > "$RUNNER_TEMP/billing-acceptance/fixture.sh" <<'SH'
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/billing-acceptance"
+          fixture_sql() {
+            docker exec -e PGPASSWORD=isolated "$BILLING_FIXTURE_ID" psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U isolated -d isolated "$@"
+          }
+          guard_fixture() {
+            test -z "${DOCKER_HOST:-}"
+            test "$(docker context show)" = default
+            docker inspect --type container "$BILLING_FIXTURE_ID" | python3 "$evidence/check.py" service
+            test "$(fixture_sql -Atc "SELECT current_user || '|' || current_database() || '|' || inet_server_port()")" = 'isolated|isolated|5432'
+          }
+          wallet_identity() {
+            fixture_sql -Atc "SELECT oid || '|' || pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'ep_ai_wallet_test'"
+          }
+          create_wallet() {
+            guard_fixture
+            test "$DATABASE_URL" = 'postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test'
+            test ! -e "$evidence/wallet-owner.txt"
+            test "$(fixture_sql -Atc "SELECT count(*) FROM pg_database WHERE datname = 'ep_ai_wallet_test'")" = 0
+            fixture_sql -c 'CREATE DATABASE ep_ai_wallet_test OWNER isolated'
+            local identity
+            identity="$(wallet_identity)"
+            [[ "$identity" =~ ^[1-9][0-9]*\|isolated$ ]]
+            printf '%s\n' "$BILLING_FIXTURE_ID|$GITHUB_RUN_ID|$GITHUB_RUN_ATTEMPT|$identity" > "$evidence/wallet-owner.txt"
+          }
+          drop_wallet() {
+            guard_fixture
+            test "$DATABASE_URL" = 'postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test'
+            test -f "$evidence/wallet-owner.txt"
+            test "$(cat "$evidence/wallet-owner.txt")" = "$BILLING_FIXTURE_ID|$GITHUB_RUN_ID|$GITHUB_RUN_ATTEMPT|$(wallet_identity)"
+            fixture_sql -c 'DROP DATABASE ep_ai_wallet_test'
+            rm -- "$evidence/wallet-owner.txt"
+          }
+          verify_migrations() {
+            case "$1" in isolated|ep_ai_wallet_test) ;; *) return 1 ;; esac
+            guard_fixture
+            docker exec -e PGPASSWORD=isolated "$BILLING_FIXTURE_ID" psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U isolated -d "$1" -Atc 'SELECT migration_name, checksum, (finished_at IS NOT NULL AND rolled_back_at IS NULL) FROM "_prisma_migrations" ORDER BY migration_name' > "$evidence/$2-migrations.txt"
+            python3 "$evidence/check.py" migrations "$evidence/$2-migrations.txt"
+          }
+          SH
+          python3 "$RUNNER_TEMP/billing-acceptance/check.py" identity
+
       - name: Prepare disposable publication fixture database
         env:
           DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
-        run: pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
+        run: |
+          source "$RUNNER_TEMP/billing-acceptance/fixture.sh"
+          guard_fixture
+          test "$DATABASE_URL" = 'postgresql://isolated:isolated@127.0.0.1:55462/isolated'
+          test "$(fixture_sql -Atc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")" = 0
+          pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
+          verify_migrations isolated publication
+
+      - name: Test billing helper groups with separate fresh fixtures
+        env:
+          DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
+          AI_WALLET_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
+        run: |
+          source "$RUNNER_TEMP/billing-acceptance/fixture.sh"
+          test "$AI_WALLET_TEST_DATABASE_URL" = "$DATABASE_URL"
+          for spec in acceptance-sandbox:8 acceptance-sandbox-resume:4 review-funded-test-refund:5; do
+            name="${spec%:*}"
+            count="${spec#*:}"
+            create_wallet
+            cp "$evidence/wallet-owner.txt" "$evidence/$name-owner.txt"
+            pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
+            verify_migrations ep_ai_wallet_test "$name"
+            (cd "$GITHUB_WORKSPACE" && node --test --test-reporter=tap "scripts/billing/$name.test.cjs") 2>&1 | tee "$evidence/$name.tap"
+            python3 "$evidence/check.py" tap "$evidence/$name.tap" "$count"
+            drop_wallet
+          done
+
+      - name: Test billing launcher safeguards
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/billing-acceptance"
+          for spec in acceptance-sandbox-launcher:5 review-funded-test-refund-launcher:2; do
+            name="${spec%:*}"
+            count="${spec#*:}"
+            python3 -B "$GITHUB_WORKSPACE/scripts/billing/$name.test.py" -v 2>&1 | tee "$evidence/$name.log"
+            python3 "$evidence/check.py" unittest "$evidence/$name.log" "$count"
+          done
 
       - name: Prepare isolated prepaid wallet database
         env:
           DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
         run: |
-          docker exec "${{ job.services.publication-fixtures.id }}" createdb -U isolated ep_ai_wallet_test
+          source "$RUNNER_TEMP/billing-acceptance/fixture.sh"
+          create_wallet
           pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
+          verify_migrations ep_ai_wallet_test wallet
 
       - name: Test prepaid wallet transactions against PostgreSQL
         env:
           AI_WALLET_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
           LAUNCH_ENTITLEMENT_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
-        run: pnpm exec jest --config jest.ai-wallet.config.cjs --runInBand
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/billing-acceptance"
+          pnpm exec jest --config jest.ai-wallet.config.cjs --runInBand --json --outputFile="$evidence/wallet.json" 2>&1 | tee "$evidence/wallet.log"
+          python3 "$evidence/check.py" jest "$evidence/wallet.json" wallet
 
       - name: Verify default Jest configuration loads
         run: |
@@ -225,7 +427,9 @@ jobs:
       - name: Test generated post-set review workflow
         id: post-set-test
         continue-on-error: true
-        run: pnpm exec jest --config jest.post-set-review.config.cjs --runInBand > post-set-test.log 2>&1
+        run: |
+          pnpm exec jest --config jest.post-set-review.config.cjs --runInBand --json --outputFile="$RUNNER_TEMP/billing-acceptance/frontend.json" > post-set-test.log 2>&1
+          python3 "$RUNNER_TEMP/billing-acceptance/check.py" jest "$RUNNER_TEMP/billing-acceptance/frontend.json" frontend
 
       - name: Type-check frontend
         id: frontend-typecheck
@@ -284,7 +488,11 @@ jobs:
       - name: Run copy-generation tests
         id: copy-generation-tests
         continue-on-error: true
-        run: pnpm exec jest --config jest.copy-generation.config.cjs --runInBand > copy-generation-test.log 2>&1
+        env:
+          OAUTH_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
+        run: |
+          pnpm exec jest --config jest.copy-generation.config.cjs --runInBand --json --outputFile="$RUNNER_TEMP/billing-acceptance/copy.json" > copy-generation-test.log 2>&1
+          python3 "$RUNNER_TEMP/billing-acceptance/check.py" jest "$RUNNER_TEMP/billing-acceptance/copy.json" copy
 
       - name: Upload copy-generation diagnostics
         if: always()
@@ -310,6 +518,15 @@ jobs:
 
       - name: Test private connected Creator Audit
         run: pnpm exec jest --config jest.published-posts.config.cjs --testMatch '**/tests/creator-audit/**/*.spec.ts' --runInBand
+
+      - name: Preserve billing acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/billing-acceptance
+          if-no-files-found: error
+          retention-days: 7
 
   classify-docker-build:
     name: Classify Docker build requirement
