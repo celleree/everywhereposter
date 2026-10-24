@@ -5,6 +5,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Full base commit SHA to compare
+        required: true
+        type: string
+      head_sha:
+        description: Full head commit SHA to test
+        required: true
+        type: string
 
 concurrency:
   group: pull-request-ci-${{ github.event.pull_request.number || github.ref }}
@@ -17,13 +26,47 @@ env:
   NODE_OPTIONS: --max-old-space-size=4096
 
 jobs:
+  resolve-revisions:
+    name: Resolve trusted revisions
+    runs-on: ubuntu-latest
+    outputs:
+      base_sha: ${{ steps.revisions.outputs.base_sha }}
+      head_sha: ${{ steps.revisions.outputs.head_sha }}
+      checkout_ref: ${{ steps.revisions.outputs.checkout_ref }}
+
+    steps:
+      - name: Validate repository commit identities
+        id: revisions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.head_sha }}
+          CHECKOUT_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha || github.sha }}
+        run: |
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            test "$EVENT_SHA" = "$HEAD_SHA"
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$BASE_SHA" --jq .sha)" = "$BASE_SHA"
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$HEAD_SHA" --jq .sha)" = "$HEAD_SHA"
+          fi
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$CHECKOUT_REF" >> "$GITHUB_OUTPUT"
+
   repository-guard:
     name: Repository guard
+    needs: resolve-revisions
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-revisions.outputs.checkout_ref }}
 
       - name: Verify canonical branch safeguards
         env:
@@ -37,6 +80,7 @@ jobs:
 
   quality:
     name: Type checks and stable unit tests
+    needs: resolve-revisions
     runs-on: ubuntu-latest
     services:
       publication-fixtures:
@@ -60,15 +104,19 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.resolve-revisions.outputs.checkout_ref }}
           fetch-depth: 0
 
       - name: Verify working tree and pull request diff
         working-directory: .
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ needs.resolve-revisions.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.resolve-revisions.outputs.head_sha }}
         run: |
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
           git status --short
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA" || test "${{ github.event_name }}" = "pull_request"
           git diff --check "$BASE_SHA...$HEAD_SHA"
           git diff --stat "$BASE_SHA...$HEAD_SHA"
 
@@ -241,6 +289,7 @@ jobs:
 
   classify-docker-build:
     name: Classify Docker build requirement
+    needs: resolve-revisions
     runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.classify.outputs.should_build }}
@@ -249,6 +298,7 @@ jobs:
       - name: Check out repository history
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.resolve-revisions.outputs.checkout_ref }}
           fetch-depth: 0
 
       - name: Test Docker build classifier
@@ -264,13 +314,14 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ needs.resolve-revisions.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.resolve-revisions.outputs.head_sha }}
         run: bash scripts/classify-docker-build.sh
 
   docker-validation:
     name: Docker validation
     needs:
+      - resolve-revisions
       - repository-guard
       - classify-docker-build
     if: ${{ always() && needs.repository-guard.result == 'success' && needs.classify-docker-build.result == 'success' && needs.classify-docker-build.outputs.should_build == 'true' }}
@@ -279,6 +330,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-revisions.outputs.checkout_ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -297,6 +350,7 @@ jobs:
   docker-build:
     name: Docker build
     needs:
+      - resolve-revisions
       - repository-guard
       - quality
       - classify-docker-build
@@ -307,16 +361,21 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-revisions.outputs.checkout_ref || 'main' }}
 
       - name: Verify prerequisites, classification, and Docker validation
         shell: bash
         env:
+          RESOLUTION_RESULT: ${{ needs.resolve-revisions.result }}
           REPOSITORY_GUARD_RESULT: ${{ needs.repository-guard.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
           CLASSIFIER_RESULT: ${{ needs.classify-docker-build.result }}
           SHOULD_BUILD: ${{ needs.classify-docker-build.outputs.should_build }}
           DOCKER_VALIDATION_RESULT: ${{ needs.docker-validation.result }}
-        run: bash scripts/check-pr-docker-gate.sh
+        run: |
+          test "$RESOLUTION_RESULT" = success
+          bash scripts/check-pr-docker-gate.sh
 
       - name: Report safe-only skip
         if: needs.classify-docker-build.outputs.should_build == 'false'
