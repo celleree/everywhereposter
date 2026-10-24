@@ -168,7 +168,7 @@ jobs:
 
           def migrations(root):
               files = sorted((root / "postiz-app/libraries/nestjs-libraries/src/database/prisma/migrations").glob("*/migration.sql"))
-              require(len(files) == 16, "Expected exactly 16 candidate migrations")
+              require(len(files) == 17, "Expected exactly 17 candidate migrations")
               return {p.parent.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 
           def verify_service(data, expected):
@@ -189,8 +189,8 @@ jobs:
 
           def verify_migrations(text, expected):
               rows = [line.split("|") for line in text.splitlines() if line]
-              require(len(rows) == 16 and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
-              require(len({row[0] for row in rows}) == 16, "Duplicate migration evidence")
+              require(len(rows) == 17 and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
+              require(len({row[0] for row in rows}) == 17, "Duplicate migration evidence")
               require({row[0]: row[1] for row in rows} == expected and all(row[2] == "t" for row in rows), "Migrations differ or did not finish")
 
           def verify_tap(text, expected):
@@ -219,7 +219,7 @@ jobs:
               else:
                   names = {
                       "frontend": ["ai-wallet", "copy-generation.client", "copy-generation.retry-identity"],
-                      "copy": ["stripe.launch-plan", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
+                      "copy": ["stripe.launch-plan", "stripe.launch-checkout.integration", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
                   }[group]
                   directory, extension = ("frontend", "tsx") if group == "frontend" else ("copy-generation", "ts")
                   selected = []
@@ -318,6 +318,7 @@ jobs:
           guard_fixture
           test "$DATABASE_URL" = 'postgresql://isolated:isolated@127.0.0.1:55462/isolated'
           test "$(fixture_sql -Atc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")" = 0
+          pnpm exec prisma validate --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
           pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
           verify_migrations isolated publication
 
@@ -493,6 +494,7 @@ jobs:
         continue-on-error: true
         env:
           OAUTH_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
+          LAUNCH_CHECKOUT_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
         run: |
           pnpm exec jest --config jest.copy-generation.config.cjs --runInBand --json --outputFile="$RUNNER_TEMP/billing-acceptance/copy.json" > copy-generation-test.log 2>&1
           python3 "$RUNNER_TEMP/billing-acceptance/check.py" jest "$RUNNER_TEMP/billing-acceptance/copy.json" copy
