@@ -35,6 +35,14 @@ Use this file to choose the smallest initial file set for an EverywherePoster ta
 - Video/frame analysis: start from the existing copy-generation video-media/frame services and `postiz-app/tests/copy-generation/` frame/media tests.
 - Before importing TRA media-intelligence concepts, audit EverywherePoster contracts first; do not copy TRA-specific business rules or permissions.
 
+## Video editing
+
+- Production entry point: `postiz-app/apps/frontend/src/app/(app)/(site)/video-editor/` and `postiz-app/apps/frontend/src/components/video-editor/`.
+- Standard editor: start from `postiz-app/apps/backend/src/api/routes/media.controller.ts`, `postiz-app/libraries/nestjs-libraries/src/media-editing/video-editor.service.ts`, `postiz-app/libraries/nestjs-libraries/src/media-editing/ffmpeg-video-editor.service.ts`, `docs/VIDEO-EDITOR-BACKEND.md`, and the focused `video-editor` tests. This is the current-main fallback and uses the synchronous `/media/:id/video-edits` contract.
+- Cooked editor: start from `postiz-app/apps/backend/src/api/routes/cooked-review.controller.ts`, `postiz-app/libraries/nestjs-libraries/src/media-editing/cooked-*`, `tools/cooked-worker/`, `docs/COOKED-RUNTIME-PILOT.md`, and the focused `cooked-*` tests. It is an opt-in, organization-scoped worker mode; merged code or workflow configuration is not proof that it is activated in production.
+- [PR #251](https://github.com/celleree/everywhereposter/pull/251) is an isolated visual-review prototype, not a production route or current-main capability. Verify its live state before using it as design input.
+- Keep Standard routing, Cooked activation/runtime work, and visual-prototype translation as separate bounded scopes unless an approved task explicitly joins them.
+
 ## Image assets and image generation
 
 - Image asset API entry point: `postiz-app/apps/backend/src/api/routes/image-assets.controller.ts`
@@ -80,6 +88,7 @@ Infrastructure/deployment work is high-risk. Default to one implementation agent
 
 ## Agent workflow and project state
 
+- Canonical local development checkout: WSL-native `/home/arund/dev/everywhereposter`; create isolated WSL-native worktrees for implementation. The old `/mnt/c/dev/everywhereposter` checkout is historical only. See `AGENTS.md` for the complete guardrail rules.
 - Entry rules: `AGENTS.md`
 - Current priorities/checkpoint: `docs/brain/CURRENT_WORK.md`
 - Product promises/contracts: `docs/brain/PRODUCT_TRUTH.md`

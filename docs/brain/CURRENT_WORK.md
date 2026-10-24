@@ -1,6 +1,6 @@
 # Current Work
 
-Updated: 2026-10-17
+Updated: 2026-10-24
 
 Use this file when the user asks to continue the project, continue a roadmap, decide what to do next, or coordinate work across multiple EverywherePoster workstreams. Do not load it for a narrow bug with an already-named issue or file unless the current priority matters.
 
@@ -14,11 +14,13 @@ Get EverywherePoster to a safe early paid launch with the core repurposing/publi
 
 ## Priority workstreams
 
-### User-requested engineering priority — Video Editor completion
+### Video Editor — current-main routing established
 
-Continue the existing PR #214 integration; the user reactivated completion on October 17. Phase 1 performs local FFmpeg pause editing, creates a separate ordinary organization media item and hands it to the composer. It makes no paid model/transcription call and adds no schema, queue or worker. See `docs/VIDEO-EDITOR-BACKEND.md` for the implemented limits and runtime contract.
+PR #214 is merged. The Standard editor is the current-main fallback: local FFmpeg pause editing creates a separate ordinary organization media item and hands that exact output to the composer. It makes no paid model/transcription call and adds no durable job or queue. See `docs/VIDEO-EDITOR-BACKEND.md` for its limits and runtime contract.
 
-Preserve the paused billing candidate. Current editor eligibility inherits the existing Create/AI guard: with the Stripe publishable key absent, all authenticated organization roles are eligible; it is not an internal-only gate or payment-status check. Capacity and acceptance evidence, current-main integration, matching CI and fresh exact-HEAD review remain release gates. Ordinary reviewed safe releases are authorized through October 19 Pacific; genuinely major infrastructure, business-policy, credential or spending changes still need a scoped decision.
+Current main also contains the optional Cooked review/runtime path. It is selected only for explicitly configured organizations and is disabled by default; repository code, worker packaging, or activation workflows do not prove production activation. See `docs/COOKED-RUNTIME-PILOT.md` and `tools/cooked-worker/README.md`. PR #251 remains an isolated visual prototype with fixture-only behavior, not a production route or current-main capability.
+
+Preserve Standard routing, the paused billing candidate, and the existing Create/AI eligibility behavior. Treat Cooked activation, resource acceptance, and translation of the visual prototype into production components as separate bounded decisions. Do not infer deployment or activation from merged code.
 
 ### 1. External platform verification — ACTIVE
 
@@ -105,18 +107,20 @@ Do not automatically prioritize these above provider verification or release blo
 - PR #104 — deployment-performance policy and measurement checkpoint; its docs-only CI run skipped Docker validation/package work.
 - PR #105 — bounded application readiness and deployment health polling; internal readiness production-verified in controlled run [34914337122](https://github.com/celleree/everywhereposter/actions/runs/34914337122).
 - PR #108 — bounded public readiness retry/backoff; repository-complete with a direct live-helper HTTP 307 response, while combined deployment verification remains pending.
+- PR #214 — Standard Video Editor source selection, local FFmpeg rendering, separate-media output, preview/download, and composer handoff integrated into current main.
+- PR #258 — Cooked output timing verification rejects invalid metadata and direct audio/video drift; this repository result does not establish production activation.
 
 A merged production/config fix is not proof of runtime behavior until the applicable production deployment/configuration has been verified.
 
 ## Parked / not current by default
 
-- PR #83 prompt-guided video editor work remains parked. The current reactivation applies to the existing PR #214 local FFmpeg integration, not a replacement implementation.
+- PR #83 prompt-guided video editor work remains parked. The merged PR #214 Standard editor is the current-main implementation; PR #83 is not its replacement.
 - PR #82 Codex verification-loop automation remains separate from ordinary local Codex orchestration. Do not treat the draft PR as required for the root orchestrator protocol.
 - Broad rebrand cleanup in Issue #47 is a tracker. Use its outstanding items when they block launch or external verification rather than reopening completed rebrand work.
 
 ## Next bounded engineering task
 
-Complete PR #214 against current main: verify source selection, bounded local rendering, preview/download and exact edited-media composer handoff; resolve the measured render-memory concern with ordinary code where possible. Preserve existing billing and entitlement behavior. Record any unresolved capacity or activation decision precisely instead of treating ordinary release approval as missing.
+Start new work from current main and define it in a bounded task with explicit owned, shared, and prohibited paths. Video-editor tasks must preserve Standard routing and keep Cooked activation/runtime work and PR #251 visual-prototype translation separate unless an approved task explicitly joins them. Record unresolved capacity, deployment, or activation decisions rather than inferring them from repository state.
 
 The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 

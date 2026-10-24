@@ -63,6 +63,7 @@ Do not search every provider or service when the failing route/component already
 - Do not scan the entire repository unless necessary.
 - Do not edit files until you have explained the plan for meaningful non-mechanical work.
 - Before editing, identify the likely root cause, smallest coherent fix, files to change, and verification command.
+- Before editing, each implementation task must name its owned paths, shared paths or dependencies, and prohibited paths. When work is parallel, the named integrator must resolve shared ownership before edits begin.
 - Inspect only the files directly related to the task, error, current issue, or governing contract.
 - Do not refactor unrelated code.
 - Do not rename things unless required.
