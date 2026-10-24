@@ -24,7 +24,7 @@ const database = process.env.OAUTH_TEST_DATABASE_URL;
   beforeAll(async () => {
     clients = [0, 1].map(() => new PrismaClient({ datasources: { db: { url: database } } }));
     repositories = clients.map((client) => new OAuthRepository(
-      { model: client } as any, { model: client } as any
+      { model: client } as any, { model: client } as any, { model: client } as any
     ));
     services = repositories.map((repository) => new OAuthService(repository));
     process.env.JWT_SECRET = 'oauth-test-only-secret';

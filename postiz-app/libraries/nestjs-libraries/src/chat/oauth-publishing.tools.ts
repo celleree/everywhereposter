@@ -16,6 +16,7 @@ import type { PostsService } from '../database/prisma/posts/posts.service';
 import type { Redis } from 'ioredis';
 import type { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import { createPublishingConfirmation, readPublishingConfirmation, previewHash } from './oauth-publishing-confirmation';
 
 // Reviewed publishing-option methods only; new legacy tools are never inherited.
 const optionMethods: Record<string, string[]> = {
@@ -23,7 +24,7 @@ const optionMethods: Record<string, string[]> = {
   discord: ['channels'], slack: ['channels'], medium: ['publications'],
   dribbble: ['teams'], wrapcast: ['subreddits'], devto: ['tags', 'organizations'],
   hashnode: ['tagsList', 'publications'], wordpress: ['postTypes'],
-  lemmy: ['subreddits'], listmonk: ['list', 'templates'],
+  listmonk: ['list', 'templates'],
   skool: ['groups', 'label'], whop: ['companies', 'experiences'], mewe: ['groups'],
   tiktok: ['creatorInfo'],
 };
@@ -94,6 +95,7 @@ export function createOAuthPublishingTools(deps: Dependencies) {
     if (input.type === 'schedule' && new Date(input.date).getTime() <= Date.now()) throw new Error('Scheduled date must be in the future');
     if (new Set(input.posts.map((p) => p.integrationId)).size !== input.posts.length) throw new Error('Select each destination only once');
     const destinations = [];
+    const accountIdentities = [];
     const posts = [];
     for (const post of input.posts) {
       const { integration, provider } = await account(post.integrationId);
@@ -115,10 +117,11 @@ export function createOAuthPublishingTools(deps: Dependencies) {
         settings: { ...post.settings, __type: provider.identifier },
         value: [{ content: post.content, image, delay: 0 }] });
       destinations.push({ id: integration.id, name: integration.name, platform: provider.identifier, attachments: image });
+      accountIdentities.push(integration.internalId);
     }
     const body = plainToInstance(CreatePostDto, { ...input, shortLink: false, tags: [], posts });
     if ((await validate(body)).length) throw new Error('Invalid post content, attachments, or platform settings');
-    return { body, destinations };
+    return { body, destinations, binding: { destinations, accountIdentities } };
   };
   const list = createListConnectedAccountsTool(deps.integrations);
   const readTools = {
@@ -137,6 +140,7 @@ export function createOAuthPublishingTools(deps: Dependencies) {
           rules: manager.getAllRulesDescription()[provider.identifier],
           settings: provider.dto ? getValidationSchemas()[provider.dto.name] : {},
           tools: (manager.getAllTools()[provider.identifier] || []).filter((t) => optionMethods[provider.identifier]?.includes(t.methodName)),
+          ...(provider.identifier === 'lemmy' ? { publishingOptionsTool: 'lemmy_communities' } : {}),
           ...(provider.identifier === 'tiktok' ? { creatorInfo: 'Call triggerTool with methodName creatorInfo before choosing privacy and interaction settings.' } : {}),
         };
       },
@@ -166,32 +170,46 @@ export function createOAuthPublishingTools(deps: Dependencies) {
         } catch { throw new Error('Unable to load publishing options; check the account connection'); }
       },
     }),
+    lemmy_communities: createTool({
+      id: 'lemmy_communities',
+      description: 'Find Lemmy communities for a connected Lemmy account. This signs in to its configured instance and creates a provider login session; it does not publish. Use only when choosing Lemmy communities.',
+      inputSchema: z.object({ integrationId: id, word: z.string().max(200).regex(/^[\w /-]*$/) }).strict(),
+      mcp: oauthToolMeta('posts:write', false, true),
+      execute: async ({ integrationId, word }) => {
+        const { integration, provider } = await account(integrationId);
+        if (provider.identifier !== 'lemmy') throw new Error('Select a Lemmy account');
+        try {
+          const options = await (provider as any).subreddits(integration.token, { word }, integration.internalId, integration);
+          return { options: options.slice(0, 1000).map(({ id, name, title }: { id: string; name: string; title: string }) => ({ id, name, title })) };
+        } catch { throw new Error('Unable to load Lemmy communities; check the account connection'); }
+      },
+    }),
     prepare_post: createTool({
-      id: 'prepare_post', description: 'Validate a complete post and return a 15-minute preview. Show all content, attachments, destination accounts, time and settings to the user and ask for explicit confirmation. This does not publish.',
-      inputSchema: publishingInput, mcp: oauthToolMeta('posts:write', false),
+      id: 'prepare_post', description: 'Validate one complete batch of up to 20 connected accounts and return a 15-minute preview without saving a draft or publishing. Include all destinations in one call. Show all content, attachments, destination accounts, time and settings together and request one explicit approval for this batch. New or changed batches require fresh approval.',
+      inputSchema: publishingInput, mcp: oauthToolMeta('posts:write', true),
       execute: async (input) => {
-        const { grantId } = requireOAuthScope('posts:write');
-        const { destinations } = await buildPost(input);
-        const confirmationId = randomUUID();
-        await deps.redis.set(`oauth-post:${grantId}:${confirmationId}`, JSON.stringify({ input, destinations }), 'EX', 900);
+        const principal = requireOAuthScope('posts:write');
+        const { destinations, binding } = await buildPost(input);
+        const confirmationId = createPublishingConfirmation(principal, input, binding);
         return { confirmationId, preview: input, destinations, expiresInSeconds: 900, requiresConfirmation: true };
       },
     }),
     publish_post: createTool({
-      id: 'publish_post', description: 'Publish now or schedule the exact prepared preview ONLY after the user has explicitly confirmed its content, attachments, destination accounts, time and settings. Include the complete unchanged preview. On an uncertain result, check EverywherePoster before preparing another post; never automatically retry with a new confirmation.',
-      inputSchema: z.object({ confirmationId: z.string().uuid(), confirmed: z.literal(true), preview: publishingInput }).strict(),
+      id: 'publish_post', description: 'Publish now or schedule the complete prepared batch ONLY after explicit user approval of this batch including its content, attachments, destination accounts, time and settings. Send one call with the complete unchanged preview and confirmation ID. Earlier approval never authorizes a new or changed batch. On an uncertain result, check EverywherePoster before preparing another batch; never automatically retry with a new confirmation.',
+      inputSchema: z.object({ confirmationId: z.string().min(1).max(1024), confirmed: z.literal(true), preview: publishingInput }).strict(),
       mcp: oauthToolMeta('posts:write', false, true, true),
       execute: async ({ confirmationId, confirmed, preview }) => {
         const { grantId, organizationId } = requireOAuthScope('posts:write');
         if (confirmed !== true) throw new Error('Explicit confirmation required');
-        const key = `oauth-post:${grantId}:${confirmationId}`;
-        const stored = await deps.redis.get(key);
-        if (!stored || JSON.stringify(JSON.parse(stored).input) !== JSON.stringify(preview)) throw new Error('Preview expired or changed; check EverywherePoster before preparing and confirming again');
+        const confirmation = readPublishingConfirmation(confirmationId, { grantId, organizationId }, preview);
+        const key = `oauth-post:${grantId}:${confirmation.id}`;
         const receiptKey = `${key}:receipt`;
         const receipt = await deps.redis.get(receiptKey);
         if (receipt) return JSON.parse(receipt);
-        const { body, destinations } = await buildPost(preview);
-        if (JSON.stringify(destinations) !== JSON.stringify(JSON.parse(stored).destinations)) throw new Error('Destinations or attachments changed; prepare and confirm again');
+        if (confirmation.expiresAt <= Date.now()) throw new Error('Preview expired or changed; prepare and confirm again');
+        const { body, binding } = await buildPost(preview);
+        if (previewHash(binding) !== confirmation.destinationsHash) throw new Error('Destinations or attachments changed; prepare and confirm again');
+        if (confirmation.expiresAt <= Date.now()) throw new Error('Preview expired or changed; prepare and confirm again');
         const pending = { status: 'pending_or_uncertain', message: 'Check EverywherePoster before preparing another post.' };
         if (!await deps.redis.set(receiptKey, JSON.stringify(pending), 'EX', 86400, 'NX')) return pending;
         try {

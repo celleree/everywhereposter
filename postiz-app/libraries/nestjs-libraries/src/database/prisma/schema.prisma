@@ -1116,6 +1116,8 @@ model OAuthAuthorization {
   redirectUri       String?
   codeChallenge     String?
   tokenExpiresAt    DateTime?
+  refreshFamilyId   String?
+  refreshTokens     OAuthRefreshToken[]
   revokedAt         DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
@@ -1130,6 +1132,18 @@ model OAuthAuthorization {
   @@index([userId])
   @@index([organizationId])
   @@index([revokedAt])
+}
+
+model OAuthRefreshToken {
+  tokenHash       String             @id
+  authorizationId String
+  familyId        String
+  expiresAt       DateTime
+  usedAt          DateTime?
+  authorization   OAuthAuthorization @relation(fields: [authorizationId], references: [id], onDelete: Cascade)
+
+  @@index([authorizationId, familyId])
+  @@index([expiresAt])
 }
 
 enum OrderStatus {
