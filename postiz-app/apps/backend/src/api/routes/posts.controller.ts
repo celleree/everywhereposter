@@ -347,6 +347,7 @@ export class PostsController {
   }
 
   @Post('/separate-posts')
+  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
   async separatePosts(
     @GetOrgFromRequest() org: Organization,
     @Body() body: { content: string; len: number }
