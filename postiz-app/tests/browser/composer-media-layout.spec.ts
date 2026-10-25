@@ -17,6 +17,8 @@ for (const [width, height] of [[180, 320], [320, 180], [240, 300], [240, 240]]) 
     await openApp(page, '/create');
     const card = page.locator('.composer-upload-card');
     const tray = card.getByRole('region', { name: 'Video transfers' });
+    await expect(tray.getByText('Transfer complete', { exact: true })).toBeHidden();
+    await tray.getByText('Completed uploads (1)', { exact: true }).click();
     await expect(tray.getByText('Transfer complete', { exact: true })).toBeVisible();
     await card.getByRole('button', { name: 'Media Library', exact: true }).click();
     const picker = page.getByRole('dialog', { name: 'Media Library', exact: true });

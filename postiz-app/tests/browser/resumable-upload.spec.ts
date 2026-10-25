@@ -62,7 +62,7 @@ test('Resumable upload: navigation, browser return and safe completion', async (
   await tray.getByRole('button', { name: 'Retry upload', exact: true }).click();
   await chooser;
   await page.getByLabel('Resume resume.mp4').setInputFiles({ name: 'resume.mp4', mimeType: 'video/mp4', buffer: bytes });
-  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
+  await expect(tray.getByRole('status', { includeHidden: true }).first()).toHaveText('Transfer complete');
   expect(chunks.filter(index => index === 0)).toHaveLength(1);
   expect(session.status).toBe('COMPLETE');
 });
@@ -104,7 +104,7 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   } else await page.locator('#left-menu').getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page).toHaveURL(/settings/); await expect(tray).toHaveCount(0); continueTransfer = true; release!();
   await page.goBack();
-  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
+  await expect(tray.getByRole('status', { includeHidden: true }).first()).toHaveText('Transfer complete');
   intent.status = 'PUBLISHING'; session.quickIntent = intent; await page.reload();
   await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Publishing');
   intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }, { integrationId: 'failed-x', name: 'X account', state: 'Failed', reason: 'Synthetic rejection' }]; session.quickIntent = intent; await page.reload();
@@ -133,6 +133,7 @@ test('Resumable upload: restored completed transfers stay inline and do not cove
   await choose.click({ timeout: 5000 });
   await chooser;
   const tray = page.getByRole('region', { name: 'Video transfers' });
+  await tray.getByText('Completed uploads (2)', { exact: true }).click();
   await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toBeVisible();
   expect(await tray.evaluate(element => getComputedStyle(element).position)).toBe('static');
   await tray.getByRole('button', { name: 'Dismiss transfer' }).first().click();
@@ -144,6 +145,7 @@ test('Resumable upload: restored completed transfers stay inline and do not cove
   await page.reload();
   await Promise.all([restoredUploads, expect(choose).toBeVisible({ timeout: 60_000 })]);
   await expect(tray.getByText('synthetic-0.mp4', { exact: true })).toHaveCount(0);
+  await tray.getByText('Completed uploads (1)', { exact: true }).click();
   await expect(tray.getByText('synthetic-1.mp4', { exact: true })).toBeVisible();
 });
 
@@ -199,7 +201,7 @@ test('Resumable upload: one-tap retry reconciles a lost chunk acknowledgement', 
   await expect(tray.getByRole('button', { name: 'Retry upload', exact: true })).toHaveCount(0);
   await expect(tray.getByRole('button', { name: 'Cancel upload', exact: true })).toBeVisible();
   release();
-  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
+  await expect(tray.getByRole('status', { includeHidden: true }).first()).toHaveText('Transfer complete');
   expect(pickers).toBe(0); expect(creations).toBe(1); expect(completions).toBe(1);
   expect(chunks).toEqual([0, 1]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -271,7 +273,7 @@ test('Resumable upload: cancel settles before a fresh upload and leaves no stale
   release();
   await expect(tray).toHaveCount(0);
   await picker.setInputFiles({ ...upload, name: 'fresh.mp4' });
-  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
+  await expect(tray.getByRole('status', { includeHidden: true }).first()).toHaveText('Transfer complete');
   await expect(tray.getByRole('alert')).toHaveCount(0);
   await expect(tray.getByText('Keep this browser open and on screen while uploading.')).toHaveCount(0);
   expect(creations).toBe(2); expect(deletes).toBe(1);
@@ -294,9 +296,31 @@ test('Resumable upload: server completion clears a prior cancellation warning wi
   await tray.getByRole('button', { name: 'Cancel upload', exact: true }).click();
   await expect(tray.getByRole('alert')).toContainText('Wait for the current request');
   session.status = 'COMPLETE'; session.media = { id: 'saved-busy-media' };
-  await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
+  await expect(tray.getByRole('status', { includeHidden: true }).first()).toHaveText('Transfer complete');
   await expect(tray.getByRole('alert')).toHaveCount(0);
   await tray.getByRole('button', { name: 'Dismiss transfer' }).click();
   await expect(tray).toHaveCount(0);
   expect(deletes).toBe(1);
 });
+
+for (const width of [390, 1440]) {
+  test(`Resumable upload: completed history preserves a usable ${width}px Media grid`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.route('**/backend-api/media/uploads**', route => route.fulfill({ json: {
+      sessions: Array.from({ length: 8 }, (_, index) => ({
+        id: 'history-' + index, originalName: 'history-' + index + '.mp4',
+        byteSize: 100, status: 'COMPLETE', parts: [], manifest: [], media: { id: 'history-media-' + index },
+      })),
+    } }));
+    await openApp(page, '/media');
+    const tray = page.getByRole('region', { name: 'Video transfers' });
+    await expect(tray.getByText('Completed uploads (8)')).toBeVisible();
+    await expect(tray.getByText('history-0.mp4', { exact: true })).toBeHidden();
+    const grid = page.locator('.withp3').first();
+    await expect.poll(() => grid.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(240);
+    await tray.getByText('Completed uploads (8)').click();
+    await expect(tray.getByText('history-0.mp4', { exact: true })).toBeVisible();
+    expect(await tray.evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(240);
+    expect(await grid.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(240);
+  });
+}
