@@ -21,6 +21,7 @@ export class WebhooksRepository {
       where: {
         organizationId: orgId,
         deletedAt: null,
+        NOT: { organization: { subscription: { is: { subscriptionTier: 'LAUNCH_V1' as any } } } },
       },
       include: {
         integrations: {

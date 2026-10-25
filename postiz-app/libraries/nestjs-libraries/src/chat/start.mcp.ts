@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { ForbiddenException, INestApplication } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
 import { MCPServer } from '@mastra/mcp';
@@ -34,6 +34,20 @@ export const startMcp = async (app: INestApplication) => {
   const resolveAuth = async (token: string) => {
     if (token.startsWith('pos_')) return null;
     return organizationService.getOrgByApiKey(token);
+  };
+
+  const allowLegacyAutomation = async (orgId: string, res: Response) => {
+    try {
+      await organizationService.assertAdvancedAutomationAllowed(orgId);
+      return true;
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        res.status(403).send('Advanced automation is unavailable on this plan');
+      } else {
+        res.status(503).send('Unable to verify advanced automation entitlement');
+      }
+      return false;
+    }
   };
 
   const mastra = await mastraService.mastra();
@@ -218,6 +232,9 @@ export const startMcp = async (app: INestApplication) => {
       return;
     }
 
+    // @ts-ignore
+    if (!(await allowLegacyAutomation(req.auth.id, res))) return;
+
     const url = new URL('/mcp', process.env.NEXT_PUBLIC_BACKEND_URL);
 
     fixAcceptHeader(req);
@@ -257,6 +274,9 @@ export const startMcp = async (app: INestApplication) => {
       res.status(400).send('Invalid API Key');
       return;
     }
+
+    // @ts-ignore
+    if (!(await allowLegacyAutomation(req.auth.id, res))) return;
 
     const url = new URL(
       `/mcp/${req.params.id}`,
@@ -303,6 +323,9 @@ export const startMcp = async (app: INestApplication) => {
       res.status(400).send('Invalid API Key');
       return;
     }
+
+    // @ts-ignore
+    if (!(await allowLegacyAutomation(req.auth.id, res))) return;
 
     const url = new URL(req.originalUrl, process.env.NEXT_PUBLIC_BACKEND_URL);
 

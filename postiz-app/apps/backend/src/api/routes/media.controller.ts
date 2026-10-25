@@ -32,6 +32,9 @@ import { SaveMediaInformationDto } from '@gitroom/nestjs-libraries/dtos/media/sa
 import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
 import { MediaTranscriptionService } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
+import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
+import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 import { validateVideoOnDisk } from '@gitroom/nestjs-libraries/upload/resumable-video.validation';
 import { rm } from 'fs/promises';
@@ -42,8 +45,6 @@ import { CreateVideoUploadDto } from '@gitroom/nestjs-libraries/dtos/media/creat
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 import { VideoEditorService } from '@gitroom/nestjs-libraries/media-editing/video-editor.service';
 import { CreateVideoEditDto } from '@gitroom/nestjs-libraries/dtos/media/create-video-edit.dto';
-import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
-import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -105,6 +106,7 @@ export class MediaController {
   }
 
   @Post('/generate-video')
+  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
   generateVideo(
     @GetOrgFromRequest() org: Organization,
     @Body() body: VideoDto
@@ -121,7 +123,7 @@ export class MediaController {
     isPicturePrompt = false
   ) {
     const total = await this._subscriptionService.checkCredits(org);
-    if (process.env.STRIPE_PUBLISHABLE_KEY && total.credits <= 0) {
+    if (isBillingEnabled() && total.credits <= 0) {
       return false;
     }
 

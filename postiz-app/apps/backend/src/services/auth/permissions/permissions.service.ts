@@ -1,3 +1,4 @@
+import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wallet/ai-wallet.service';
 import { Ability, AbilityBuilder, AbilityClass } from '@casl/ability';
 import { Injectable } from '@nestjs/common';
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
@@ -7,6 +8,7 @@ import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/in
 import dayjs from 'dayjs';
 import { WebhooksService } from '@gitroom/nestjs-libraries/database/prisma/webhooks/webhooks.service';
 import { AuthorizationActions, Sections } from './permission.exception.class';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 export type AppAbility = Ability<[AuthorizationActions, Sections]>;
 
@@ -16,7 +18,8 @@ export class PermissionsService {
     private _subscriptionService: SubscriptionService,
     private _postsService: PostsService,
     private _integrationService: IntegrationService,
-    private _webhooksService: WebhooksService
+    private _webhooksService: WebhooksService,
+    private _wallet?: AiWalletService
   ) {}
   async getPackageOptions(orgId: string) {
     const subscription =
@@ -24,7 +27,7 @@ export class PermissionsService {
 
     const tier =
       subscription?.subscriptionTier ||
-      (!process.env.STRIPE_PUBLISHABLE_KEY ? 'PRO' : 'FREE');
+      (!isBillingEnabled() ? 'PRO' : 'FREE');
 
     const { channel, ...all } = pricing[tier];
     return {
@@ -41,15 +44,17 @@ export class PermissionsService {
     created_at: Date,
     permission: 'USER' | 'ADMIN' | 'SUPERADMIN',
     requestedPermission: Array<[AuthorizationActions, Sections]>,
-    refreshChannelId?: string
+    refreshChannelId?: string,
+    guidedRequestKey?: string
   ) {
     const { can, build } = new AbilityBuilder<
       Ability<[AuthorizationActions, Sections]>
     >(Ability as AbilityClass<AppAbility>);
 
+    const packageOptions = await this.getPackageOptions(orgId);
     if (
       requestedPermission.length === 0 ||
-      !process.env.STRIPE_PUBLISHABLE_KEY
+      (!isBillingEnabled() && packageOptions.subscription?.subscriptionTier !== 'LAUNCH_V1')
     ) {
       for (const [action, section] of requestedPermission) {
         can(action, section);
@@ -62,10 +67,19 @@ export class PermissionsService {
       });
     }
 
-    const { subscription, options } = await this.getPackageOptions(orgId);
+    const recoveringText = requestedPermission.some(([, section]) => section === Sections.GUIDED_COPY) &&
+      /^[a-zA-Z0-9_-]{16,80}$/.test(guidedRequestKey || '') &&
+      await this._wallet?.existingTextRequest(orgId, guidedRequestKey!);
+    const { subscription, options } = packageOptions;
     for (const [action, section] of requestedPermission) {
+      // Existing owned work may reach bookkeeping after revocation/quota changes.
+      // The prepaid context still requires a current grant for every new dispatch.
+      if (recoveringText && [Sections.GUIDED_COPY, Sections.POSTS_PER_MONTH].includes(section)) {
+        can(action, section); continue;
+      }
       // check for the amount of channels
       if (section === Sections.CHANNEL) {
+        if (options.unlimited_channels) { can(action, section); continue; }
         // Refreshing an existing channel doesn't add a new one, so skip the limit check
         // but only if the channel actually belongs to this org
         if (refreshChannelId) {
@@ -103,6 +117,7 @@ export class PermissionsService {
 
       // check for posts per month
       if (section === Sections.POSTS_PER_MONTH) {
+        if (options.unlimited_posts) { can(action, section); continue; }
         const createdAt =
           (await this._subscriptionService.getSubscription(orgId))?.createdAt ||
           created_at;
@@ -150,6 +165,10 @@ export class PermissionsService {
         continue;
       }
 
+      if (section === Sections.GUIDED_COPY && (options.ai || options.prepaid_ai)) {
+        can(action, section);
+        continue;
+      }
       if (section === Sections.AI && options.ai) {
         can(action, section);
         continue;

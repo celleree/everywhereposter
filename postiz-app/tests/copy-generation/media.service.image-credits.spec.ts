@@ -14,12 +14,14 @@ const org = {
 
 describe('MediaService image credits', () => {
   const originalStripeKey = process.env.STRIPE_PUBLISHABLE_KEY;
+  const originalBillingEnabled = process.env.BILLING_ENABLED;
   const mediaRepository = {};
   const openAi = {
     generateImage: jest.fn(),
     generatePromptForPicture: jest.fn(),
   };
   const subscriptionService = {
+    getSubscription: jest.fn(),
     useCredit: jest.fn(),
     useCreditWithinLimit: jest.fn(),
   };
@@ -35,7 +37,9 @@ describe('MediaService image credits', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    subscriptionService.getSubscription.mockResolvedValue({ subscriptionTier: 'STANDARD' });
     process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test_billing-enabled';
+    process.env.BILLING_ENABLED = 'true';
   });
 
   afterAll(() => {
@@ -44,6 +48,33 @@ describe('MediaService image credits', () => {
     } else {
       process.env.STRIPE_PUBLISHABLE_KEY = originalStripeKey;
     }
+
+    if (originalBillingEnabled === undefined) {
+      delete process.env.BILLING_ENABLED;
+    } else {
+      process.env.BILLING_ENABLED = originalBillingEnabled;
+    }
+  });
+
+  it.each(['true', 'false'])('rejects fresh Launch entitlement before any paid work with billing %s', async (flag) => {
+    process.env.BILLING_ENABLED = flag;
+    subscriptionService.getSubscription.mockResolvedValue({ subscriptionTier: 'LAUNCH_V1' });
+    // The request still carries an old legacy subscription. Only fresh server state governs.
+    await expect(createService().generateImage('prompt', org, true)).rejects.toMatchObject({
+      response: { action: AuthorizationActions.Create, section: Sections.AI },
+    });
+    expect(subscriptionService.getSubscription).toHaveBeenCalledWith(org.id);
+    expect(openAi.generatePromptForPicture).not.toHaveBeenCalled();
+    expect(openAi.generateImage).not.toHaveBeenCalled();
+    expect(subscriptionService.useCredit).not.toHaveBeenCalled();
+    expect(subscriptionService.useCreditWithinLimit).not.toHaveBeenCalled();
+  });
+
+  it('fails closed if the fresh entitlement lookup fails', async () => {
+    subscriptionService.getSubscription.mockRejectedValue(new Error('database unavailable'));
+    await expect(createService().generateImage('prompt', org, true)).rejects.toThrow('database unavailable');
+    expect(openAi.generatePromptForPicture).not.toHaveBeenCalled();
+    expect(openAi.generateImage).not.toHaveBeenCalled();
   });
 
   it('rejects exhausted image balances before invoking the provider when billing is enabled', async () => {
@@ -98,8 +129,8 @@ describe('MediaService image credits', () => {
     );
   });
 
-  it('preserves image generation when billing is disabled', async () => {
-    delete process.env.STRIPE_PUBLISHABLE_KEY;
+  it('preserves image generation when billing is disabled even with Stripe credentials configured', async () => {
+    process.env.BILLING_ENABLED = 'false';
     subscriptionService.useCredit.mockImplementation(
       async (_organization: unknown, _type: string, operation: () => Promise<any>) =>
         operation()

@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { AiWalletTranscriptionService } from '@gitroom/nestjs-libraries/services/ai-wallet-transcription.service';
 import { MediaTranscriptionStatus } from '@prisma/client';
 import { execFile } from 'child_process';
 import { lookup } from 'mime-types';
@@ -12,6 +13,7 @@ import { promisify } from 'util';
 import { CopyGenerationModelService } from '@gitroom/nestjs-libraries/copy-generation/copy-generation.model.service';
 import { prepareVideoMediaFile } from '@gitroom/nestjs-libraries/copy-generation/video-media-file';
 import { MediaTranscriptionRepository } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.repository';
+import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 
 export type TranscriptionLifecycleCode =
   | 'TRANSCRIPTION_PENDING'
@@ -49,7 +51,8 @@ export class MediaTranscriptionService {
   constructor(
     private readonly _repository: MediaTranscriptionRepository,
     private readonly _temporalService: TemporalService,
-    private readonly _copyGenerationModelService: CopyGenerationModelService
+    private readonly _copyGenerationModelService: CopyGenerationModelService,
+    private readonly _prepaid?: AiWalletTranscriptionService
   ) {}
 
   async ensureTranscriptionStarted(
@@ -200,6 +203,30 @@ export class MediaTranscriptionService {
     );
     if (!active) {
       return { discarded: true };
+    }
+
+    const subscriptionTier = String(
+      active.media.organization?.subscription?.subscriptionTier || ''
+    );
+    const requiresPrepaid = subscriptionTier === 'LAUNCH_V1';
+    const hasLegacyBundledAi =
+      ['STANDARD', 'TEAM', 'PRO', 'ULTIMATE'].includes(subscriptionTier) ||
+      (!isBillingEnabled() && !requiresPrepaid);
+
+    if (this._prepaid) {
+      const accounted = await this._prepaid.run(active.media.organizationId, transcriptionId, generation, requiresPrepaid, async () => {
+        const prepared = await prepareVideoMediaFile(active.media.path, active.media.originalName || active.media.name);
+        try { return await this._copyGenerationModelService.preparePrepaidTranscription({ inputPath: prepared.inputPath,
+          originalName: active.media.originalName || active.media.name }); }
+        finally { await prepared.cleanup(); }
+      });
+      if (accounted) return { discarded: false, status: accounted.state === 'SETTLED' ? 'READY' as const : 'PROCESSING' as const };
+    }
+    if (requiresPrepaid) {
+      throw new Error('Prepaid transcription adapter is unavailable.');
+    }
+    if (!hasLegacyBundledAi) {
+      throw new Error('AI transcription is not included in this plan.');
     }
 
     let preparedVideo:

@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
-import {
-  PrismaRepository,
-  PrismaTransaction,
-} from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { ConflictException, Injectable } from '@nestjs/common';
+import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import dayjs from 'dayjs';
-import { Organization } from '@prisma/client';
+import { LaunchCheckoutAttempt, LaunchCheckoutState, Organization, Prisma, Subscription } from '@prisma/client';
+
+export type LaunchCheckoutProposal = Pick<LaunchCheckoutAttempt,
+  'id' | 'operationKey' | 'requestFingerprint'> & { parameters: Prisma.InputJsonObject; allowTrial: boolean };
+
+export type LifetimeSubscriptionSnapshot = Pick<Subscription, 'id' | 'updatedAt' | 'identifier'>;
 
 @Injectable()
 export class SubscriptionRepository {
@@ -15,6 +17,66 @@ export class SubscriptionRepository {
     private readonly _credits: PrismaRepository<'credits'>,
     private _usedCodes: PrismaRepository<'usedCodes'>
   ) {}
+
+  getLaunchCustomer(organizationId: string) {
+    return this._organization.model.organization.findUnique({ where: { id: organizationId },
+      select: { paymentId: true, allowTrial: true } });
+  }
+
+  async bindLaunchCustomer(organizationId: string, customerId: string) {
+    await this._organization.model.organization.updateMany({
+      where: { id: organizationId, paymentId: null }, data: { paymentId: customerId },
+    });
+    // The winner may be a concurrent customer creator. Never use the losing ID.
+    const canonical = await this.getLaunchCustomer(organizationId);
+    if (!canonical?.paymentId) throw new ConflictException('Billing customer binding is pending');
+    return canonical;
+  }
+
+  async claimLaunchCheckout(tx: Prisma.TransactionClient, organizationId: string,
+    customerId: string, proposal: LaunchCheckoutProposal, token: string) {
+    const org = await tx.organization.findUnique({ where: { id: organizationId } });
+    const subscribed = await tx.subscription.findFirst({ where: { organizationId, deletedAt: null } });
+    if (!org || org.paymentId !== customerId || subscribed) {
+      throw new ConflictException('Subscription or canonical customer state changed; refresh billing');
+    }
+    if (proposal.allowTrial && !org.allowTrial) throw new ConflictException('Trial eligibility changed; refresh billing');
+    let attempt = await tx.launchCheckoutAttempt.findFirst({ where: { organizationId, state: { not: 'CLOSED' } } });
+    const now = new Date(Date.now());
+    if (attempt?.leaseUntil && attempt.leaseUntil > now) throw new ConflictException('Launch checkout is pending; retry shortly');
+    if (!attempt) {
+      const { allowTrial: _allowTrial, ...data } = proposal;
+      attempt = await tx.launchCheckoutAttempt.create({ data: { ...data, organizationId, customerId } });
+    }
+    if (attempt.customerId !== customerId) throw new ConflictException('Checkout customer requires reconciliation');
+    return tx.launchCheckoutAttempt.update({ where: { id: attempt.id },
+      data: { leaseToken: token, leaseUntil: new Date(now.getTime() + 120000) } });
+  }
+
+  async transitionLaunchCheckout(tx: Prisma.TransactionClient, attempt: LaunchCheckoutAttempt,
+    states: LaunchCheckoutState[], data: Partial<Pick<LaunchCheckoutAttempt, 'state' | 'sessionId' | 'firstDispatchedAt'>>) {
+    if (data.state && ['DISPATCHED', 'OPEN', 'CLOSED'].includes(data.state)) {
+      const org = await tx.organization.findUnique({ where: { id: attempt.organizationId } });
+      const subscribed = await tx.subscription.findFirst({ where: { organizationId: attempt.organizationId, deletedAt: null } });
+      if (!org || org.paymentId !== attempt.customerId || subscribed) {
+        throw new ConflictException('Subscription or canonical customer state changed; refresh billing');
+      }
+      const parameters = attempt.parameters as { subscription_data?: { trial_period_days?: number } };
+      if (data.state !== 'CLOSED' && parameters.subscription_data?.trial_period_days && !org.allowTrial) {
+        throw new ConflictException('Trial eligibility changed; refresh billing');
+      }
+    }
+    const changed = await tx.launchCheckoutAttempt.updateMany({ where: { id: attempt.id,
+      organizationId: attempt.organizationId, leaseToken: attempt.leaseToken,
+      leaseUntil: { gt: new Date(Date.now()) }, state: { in: states } }, data });
+    if (changed.count !== 1) throw new ConflictException('Checkout ownership changed; refresh billing');
+    return tx.launchCheckoutAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
+  }
+
+  releaseLaunchCheckout(tx: Prisma.TransactionClient, attempt: LaunchCheckoutAttempt) {
+    return tx.launchCheckoutAttempt.updateMany({ where: { id: attempt.id, leaseToken: attempt.leaseToken },
+      data: { leaseToken: null, leaseUntil: null } });
+  }
 
   getUserAccount(userId: string) {
     return this._user.model.user.findFirst({
@@ -91,6 +153,7 @@ export class SubscriptionRepository {
   deleteSubscriptionByCustomerId(customerId: string) {
     return this._subscription.model.subscription.deleteMany({
       where: {
+        isLifetime: false,
         organization: {
           paymentId: customerId,
         },
@@ -135,57 +198,81 @@ export class SubscriptionRepository {
     });
   }
 
-  async createOrUpdateSubscription(
+  private async persistOrdinarySubscriptionWithClient(
+    client: Pick<Prisma.TransactionClient, 'organization' | 'subscription'>,
     isTrailing: boolean,
     identifier: string,
     customerId: string,
     totalChannels: number,
-    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null,
-    code?: string,
-    org?: { id: string }
+    launchOnly = false
   ) {
-    const findOrg =
-      org || (await this.getOrganizationByCustomerId(customerId))!;
+    const findOrg = await client.organization.findFirst({
+      where: {
+        paymentId: customerId,
+      },
+      select: {
+        id: true,
+      },
+    });
 
     if (!findOrg) {
-      return;
+      return { applied: false as const };
     }
 
-    await this._subscription.model.subscription.upsert({
+    const current = await client.subscription.findFirst({
       where: {
         organizationId: findOrg.id,
-        ...(!code
-          ? {
-              organization: {
-                paymentId: customerId,
-              },
-            }
-          : {}),
       },
-      update: {
-        subscriptionTier: billing,
-        totalChannels,
-        period,
-        identifier,
-        isLifetime: !!code,
-        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
-        deletedAt: null,
-      },
-      create: {
+    });
+
+    const updated = await client.subscription.updateMany({
+      where: {
         organizationId: findOrg.id,
+        isLifetime: false,
+        ...(launchOnly ? { subscriptionTier: 'LAUNCH_V1' as const } :
+          billing !== 'LAUNCH_V1' ? { NOT: { subscriptionTier: 'LAUNCH_V1' as const } } : {}),
+        organization: {
+          paymentId: customerId,
+        },
+      },
+      data: {
         subscriptionTier: billing,
-        isLifetime: !!code,
         totalChannels,
         period,
-        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
         identifier,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
         deletedAt: null,
       },
     });
 
-    await this._organization.model.organization.update({
+    if (updated.count === 0) {
+      if (current) {
+        return { applied: false as const };
+      }
+
+      const created = await client.subscription.createMany({
+        data: {
+          organizationId: findOrg.id,
+          subscriptionTier: billing,
+          isLifetime: false,
+          totalChannels,
+          period,
+          cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+          identifier,
+          deletedAt: null,
+        },
+        skipDuplicates: true,
+      });
+
+      if (created.count !== 1) {
+        return { applied: false as const };
+      }
+    }
+
+    await client.organization.update({
       where: {
         id: findOrg.id,
       },
@@ -195,14 +282,314 @@ export class SubscriptionRepository {
       },
     });
 
-    if (code) {
-      await this._usedCodes.model.usedCodes.create({
-        data: {
-          code,
-          orgId: findOrg.id,
+    return {
+      applied: true as const,
+      organizationId: findOrg.id,
+      previousTier: current?.subscriptionTier || 'FREE',
+    };
+  }
+
+  persistOrdinarySubscription(
+    transaction: Prisma.TransactionClient,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null,
+    launchOnly = false
+  ) {
+    return this.persistOrdinarySubscriptionWithClient(
+      transaction,
+      isTrailing,
+      identifier,
+      customerId,
+      totalChannels,
+      billing,
+      period,
+      cancelAt,
+      launchOnly
+    );
+  }
+
+  async deleteOrdinarySubscription(
+    transaction: Prisma.TransactionClient,
+    customerId: string,
+    tierScope?: 'launch' | 'legacy'
+  ) {
+    const findOrg = await transaction.organization.findFirst({
+      where: {
+        paymentId: customerId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!findOrg) {
+      return { applied: false as const };
+    }
+
+    const current = await transaction.subscription.findFirst({
+      where: {
+        organizationId: findOrg.id,
+      },
+    });
+
+    if (!current) {
+      return {
+        applied: false as const,
+        organizationId: findOrg.id,
+        reconcile: true as const,
+      };
+    }
+
+    if (current.isLifetime || (tierScope === 'launch' && current.subscriptionTier !== 'LAUNCH_V1') ||
+        (tierScope === 'legacy' && current.subscriptionTier === 'LAUNCH_V1')) {
+      return { applied: false as const };
+    }
+
+    const deleted = await transaction.subscription.deleteMany({
+      where: {
+        organizationId: findOrg.id,
+        isLifetime: false,
+        ...(tierScope === 'launch' ? { subscriptionTier: 'LAUNCH_V1' as const } :
+          tierScope === 'legacy' ? { NOT: { subscriptionTier: 'LAUNCH_V1' as const } } : {}),
+        organization: {
+          paymentId: customerId,
+        },
+      },
+    });
+
+    if (deleted.count !== 1) {
+      const authoritative = await transaction.subscription.findFirst({
+        where: {
+          organizationId: findOrg.id,
         },
       });
+
+      if (!authoritative) {
+        return {
+          applied: false as const,
+          organizationId: findOrg.id,
+          reconcile: true as const,
+        };
+      }
+
+      return { applied: false as const };
     }
+
+    return {
+      applied: true as const,
+      organizationId: findOrg.id,
+      previousTier: current.subscriptionTier,
+      result: deleted,
+    };
+  }
+
+  async bookkeepSubscriptionWhileBillingDisabled(
+    identifier: string,
+    customerId: string,
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null
+  ) {
+    const findOrg = await this.getOrganizationByCustomerId(customerId);
+    if (!findOrg) {
+      return;
+    }
+
+    const updated = await this._subscription.model.subscription.updateMany({
+      where: {
+        organizationId: findOrg.id,
+        isLifetime: false,
+        identifier,
+        deletedAt: null,
+        organization: {
+          paymentId: customerId,
+        },
+      },
+      data: {
+        period,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+      },
+    });
+
+    return updated.count === 1 ? true : undefined;
+  }
+
+  private async persistLifetimeSubscriptionWithClient(
+    client: Pick<
+      Prisma.TransactionClient,
+      'organization' | 'subscription' | 'usedCodes' | '$queryRaw'
+    >,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null,
+    code: string,
+    org?: { id: string },
+    expectedSubscription?: LifetimeSubscriptionSnapshot | null
+  ) {
+    // Serialize claims for this code across organizations without requiring a
+    // uniqueness migration over historical data. The claim check and writes
+    // must share the transaction that owns this lock.
+    await client.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${code}, 1))::text
+    `;
+    const findOrg =
+      org ||
+      (await client.organization.findFirst({
+        where: {
+          paymentId: customerId,
+        },
+        select: {
+          id: true,
+        },
+      }));
+
+    if (!findOrg) {
+      return { applied: false as const };
+    }
+
+    // Always acquire the code lock before the organization lock.
+    await client.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${findOrg.id}, 2))::text
+    `;
+    const claim = await client.usedCodes.findFirst({ where: { code } });
+    if (claim) {
+      if (claim.orgId !== findOrg.id) {
+        throw new Error('Lifetime code has already been redeemed.');
+      }
+      // A committed claim may still need post-commit entitlement reconciliation.
+      // Never apply its upgrade twice when the caller retries.
+      return { applied: true as const, organizationId: findOrg.id };
+    }
+
+    if (expectedSubscription !== undefined) {
+      const current = await client.subscription.findFirst({
+        where: { organizationId: findOrg.id, deletedAt: null },
+      });
+      const matches = expectedSubscription === null
+        ? current === null
+        : current?.id === expectedSubscription.id &&
+          current.identifier === expectedSubscription.identifier &&
+          current.updatedAt.getTime() === expectedSubscription.updatedAt.getTime();
+      if (!matches) {
+        throw new Error('Subscription changed; retry the lifetime code.');
+      }
+    }
+
+    await client.subscription.upsert({
+      where: {
+        organizationId: findOrg.id,
+      },
+      update: {
+        subscriptionTier: billing,
+        totalChannels,
+        period,
+        identifier,
+        isLifetime: true,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+        deletedAt: null,
+      },
+      create: {
+        organizationId: findOrg.id,
+        subscriptionTier: billing,
+        isLifetime: true,
+        totalChannels,
+        period,
+        cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+        identifier,
+        deletedAt: null,
+      },
+    });
+
+    await client.organization.update({
+      where: {
+        id: findOrg.id,
+      },
+      data: {
+        isTrailing,
+        allowTrial: false,
+      },
+    });
+
+    await client.usedCodes.create({
+      data: {
+        code,
+        orgId: findOrg.id,
+      },
+    });
+
+    return {
+      applied: true as const,
+      organizationId: findOrg.id,
+    };
+  }
+
+  persistLifetimeSubscription(
+    transaction: Prisma.TransactionClient,
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null,
+    code: string,
+    org?: { id: string },
+    expectedSubscription?: LifetimeSubscriptionSnapshot | null
+  ) {
+    return this.persistLifetimeSubscriptionWithClient(
+      transaction,
+      isTrailing,
+      identifier,
+      customerId,
+      totalChannels,
+      billing,
+      period,
+      cancelAt,
+      code,
+      org,
+      expectedSubscription
+    );
+  }
+
+  async createOrUpdateSubscription(
+    isTrailing: boolean,
+    identifier: string,
+    customerId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE' | 'LAUNCH_V1',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null,
+    code?: string,
+    org?: { id: string }
+  ) {
+    if (!code) {
+      return this.persistOrdinarySubscriptionWithClient(
+        {
+          organization: this._organization.model.organization,
+          subscription: this._subscription.model.subscription,
+        } as unknown as Pick<
+          Prisma.TransactionClient,
+          'organization' | 'subscription'
+        >,
+        isTrailing,
+        identifier,
+        customerId,
+        totalChannels,
+        billing,
+        period,
+        cancelAt
+      );
+    }
+
+    throw new Error('Lifetime subscriptions require a claim transaction.');
   }
 
   getSubscriptionByIdentifier(identifier: string) {

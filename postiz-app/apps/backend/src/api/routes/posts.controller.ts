@@ -240,7 +240,7 @@ export class PostsController {
   }
 
   @Post('/generator')
-  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH], [AuthorizationActions.Create, Sections.AI])
   async generatePosts(
     @GetOrgFromRequest() org: Organization,
     @Body() body: GeneratorDto,
@@ -255,7 +255,7 @@ export class PostsController {
   }
 
   @Post('/copy/generate')
-  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH], [AuthorizationActions.Create, Sections.GUIDED_COPY])
   async generateMediaCopy(
     @GetOrgFromRequest() org: Organization,
     @Body() body: GenerateMediaCopyDto,
@@ -347,6 +347,7 @@ export class PostsController {
   }
 
   @Post('/separate-posts')
+  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
   async separatePosts(
     @GetOrgFromRequest() org: Organization,
     @Body() body: { content: string; len: number }
