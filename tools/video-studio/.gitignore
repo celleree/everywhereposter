@@ -1,0 +1,20 @@
+# Local inputs, per-video plans, dependencies and generated output stay outside Git.
+node_modules/
+projects/
+render-cache/
+bundle/
+player/
+public/
+qa/
+__pycache__/
+*.pyc
+.env*
+*.[mM][pP]4
+*.[mM][oO][vV]
+*.[wW][aA][vV]
+*.m4a
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.ttf
