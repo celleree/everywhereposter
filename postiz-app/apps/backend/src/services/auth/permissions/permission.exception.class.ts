@@ -8,6 +8,7 @@ export enum Sections {
   COMMUNITY_FEATURES = 'community_features',
   FEATURED_BY_GITROOM = 'featured_by_gitroom',
   AI = 'ai',
+  LOCAL_VIDEO_EDIT = 'local_video_edit',
   GUIDED_COPY = 'guided_copy',
   IMPORT_FROM_CHANNELS = 'import_from_channels',
   ADMIN = 'admin',

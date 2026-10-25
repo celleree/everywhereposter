@@ -62,7 +62,7 @@ export class MediaController {
   ) {}
 
   @Post('/:id/video-edits')
-  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
   createVideoEdit(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Body() body: CreateVideoEditDto) {
     return this.videoEditor.create(org.id, id, body);
   }

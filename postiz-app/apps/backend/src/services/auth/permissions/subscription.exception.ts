@@ -30,6 +30,8 @@ const getErrorMessage = (error: {
   action: AuthorizationActions;
 }) => {
   switch (error.section) {
+    case Sections.LOCAL_VIDEO_EDIT:
+      return 'Your current subscription does not include local video editing. Please review your subscription to use the editor.';
     case Sections.POSTS_PER_MONTH:
       switch (error.action) {
         default:

@@ -17,22 +17,22 @@ export class CookedReviewController {
   @Get('/status')
   status(@GetOrgFromRequest() org: Organization) { return this.editor.status(org.id); }
   @Get('/:id/find')
-  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
   find(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Query('request') request: string) { return this.editor.find(org.id, id, request); }
   @Post('/:id')
-  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
   create(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Req() req: Request, @Body() body: { requestId: string }) { origin(req); return this.editor.create(org.id, id, body); }
   @Post('/:id/:job/edits')
-  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
   edit(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Param('job') job: string, @Req() req: Request, @Body() body: unknown) { origin(req); return this.editor.edit(org.id, id, job, body); }
   @Post('/:id/:job/output')
-  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
   output(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Param('job') job: string, @Req() req: Request, @Body() body: { revision: number }) { origin(req); return this.editor.output(org.id, id, job, body); }
   @Delete('/:id/request/:job')
-  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
   remove(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Param('job') job: string, @Req() req: Request) { origin(req); return this.editor.remove(org.id, id, job); }
   @Get('/:id/:job/:view')
-  @CheckPolicies([AuthorizationActions.Create, Sections.AI])
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
   async view(@GetOrgFromRequest() org: Organization, @Param('id') id: string, @Param('job') job: string, @Param('view') view: string,
     @Query('k') key: string, @Req() req: Request, @Res() res: Response) {
     const result = await this.editor.view(org.id, id, job, view, key, req.headers.range);
