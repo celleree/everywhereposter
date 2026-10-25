@@ -119,8 +119,12 @@ test('Resumable upload: restored completed transfers stay inline and do not cove
     id: `completed-${index}`, originalName: `synthetic-${index}.mp4`, byteSize: 128 * 1024 * 1024,
     status: 'COMPLETE', parts: [], manifest: [], media: { id: `media-${index}` },
   })) } }));
+  const initialRestoredUploads = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/backend-api/media/uploads' &&
+    response.request().method() === 'GET' && response.ok(), { timeout: 60_000 });
   await openApp(page, '/create');
   const choose = page.getByRole('button', { name: 'Choose files', exact: true });
+  await Promise.all([initialRestoredUploads, expect(choose).toBeVisible({ timeout: 60_000 })]);
   await expect(page.getByRole('region', { name: 'Video transfers' })).toBeVisible();
   await expect.poll(() => choose.evaluate(element => {
     const r = element.getBoundingClientRect();
