@@ -74,6 +74,115 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
     const draft=await m.generatePlatformDraft(brief,'Write grounded copy','Be specific');
     yield await m.rewriteDraft({brief,draft:draft.draft,reasons:['Specificity'],targetCharacters:300,hardCap:3000});
   };
+  const multiPlatformCopy=()=>{
+    const source={build:async()=>({media:{id:'fixture-media',mediaType:'image'},
+      source:{mediaType:'image',facts:['Handwritten labels'],unknowns:[]},coreMessage:'Check details',sourceConfidence:0.8,
+      warnings:[],storedKnowledgeBaseFacts:[],overlapReferenceTexts:[],blocked:false})};
+    // Make rewrite selection deterministic while keeping the real generator,
+    // prepaid context, model adapter and PostgreSQL wallet in the test path.
+    const quality={buildPromptConstraints:()=> 'Fixture constraints',scoreDraft:()=>({score:40,reasons:['Fixture rewrite'],unsupportedClaim:false}),
+      shouldRewrite:()=>true,shouldWarn:()=>false,detectTranscriptOverlap:()=>({overlaps:false})};
+    return new CopyGenerationService(source as any,quality as any,model,undefined,scope);
+  };
+  const platformReceipt=(req:any)=>{
+    const stage=req.response_format.json_schema.name==='rewriteDraft'?'rewrite':'draft';
+    const platform=stage==='draft'?req.messages[1].content.match(/Write one (\w+) draft\./)?.[1]
+      :req.messages[0].content.match(/Keep it native to (\w+)\./)?.[1];
+    if(!platform) throw Error('Missing platform in fixture request');
+    return {platform,stage};
+  };
+  const configurePlatformReceipts=()=>parse.mockImplementation(async req=>{
+    const {platform,stage}=platformReceipt(req);
+    return{id:randomUUID(),model:req.model,service_tier:'default',choices:[{finish_reason:'stop',message:{parsed:{draft:`${platform} ${stage} about handwritten labels.`}}}],
+      usage:{prompt_tokens:10,completion_tokens:3,total_tokens:13,prompt_tokens_details:{cached_tokens:2},completion_tokens_details:{reasoning_tokens:1}}};
+  });
+  const failSettlementOnce=(stage:string)=>{
+    const finish=wallet.finishText.bind(wallet);let interrupted=false;
+    return jest.spyOn(wallet,'finishText').mockImplementation(async(organizationId,id)=>{
+      const row=await db.aiWalletReservation.findUniqueOrThrow({where:{id}});
+      if(!interrupted&&row.operationKey.endsWith(`:${stage}`)){interrupted=true;throw Error('local settlement interruption');}
+      return finish(organizationId,id);
+    });
+  };
+  const restartText=()=>{wallet=new AiWalletService({model:db} as any);
+    scope=new PrepaidCopyContextService(subscriptions,wallet,new AiWalletTextService(wallet));model=new CopyGenerationModelService(scope);};
+  const startedPlatforms=(events:any[])=>events.filter(e=>e.name==='platform-started').map(e=>e.data.platform);
+  const walletState=()=>db.aiWallet.findUniqueOrThrow({where:{organizationId:org}});
+
+  it('stops after a paid draft settlement failure and resumes each platform/rewrite identity once',async()=>{
+    body.platforms=['linkedin','threads'];configurePlatformReceipts();
+    const interrupt=failSettlementOnce('draft_0');
+    const failed=await collect(multiPlatformCopy().generate(org,body));
+    expect(failed.at(-1)).toMatchObject({name:'completed',data:{requestId:body.requestKey,status:'failed',results:[]}});
+    expect(startedPlatforms(failed)).toEqual(['linkedin']);expect(parse).toHaveBeenCalledTimes(1);
+    expect(await db.aiWalletReservation.count({where:{organizationId:org}})).toBe(1);
+    expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(0);
+    interrupt.mockRestore();restartText();
+    const complete=(await collect(multiPlatformCopy().generate(org,body))).at(-1);
+    expect(complete.data).toMatchObject({requestId:body.requestKey,status:'complete'});
+    expect(complete.data.results.map((r:any)=>r.draft)).toEqual(['linkedin rewrite about handwritten labels.','threads rewrite about handwritten labels.']);
+    expect(parse.mock.calls.map(([req])=>platformReceipt(req))).toEqual([
+      {platform:'linkedin',stage:'draft'},{platform:'linkedin',stage:'rewrite'},{platform:'threads',stage:'draft'},{platform:'threads',stage:'rewrite'}]);
+    const rows=await db.aiWalletReservation.findMany({where:{organizationId:org},orderBy:{operationKey:'asc'}});
+    expect(rows.map(r=>r.operationKey)).toEqual(['draft_0','draft_1','rewrite_0','rewrite_1'].map(s=>`guided-text:${body.requestKey}:${s}`));
+    expect(rows.every(r=>r.state==='SETTLED')).toBe(true);
+    expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(4);
+    expect(await walletState()).toMatchObject({balanceNanos:99999840n,heldNanos:0n});
+    expect((await collect(multiPlatformCopy().generate(org,body))).at(-1)).toEqual(complete);
+    expect(parse).toHaveBeenCalledTimes(4);expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(4);
+    expect(await walletState()).toMatchObject({balanceNanos:99999840n,heldNanos:0n});
+  });
+  it('retains earlier partial results and stops later platforms after a paid rewrite settlement failure',async()=>{
+    body.platforms=['linkedin','threads','facebook'];configurePlatformReceipts();
+    const interrupt=failSettlementOnce('rewrite_1');
+    const partial=await collect(multiPlatformCopy().generate(org,body));
+    expect(partial.at(-1).data).toMatchObject({requestId:body.requestKey,status:'partial'});
+    expect(partial.at(-1).data.results.map((r:any)=>r.platform)).toEqual(['linkedin']);
+    expect(startedPlatforms(partial)).toEqual(['linkedin','threads']);expect(parse).toHaveBeenCalledTimes(4);
+    expect(await db.aiWalletReservation.count({where:{organizationId:org}})).toBe(4);
+    expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(3);
+    interrupt.mockRestore();restartText();
+    const complete=(await collect(multiPlatformCopy().generate(org,body))).at(-1);
+    expect(complete.data).toMatchObject({requestId:body.requestKey,status:'complete'});
+    expect(complete.data.results.map((r:any)=>r.draft)).toEqual(body.platforms.map((p:string)=>`${p} rewrite about handwritten labels.`));
+    expect(parse).toHaveBeenCalledTimes(6);expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(6);
+    expect(await db.aiWalletReservation.count({where:{organizationId:org,state:'SETTLED'}})).toBe(6);
+    expect(await walletState()).toMatchObject({balanceNanos:99999760n,heldNanos:0n});
+    expect((await collect(multiPlatformCopy().generate(org,body))).at(-1)).toEqual(complete);
+    expect(parse).toHaveBeenCalledTimes(6);expect(await walletState()).toMatchObject({balanceNanos:99999760n,heldNanos:0n});
+  });
+  it('stops paid adaptation on an uncertain provider response without fallback or a later-platform debit',async()=>{
+    Object.assign(body,{platforms:['linkedin','threads'],captionMode:'adapt-by-platform',sourceCaption:'Handwritten labels.'});
+    configurePlatformReceipts();parse.mockRejectedValueOnce(Error('ambiguous provider outcome'));
+    for(let i=0;i<2;i++){
+      const failed=await collect(multiPlatformCopy().generate(org,body));
+      expect(failed.at(-1).data).toMatchObject({requestId:body.requestKey,status:'failed',results:[]});
+      expect(startedPlatforms(failed)).toEqual(['linkedin']);expect(parse).toHaveBeenCalledTimes(1);
+    }
+    const rows=await db.aiWalletReservation.findMany({where:{organizationId:org}});
+    expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({operationKey:`guided-text:${body.requestKey}:draft_0`,state:'UNKNOWN',usageSnapshot:null});
+    expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(0);
+    expect(await walletState()).toMatchObject({balanceNanos:100000000n,heldNanos:rows[0].ceilingNanos});
+  });
+  it('continues later legacy platforms, including original-caption fallback, with no prepaid reservations',async()=>{
+    await db.subscription.update({where:{organizationId:org},data:{subscriptionTier:'PRO'}});
+    Object.assign(body,{platforms:['linkedin','threads'],sourceCaption:'Handwritten labels.'});configurePlatformReceipts();
+    for(const mode of ['generate','adapt-by-platform']){
+      body.captionMode=mode;parse.mockClear();parse.mockRejectedValueOnce(Error('legacy generation failure'));
+      const events=await collect(multiPlatformCopy().generate(org,body));const complete=events.at(-1).data;
+      expect(startedPlatforms(events)).toEqual(['linkedin','threads']);expect(complete.requestId).toBe(body.requestKey);
+      if(mode==='generate'){
+        expect(complete.status).toBe('partial');expect(complete.results.map((r:any)=>r.platform)).toEqual(['threads']);
+        expect(parse).toHaveBeenCalledTimes(3);
+      }else{
+        expect(complete.status).toBe('complete');expect(complete.results[0]).toMatchObject({platform:'linkedin',origin:'original',draft:body.sourceCaption});
+        expect(complete.results[1]).toMatchObject({platform:'threads',origin:'adapted'});expect(parse).toHaveBeenCalledTimes(2);
+      }
+    }
+    expect(await db.aiWalletReservation.count({where:{organizationId:org}})).toBe(0);
+    expect(await db.aiWalletLedger.count({where:{organizationId:org}})).toBe(0);
+    expect(await walletState()).toMatchObject({balanceNanos:100000000n,heldNanos:0n});expect(scope.active).toBe(false);
+  });
   it('meters analysis, draft and rewrite with no SDK retry and replays after flags/plan pause',async()=>{
     const first=await collect(scope.scope(org,body,()=>stages(model)));expect(parse).toHaveBeenCalledTimes(3);
     for(const [req,opts] of parse.mock.calls){expect(req).toMatchObject({max_completion_tokens:4096,n:1,service_tier:'default'});expect(opts).toMatchObject({maxRetries:0});}

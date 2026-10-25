@@ -670,6 +670,9 @@ export class CopyGenerationService {
             platform,
           },
         };
+        // Paid retries restart the stage counters. Do not let later platforms
+        // consume rewrite identities that this failed platform still needs.
+        if (this._prepaid?.active) break;
       }
     }
 
