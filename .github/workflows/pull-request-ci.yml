@@ -219,7 +219,7 @@ jobs:
               else:
                   names = {
                       "frontend": ["ai-wallet", "copy-generation.client", "copy-generation.retry-identity"],
-                      "copy": ["stripe.launch-plan", "stripe.launch-checkout.integration", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
+                      "copy": ["stripe.launch-plan", "stripe.launch-checkout.integration", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "launch-mcp-entitlements", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
                   }[group]
                   directory, extension = ("frontend", "tsx") if group == "frontend" else ("copy-generation", "ts")
                   selected = []
