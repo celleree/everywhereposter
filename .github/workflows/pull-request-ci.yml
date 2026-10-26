@@ -123,11 +123,18 @@ jobs:
           test "$(git rev-parse HEAD)" = "$HEAD_SHA" || test "${{ github.event_name }}" = "pull_request"
           git diff --check "$BASE_SHA...$HEAD_SHA"
           git diff --stat "$BASE_SHA...$HEAD_SHA"
-          studio_paths="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- tools/video-studio/13_editing_pipeline/v1 .github/workflows/pull-request-ci.yml)"
+          studio_paths="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- tools/video-studio/13_editing_pipeline/v1 tools/video-studio/14_footage_acquisition/v1 scripts/ci/verify-footage-linux.py .github/workflows/pull-request-ci.yml)"
           if [ -n "$studio_paths" ]; then
             echo 'studio_changed=true' >> "$GITHUB_OUTPUT"
           else
             echo 'studio_changed=false' >> "$GITHUB_OUTPUT"
+          fi
+
+          footage_paths="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- tools/video-studio/14_footage_acquisition/v1 scripts/ci/verify-footage-linux.py .github/workflows/pull-request-ci.yml)"
+          if [ -n "$footage_paths" ]; then
+            echo 'footage_changed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'footage_changed=false' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up pnpm
@@ -142,6 +149,24 @@ jobs:
           node-version: 22.20.0
           cache: pnpm
           cache-dependency-path: postiz-app/pnpm-lock.yaml
+
+      - name: Verify acquisition runtime on Linux with generated HTTPS media
+        if: steps.candidate-diff.outputs.footage_changed == 'true'
+        timeout-minutes: 20
+        working-directory: .
+        env:
+          FOOTAGE_EVIDENCE: ${{ runner.temp }}/footage-linux-${{ github.run_id }}-${{ github.run_attempt }}
+        run: python3 -B scripts/ci/verify-footage-linux.py --mode runtime --repo "$GITHUB_WORKSPACE" --evidence "$FOOTAGE_EVIDENCE"
+
+      - name: Clean only owned acquisition test resources
+        if: always() && steps.candidate-diff.outputs.footage_changed == 'true'
+        working-directory: .
+        env:
+          FOOTAGE_EVIDENCE: ${{ runner.temp }}/footage-linux-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          if [ -f "$FOOTAGE_EVIDENCE/state.json" ]; then
+            python3 -B scripts/ci/verify-footage-linux.py --mode cleanup --repo "$GITHUB_WORKSPACE" --evidence "$FOOTAGE_EVIDENCE"
+          fi
 
       - name: Test production readiness checks
         working-directory: .
@@ -550,6 +575,28 @@ jobs:
           console.log('PASS: two generated Linux fixtures rendered, decoded, audio/picture checked and bound to current runtime');
           JS
           git diff --exit-code -- .
+
+      - name: Verify acquired asset through Studio preparation and render
+        if: steps.candidate-diff.outputs.footage_changed == 'true'
+        timeout-minutes: 10
+        working-directory: .
+        env:
+          FOOTAGE_EVIDENCE: ${{ runner.temp }}/footage-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          STUDIO_EVIDENCE: ${{ runner.temp }}/studio-linux-${{ github.run_id }}-${{ github.run_attempt }}
+        run: python3 -B scripts/ci/verify-footage-linux.py --mode join --repo "$GITHUB_WORKSPACE" --evidence "$FOOTAGE_EVIDENCE"
+
+      - name: Preserve generated acquisition acceptance evidence
+        if: always() && steps.candidate-diff.outputs.footage_changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: footage-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/footage-linux-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+            ${{ runner.temp }}/footage-linux-${{ github.run_id }}-${{ github.run_attempt }}/*.jsonl
+            ${{ runner.temp }}/footage-linux-${{ github.run_id }}-${{ github.run_attempt }}/*.log
+            ${{ runner.temp }}/footage-linux-${{ github.run_id }}-${{ github.run_attempt }}/*.mp4
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Preserve generated Studio Linux evidence
         if: always() && steps.candidate-diff.outputs.studio_changed == 'true'
