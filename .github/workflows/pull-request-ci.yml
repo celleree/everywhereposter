@@ -175,7 +175,7 @@ jobs:
 
           def migrations(root):
               files = sorted((root / "postiz-app/libraries/nestjs-libraries/src/database/prisma/migrations").glob("*/migration.sql"))
-              require(len(files) == 17, "Expected exactly 17 candidate migrations")
+              require(len(files) == 19, "Expected exactly 19 candidate migrations")
               return {p.parent.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 
           def verify_service(data, expected):
@@ -196,8 +196,8 @@ jobs:
 
           def verify_migrations(text, expected):
               rows = [line.split("|") for line in text.splitlines() if line]
-              require(len(rows) == 17 and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
-              require(len({row[0] for row in rows}) == 17, "Duplicate migration evidence")
+              require(len(rows) == 19 and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
+              require(len({row[0] for row in rows}) == 19, "Duplicate migration evidence")
               require({row[0]: row[1] for row in rows} == expected and all(row[2] == "t" for row in rows), "Migrations differ or did not finish")
 
           def verify_tap(text, expected):
@@ -227,7 +227,7 @@ jobs:
                   names = {
                       "frontend": ["ai-wallet", "copy-generation.client", "copy-generation.retry-identity", "composer.draft.recovery", "manage.modal.guided.publish"],
                       "published": ["publishing-submission", "publishing-submission.postgres"],
-                      "copy": ["stripe.launch-plan", "stripe.launch-checkout.integration", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "launch-mcp-entitlements", "launch.permissions", "media.controller.video-edit", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
+                      "copy": ["stripe.launch-plan", "stripe.launch-checkout.integration", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "launch-mcp-entitlements", "launch.permissions", "media.controller.video-edit", "studio-editor.integration", "studio-storage", "studio-bridge", "studio-evidence", "studio-director", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
                   }[group]
                   directory, extension = {"frontend": ("frontend", "tsx"), "copy": ("copy-generation", "ts"), "published": ("published-posts", "ts")}[group]
                   selected = []
@@ -239,7 +239,7 @@ jobs:
               for result in selected:
                   assertions = result.get("assertionResults")
                   require(result.get("status") == "passed" and isinstance(assertions, list) and assertions and all(a.get("status") == "passed" for a in assertions), "Required suite failed or skipped")
-                  expected_count = {"launch.permissions.spec.ts": 17, "media.controller.video-edit.spec.ts": 19, "composer.draft.recovery.spec.tsx": 49, "manage.modal.guided.publish.spec.tsx": 42, "publishing-submission.spec.ts": 15, "publishing-submission.postgres.spec.ts": 36}.get(result["name"].replace("\\", "/").rsplit("/", 1)[-1])
+                  expected_count = {"launch.permissions.spec.ts": 17, "media.controller.video-edit.spec.ts": 24, "studio-editor.integration.spec.ts": 15, "studio-storage.spec.ts": 7, "studio-bridge.spec.ts": 30, "studio-evidence.spec.ts": 13, "studio-director.spec.ts": 9, "composer.draft.recovery.spec.tsx": 49, "manage.modal.guided.publish.spec.tsx": 42, "publishing-submission.spec.ts": 15, "publishing-submission.postgres.spec.ts": 36}.get(result["name"].replace("\\", "/").rsplit("/", 1)[-1])
                   if expected_count is not None:
                       require(len(assertions) == expected_count, "Unexpected local editor assertion count")
 
@@ -623,6 +623,7 @@ jobs:
         continue-on-error: true
         env:
           OAUTH_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
+          EP_STUDIO_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
           LAUNCH_CHECKOUT_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/ep_ai_wallet_test
         run: |
           pnpm exec jest --config jest.copy-generation.config.cjs --runInBand --json --outputFile="$RUNNER_TEMP/billing-acceptance/copy.json" > copy-generation-test.log 2>&1
