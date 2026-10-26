@@ -125,6 +125,8 @@ import {
   useComposerDraftRecovery,
   INTERRUPTED_GENERATION,
   readSubmissionStatus,
+  immediateReceiptKey,
+  readImmediateReceipt,
 } from '../../apps/frontend/src/components/new-launch/composer.draft.recovery';
 
 const integration: any = {
@@ -273,6 +275,7 @@ describe('reviewed immediate publication recovery', () => {
     await mount(); const id = await begin();
     expect(id).toMatch(/^[a-f0-9]{32}$/);
     expect(draft().journal).toMatchObject({ attemptId: id, durableImmediate: true, destinationIds: ['channel-1'] });
+    expect(readImmediateReceipt(localStorage.getItem(immediateReceiptKey(key())))?.attemptId).toBe(id);
     expect(await begin()).toBeNull();
     expect(draft().journal?.attemptId).toBe(id);
     expect(mockFetch).not.toHaveBeenCalled();
@@ -306,6 +309,40 @@ describe('reviewed immediate publication recovery', () => {
     await screen.findByText('Resolve the existing publishing attempt before starting a new draft.');
     expect(draft().journal?.durableImmediate).toBe(true);
     expect(await begin()).toBeNull();
+  });
+
+  it('retains the authoritative receipt when stale autosave overwrites the draft after reading its journal', async () => {
+    await mount();
+    const prepared = snapshotComposerDraft(mockUser.id, mockUser.orgId, 'now', {
+      attemptId: 'prepared-attempt-1234', startedAt: 1, destinationIds: ['channel-1'],
+    });
+    localStorage.setItem(key(), JSON.stringify(prepared));
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: key() })));
+    const originalSet = Storage.prototype.setItem;
+    let injected = false;
+    const spy = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (storageKey, value) {
+      if (storageKey === key() && !injected) {
+        injected = true;
+        originalSet.call(this, immediateReceiptKey(key()), JSON.stringify({ ...prepared.journal, durableImmediate: true }));
+      }
+      originalSet.call(this, storageKey, value);
+    });
+    try { act(() => useLaunchStore.getState().setGlobalValueText(0, 'Late autosave')); } finally { spy.mockRestore(); }
+    expect(injected).toBe(true);
+    expect(draft().journal?.durableImmediate).toBeUndefined(); // The raced draft write really happened.
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new draft' }));
+    await screen.findByText('Resolve the existing publishing attempt before starting a new draft.');
+    expect(readImmediateReceipt(localStorage.getItem(immediateReceiptKey(key())))?.attemptId).toBe(prepared.journal!.attemptId);
+    expect(await begin()).toBeNull();
+  });
+
+  it('recovers the receipt independently when a stale tab erased the draft journal', async () => {
+    const view = await mount(); const id = await begin(); view.unmount();
+    localStorage.removeItem(key());
+    mockFetch.mockImplementation(async () => ({ ok: true, json: async () => status(id, 'uncertain') }));
+    await mount(); await screen.findByText('Business: Outcome unconfirmed');
+    expect(await begin()).toBeNull();
+    expect(readImmediateReceipt(localStorage.getItem(immediateReceiptKey(key())))?.attemptId).toBe(id);
   });
 
   it.each(['missing-media', 'disabled-account'])('recovers the receipt when %s blocks draft hydration', async cause => {

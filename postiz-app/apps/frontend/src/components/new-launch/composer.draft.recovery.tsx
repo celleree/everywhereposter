@@ -57,6 +57,22 @@ type Journal = {
   attemptId: string;
   durableImmediate?: true;
 };
+export const immediateReceiptKey = (scope: string) => `${scope}:immediate-receipt:v1`;
+export function readImmediateReceipt(raw: string | null): Journal | null {
+  if (raw === null) return null;
+  if (raw.length > 20000) throw new Error('The saved publishing receipt is too large. It has been retained.');
+  const value = JSON.parse(raw);
+  if (!value ||
+      Object.keys(value).sort().join(',') !== 'attemptId,destinationIds,durableImmediate,startedAt' ||
+      value.durableImmediate !== true || !Number.isFinite(value.startedAt) ||
+      typeof value.attemptId !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(value.attemptId) ||
+      !Array.isArray(value.destinationIds) || !value.destinationIds.length || value.destinationIds.length > 100 ||
+      new Set(value.destinationIds).size !== value.destinationIds.length ||
+      !value.destinationIds.every((id: unknown) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id))) {
+    throw new Error('The saved publishing receipt could not be verified. It has been retained.');
+  }
+  return value;
+}
 type SubmissionStatus = {
   submissionId: string;
   destinations: Array<{ integrationId: string; postId: string; generation: number;
@@ -642,6 +658,9 @@ export function ComposerDraftRecovery({
           return;
         }
         const raw = localStorage.getItem(scope);
+        const receipt = readImmediateReceipt(localStorage.getItem(immediateReceiptKey(scope)));
+        journalRef.current = receipt;
+        if (receipt) { ownPostStartedRef.current = true; setOwnPostStarted(true); }
         if (raw) {
           const {
             user: identity,
@@ -649,6 +668,7 @@ export function ComposerDraftRecovery({
             fetcher: get,
           } = latest.current;
           const draft = readComposerDraft(raw, identity!.id, identity!.orgId);
+          if (receipt) draft.journal = receipt;
           // Receipt lookup does not depend on the source media still hydrating.
           journalRef.current = draft.journal;
           setRestored(draft);
@@ -686,9 +706,11 @@ export function ComposerDraftRecovery({
     if (!scope) return false;
     const raw = localStorage.getItem(scope);
     const identity = latest.current.user!;
-    const stored = raw
+    // The dedicated receipt is authoritative and ordinary draft autosave never
+    // writes it. A stale tab can overwrite a draft, but cannot erase this fence.
+    const stored = readImmediateReceipt(localStorage.getItem(immediateReceiptKey(scope))) || (raw
       ? readComposerDraft(raw, identity.id, identity.orgId).journal
-      : null;
+      : null);
     if (stored && (stored.attemptId !== journalRef.current?.attemptId ||
         (stored.durableImmediate && !journalRef.current?.durableImmediate))) {
       statusRequest.current++;
@@ -755,7 +777,7 @@ export function ComposerDraftRecovery({
       }
     };
     const storageChanged = (event: StorageEvent) => {
-      if (event.key === scope) {
+      if (event.key === scope || event.key === immediateReceiptKey(scope)) {
         try {
           adoptJournal();
         } catch {
@@ -785,7 +807,7 @@ export function ComposerDraftRecovery({
   }, [phase, scope]);
 
   useEffect(() => {
-    if ((phase === 'ready' || phase === 'blocked') && restored?.journal?.durableImmediate) void checkImmediateSubmission();
+    if ((phase === 'ready' || phase === 'blocked') && journalRef.current?.durableImmediate) void checkImmediateSubmission();
     return () => { statusRequest.current++; };
   }, [phase, scope, restored]);
 
@@ -825,6 +847,7 @@ export function ComposerDraftRecovery({
     try {
       return await navigator.locks.request(`publishing:${scope}`, { ifAvailable: true }, async lock => {
         if (!lock || currentScope.current !== scope || readyScopeRef.current !== scope || ownPostStartedRef.current || !readyRef.current) return null;
+        if (localStorage.getItem(immediateReceiptKey(scope)) !== null) { adoptJournal(); return null; }
         if (!prepareSubmission(destinationIds)) return null;
         const journal = journalRef.current!;
         if (journal.destinationIds.length !== destinationIds.length || !destinationIds.every(id => journal.destinationIds.includes(id))) return null;
@@ -832,6 +855,9 @@ export function ComposerDraftRecovery({
         timingRef.current = 'now';
         setTiming('now');
         if (!saveRef.current() || foreignLockRef.current) return null;
+        // Written once under the admission lock; cleared only after every
+        // destination is confirmed published, under that same lock.
+        localStorage.setItem(immediateReceiptKey(scope), JSON.stringify(journalRef.current));
         ownPostStartedRef.current = true;
         setOwnPostStarted(true);
         return journal.attemptId;
@@ -892,7 +918,10 @@ export function ComposerDraftRecovery({
     )
       return;
     try {
-      if (scope) localStorage.removeItem(scope);
+      if (scope) {
+        localStorage.removeItem(scope);
+        localStorage.removeItem(immediateReceiptKey(scope));
+      }
     } catch {
       setMessage('The saved draft could not be discarded.');
       return;
@@ -903,8 +932,7 @@ export function ComposerDraftRecovery({
     setAttempt((value) => value + 1);
     };
     try { if (scope) adoptJournal(); } catch { return; }
-    if (journalRef.current && navigator.locks?.request) {
-      if (!navigator.locks?.request) return;
+    if (navigator.locks?.request) {
       void navigator.locks.request(`publishing:${scope}`, { ifAvailable: true }, lock => {
         if (lock && currentScope.current === scope) discard();
       }).catch(() => setMessage('The saved publishing attempt could not be cleared safely.'));
