@@ -499,8 +499,13 @@ def exercise_runtime(repo, evidence, report):
     connection_after=fixture_stats(evidence)
     assert connection_after['dns'].get('media.fixture.test',0)-connection_before['dns'].get('media.fixture.test',0)==1
     assert len(connection_after['http'])>len(connection_before['http'])
-    case(report,'acquisition-deadline',lambda:failed('deadline',{'acquisitionSeconds':1},req=request|{'url':'https://media.fixture.test/slow.mp4'}))
-    assert any(x['path'].startswith('/slow') for x in fixture_stats(evidence)['http'])
+    def acquisition_deadline():
+        before=sum(x['path'].startswith('/slow') for x in fixture_stats(evidence)['http'])
+        detail=failed('deadline',{'acquisitionSeconds':5},req=request|{'url':'https://media.fixture.test/slow.mp4'})
+        after=sum(x['path'].startswith('/slow') for x in fixture_stats(evidence)['http'])
+        assert after>before,'Acquisition deadline did not reach the slow fixture'
+        return detail
+    case(report,'acquisition-deadline',acquisition_deadline)
     case(report,'normalization-deadline-real-delayed-child',lambda:failed('normalize',{'normalizeSeconds':1},configuration=config|{'offlineImage':evidence.state['slowImage']}))
     assert (evidence.out/'normalization-child-started.jsonl').exists(),'Normalization failure never reached delayed FFmpeg'
     def storage_factory(configuration):
