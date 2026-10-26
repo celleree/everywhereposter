@@ -4,12 +4,13 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm } from 'fs/promise
 import { join, sep } from 'path';
 import { pipeline } from 'stream/promises';
 import { Transform } from 'stream';
+import { createHash } from 'crypto';
 import { CookedEditorRuntime, PreparedCookedSource } from './cooked-editor-runtime';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX = 100 * 1024 * 1024;
 type Receipt = Awaited<ReturnType<CookedEditorRuntime['revise']>>;
-type Job = { org: string; media: string; request: string; at: number; status: 'working' | 'ready' | 'failed'; ingress?: string; receipt?: Receipt; nativeId?: string; state?: Record<string, any> };
+type Job = { org: string; media: string; request: string; at: number; status: 'working' | 'ready' | 'failed'; ingress?: string; receipt?: Receipt; nativeId?: string; state?: Record<string, any>; metadata?: PreparedCookedSource['metadata'] };
 const error = (code: number) => Object.assign(new Error('Editor request failed'), { status: code });
 function nativeFailure(event: string, error: unknown) {
   const message = (error as Error).message;
@@ -56,6 +57,25 @@ async function media(req: IncomingMessage, res: ServerResponse, path: string) {
 export function createCookedWorker(runtime: CookedEditorRuntime, workRoot: string, sourceRoot: string) {
   const jobs = new Map<string, Job>(); let active = false, retiring = false;
   const receipt = (j: Job) => ({ requestId: j.request, jobId: j.receipt?.jobId, revision: j.receipt?.revision, status: j.status, editing: { mode: 'quiet-block-v1', wordCuts: false, arbitraryPhrases: false, pauseEdits: false, blocks: j.receipt?.blocks ?? [], removedBlocks: j.receipt?.removedBlocks ?? [] } });
+  async function studioEvidence(j: Job) {
+    const r = j.receipt!;
+    const hash = async (file: string) => { const h = createHash('sha256'); for await (const b of createReadStream(file)) h.update(b); return h.digest('hex'); };
+    const source = await ownedFile(j, join(r.workspace, 'source.mp4'));
+    if (await hash(source) !== r.sourceSha256) throw error(409);
+    const files: Record<string, any> = {};
+    for (const [key, name] of Object.entries({ rawWords: 'words.raw.json', words: 'words.json', decisions: 'decisions.json', policy: 'boundary-policy.json', report: 'report.json' })) {
+      const file = await ownedFile(j, join(r.editDirectory, name));
+      if ((await lstat(file)).size > 1024 * 1024) throw error(413);
+      let value = JSON.parse(await readFile(file, 'utf8'));
+      if (key === 'report') value = { fps: value.fps, final_s: value.final_s, frames: value.frames, policy: value.policy };
+      files[key] = { sha256: await hash(file), value };
+    }
+    const audio = await ownedFile(j, r.cutPath), bytes = (await lstat(audio)).size;
+    if (bytes < 1 || bytes > MAX) throw error(413);
+    return { value: { schemaVersion: 1, organizationId: j.org, mediaId: j.media, jobId: r.jobId, revision: r.revision,
+      sourceSha256: r.sourceSha256, fps: files.policy.value.fps, totalFrames: files.policy.value.total,
+      width: j.metadata?.width, height: j.metadata?.height, files, audio: { bytes, sha256: await hash(audio) } }, audio };
+  }
   async function cleanup(j: Job) {
     if (j.status === 'working') return;
     if (server.listenerCount('sessionClosed')) retiring = true;
@@ -92,7 +112,7 @@ export function createCookedWorker(runtime: CookedEditorRuntime, workRoot: strin
         const length = Number(req.headers['content-length']); if (!Number.isSafeInteger(length) || length <= 0 || length > MAX) throw error(413);
         let metadata: PreparedCookedSource['metadata'];
         try { metadata = JSON.parse(Buffer.from(String(req.headers['x-cooked-metadata']), 'base64').toString()); } catch { throw error(400); }
-        const j: Job = { org, media: id, request, at: Date.now(), status: 'working' }; jobs.set(org + ':' + request, j); active = true;
+        const j: Job = { org, media: id, request, at: Date.now(), status: 'working', metadata }; jobs.set(org + ':' + request, j); active = true;
         try {
           j.ingress = await mkdtemp(join(workRoot, 'ingress-')); await chmod(j.ingress, 0o700);
           const path = join(j.ingress, 'source.mp4'); let size = 0;
@@ -110,7 +130,7 @@ export function createCookedWorker(runtime: CookedEditorRuntime, workRoot: strin
         } finally { active = false; j.at = Date.now(); }
         return send(res, 200, receipt(j));
       }
-      const match = /^\/jobs\/([0-9a-f-]{36})(?:\/(state|data|video|download|review|edits))?$/.exec(url.pathname);
+      const match = /^\/jobs\/([0-9a-f-]{36})(?:\/(state|data|video|download|review|edits|studio-evidence|studio-audio))?$/.exec(url.pathname);
       if (!match || !UUID.test(match[1])) throw error(404);
       const j = [...jobs.values()].find(j => j.org === org && j.media === id && j.receipt?.jobId === match[1]);
       if (!j || j.status !== 'ready') throw error(404); j.at = Date.now();
@@ -139,6 +159,16 @@ export function createCookedWorker(runtime: CookedEditorRuntime, workRoot: strin
         return send(res, 200, { event: true, revision: j.receipt!.revision });
       }
       if (req.method !== 'GET') throw error(405);
+      if (action === 'studio-evidence' || action === 'studio-audio') {
+        if (active || url.searchParams.get('revision') !== String(r.revision)) throw error(409);
+        active = true;
+        try {
+          const snapshot = await studioEvidence(j);
+          if (action === 'studio-evidence') return send(res, 200, snapshot.value);
+          if (url.searchParams.get('sha256') !== snapshot.value.audio.sha256) throw error(409);
+          return await media(req, res, snapshot.audio);
+        } finally { active = false; }
+      }
       const state = j.state!; // last completed native round, including during a mutation
       const k = url.searchParams.get('k');
       const round = k ? state.rounds.find((x: { stage: string; round: number }) => `${x.stage}-${x.round}` === k) : state;

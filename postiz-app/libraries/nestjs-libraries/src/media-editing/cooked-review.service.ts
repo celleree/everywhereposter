@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, HttpException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { lstat, mkdtemp, rm } from 'fs/promises';
+import { lstat, mkdtemp, rm, writeFile } from 'fs/promises';
 import { isAbsolute, join } from 'path';
 import { tmpdir } from 'os';
 import { MediaRepository } from '../database/prisma/media/media.repository';
@@ -10,6 +10,8 @@ import { cookedData, cookedState, trustedCookedHtml } from './cooked-review-boun
 import { adaptCookedReviewHtml } from './cooked-review-html';
 import { UploadFactory } from '../upload/upload.factory';
 import type { UploadedFileReceipt } from '../upload/upload.interface';
+import { studioHashFile, studioJson } from './studio-worker';
+import { validateStudioEvidence } from './studio-evidence';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 @Injectable()
@@ -62,6 +64,43 @@ export class CookedReviewService {
   async find(org: string, id: string, request: string) {
     await this.owner(org, id); if (!UUID.test(request)) throw new BadRequestException();
     return this.safe(async () => (await this.client(org)).json('/find?request=' + request, org, id));
+  }
+  // Internal handoff only. Caller owns a retained private Studio directory; no
+  // client path or native filesystem location is accepted through HTTP.
+  async studioSource(org: string, id: string, requestId: string, dir: string, allowCreate: boolean) {
+    const source = await this.owner(org, id);
+    const prepared = await prepareEditorSource(source.path, source.originalName || source.name);
+    try {
+      const originalSha256 = await studioHashFile(prepared.inputPath), metadata = await this.probe.probeForCooked(prepared.inputPath);
+      if (metadata.fps !== 30 || metadata.durationMs > 60_000 || Math.abs(metadata.width / metadata.height - 9 / 16) > .001) {
+        throw new BadRequestException('Studio beta supports portrait CFR30 originals up to60seconds within the existing native resource limits');
+      }
+      const native = allowCreate ? await this.create(org, id, { requestId }) : await this.find(org, id, requestId);
+      if (native.status !== 'ready' || !UUID.test(native.jobId || '') || !Number.isSafeInteger(native.revision)) throw new ConflictException('Source evidence is still pending; no second native job was dispatched');
+      const client = await this.client(org), raw = await client.studioEvidence(org, id, native.jobId, native.revision);
+      if (raw.jobId !== native.jobId || raw.revision !== native.revision) throw new ConflictException('Native evidence revision changed');
+      const evidence = validateStudioEvidence(raw, { organizationId: org, mediaId: id, sourceSha256: originalSha256 });
+      const audio = join(dir, 'cooked-audio.mp4');
+      try { await lstat(audio); }
+      catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+        await client.studioAudio(org, id, native.jobId, native.revision, evidence.audio.sha256, evidence.audio.bytes, audio);
+      }
+      if ((await lstat(audio)).size !== evidence.audio.bytes || await studioHashFile(audio) !== evidence.audio.sha256 ||
+          await studioHashFile(prepared.inputPath) !== originalSha256) throw new ConflictException('Source or aligned audio changed');
+      await this.owner(org, id);
+      const snapshots = { 'cooked-decisions.json': raw.files.decisions.value, 'cooked-captions.json': raw.files.words.value,
+        'cooked-receipt.json': raw, 'evidence.json': raw };
+      for (const [name, value] of Object.entries(snapshots)) {
+        const file = join(dir, name);
+        try { await writeFile(file, JSON.stringify(value), { flag: 'wx', mode: 0o600 }); }
+        catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || JSON.stringify(await studioJson(file)) !== JSON.stringify(value)) throw e; }
+      }
+      // Exported custody survives native session close/expiry. Closing only this
+      // request releases its temporary native copies, never the uploaded Media.
+      await client.json('/find?request=' + requestId, org, id, 'DELETE').catch(() => {});
+      return raw;
+    } finally { await prepared.cleanup(); }
   }
   async create(org: string, id: string, body: { requestId: string }) {
     const source = await this.owner(org, id);

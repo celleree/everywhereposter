@@ -61,4 +61,18 @@ export class CookedWorkerClient {
     if (![200, 206].includes(response.statusCode!) || !Number.isSafeInteger(length) || length < 1 || length > 100 * 1024 * 1024 || (response.statusCode === 206 ? !validRange : contentRange !== undefined)) { response.destroy(); throw new Error('INVALID_MEDIA_RESPONSE'); }
     return response;
   }
+  studioEvidence(org: string, media: string, job: string, revision: number) {
+    if (!/^[a-f0-9-]{36}$/.test(job) || !Number.isSafeInteger(revision) || revision < 0) throw Error('INVALID_STUDIO_EVIDENCE_ID');
+    return this.json(`/jobs/${job}/studio-evidence?revision=${revision}`, org, media);
+  }
+  async studioAudio(org: string, media: string, job: string, revision: number, sha256: string, bytes: number, file: string) {
+    if (!/^[a-f0-9-]{36}$/.test(job) || !Number.isSafeInteger(revision) || revision < 0 || !/^[a-f0-9]{64}$/.test(sha256) ||
+        !Number.isSafeInteger(bytes) || bytes < 1 || bytes > 100 * 1024 * 1024) throw Error('INVALID_STUDIO_AUDIO');
+    const response = await this.call(`/jobs/${job}/studio-audio?revision=${revision}&sha256=${sha256}`, 'GET', org, media);
+    if (response.statusCode !== 200 || Number(response.headers['content-length']) !== bytes) { response.destroy(); throw Error('INVALID_STUDIO_AUDIO'); }
+    let size = 0;
+    const bounded = new Transform({ transform(chunk, _, done) { size += chunk.length; done(size > bytes ? Error('STUDIO_AUDIO_TOO_LARGE') : null, chunk); } });
+    await pipeline(response, bounded, createWriteStream(file, { flags: 'wx', mode: 0o600 }));
+    if ((await stat(file)).size !== bytes) throw Error('INCOMPLETE_STUDIO_AUDIO');
+  }
 }

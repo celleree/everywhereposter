@@ -48,6 +48,7 @@ import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.req
 import { VideoEditorService } from '@gitroom/nestjs-libraries/media-editing/video-editor.service';
 import { CreateVideoEditDto } from '@gitroom/nestjs-libraries/dtos/media/create-video-edit.dto';
 import { StudioEditService } from '@gitroom/nestjs-libraries/media-editing/studio-edit.service';
+import { StudioEditRequest } from '@gitroom/nestjs-libraries/media-editing/studio-edit.repository';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -64,6 +65,26 @@ export class MediaController {
     private readonly videoEditor: VideoEditorService,
     private readonly studioEditor: StudioEditService
   ) {}
+
+  @Get('/studio/status')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  studioAvailability(@GetOrgFromRequest() org: Organization) { return this.studioEditor.availability(org.id); }
+
+  @Get('/studio/framing/:source')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  studioFraming(@GetOrgFromRequest() org: Organization, @Param('source') source: string) { return this.studioEditor.framing(org.id, source); }
+
+  @Post('/studio/jobs')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  createStudio(@GetOrgFromRequest() org: Organization, @Body() body: StudioEditRequest, @Req() req: Request) {
+    this.studioOrigin(req); return this.studioEditor.create(org.id, body);
+  }
+
+  @Post('/studio/jobs/:job/resume')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  resumeStudio(@GetOrgFromRequest() org: Organization, @Param('job') job: string, @Req() req: Request) {
+    this.studioOrigin(req); return this.studioEditor.resume(org.id, job);
+  }
 
   @Get('/studio/jobs')
   @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])

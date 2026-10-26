@@ -4,22 +4,30 @@ import { PrismaService } from '../database/prisma/prisma.service';
 import { StudioOutputIntent, StudioOutputReceipt, studioOutputKey } from '../upload/upload.interface';
 import { studioFingerprint } from './studio-receipt';
 import { Prisma } from '@prisma/client';
+import { StudioFraming, validateStudioFraming } from './studio-evidence';
 
 export type StudioEditRequest = { requestKey: string; sourceMediaId: string; brollMediaIds: string[];
-  destinations: string[]; profile: 'easy-graphics-v1' };
+  destinations: string[]; profile: 'easy-graphics-v1'; creative?: { brief: string; framing: StudioFraming } };
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const id = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const destinations = ['instagram', 'facebook', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'reddit', 'dribbble'];
 export function normalizeStudioRequest(body: StudioEditRequest): StudioEditRequest {
-  if (!body || Object.keys(body).sort().join(',') !== 'brollMediaIds,destinations,profile,requestKey,sourceMediaId' ||
+  if (!body || Object.keys(body).some(k => !['brollMediaIds', 'destinations', 'profile', 'requestKey', 'sourceMediaId', 'creative'].includes(k)) ||
       typeof body.requestKey !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(body.requestKey) || !id(body.sourceMediaId) || body.profile !== 'easy-graphics-v1' ||
       !Array.isArray(body.brollMediaIds) || body.brollMediaIds.length < 1 || body.brollMediaIds.length > 8 ||
       body.brollMediaIds.some(asset => !id(asset) || asset === body.sourceMediaId) ||
       new Set(body.brollMediaIds).size !== body.brollMediaIds.length || !Array.isArray(body.destinations) ||
       !body.destinations.length || body.destinations.length > 10 || body.destinations.some(value => !destinations.includes(value)) ||
       new Set(body.destinations).size !== body.destinations.length) throw new BadRequestException('Invalid Studio edit request');
+  let creative: StudioEditRequest['creative'];
+  if (body.creative !== undefined) {
+    if (!body.creative || Object.keys(body.creative).sort().join(',') !== 'brief,framing' || typeof body.creative.brief !== 'string' ||
+        !body.creative.brief.trim() || body.creative.brief.length > 1000) throw new BadRequestException('Describe the edit and confirm its stationary speaker framing');
+    try { creative = { brief: body.creative.brief.trim(), framing: validateStudioFraming(body.creative.framing) }; }
+    catch { throw new BadRequestException('Confirm one stationary speaker; moving or multiple speakers need adjustment'); }
+  }
   return { requestKey: body.requestKey, sourceMediaId: body.sourceMediaId, brollMediaIds: [...body.brollMediaIds].sort(),
-    destinations: [...body.destinations].sort(), profile: body.profile };
+    destinations: [...body.destinations].sort(), profile: body.profile, ...(creative ? { creative } : {}) };
 }
 
 @Injectable()

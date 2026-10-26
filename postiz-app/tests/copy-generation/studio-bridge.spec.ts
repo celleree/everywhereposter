@@ -7,6 +7,7 @@ import { acceptStudioReceipt, studioFingerprint } from '../../libraries/nestjs-l
 import { assertStudioPlan, stageStudioPlan, studioDirectory, studioCommand } from '../../libraries/nestjs-libraries/src/media-editing/studio-worker';
 import { StudioEditRepository } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.repository';
 import { StudioEditService } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.service';
+import { normalizeStudioRequest } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.repository';
 
 const h = 'a'.repeat(64), changed = 'b'.repeat(64);
 function receipts() {
@@ -138,4 +139,56 @@ it('lost permanent-storage acknowledgement does not create Media and the same ap
   const body = { generation: 1, sha256: h, reviewed: true };
   await assert.rejects(service.review('org', row.id, 'reviewer', body)); assert.equal(registrations, 0);
   assert.equal((await service.review('org', row.id, 'reviewer', body)).outputMedia.id, 'one'); assert.equal(uploads, 1);
+});
+it('normalizes new-upload direction/observation without accepting a manifest or changing legacy requests', () => {
+  const request: any = { requestKey: randomUUID(), sourceMediaId: 'video', brollMediaIds: ['still'], destinations: ['linkedin'], profile: 'easy-graphics-v1' };
+  assert.equal(Object.keys(normalizeStudioRequest(request)).length, 5);
+  const creative = { brief: ' My words and visuals ', framing: { x: .28, y: .28, width: .44, height: .24, confirmed: true, stationary: true, singleSpeaker: true } };
+  const normalized = normalizeStudioRequest({ ...request, creative }); assert.equal(normalized.creative!.brief, 'My words and visuals');
+  assert.throws(() => normalizeStudioRequest({ ...request, creative, manifest: {} }));
+  assert.throws(() => normalizeStudioRequest({ ...request, creative: { ...creative, framing: { ...creative.framing, stationary: false } } }));
+});
+async function withUploadProducer(test: (service: StudioEditService, row: any, counts: any) => Promise<void>, uncertain = false) {
+  const root = await mkdtemp(join(tmpdir(), 'studio-upload-')), privateRoot = join(root, 'private'), publicRoot = join(root, 'uploads');
+  await mkdir(privateRoot); await mkdir(publicRoot);
+  const env: Record<string, string | undefined> = {}, settings: Record<string, string> = { STUDIO_EDITOR_ENABLED: 'true', STUDIO_EDITOR_ORGANIZATIONS: 'owner',
+    STUDIO_EDITOR_PACKAGE_ROOT: root, STUDIO_EDITOR_RUNTIME: join(root, 'runtime.json'), STUDIO_EDITOR_WORK_ROOT: privateRoot, UPLOAD_DIRECTORY: publicRoot };
+  for (const key of Object.keys(settings)) { env[key] = process.env[key]; process.env[key] = settings[key]; }
+  try {
+    await writeFile(settings.STUDIO_EDITOR_RUNTIME, JSON.stringify({ nodeExecutable: process.execPath, pythonExecutable: process.execPath }));
+    const request: any = { requestKey: randomUUID(), sourceMediaId: 'video', brollMediaIds: ['still'], destinations: ['linkedin'], profile: 'easy-graphics-v1',
+      creative: { brief: 'My actual uploaded source', framing: { x: .28, y: .28, width: .44, height: .24, confirmed: true, stationary: true, singleSpeaker: true } } };
+    const row: any = { id: randomUUID(), organizationId: 'owner', sourceMediaId: 'video', state: 'ADMITTED', generation: 1, inputFingerprint: h,
+      input: { request, media: [{ id: 'video', path: '/owned/video.mp4' }, { id: 'still', path: '/owned/still.png' }] } };
+    const counts = { native: 0, direction: 0, render: 0 };
+    const value = (value: any) => ({ value, sha256: h });
+    const raw = { schemaVersion: 1, organizationId: 'owner', mediaId: 'video', jobId: randomUUID(), revision: 0, sourceSha256: h,
+      fps: 30, totalFrames: 180, width: 360, height: 640, audio: { sha256: h, bytes: 13 }, files: {
+        rawWords: value([{ type: 'word', text: 'uploaded', start: .1, end: .3 }]), words: value([{ type: 'word', text: 'uploaded', start: .1, end: .3 }]),
+        policy: value({ version: 'quiet-block-v1', sourceSha256: h, fps: 30, total: 180 }),
+        report: value({ fps: 30, policy: 'quiet-block-v1', final_s: 6, frames: [[0, 180]] }), decisions: value([{ start: 0, end: 6 }]) } };
+    const jobs = { admit: async () => row, get: async () => row, claim: async () => { row.state = 'RUNNING'; row.leaseToken = randomUUID(); return row; } };
+    const cooked = { studioSource: async (_org: string, _media: string, _request: string, dir: string) => { counts.native++; await writeFile(join(dir, 'evidence.json'), JSON.stringify(raw)); return raw; } };
+    const director = { prepareAssets: async () => [{ mediaId: 'video', sha256: h }], produce: async () => { counts.direction++; if (uncertain) throw Error('UNKNOWN'); return { generated: 'from current evidence' }; } };
+    const db = { media: { findMany: async () => row.input.media } };
+    const service = new StudioEditService(jobs as any, db as any, cooked as any, director as any);
+    (service as any).renderApproved = async (_org: string, _job: string, plan: any) => { assert.equal(plan.generated, 'from current evidence'); counts.render++; row.state = 'TECHNICAL_READY'; };
+    await service.create('owner', request); await (service as any).running.get('owner:' + row.id);
+    await test(service, row, counts);
+  } finally { for (const key of Object.keys(settings)) { if (env[key] === undefined) delete process.env[key]; else process.env[key] = env[key]; } await rm(root, { recursive: true, force: true }); }
+}
+it('new-upload admission runs evidence -> generated direction -> render once and repeated creation recovers the same job', async () => {
+  await withUploadProducer(async (service, row, counts) => {
+    const recovered = await service.create('owner', row.input.request); assert.equal(recovered.id, row.id);
+    assert.equal(counts.native, 1); assert.equal(counts.direction, 1); assert.equal(counts.render, 1);
+    assert.equal(row.state, 'TECHNICAL_READY');
+  });
+});
+it('resuming uncertain direction uses retained evidence and never starts a replacement native job', async () => {
+  await withUploadProducer(async (service, row, counts) => {
+    assert.equal(row.state, 'RUNNING'); assert.equal(counts.render, 0);
+    await service.resume('owner', row.id); await (service as any).running.get('owner:' + row.id);
+    assert.equal(counts.native, 1); assert.equal(counts.direction, 2); assert.equal(counts.render, 0);
+    const status: any = await service.status('owner', row.id); assert.equal(status.phase, 'NEEDS_VERIFICATION');
+  }, true);
 });
