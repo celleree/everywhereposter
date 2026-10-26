@@ -1,4 +1,6 @@
-import copy,json,tempfile,threading,time,unittest
+import copy,json,signal,tempfile,threading,time,unittest
+from unittest import mock
+import acquire as acquisition
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from acquire import acquire
@@ -58,3 +60,26 @@ class Tests(unittest.TestCase):
         _,p=fixture();checked_policy(p)
         for patch in [{'trafficBytes':0},{'acquisitionSeconds':9999},{'hosts':['127.0.0.1']},{'coverageSeconds':601}]:
             with self.assertRaises(ValueError):checked_policy(p|patch)
+
+    def test_cli_restores_sigterm_handler_on_success_and_error(self):
+        for error in (None,ValueError('failure')):
+            with self.subTest(error=error), mock.patch.object(acquisition.signal,'getsignal',return_value='previous'), mock.patch.object(acquisition.signal,'signal') as register, mock.patch.object(acquisition,'main',side_effect=error):
+                if error:
+                    with self.assertRaises(SystemExit) as exit_code: acquisition.cli()
+                    self.assertEqual(exit_code.exception.code,1)
+                else: acquisition.cli()
+                self.assertEqual(register.call_args_list[-1].args,(signal.SIGTERM,'previous'))
+
+    def test_cli_sigterm_unwinds_runtime_job_and_owner(self):
+        r,p=fixture();closed=[];handler=[]
+        def register(sig,value):
+            if callable(value): handler.append(value)
+        class Cancelled(FakeRuntime):
+            def __exit__(self,*args): closed.append(True)
+            def acquire(self,r,p,job):
+                (job/'partial').write_bytes(b'x');handler[0](signal.SIGTERM,None)
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(acquisition.signal,'getsignal',return_value='previous'), mock.patch.object(acquisition.signal,'signal',side_effect=register) as installed, mock.patch.object(acquisition,'main',side_effect=lambda:acquire(r,p,{},root,Cancelled)):
+            with self.assertRaises(SystemExit) as exit_code: acquisition.cli()
+            self.assertEqual(exit_code.exception.code,1);self.assertEqual(closed,[True]);self.assertEqual(list(Path(root).iterdir()),[])
+            self.assertEqual(installed.call_args_list[-2].args,(signal.SIGTERM,signal.SIG_IGN))
+            self.assertEqual(installed.call_args_list[-1].args,(signal.SIGTERM,'previous'))

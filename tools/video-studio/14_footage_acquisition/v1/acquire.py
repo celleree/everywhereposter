@@ -1,5 +1,5 @@
 """One local acquisition owner; immutable ready receipts, no app/storage service."""
-import argparse, json, os, shutil, tempfile, time
+import argparse, json, os, shutil, signal, tempfile, time
 from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit
 from cache import owner, ready, sha
@@ -36,8 +36,21 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--request',required=True);p.add_argument('--policy',required=True);p.add_argument('--runtime',required=True);p.add_argument('--cache',required=True);a=p.parse_args()
     result=acquire(json.loads(Path(a.request).read_text()),json.loads(Path(a.policy).read_text()),json.loads(Path(a.runtime).read_text()),a.cache)
     print(json.dumps(result))
-if __name__=='__main__':
-    try: main()
-    except Exception as error:
-        # Never echo URLs, source descriptions or subprocess arguments on failures.
-        print(json.dumps({'status':'failed','reason':str(error) if isinstance(error,ValueError) else type(error).__name__}));raise SystemExit(1)
+class Terminated(Exception):
+    pass
+
+def cli():
+    previous=signal.getsignal(signal.SIGTERM)
+    def terminate(signum,frame):
+        # Let the first signal unwind all owned cleanup without interruption.
+        signal.signal(signal.SIGTERM,signal.SIG_IGN)
+        raise Terminated()
+    signal.signal(signal.SIGTERM,terminate)
+    try:
+        try: main()
+        except Exception as error:
+            # Never echo URLs, source descriptions or subprocess arguments on failures.
+            print(json.dumps({'status':'failed','reason':str(error) if isinstance(error,ValueError) else type(error).__name__}));raise SystemExit(1)
+    finally:
+        signal.signal(signal.SIGTERM,previous)
+if __name__=='__main__': cli()

@@ -25,7 +25,7 @@ import uuid
 
 # Official library/registry:3.0.0 index, verified against Docker Hub metadata.
 REGISTRY = 'registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e'
-REQUIRED_UNIT_TESTS = 19  # Seventeen contract/synthetic tests plus two real Linux tests.
+REQUIRED_UNIT_TESTS = 21  # Nineteen contract/synthetic tests plus two real Linux tests.
 REQUIRED_REAL_TESTS = {
     'tests.test_runtime_integration.Tests.test_direct_child_network_has_no_route',
     'tests.test_runtime_integration.Tests.test_copy_from_real_container_tmpfs',
@@ -310,7 +310,7 @@ def runtime_acceptance(repo, out):
     assert state['tree'] == command(['git','rev-parse',state['head']+'^{tree}'],cwd=repo).stdout.decode().strip()
     write(out/'state.json',state);evidence=Evidence(out)
     report={'status':'RUNNING','identity':state.copy(),'checks':[], 'fixture':'generated patterns and tones only',
-            'scope':'Test network/DNS and trust instrumentation; product code unchanged'}
+            'scope':'Test-only network/DNS and trust instrumentation around the exact checkout product code'}
     try:
         prepare_runtime(repo,evidence,report)
         exercise_runtime(repo,evidence,report)
@@ -424,7 +424,7 @@ def prepare_runtime(repo, evidence, report):
         smoke.subprocess=original_subprocess;smoke.Runtime=original_runtime
     assert result.testsRun==REQUIRED_UNIT_TESTS and result.wasSuccessful() and not result.skipped
     assert len(smoke_calls)==1 and REQUIRED_REAL_TESTS <= set(result.success_ids)
-    report['unitTests']={'executed':result.testsRun,'skipped':len(result.skipped),'contractAndSyntheticTests':17,
+    report['unitTests']={'executed':result.testsRun,'skipped':len(result.skipped),'contractAndSyntheticTests':19,
                          'realNoRouteSmoke':1,'realTmpfsTransport':1,'successfulTestIds':result.success_ids}
     case(report,'official-tool-hash-and-real-unit-smoke',lambda:report['unitTests'])
 
