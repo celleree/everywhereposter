@@ -1,0 +1,18 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture} from './fixture.mjs';
+import {validateProject,frameCount,chunkContent,assertPreparedProject,audioTimeline} from '../project.mjs';
+test('a project over 60s retains its resolution and source-ordered cuts',()=>{const p=fixture(),v=validateProject(p);assert.equal(p.canvas.width,1440);assert.equal(p.canvas.height,2560);assert.ok(p.source.frames/p.canvas.fps>117);assert.ok(v.seconds>89);assert.equal(v.frames,frameCount(p));});
+test('missing caption words cannot silently disappear',()=>{const p=fixture();p.captions[0].wordIds.shift();assert.throws(()=>validateProject(p),/every word/);});
+test('out-of-range cuts and reordered source are rejected',()=>{const p=fixture();p.cuts[1].in=0;assert.throws(()=>validateProject(p),/source order/);p.cuts[1].in=p.source.frames;assert.throws(()=>validateProject(p));});
+test('media references cannot bypass the local asset registry',()=>{const p=fixture();p.assets[0].file='../../private.env';assert.throws(()=>validateProject(p),/asset/);});
+test('effects cannot overwrite checked geometry or inject remote sources',()=>{for(const props of [{position:[0,0]},{images:[{src:'https://example.test/private'}]}]){const p=fixture();p.effects[0].props={...p.effects[0].props,...props};assert.throws(()=>validateProject(p));}});
+test('a visual cue needs actual narration timing evidence',()=>{const p=fixture();p.effects[0].from=0;assert.throws(()=>validateProject(p),/detached/);});
+test('observed face and caption regions are protected',()=>{const p=fixture();p.effects[0].bounds={x:300,y:400,width:350,height:500};assert.throws(()=>validateProject(p),/speaker/);p.effects[0].bounds={x:80,y:1400,width:800,height:300};assert.throws(()=>validateProject(p),/safe area/);});
+test('unsupported matte capability fails instead of pretending to render',()=>{const p=fixture();p.effects[0].type='PersonPopOut';assert.throws(()=>validateProject(p),/matte adapter/);});
+test('a source replacement invalidates provenance',()=>{const p=fixture();p.source.sha256='0'.repeat(64);assert.throws(()=>validateProject(p),/identity/);});
+test('B-roll range cannot run beyond its original',()=>{const p=fixture();p.broll[0].sourceStart=59.9;assert.throws(()=>validateProject(p),/B-roll exceeds/);});
+test('changing one later effect preserves an unaffected cached render chunk',()=>{const p=fixture(),before=JSON.stringify(chunkContent(p,0,599)),later=JSON.stringify(chunkContent(p,1800,2399));p.effects.at(-1).props.radius=18;p.revision++;assert.equal(JSON.stringify(chunkContent(p,0,599)),before);assert.notEqual(JSON.stringify(chunkContent(p,1800,2399)),later);});
+test('explicit effect directions cannot be silently discarded',()=>{const p=fixture();p.instructions.requiredCues=[{id:'script-1',effect:'IrisEffect'}];assert.throws(()=>validateProject(p),/script effect cue/);});
+test('a same-duration cut shift cannot reuse stale prepared speech',()=>{const p=fixture(),receipt={audioTimeline:audioTimeline(p),audioSha256:'audio'};assertPreparedProject(p,receipt,'audio');p.cuts[1].in++;p.cuts[1].out++;assert.doesNotThrow(()=>validateProject(p));assert.throws(()=>assertPreparedProject(p,receipt,'audio'),/prepare and realign/);});
+test('fractional caption starts at a chunk boundary invalidate the visible chunk',()=>{const p=fixture();p.words[0].start=599.7/30;p.words[0].end=20.3;p.words[1].start=21;p.words[1].end=21.3;p.effects[0].from=599;validateProject(p);const before=structuredClone(chunkContent(p,0,599));assert.ok(before.captions.some(c=>c.wordIds.includes('w0')));p.words[0].text='Changed';assert.notDeepEqual(chunkContent(p,0,599),before);});
