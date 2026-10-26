@@ -88,7 +88,7 @@ class Evidence:
     def valid_resource(self,kind,name):
         owner=self.state['owner']
         if kind=='container':
-            return name in [owner+'-'+role for role in ('registry','fixture','smoke','tool-hash')] or bool(re.fullmatch(r'footage-[a-f0-9]{32}-(proxy|download|offline)',name))
+            return name in [owner+'-'+role for role in ('registry','fixture','smoke','tool-hash','generator','asset-probe','asset-decode')] or bool(re.fullmatch(r'footage-[a-f0-9]{32}-(proxy|download|offline)',name))
         if kind=='volume':return bool(re.fullmatch(r'footage-[a-f0-9]{32}',name))
         return kind=='network' and name==owner+'-network'
 
@@ -263,6 +263,18 @@ def build(evidence, context, name, dockerfile='Dockerfile'):
     return matches[0]
 
 
+def media_tool(evidence,image,role,args,data=None):
+    """Real FFmpeg tools in the already approved offline image, with pipe I/O."""
+    assert role in ('generator','asset-probe','asset-decode')
+    name=evidence.state['owner']+'-'+role;evidence.record('container',name)
+    options=['run','--rm','--name',name,'--label','ci.footage.owner='+evidence.state['owner'],
+             '--network','none','--read-only','--user','10001:10001','--cap-drop','ALL',
+             '--security-opt','no-new-privileges:true','--memory','512m','--memory-swap','512m',
+             '--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,noexec,nosuid,size=16m']
+    if data is not None:options.append('-i')
+    return docker(*options,image,*args,data=data,timeout=45)
+
+
 def case(report, name, operation):
     started = time.monotonic()
     try:
@@ -348,9 +360,12 @@ def prepare_runtime(repo, evidence, report):
     (offline/'Dockerfile').write_text(f"FROM {lock['pythonImage']}\nRUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates && rm -rf /var/lib/apt/lists/*\nUSER 10001:10001\n")
     offline_image=build(evidence,offline,'offline')
     media=root/'source.mp4'
-    command(['ffmpeg','-v','error','-n','-f','lavfi','-i','testsrc2=size=360x640:rate=30',
+    generated=media_tool(evidence,offline_image,'generator',['/usr/bin/ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=360x640:rate=30',
              '-f','lavfi','-i','sine=frequency=220:sample_rate=48000','-t','6','-c:v','libx264',
-             '-preset','ultrafast','-crf','18','-c:a','aac',media],timeout=45)
+             '-preset','ultrafast','-crf','18','-c:a','aac','-fs',str(20*1024**2),
+             '-movflags','frag_keyframe+empty_moov','-f','mp4','pipe:1'])
+    assert 0<len(generated.stdout)<=20*1024**2
+    media.write_bytes(generated.stdout)
     shutil.copyfile(media,evidence.out/'generated-source.mp4')
     fixture=context/'fixture';fixture.mkdir()
     for filename in ('server.crt','server.key'):shutil.copyfile(tls/filename,fixture/filename)
@@ -427,10 +442,13 @@ def exercise_runtime(repo, evidence, report):
         assert abs(facts['duration']-2)<=1/30+.002 and facts['sha256']==sha(asset['path'])
         assert facts['acquiredSha256']==evidence.state['sourceSha256']
         assert 'generated=1' not in asset['source']['urlWithoutQuery'] and asset['contentReview']=='PENDING'
-        streams=json.loads(command(['ffprobe','-v','error','-show_streams','-of','json',asset['path']]).stdout)['streams']
+        contents=Path(asset['path']).read_bytes();assert 0<len(contents)<=policy['assetBytes']
+        streams=json.loads(media_tool(evidence,config['offlineImage'],'asset-probe',
+            ['/usr/bin/ffprobe','-v','error','-protocol_whitelist','file,pipe','-show_streams','-of','json','pipe:0'],contents).stdout)['streams']
         assert len(streams)==1 and streams[0]['codec_type']=='video' and streams[0]['codec_name']=='h264'
         assert streams[0]['avg_frame_rate']=='30/1' and int(streams[0]['nb_frames'])==60
-        command(['ffmpeg','-v','error','-i',asset['path'],'-f','null','-'],timeout=20)
+        media_tool(evidence,config['offlineImage'],'asset-decode',
+                   ['/usr/bin/ffmpeg','-v','error','-protocol_whitelist','file,pipe','-i','pipe:0','-f','null','-'],contents)
         # Reuse must not start another downloader, even if presentation context differs.
         before=len(evidence.resources())
         reused=acquisition.acquire(request|{'context':'Different generated placement'},policy,config,positive,factory)

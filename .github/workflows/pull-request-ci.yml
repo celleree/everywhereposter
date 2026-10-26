@@ -150,15 +150,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: postiz-app/pnpm-lock.yaml
 
-      - name: Verify FFmpeg tools
-        run: |
-          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y ffmpeg
-          fi
-          ffmpeg -version
-          ffprobe -version
-
       - name: Verify acquisition runtime on Linux with generated HTTPS media
         if: steps.candidate-diff.outputs.footage_changed == 'true'
         timeout-minutes: 20
@@ -476,6 +467,15 @@ jobs:
             postiz-app/browser-report
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Verify FFmpeg tools
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version
+          ffprobe -version
 
       - name: Verify Studio package on Linux with generated media
         if: steps.candidate-diff.outputs.studio_changed == 'true'
