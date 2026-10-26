@@ -1,6 +1,7 @@
 import { request } from 'http';
 import { createReadStream, createWriteStream } from 'fs';
-import { stat } from 'fs/promises';
+import { stat, lstat, link, rm } from 'fs/promises';
+import { createHash, randomUUID } from 'crypto';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { IncomingMessage } from 'http';
@@ -60,5 +61,29 @@ export class CookedWorkerClient {
     const validRange = match && Number(match[1]) <= Number(match[2]) && Number(match[2]) < Number(match[3]) && Number(match[3]) <= 100 * 1024 * 1024 && Number(match[2]) - Number(match[1]) + 1 === length;
     if (![200, 206].includes(response.statusCode!) || !Number.isSafeInteger(length) || length < 1 || length > 100 * 1024 * 1024 || (response.statusCode === 206 ? !validRange : contentRange !== undefined)) { response.destroy(); throw new Error('INVALID_MEDIA_RESPONSE'); }
     return response;
+  }
+  studioEvidence(org: string, media: string, job: string, revision: number) {
+    if (!/^[a-f0-9-]{36}$/.test(job) || !Number.isSafeInteger(revision) || revision < 0) throw Error('INVALID_STUDIO_EVIDENCE_ID');
+    return this.json(`/jobs/${job}/studio-evidence?revision=${revision}`, org, media);
+  }
+  async studioAudio(org: string, media: string, job: string, revision: number, sha256: string, bytes: number, file: string) {
+    if (!/^[a-f0-9-]{36}$/.test(job) || !Number.isSafeInteger(revision) || revision < 0 || !/^[a-f0-9]{64}$/.test(sha256) ||
+        !Number.isSafeInteger(bytes) || bytes < 1 || bytes > 100 * 1024 * 1024) throw Error('INVALID_STUDIO_AUDIO');
+    const response = await this.call(`/jobs/${job}/studio-audio?revision=${revision}&sha256=${sha256}`, 'GET', org, media);
+    if (response.statusCode !== 200 || Number(response.headers['content-length']) !== bytes) { response.destroy(); throw Error('INVALID_STUDIO_AUDIO'); }
+    const temporary = file + '.part-' + randomUUID();
+    const verify = async (path: string) => {
+      const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink() || info.size !== bytes) throw Error('INCOMPLETE_STUDIO_AUDIO');
+      const h = createHash('sha256'); for await (const b of createReadStream(path)) h.update(b);
+      if (h.digest('hex') !== sha256) throw Error('STUDIO_AUDIO_HASH_MISMATCH');
+    };
+    try {
+      let size = 0;
+      const bounded = new Transform({ transform(chunk, _, done) { size += chunk.length; done(size > bytes ? Error('STUDIO_AUDIO_TOO_LARGE') : null, chunk); } });
+      await pipeline(response, bounded, createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
+      await verify(temporary);
+      try { await link(temporary, file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      await verify(file);
+    } finally { await rm(temporary, { force: true }).catch(() => {}); }
   }
 }

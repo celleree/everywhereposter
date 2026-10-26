@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -17,6 +18,7 @@ import {
   UsePipes,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { pipeline } from 'stream/promises';
 import { existsSync, statSync } from 'fs';
 import { resolve, sep } from 'path';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
@@ -45,6 +47,8 @@ import { CreateVideoUploadDto } from '@gitroom/nestjs-libraries/dtos/media/creat
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 import { VideoEditorService } from '@gitroom/nestjs-libraries/media-editing/video-editor.service';
 import { CreateVideoEditDto } from '@gitroom/nestjs-libraries/dtos/media/create-video-edit.dto';
+import { StudioEditService } from '@gitroom/nestjs-libraries/media-editing/studio-edit.service';
+import { StudioEditRequest } from '@gitroom/nestjs-libraries/media-editing/studio-edit.repository';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -58,8 +62,64 @@ export class MediaController {
     private readonly quickUpload: QuickUploadService,
     private _subscriptionService: SubscriptionService,
     private _mediaTranscriptionService: MediaTranscriptionService,
-    private readonly videoEditor: VideoEditorService
+    private readonly videoEditor: VideoEditorService,
+    private readonly studioEditor: StudioEditService
   ) {}
+
+  @Get('/studio/status')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  studioAvailability(@GetOrgFromRequest() org: Organization) { return this.studioEditor.availability(org.id); }
+
+  @Get('/studio/framing/:source')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  studioFraming(@GetOrgFromRequest() org: Organization, @Param('source') source: string) { return this.studioEditor.framing(org.id, source); }
+
+  @Post('/studio/jobs')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  createStudio(@GetOrgFromRequest() org: Organization, @Body() body: StudioEditRequest, @Req() req: Request) {
+    this.studioOrigin(req); return this.studioEditor.create(org.id, body);
+  }
+
+  @Post('/studio/jobs/:job/resume')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  resumeStudio(@GetOrgFromRequest() org: Organization, @Param('job') job: string, @Req() req: Request) {
+    this.studioOrigin(req); return this.studioEditor.resume(org.id, job);
+  }
+
+  @Get('/studio/jobs')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  studioJobs(@GetOrgFromRequest() org: Organization) { return this.studioEditor.list(org.id); }
+
+  @Get('/studio/jobs/:job')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  studioJob(@GetOrgFromRequest() org: Organization, @Param('job') job: string) { return this.studioEditor.status(org.id, job); }
+
+  @Get('/studio/jobs/:job/preview')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  async studioPreview(@GetOrgFromRequest() org: Organization, @Param('job') job: string, @Req() req: Request, @Res() res: Response) {
+    const result = await this.studioEditor.preview(org.id, job, req.headers.range);
+    res.type('video/mp4'); res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Content-Length', result.end - result.start + 1);
+    if (result.status === 206) res.setHeader('Content-Range', `bytes ${result.start}-${result.end}/${result.bytes}`);
+    res.status(result.status); req.once('aborted', () => result.stream.destroy());
+    await pipeline(result.stream, res);
+  }
+
+  @Post('/studio/jobs/:job/review')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  reviewStudio(@GetOrgFromRequest() org: Organization, @GetUserFromRequest() user: User, @Param('job') job: string, @Body() body: unknown, @Req() req: Request) {
+    this.studioOrigin(req);
+    return this.studioEditor.review(org.id, job, user.id, body);
+  }
+
+  @Delete('/studio/jobs/:job')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  cancelStudio(@GetOrgFromRequest() org: Organization, @Param('job') job: string, @Req() req: Request) { this.studioOrigin(req); return this.studioEditor.cancel(org.id, job); }
+
+  private studioOrigin(req: Request) {
+    let expected = ''; try { expected = new URL(process.env.FRONTEND_URL!).origin; } catch {}
+    if (!expected || req.headers.origin !== expected) throw new BadRequestException('Use Studio from this application');
+  }
 
   @Post('/:id/video-edits')
   @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])

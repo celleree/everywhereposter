@@ -9,6 +9,7 @@ datasource db {
 }
 
 model Organization {
+  studioEdits StudioEditJob[]
   aiWallet AiWallet?
   uploadSessions VideoUploadSession[]
   quickUploadIntents QuickUploadIntent[]
@@ -221,6 +222,8 @@ model Star {
 }
 
 model Media {
+  studioOutput StudioEditJob? @relation("StudioOutput")
+  studioSources StudioEditJob[] @relation("StudioSource")
   uploadSession VideoUploadSession?
   id                 String              @id @default(uuid())
   name               String
@@ -244,6 +247,37 @@ model Media {
   @@index([name])
   @@index([organizationId])
   @@index([type])
+}
+
+// Technical acceptance and explicit human review are separate durable steps.
+model StudioEditJob {
+  id String @id @default(uuid())
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  sourceMediaId String
+  sourceMedia Media @relation("StudioSource", fields: [sourceMediaId], references: [id], onDelete: Restrict)
+  requestKey String
+  requestHash String
+  inputFingerprint String
+  input Json
+  state String @default("ADMITTED")
+  generation Int @default(1)
+  leaseToken String?
+  artifactSha256 String?
+  artifactBytes Int?
+  artifactKey String? @unique
+  storagePath String?
+  worker Json?
+  technicalReceipt Json?
+  outputMediaId String? @unique
+  outputMedia Media? @relation("StudioOutput", fields: [outputMediaId], references: [id], onDelete: Restrict)
+  reviewedByUserId String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, requestKey])
+  @@index([organizationId, state, createdAt])
 }
 
 model MediaTranscription {
