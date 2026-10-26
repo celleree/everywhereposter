@@ -36,7 +36,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
   const id = selected || (Array.isArray(jobs) ? jobs[0]?.id : '');
   const { data, mutate } = useSWR(id && scope ? ['studio-result', scope, id] : null, () => read('/media/studio/jobs/' + encodeURIComponent(id)), {
     shouldRetryOnError: false, refreshInterval: (value: any) => value?.state === 'RUNNING' && !value?.phase ? 3000 : 0 });
-  const ready = data?.id === id && data.technicalStatus === 'PASS' && data.preview;
+  const ready = !!id && data?.id === id && data.technicalStatus === 'PASS' && data.preview;
   const version = data ? [id, data.generation, data.sha256].join(':') : '';
   const choose = (video: boolean) => modals.openModal({ title: 'Media Library', fullScreen: true, askClose: false,
     closeOnEscape: true, size: 'calc(100% - 80px)', height: 'calc(100% - 80px)',
