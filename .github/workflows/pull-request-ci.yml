@@ -321,6 +321,19 @@ jobs:
           SH
           python3 "$RUNNER_TEMP/billing-acceptance/check.py" identity
 
+      - name: Test generated post-set review workflow
+        id: post-set-test
+        continue-on-error: true
+        run: |
+          pnpm exec jest --config jest.post-set-review.config.cjs --runInBand --json --outputFile="$RUNNER_TEMP/billing-acceptance/frontend.json" > post-set-test.log 2>&1
+          python3 "$RUNNER_TEMP/billing-acceptance/check.py" jest "$RUNNER_TEMP/billing-acceptance/frontend.json" frontend
+
+      - name: Enforce generated post-set review workflow
+        if: steps.post-set-test.outcome == 'failure'
+        run: |
+          cat post-set-test.log
+          exit 1
+
       - name: Prepare disposable publication fixture database
         env:
           DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
@@ -557,13 +570,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Test generated post-set review workflow
-        id: post-set-test
-        continue-on-error: true
-        run: |
-          pnpm exec jest --config jest.post-set-review.config.cjs --runInBand --json --outputFile="$RUNNER_TEMP/billing-acceptance/frontend.json" > post-set-test.log 2>&1
-          python3 "$RUNNER_TEMP/billing-acceptance/check.py" jest "$RUNNER_TEMP/billing-acceptance/frontend.json" frontend
-
       - name: Type-check frontend
         id: frontend-typecheck
         continue-on-error: true
@@ -578,12 +584,6 @@ jobs:
             postiz-app/post-set-test.log
             postiz-app/frontend-typecheck.log
           if-no-files-found: error
-
-      - name: Enforce generated post-set review workflow
-        if: steps.post-set-test.outcome == 'failure'
-        run: |
-          cat post-set-test.log
-          exit 1
 
       - name: Enforce frontend typecheck
         if: steps.frontend-typecheck.outcome == 'failure'
