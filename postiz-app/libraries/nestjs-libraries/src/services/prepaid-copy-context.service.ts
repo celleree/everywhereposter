@@ -3,7 +3,8 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { SubscriptionRepository } from '../database/prisma/subscriptions/subscription.repository';
 import { AiWalletService } from '../database/prisma/ai-wallet/ai-wallet.service';
 import { AiWalletTextService, TextRequest } from './ai-wallet-text.service';
-import { snapshotFingerprint } from './ai-wallet-pricing';
+import { snapshotFingerprint, validatePricingQuote } from './ai-wallet-pricing';
+import { persistedTextChat } from '../openai/model-config';
 import { GenerateMediaCopyDto } from '../dtos/copy-generation/generate.media.copy.dto';
 import { pricing } from '../database/prisma/subscriptions/pricing';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
@@ -46,8 +47,16 @@ export class PrepaidCopyContextService {
     const context = this.storage.getStore();
     if (!context) throw Error('A prepaid text context is required.');
     const index = context.counts.get(stage) || 0; context.counts.set(stage, index + 1);
+    const operationKey = `guided-text:${context.requestKey}:${stage}_${index}`;
+    // Default/config changes must not alter an existing paid operation. The
+    // adapter still verifies the full request fingerprint and immutable quote.
+    const existing = await this.wallet.quotedOperation(context.organizationId, operationKey);
+    if (existing) {
+      const quote = validatePricingQuote(existing.quoteSnapshot);
+      request = { ...request, ...persistedTextChat(quote.model) };
+    }
     const subscription = await this.subscriptions.getSubscriptionByOrganizationId(context.organizationId);
-    return this.text.run(context.organizationId, `guided-text:${context.requestKey}:${stage}_${index}`, context.fingerprint,
+    return this.text.run(context.organizationId, operationKey, context.fingerprint,
       request, subscription?.subscriptionTier === 'LAUNCH_V1', invoke);
   }
 }
