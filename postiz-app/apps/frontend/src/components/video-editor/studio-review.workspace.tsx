@@ -17,7 +17,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
   const [brief, setBrief] = useState('Keep my words and add a few clear source-led graphics using my selected supporting visuals.');
   const [framing, setFraming] = useState<any>({ x: .28, y: .28, width: .44, height: .24 }), [framingConfirmed, setFramingConfirmed] = useState(false);
   const [adjusting, setAdjusting] = useState(false), [pendingRequest, setPendingRequest] = useState<any>();
-  const drag = useRef<{ x: number; y: number }>(), receiptKey = 'everywhereposter:studio-request:v1:' + scope;
+  const drag = useRef<{ x: number; y: number } | undefined>(undefined), receiptKey = 'everywhereposter:studio-request:v1:' + scope;
   const sourceGeneration = useRef(0);
   useEffect(() => { try { const raw = localStorage.getItem(receiptKey); if (raw && raw.length < 16384) setPendingRequest(JSON.parse(raw)); } catch {} }, [receiptKey]);
   const active = useRef(true); useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
