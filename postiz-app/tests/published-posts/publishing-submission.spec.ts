@@ -61,6 +61,17 @@ it('hashes meaningful content independently of property order and immediate clie
   expect(submissionHash(changed)).not.toBe(submissionHash(request()));
 });
 
+it('binds a multi-destination video submission to its reviewed captions, settings and owned media identity', () => {
+  const original = request();
+  original.posts[0].value[0].image = [{ id: 'owned-video', path: '/uploads/owned.mp4', alt: 'Reviewed video' }] as any;
+  original.posts.push({ ...original.posts[0], integration: { id: 'another-account' }, settings: { __type: 'threads' } } as any);
+  const changed = JSON.parse(JSON.stringify(original));
+  changed.posts.reverse();
+  expect(submissionHash(changed)).toBe(submissionHash(original));
+  changed.posts[0].value[0].image[0].id = 'other-video';
+  expect(submissionHash(changed)).not.toBe(submissionHash(original));
+});
+
 it.each(['bad', '', 'contains spaces 12345', 'a'.repeat(129)])(
   'validates supplied submission identity %j',
   async (submissionId) => {

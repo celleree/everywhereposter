@@ -55,7 +55,39 @@ type Journal = {
   destinationIds: string[];
   startedAt: number;
   attemptId: string;
+  durableImmediate?: true;
 };
+type SubmissionStatus = {
+  submissionId: string;
+  destinations: Array<{ integrationId: string; postId: string; generation: number;
+    state: string; providerState: string; postState: string; workflowState: string; recoverability: string }>;
+};
+const submissionLabels: Record<string, string> = {
+  unavailable: 'Unavailable', uncertain: 'Outcome unconfirmed', published: 'Published',
+  'reconnect-required': 'Reconnect account', 'failed-before-provider': 'Stopped before publishing',
+  failed: 'Needs review', processing: 'Processing',
+};
+export function readSubmissionStatus(value: any, journal: Journal): SubmissionStatus {
+  const ids = new Set(journal.destinationIds);
+  if (!value || value.submissionId !== journal.attemptId || !Array.isArray(value.destinations) ||
+      value.destinations.length !== ids.size || !ids.size ||
+      new Set(value.destinations.map((item: any) => item?.postId)).size !== ids.size ||
+      !value.destinations.every((item: any) => item && ids.delete(item.integrationId) &&
+        typeof item.postId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(item.postId) &&
+        Number.isSafeInteger(item.generation) && item.generation > 0 &&
+        ['READY', 'IN_FLIGHT', 'UNCERTAIN', 'SUCCEEDED'].includes(item.providerState) &&
+        typeof item.postState === 'string' && typeof item.workflowState === 'string' &&
+        ['unavailable', 'uncertain', 'published', 'reconnect-required', 'failed-before-provider', 'failed', 'processing'].includes(item.state) &&
+        (item.recoverability === 'locked' ||
+          (item.recoverability === 'complete' && item.state === 'published' && item.providerState === 'SUCCEEDED' && item.postState === 'PUBLISHED') ||
+          (item.providerState === 'READY' &&
+            ((item.recoverability === 'resume-dispatch' && item.state === 'processing' && item.postState === 'QUEUE') ||
+             (item.recoverability === 'retry-before-provider' && item.state === 'failed-before-provider' &&
+              ['COMPLETED', 'FAILED', 'CANCELLED', 'TERMINATED', 'TIMED_OUT'].includes(item.workflowState))))))) {
+    throw new Error('The publishing status could not be verified. Your attempt remains locked.');
+  }
+  return value;
+}
 export type ComposerDraft = {
   version: 1;
   userId: string;
@@ -330,6 +362,9 @@ export function readComposerDraft(
         (draft.journal &&
           Number.isFinite(draft.journal.startedAt) &&
           typeof draft.journal.attemptId === 'string' &&
+          (draft.journal.durableImmediate === undefined ||
+            (draft.journal.durableImmediate === true && draft.timing === 'now' &&
+              /^[a-zA-Z0-9_-]{16,128}$/.test(draft.journal.attemptId))) &&
           Array.isArray(draft.journal.destinationIds) &&
           draft.journal.destinationIds.every(
             (id: unknown) => typeof id === 'string'
@@ -360,6 +395,7 @@ export function readComposerDraft(
       startedAt: draft.journal.startedAt,
       attemptId: draft.journal.attemptId,
       destinationIds: draft.journal.destinationIds,
+      ...(draft.journal.durableImmediate ? { durableImmediate: true } : {}),
     },
     guided: {
       ...Object.fromEntries(
@@ -488,6 +524,9 @@ type Recovery = {
   setTiming: (timing: ComposerDraft['timing']) => void;
   prepareSubmission: (destinationIds: string[]) => boolean;
   beginSubmission: (destinationIds: string[]) => boolean;
+  beginImmediateSubmission: (destinationIds: string[]) => Promise<string | null>;
+  checkImmediateSubmission: () => Promise<void>;
+  isImmediateSubmissionCurrent: (id: string) => boolean;
   safeSubmissionFailure: () => void;
   settingsSaveFailed: () => void;
   savedDraftComplete: () => void;
@@ -501,6 +540,9 @@ const RecoveryContext = createContext<Recovery>({
   setTiming: () => {},
   prepareSubmission: () => true,
   beginSubmission: () => true,
+  beginImmediateSubmission: async () => null,
+  checkImmediateSubmission: async () => {},
+  isImmediateSubmissionCurrent: () => false,
   safeSubmissionFailure: () => {},
   settingsSaveFailed: () => {},
   savedDraftComplete: () => {},
@@ -518,6 +560,8 @@ export function ComposerDraftRecovery({
   const fetcher = useFetch();
   const scope =
     user?.id && user?.orgId ? composerDraftKey(user.id, user.orgId) : '';
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
   const latest = useRef({ integrations, fetcher, user });
   latest.current = { integrations, fetcher, user };
   const [phase, setPhase] = useState<'loading' | 'ready' | 'blocked'>(
@@ -536,15 +580,54 @@ export function ComposerDraftRecovery({
   timingRef.current = timing;
   const journalRef = useRef<Journal | null>(null);
   const readyRef = useRef(false);
+  const readyScopeRef = useRef('');
   const completedRef = useRef(false);
   const saveRef = useRef<() => boolean>(() => false);
+  const [submissionStatus, setSubmissionStatus] = useState<SubmissionStatus | null>(null);
+  const [checkingSubmission, setCheckingSubmission] = useState(false);
+  const statusRequest = useRef(0);
+  const recoveryMutation = useRef(false);
+
+  const checkImmediateSubmission = async (action?: 'resume' | string) => {
+    const journal = journalRef.current;
+    if (!scope || currentScope.current !== scope || readyScopeRef.current !== scope || !journal?.durableImmediate || recoveryMutation.current) return;
+    // Only a current server classification can expose a recovery mutation.
+    if (action && (!submissionStatus || submissionStatus.submissionId !== journal.attemptId ||
+        !submissionStatus.destinations.some(item => action === 'resume'
+          ? item.recoverability === 'resume-dispatch'
+          : item.integrationId === action && item.recoverability === 'retry-before-provider'))) return;
+    if (action) recoveryMutation.current = true;
+    const request = ++statusRequest.current;
+    const stillCurrent = () => currentScope.current === scope && request === statusRequest.current && journalRef.current?.attemptId === journal.attemptId;
+    setCheckingSubmission(true);
+    setSubmissionStatus(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const suffix = !action ? '' : action === 'resume' ? '/resume' : `/destinations/${encodeURIComponent(action)}/retry`;
+      const response = await latest.current.fetcher(`/posts/submissions/${encodeURIComponent(journal.attemptId)}${suffix}`, { method: action ? 'POST' : 'GET', signal: controller.signal });
+      if (!response.ok) throw new Error('Publishing status is unavailable. The original request may have been accepted; do not resend it.');
+      const status = readSubmissionStatus(await response.json(), journal);
+      if (stillCurrent()) { setSubmissionStatus(status); setMessage(''); }
+    } catch {
+      if (stillCurrent()) setMessage('Publishing status could not be confirmed. Your attempt remains locked; check status again before taking further action.');
+    } finally {
+      clearTimeout(timeout);
+      if (stillCurrent()) setCheckingSubmission(false);
+      if (action) recoveryMutation.current = false;
+    }
+  };
 
   useEffect(() => {
     let active = true;
     readyRef.current = false;
+    readyScopeRef.current = '';
     setPhase('loading');
     setAcknowledged(false);
     setRestored(null);
+    setSubmissionStatus(null);
+    setCheckingSubmission(false);
+    statusRequest.current++;
     completedRef.current = false;
     journalRef.current = null;
     ownPostStartedRef.current = false;
@@ -603,6 +686,9 @@ export function ComposerDraftRecovery({
       ? readComposerDraft(raw, identity.id, identity.orgId).journal
       : null;
     if (stored && stored.attemptId !== journalRef.current?.attemptId) {
+      statusRequest.current++;
+      setSubmissionStatus(null);
+      setCheckingSubmission(false);
       journalRef.current = stored;
       foreignLockRef.current = true;
       setForeignLock(true);
@@ -612,6 +698,7 @@ export function ComposerDraftRecovery({
   useEffect(() => {
     if (phase !== 'ready' || !scope) return;
     readyRef.current = true;
+    readyScopeRef.current = scope;
     const identity = latest.current.user!;
     const save = () => {
       if (!readyRef.current || !useLaunchStore.getState().global.length)
@@ -681,6 +768,7 @@ export function ComposerDraftRecovery({
     return () => {
       save();
       readyRef.current = false;
+      readyScopeRef.current = '';
       stopLaunch();
       stopGuided();
       window.removeEventListener('storage', storageChanged);
@@ -690,6 +778,11 @@ export function ComposerDraftRecovery({
       resetComposerState();
     };
   }, [phase, scope]);
+
+  useEffect(() => {
+    if (phase === 'ready' && restored?.journal?.durableImmediate) void checkImmediateSubmission();
+    return () => { statusRequest.current++; };
+  }, [phase, scope, restored]);
 
   const prepareSubmission = (destinationIds: string[]) => {
     if (restored?.journal || !scope) return !restored?.journal;
@@ -716,6 +809,32 @@ export function ComposerDraftRecovery({
     ownPostStartedRef.current = true;
     setOwnPostStarted(true);
     return true;
+  };
+  const beginImmediateSubmission = async (destinationIds: string[]) => {
+    if (!scope || currentScope.current !== scope || restored?.journal || ownPostStartedRef.current ||
+        !readyRef.current || readyScopeRef.current !== scope || !navigator.locks?.request || !destinationIds.length ||
+        new Set(destinationIds).size !== destinationIds.length) {
+      setMessage('Publishing needs working browser storage and tab coordination. Keep this draft open and try again in a supported secure browser.');
+      return null;
+    }
+    try {
+      return await navigator.locks.request(`publishing:${scope}`, { ifAvailable: true }, async lock => {
+        if (!lock || currentScope.current !== scope || readyScopeRef.current !== scope || ownPostStartedRef.current || !readyRef.current) return null;
+        if (!prepareSubmission(destinationIds)) return null;
+        const journal = journalRef.current!;
+        if (journal.destinationIds.length !== destinationIds.length || !destinationIds.every(id => journal.destinationIds.includes(id))) return null;
+        journalRef.current = { ...journal, durableImmediate: true };
+        timingRef.current = 'now';
+        setTiming('now');
+        if (!saveRef.current() || foreignLockRef.current) return null;
+        ownPostStartedRef.current = true;
+        setOwnPostStarted(true);
+        return journal.attemptId;
+      });
+    } catch {
+      setMessage('The publishing attempt could not be saved safely. No new request was started.');
+      return null;
+    }
   };
   const safeSubmissionFailure = () => {
     if (ownPostStartedRef.current) return;
@@ -751,6 +870,16 @@ export function ComposerDraftRecovery({
     }
   };
   const startBlank = () => {
+    if (currentScope.current !== scope) return;
+    const discard = () => {
+    try { if (scope) adoptJournal(); } catch { return; }
+    // Clearing an uncertain receipt must never mint another publishing identity.
+    if (journalRef.current?.durableImmediate && (!submissionStatus || checkingSubmission ||
+        submissionStatus.submissionId !== journalRef.current.attemptId ||
+        !submissionStatus.destinations.every(item => item.recoverability === 'complete'))) {
+      setMessage('Resolve the existing publishing attempt before starting a new draft.');
+      return;
+    }
     if (
       !window.confirm(
         'Discard the saved composer work? Check Schedule and connected accounts for any previous publishing request before starting again.'
@@ -767,6 +896,14 @@ export function ComposerDraftRecovery({
     setPhase('loading');
     resetComposerState();
     setAttempt((value) => value + 1);
+    };
+    try { if (scope) adoptJournal(); } catch { return; }
+    if (journalRef.current?.durableImmediate) {
+      if (!navigator.locks?.request) return;
+      void navigator.locks.request(`publishing:${scope}`, { ifAvailable: true }, lock => {
+        if (lock && currentScope.current === scope) discard();
+      }).catch(() => setMessage('The saved publishing attempt could not be cleared safely.'));
+    } else discard();
   };
   if (phase === 'loading')
     return <div role="status">Restoring your composer…</div>;
@@ -798,6 +935,10 @@ export function ComposerDraftRecovery({
         },
         prepareSubmission,
         beginSubmission,
+        beginImmediateSubmission,
+        checkImmediateSubmission,
+        isImmediateSubmissionCurrent: id => currentScope.current === scope && readyScopeRef.current === scope && readyRef.current &&
+          journalRef.current?.attemptId === id && ownPostStartedRef.current,
         safeSubmissionFailure,
         savedDraftComplete,
         settingsSaveFailed: () =>
@@ -818,6 +959,16 @@ export function ComposerDraftRecovery({
             <button type="button" className="min-h-[44px] underline" onClick={() => setAcknowledged(value => !value)}>{acknowledged ? 'Show recovery details' : 'Acknowledge notice'}</button>
             <button type="button" className="min-h-[44px] underline" onClick={startBlank}>Start a new draft</button>
           </div>
+          {journalRef.current?.durableImmediate && <div aria-label="Submission status">
+            {submissionStatus?.destinations.map(item => <div key={item.integrationId}>
+              <p>{integrations.find(account => account.id === item.integrationId)?.name || 'Selected account'}: {submissionLabels[item.state]}</p>
+              {item.recoverability === 'retry-before-provider' && <button type="button" disabled={checkingSubmission}
+                onClick={() => void checkImmediateSubmission(item.integrationId)}>Retry publishing to {integrations.find(account => account.id === item.integrationId)?.name || 'selected account'}</button>}
+            </div>)}
+            <button type="button" disabled={checkingSubmission} onClick={() => void checkImmediateSubmission()}>Check publishing status</button>
+            {submissionStatus?.destinations.some(item => item.recoverability === 'resume-dispatch') && <button type="button"
+              disabled={checkingSubmission} onClick={() => void checkImmediateSubmission('resume')}>Resume pending dispatch</button>}
+          </div>}
         </section>
       )}
       <React.Fragment key={attempt}>{children}</React.Fragment>
