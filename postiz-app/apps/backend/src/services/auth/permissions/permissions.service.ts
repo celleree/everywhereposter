@@ -165,6 +165,11 @@ export class PermissionsService {
         continue;
       }
 
+      // Local editing does not dispatch paid inference or require wallet credits.
+      if (section === Sections.LOCAL_VIDEO_EDIT && (options.ai || subscription?.subscriptionTier === 'LAUNCH_V1')) {
+        can(action, section);
+        continue;
+      }
       if (section === Sections.GUIDED_COPY && (options.ai || options.prepaid_ai)) {
         can(action, section);
         continue;
