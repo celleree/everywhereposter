@@ -27,7 +27,6 @@ export class LocalStorage implements IUploadProvider {
 
   async storeStudioOutput(path: string, intent: StudioOutputIntent) {
     const key = studioOutputKey(intent);
-    await verifyStudioFile(path, intent);
     const root = await realpath(this.uploadDirectory);
     const parts = key.split('/'); let directory = root;
     for (const part of parts.slice(0, -1)) {
@@ -37,6 +36,14 @@ export class LocalStorage implements IUploadProvider {
       if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Unsafe Studio output directory');
     }
     const destination = join(directory, parts.at(-1)!);
+    const receipt = { key, path: `${process.env.FRONTEND_URL}/uploads/${key}`, sha256: intent.sha256, bytes: intent.bytes };
+    try {
+      const existing = await lstat(destination);
+      if (!existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe Studio output file');
+      await verifyStudioFile(destination, intent);
+      return receipt;
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    await verifyStudioFile(path, intent);
     const temporary = join(directory, `.studio-${randomUUID()}.tmp`);
     try {
       await copyFile(path, temporary, constants.COPYFILE_EXCL);
@@ -46,7 +53,7 @@ export class LocalStorage implements IUploadProvider {
       const info = await lstat(destination);
       if (!info.isFile() || info.isSymbolicLink()) throw new Error('Unsafe Studio output file');
       await verifyStudioFile(destination, intent);
-      return { key, path: `${process.env.FRONTEND_URL}/uploads/${key}`, sha256: intent.sha256, bytes: intent.bytes };
+      return receipt;
     } finally { await rm(temporary, { force: true }); }
   }
 

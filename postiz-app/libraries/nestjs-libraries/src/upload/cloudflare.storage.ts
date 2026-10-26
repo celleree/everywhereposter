@@ -29,7 +29,6 @@ class CloudflareStorage implements IUploadProvider {
 
   async storeStudioOutput(path: string, intent: StudioOutputIntent) {
     const key = studioOutputKey(intent);
-    await verifyStudioFile(path, intent);
     const verifyStored = async () => {
       let object;
       try { object = await this._client.send(new GetObjectCommand({ Bucket: this._bucketName, Key: key }), { abortSignal: AbortSignal.timeout(30000) }); }
@@ -46,6 +45,7 @@ class CloudflareStorage implements IUploadProvider {
       return true;
     };
     if (!await verifyStored()) {
+      await verifyStudioFile(path, intent);
       const body = createReadStream(path);
       try {
         await this._client.send(new PutObjectCommand({ Bucket: this._bucketName, Key: key, Body: body,

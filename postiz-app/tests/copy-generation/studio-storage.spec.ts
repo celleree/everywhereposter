@@ -40,6 +40,12 @@ describe('immutable Studio staging storage', () => {
     await expect(new LocalStorage(root).storeStudioOutput(source, intent)).rejects.toThrow('mismatch');
     expect(await readFile(target, 'utf8')).toBe('conflicting-object');
   });
+  it('recovers a verified local output after the temporary render was removed', async () => {
+    const store = new LocalStorage(root);
+    const receipt = await store.storeStudioOutput(source, intent);
+    await rm(source);
+    expect(await store.storeStudioOutput(source, intent)).toEqual(receipt);
+  });
   it('binds the namespace to organization, job, generation and hash and rejects path-like identities', () => {
     expect(studioOutputKey(intent)).not.toBe(studioOutputKey({ ...intent, organizationId: 'another-org' }));
     expect(studioOutputKey(intent)).not.toBe(studioOutputKey({ ...intent, generation: 2 }));
@@ -71,6 +77,7 @@ describe('immutable Studio staging storage', () => {
   it('recovers a lost remote PUT acknowledgement and never sends a second PUT or DELETE', async () => {
     const { store, send } = remote(new Map(), true);
     const first = await store.storeStudioOutput(source, intent);
+    await rm(source);
     expect(await store.storeStudioOutput(source, intent)).toEqual(first);
     expect(send.mock.calls.filter(([command]) => command instanceof PutObjectCommand)).toHaveLength(1);
     expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(false);
