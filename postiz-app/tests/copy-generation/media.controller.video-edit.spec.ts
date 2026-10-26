@@ -41,7 +41,7 @@ describe('Video Editor API contract', () => {
   });
 
   const routes = ['standard', 'find', 'create', 'edit', 'output', 'remove', 'view'] as const;
-  it.each(['studioJobs', 'studioJob', 'reviewStudio', 'cancelStudio'] as const)('requires the local-editor grant on Studio %s', name => {
+  it.each(['studioJobs', 'studioJob', 'studioPreview', 'reviewStudio', 'cancelStudio'] as const)('requires the local-editor grant on Studio %s', name => {
     expect(Reflect.getMetadata(CHECK_POLICIES_KEY, MediaController.prototype[name])).toEqual([[AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT]]);
   });
   type Route = typeof routes[number];

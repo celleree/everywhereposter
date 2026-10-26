@@ -18,6 +18,7 @@ import {
   UsePipes,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { pipeline } from 'stream/promises';
 import { existsSync, statSync } from 'fs';
 import { resolve, sep } from 'path';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
@@ -71,6 +72,17 @@ export class MediaController {
   @Get('/studio/jobs/:job')
   @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
   studioJob(@GetOrgFromRequest() org: Organization, @Param('job') job: string) { return this.studioEditor.status(org.id, job); }
+
+  @Get('/studio/jobs/:job/preview')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  async studioPreview(@GetOrgFromRequest() org: Organization, @Param('job') job: string, @Req() req: Request, @Res() res: Response) {
+    const result = await this.studioEditor.preview(org.id, job, req.headers.range);
+    res.type('video/mp4'); res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Content-Length', result.end - result.start + 1);
+    if (result.status === 206) res.setHeader('Content-Range', `bytes ${result.start}-${result.end}/${result.bytes}`);
+    res.status(result.status); req.once('aborted', () => result.stream.destroy());
+    await pipeline(result.stream, res);
+  }
 
   @Post('/studio/jobs/:job/review')
   @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])

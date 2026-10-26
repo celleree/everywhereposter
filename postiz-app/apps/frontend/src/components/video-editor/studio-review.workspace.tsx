@@ -2,16 +2,24 @@
 import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import dayjs from 'dayjs';
 
 // Review only: does not invent an authored plan, start inference or publish.
 export function StudioReviewWorkspace({ scope }: { scope: string }) {
-  const fetch = useFetch(), directory = useMediaDirectory(), modals = useModals();
+  const fetch = useFetch(), modals = useModals();
   const [selected, select] = useState(''), [reviewed, confirm] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const active = useRef(true); useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
-  const read = async (url: string) => { const r = await fetch(url); if (!r.ok) throw Error('Studio results are unavailable. Your original is unchanged.'); return r.json(); };
+  const read = async (url: string) => {
+    const r = await fetch(url); if (!r.ok) throw Error('Studio results are unavailable. Your original is unchanged.');
+    const value = await r.json();
+    if (value.preview === true) {
+      const target = new URL(r.url); target.search = ''; target.pathname = target.pathname.replace(/\/$/, '') + '/preview';
+      if (target.origin !== window.location.origin) throw Error('Studio requires the application same-origin backend proxy.');
+      value.preview = target.toString();
+    }
+    return value;
+  };
   const { data: jobs } = useSWR(scope ? ['studio-jobs', scope] : null, () => read('/media/studio/jobs'), { shouldRetryOnError: false });
   const id = selected || (Array.isArray(jobs) ? jobs[0]?.id : '');
   const { data, mutate } = useSWR(id && scope ? ['studio-result', scope, id] : null, () => read('/media/studio/jobs/' + encodeURIComponent(id)), { shouldRetryOnError: false });
@@ -33,7 +41,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
     setBusy(true); setError('');
     try {
       const media = await read('/media/' + encodeURIComponent(data.outputMediaId));
-      if (media.id !== data.outputMediaId || media.path !== data.preview || media.type !== 'video') throw Error('The saved video is no longer available.');
+      if (media.id !== data.outputMediaId || media.path !== data.savedPath || media.type !== 'video') throw Error('The saved video is no longer available.');
       const accounts = await read('/integrations/list');
       if (!Array.isArray(accounts.integrations) || accounts.integrations.some((a: any) => typeof a?.id !== 'string')) throw Error('Connected accounts are unavailable.');
       const { AddEditModal } = await import('@gitroom/frontend/components/new-launch/add.edit.modal');
@@ -53,7 +61,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
     <button disabled={busy} onClick={() => { confirm(''); void mutate(); }}>Refresh result</button>
     {ready ? <div key={data.sha256}>
       <p>Technical checks passed. Watch and listen before saving. Your original is unchanged.</p>
-      <video controls playsInline preload="metadata" aria-label="Studio video to review" src={directory.set(data.preview)} style={{ maxWidth: '100%', maxHeight: 600 }} />
+      <video controls playsInline preload="metadata" aria-label="Studio video to review" src={data.preview} style={{ maxWidth: '100%', maxHeight: 600 }} />
       {data.limitations?.map((text: string) => <p key={text}>{text}</p>)}
       <p>Selected framing profiles: {data.safeZoneProfiles?.join(', ')}. Provisional and ad-derived profiles are guidance, not a guarantee for every platform screen.</p>
       {data.outputMediaId ? <><p>Reviewed copy saved in Media Library.</p><button disabled={busy} onClick={() => void composer()}>Use in composer</button></> : <>

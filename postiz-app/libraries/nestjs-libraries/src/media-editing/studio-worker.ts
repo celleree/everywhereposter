@@ -22,6 +22,11 @@ export async function studioRuntime(org: string): Promise<StudioRuntime> {
   if (process.env.STUDIO_EDITOR_ENABLED !== 'true' || !(process.env.STUDIO_EDITOR_ORGANIZATIONS || '').split(',').includes(org)) throw new Error('Studio is unavailable');
   const root = process.env.STUDIO_EDITOR_PACKAGE_ROOT!, file = process.env.STUDIO_EDITOR_RUNTIME!, work = process.env.STUDIO_EDITOR_WORK_ROOT!;
   if (![root, file, work].every(v => typeof v === 'string' && isAbsolute(v))) throw new Error('Studio runtime is not configured');
+  const privateRoot = await realpath(work);
+  if (process.env.UPLOAD_DIRECTORY) {
+    const publicRoot = await realpath(process.env.UPLOAD_DIRECTORY);
+    if (privateRoot === publicRoot || privateRoot.startsWith(publicRoot + sep) || publicRoot.startsWith(privateRoot + sep)) throw new Error('Studio work root must be separate from public uploads');
+  }
   const config = await studioJson(file, 65536);
   if (![config.nodeExecutable, config.pythonExecutable].every(v => typeof v === 'string' && isAbsolute(v))) throw new Error('Studio tools are not configured');
   return { root, file, work, node: config.nodeExecutable, python: config.pythonExecutable };

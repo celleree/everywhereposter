@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { join } from 'path';
+import { createReadStream } from 'fs';
 import { PrismaService } from '../database/prisma/prisma.service';
 import { UploadFactory } from '../upload/upload.factory';
 import { StudioEditRepository, StudioEditRequest } from './studio-edit.repository';
@@ -42,7 +43,9 @@ export class StudioEditService {
     await this.jobs.bindWorker(org, job, row.generation, row.leaseToken, worker);
     if (['TECHNICAL_READY', 'REVIEWED'].includes(row.state)) return this.status(org, job);
     const result = await runStudioProject(config, row, plan);
-    if (row.state !== 'OUTPUT_STORED_UNVERIFIED') await this.storeOutput(org, job, row.generation, row.leaseToken, result.file, result.accepted.sha256, result.bytes);
+    // Bind the private worker final; do not upload to public permanent storage
+    // before the explicit review request authorizes saving that exact version.
+    await this.jobs.bindOutput(org, job, row.generation, row.leaseToken, result.accepted.sha256, result.bytes);
     await this.assertOwned(org, row);
     await this.jobs.markTechnical(org, job, row.generation, row.leaseToken, result.accepted);
     return this.status(org, job);
@@ -54,9 +57,6 @@ export class StudioEditService {
         await studioHashFile(join(studioDirectory(config, row), 'manifest.json')) !== worker.manifestHash) throw new Error('Studio worker binding is stale');
     const result = await inspectStudioExport(config, row);
     if (studioFingerprint(result.accepted) !== studioFingerprint(row.technicalReceipt) || result.accepted.sha256 !== row.artifactSha256 || result.bytes !== row.artifactBytes) throw new Error('Studio acceptance changed');
-    const stored = await this.storage.storeStudioOutput(result.file, { organizationId: org, jobId: row.id,
-      generation: row.generation, sha256: row.artifactSha256, bytes: row.artifactBytes });
-    if (stored.key !== row.artifactKey || stored.path !== row.storagePath) throw new Error('Studio stored object changed');
     await this.assertOwned(org, row);
     return result;
   }
@@ -73,15 +73,38 @@ export class StudioEditService {
     if (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state)) return response;
     try { await this.verified(org, row); }
     catch { return { ...response, technicalStatus: 'STALE_NEEDS_VERIFICATION' }; }
-    return { ...response, technicalStatus: 'PASS', sha256: row.artifactSha256, preview: row.storagePath,
-      outputMediaId: row.outputMediaId, limitations: (row.technicalReceipt as any).limitations, safeZoneProfiles: (row.technicalReceipt as any).safeZoneProfiles };
+    return { ...response, technicalStatus: 'PASS', sha256: row.artifactSha256, preview: true,
+      outputMediaId: row.outputMediaId, savedPath: row.state === 'REVIEWED' ? row.storagePath : undefined,
+      limitations: (row.technicalReceipt as any).limitations, safeZoneProfiles: (row.technicalReceipt as any).safeZoneProfiles };
+  }
+  async preview(org: string, job: string, range?: string) {
+    const row = await this.jobs.get(org, job);
+    if (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state)) throw new ConflictException('Studio preview is not ready');
+    let result: Awaited<ReturnType<StudioEditService['verified']>>;
+    try { result = await this.verified(org, row); } catch { throw new ServiceUnavailableException('Studio preview needs verification'); }
+    let start = 0, end = result.bytes - 1, status = 200;
+    if (range) {
+      const m = /^bytes=(\d+)-(\d*)$/.exec(range);
+      if (!m || !Number.isSafeInteger(+m[1]) || +m[1] >= result.bytes) throw new BadRequestException('Invalid preview range');
+      start = +m[1]; end = m[2] ? Math.min(+m[2], end) : end;
+      if (!Number.isSafeInteger(end) || end < start) throw new BadRequestException('Invalid preview range');
+      status = 206;
+    }
+    return { stream: createReadStream(result.file, { start, end }), start, end, bytes: result.bytes, status };
   }
   async review(org: string, job: string, user: string, body: any) {
     if (!body || Object.keys(body).sort().join(',') !== 'generation,reviewed,sha256' || body.reviewed !== true ||
         !Number.isSafeInteger(body.generation) || !/^[a-f0-9]{64}$/.test(body.sha256 || '') || typeof user !== 'string' || !user) throw new BadRequestException('Confirm review of the current video');
     const row = await this.jobs.get(org, job);
     if (body.generation !== row.generation || body.sha256 !== row.artifactSha256) throw new ConflictException('Review the current Studio version');
-    try { await this.verified(org, row); } catch { throw new ServiceUnavailableException('The Studio result needs verification before it can be saved'); }
+    let result: Awaited<ReturnType<StudioEditService['verified']>>;
+    try { result = await this.verified(org, row); } catch { throw new ServiceUnavailableException('The Studio result needs verification before it can be saved'); }
+    // Persist consent before the first potentially public storage operation.
+    await this.jobs.authorizeReviewedStorage(org, job, user, row.generation, row.artifactSha256!);
+    const intent = { organizationId: org, jobId: job, generation: row.generation, sha256: row.artifactSha256!, bytes: row.artifactBytes! };
+    const receipt = await this.storage.storeStudioOutput(result.file, intent);
+    await this.assertOwned(org, row);
+    await this.jobs.recordReviewedStorage(intent, receipt);
     return { outputMedia: await this.jobs.review(org, job, user, body.generation, body.sha256, studioFingerprint(row.technicalReceipt)) };
   }
   cancel(org: string, job: string) { return this.jobs.cancel(org, job); }

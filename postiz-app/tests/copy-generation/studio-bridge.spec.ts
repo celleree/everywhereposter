@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 import { acceptStudioReceipt, studioFingerprint } from '../../libraries/nestjs-libraries/src/media-editing/studio-receipt';
 import { assertStudioPlan, stageStudioPlan, studioDirectory, studioCommand } from '../../libraries/nestjs-libraries/src/media-editing/studio-worker';
 import { StudioEditRepository } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.repository';
+import { StudioEditService } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.service';
 
 const h = 'a'.repeat(64), changed = 'b'.repeat(64);
 function receipts() {
@@ -79,7 +80,7 @@ it('does not run the app worker on an unaccepted Windows runtime', async () => {
 });
 it('review is transactionally replayable and rejects changed content or deleted output', async () => {
   const row: any = { id: randomUUID(), organizationId: 'org', generation: 1, state: 'TECHNICAL_READY', artifactSha256: h, artifactBytes: 12,
-    storagePath: '/immutable.mp4', technicalReceipt: { sha256: h }, input: { media: [{ id: 'source', path: '/source.mp4' }] } };
+    storagePath: '/immutable.mp4', reviewedAt: new Date(), technicalReceipt: { sha256: h }, input: { media: [{ id: 'source', path: '/source.mp4' }] } };
   let output: any, creates = 0;
   const tx: any = { $executeRaw: async () => 1, studioEditJob: { findFirst: async () => row, update: async ({ data }: any) => Object.assign(row, data) },
     media: { findMany: async () => row.input.media, findFirst: async () => output, create: async ({ data }: any) => { creates++; output = data; return output; } } };
@@ -89,4 +90,52 @@ it('review is transactionally replayable and rejects changed content or deleted 
   assert.equal(creates, 1); assert.equal(row.state, 'REVIEWED');
   await assert.rejects(jobs.review('org', row.id, 'reviewer', 1, changed, fingerprint));
   output = null; await assert.rejects(jobs.review('org', row.id, 'reviewer', 1, h, fingerprint)); assert.equal(creates, 1);
+});
+it('unreviewed status exposes no permanent storage path and does not upload bytes', async () => {
+  const row: any = { id: 'job', sourceMediaId: 'source', generation: 1, state: 'TECHNICAL_READY', artifactSha256: h,
+    storagePath: 'https://public.invalid/secret.mp4', technicalReceipt: { limitations: [], safeZoneProfiles: ['linkedin-organic-v1'] } };
+  const service = new StudioEditService({ get: async () => row } as any, {} as any);
+  (service as any).assertOwned = async () => {}; (service as any).verified = async () => ({});
+  const response = await service.status('org', 'job');
+  assert.equal(response.preview, true); assert.equal(response.savedPath, undefined);
+  assert.equal(JSON.stringify(response).includes(row.storagePath), false);
+});
+it('only explicit current-version consent can call permanent storage, and consent is durable first', async () => {
+  const events: string[] = [], row: any = { id: randomUUID(), generation: 1, artifactSha256: h, artifactBytes: 3, technicalReceipt: { sha256: h } };
+  const jobs = { get: async () => row, authorizeReviewedStorage: async () => { events.push('consent'); },
+    recordReviewedStorage: async () => { events.push('storage-ack'); }, review: async () => { events.push('media'); return { id: 'one' }; } };
+  const service = new StudioEditService(jobs as any, {} as any);
+  (service as any).assertOwned = async () => {}; (service as any).verified = async () => ({ file: '/private/worker/final.mp4' });
+  (service as any).storage = { storeStudioOutput: async () => { events.push('upload'); return {}; } };
+  await assert.rejects(service.review('org', row.id, 'reviewer', { generation: 1, sha256: h, reviewed: false }));
+  assert.equal(events.length, 0);
+  await service.review('org', row.id, 'reviewer', { generation: 1, sha256: h, reviewed: true });
+  assert.equal(events.join(','), 'consent,upload,storage-ack,media');
+});
+it('private preview rechecks organization and streams only the requested byte range', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'studio-preview-'));
+  try {
+    const file = join(dir, 'final.mp4'); await writeFile(file, 'abcdef');
+    const service = new StudioEditService({ get: async (org: string) => { if (org !== 'owner') throw Error('Unavailable'); return { state: 'TECHNICAL_READY' }; } } as any, {} as any);
+    let checks = 0; (service as any).verified = async () => { checks++; return { file, bytes: 6 }; };
+    const result = await service.preview('owner', 'job', 'bytes=1-3'), chunks: Buffer[] = [];
+    for await (const part of result.stream) chunks.push(part);
+    assert.equal(result.status, 206); assert.equal(Buffer.concat(chunks).toString(), 'bcd');
+    await assert.rejects(service.preview('foreign', 'job')); assert.equal(checks, 1);
+    await assert.rejects(service.preview('owner', 'job', 'bytes=9-')); await assert.rejects(service.preview('owner', 'job', 'bytes=3-1'));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+it('lost permanent-storage acknowledgement does not create Media and the same approval can recover', async () => {
+  const row: any = { id: randomUUID(), generation: 1, artifactSha256: h, artifactBytes: 3, technicalReceipt: { sha256: h } };
+  let uploaded = false, uploads = 0, registrations = 0, acknowledged = false;
+  const jobs = { get: async () => row, authorizeReviewedStorage: async () => { row.reviewedAt ||= new Date(); },
+    recordReviewedStorage: async () => { acknowledged = true; }, review: async () => { assert.equal(acknowledged, true); registrations++; return { id: 'one' }; } };
+  const service = new StudioEditService(jobs as any, {} as any);
+  (service as any).assertOwned = async () => {}; (service as any).verified = async () => ({ file: '/private/final.mp4' });
+  (service as any).storage = { storeStudioOutput: async () => {
+    assert.ok(row.reviewedAt); if (!uploaded) { uploaded = true; uploads++; throw Error('acknowledgement lost'); } return {};
+  } };
+  const body = { generation: 1, sha256: h, reviewed: true };
+  await assert.rejects(service.review('org', row.id, 'reviewer', body)); assert.equal(registrations, 0);
+  assert.equal((await service.review('org', row.id, 'reviewer', body)).outputMedia.id, 'one'); assert.equal(uploads, 1);
 });

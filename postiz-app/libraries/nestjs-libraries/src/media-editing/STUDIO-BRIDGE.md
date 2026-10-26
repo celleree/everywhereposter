@@ -48,15 +48,20 @@ This slice intentionally has no operator recovery UI or cleanup policy.
 ## Review and storage
 
 Current runtime/source/font/input bindings, render/QA receipts and final bytes
-must match. Immutable storage is verified again before preview/review. Technical
-PASS remains `creativeApproval:PENDING`. The authenticated local-editor routes
+must match. Unreviewed final bytes stay in the private worker root, separate from
+public uploads. The authenticated preview route rechecks permission, organization
+ownership and current receipts per request, supports byte ranges and sends
+private/no-store headers. No permanent URL is exposed or uploaded at this stage.
+Technical PASS remains `creativeApproval:PENDING`. The authenticated local-editor routes
 list/get/cancel jobs and approve an exact generation/hash; client paths, receipts
 and executable choices are never accepted. No creation/dispatch HTTP route is
 exposed while trusted authoring is missing.
 
 The existing editor shows organization-scoped recent Studio results. Review is
 bound to the displayed job/generation/hash, requires watch/listen confirmation,
-and atomically creates one Media row. Concurrent/repeated approval or response
+and durably records that approval before idempotent permanent storage uses the
+existing sharing policy. Only then does a transaction create one Media row.
+Concurrent/repeated approval or response
 loss returns that same active row; deleted output does not recreate another.
 The composer receives only the reviewed saved derivative. Opening it does not
 publish or alter another saved draft. Profile IDs and provisional/ad-derived

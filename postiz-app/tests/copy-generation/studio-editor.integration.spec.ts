@@ -101,8 +101,10 @@ describeDatabase('Studio jobs on disposable PostgreSQL', () => {
   it('concurrent review and lost acknowledgement recover exactly one organization-owned Media row', async () => {
     const job = await jobs.admit(org, input), running = await jobs.claim(org, job.id, 1), lease = running.leaseToken!;
     const intent = await jobs.bindOutput(org, job.id, 1, lease, 'a'.repeat(64), 10);
-    await jobs.recordStored(intent, lease, { key: studioOutputKey(intent), path: '/stored', sha256: intent.sha256, bytes: 10 });
     const technical = { sha256: intent.sha256 }; await jobs.markTechnical(org, job.id, 1, lease, technical);
+    expect((await jobs.get(org, job.id)).storagePath).toBeNull();
+    await jobs.authorizeReviewedStorage(org, job.id, 'synthetic-reviewer', 1, intent.sha256);
+    await jobs.recordReviewedStorage(intent, { key: studioOutputKey(intent), path: '/stored', sha256: intent.sha256, bytes: 10 });
     const outputs = await Promise.all(Array.from({ length: 8 }, () => jobs.review(org, job.id, 'synthetic-reviewer', 1, intent.sha256, studioFingerprint(technical))));
     expect(new Set(outputs.map(o => o.id)).size).toBe(1); expect(outputs[0].organizationId).toBe(org);
     expect(await db.media.count({ where: { organizationId: org } })).toBe(3);

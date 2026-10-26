@@ -97,10 +97,25 @@ export class StudioEditRepository {
   }
   async markTechnical(org: string, job: string, generation: number, leaseToken: string, receipt: any) {
     const changed = await this.db.studioEditJob.updateMany({ where: { id: job, organizationId: org, generation, leaseToken,
-      state: 'OUTPUT_STORED_UNVERIFIED', artifactSha256: receipt.sha256 }, data: { state: 'TECHNICAL_READY', technicalReceipt: receipt } });
+      state: { in: ['RUNNING', 'OUTPUT_STORED_UNVERIFIED'] }, artifactSha256: receipt.sha256 }, data: { state: 'TECHNICAL_READY', technicalReceipt: receipt } });
     const row = await this.get(org, job);
     if (!changed.count && (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state) || row.generation !== generation || row.leaseToken !== leaseToken ||
         studioFingerprint(row.technicalReceipt) !== studioFingerprint(receipt))) throw new ConflictException('Studio technical completion is stale');
+    return row;
+  }
+  async authorizeReviewedStorage(org: string, job: string, user: string, generation: number, sha256: string) {
+    await this.db.studioEditJob.updateMany({ where: { id: job, organizationId: org, generation, artifactSha256: sha256,
+      state: 'TECHNICAL_READY', reviewedAt: null }, data: { reviewedAt: new Date(), reviewedByUserId: user } });
+    const row = await this.get(org, job);
+    if (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state) || row.generation !== generation || row.artifactSha256 !== sha256 || !row.reviewedAt) throw new ConflictException('Studio review became stale');
+    return row;
+  }
+  async recordReviewedStorage(intent: StudioOutputIntent, receipt: StudioOutputReceipt) {
+    if (receipt.key !== studioOutputKey(intent) || receipt.sha256 !== intent.sha256 || receipt.bytes !== intent.bytes || !receipt.path) throw new ConflictException('Studio storage receipt mismatch');
+    await this.db.studioEditJob.updateMany({ where: { id: intent.jobId, organizationId: intent.organizationId, generation: intent.generation,
+      state: 'TECHNICAL_READY', reviewedAt: { not: null }, artifactKey: receipt.key, artifactSha256: receipt.sha256, storagePath: null }, data: { storagePath: receipt.path } });
+    const row = await this.get(intent.organizationId, intent.jobId);
+    if (!row.reviewedAt || !['TECHNICAL_READY', 'REVIEWED'].includes(row.state) || row.generation !== intent.generation || row.artifactKey !== receipt.key || row.storagePath !== receipt.path) throw new ConflictException('Studio reviewed storage is stale');
     return row;
   }
   async review(org: string, job: string, user: string, generation: number, sha256: string, technicalFingerprint: string) {
@@ -108,7 +123,7 @@ export class StudioEditRepository {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${org + ':studio-review:' + job}, 0))`;
       const row = await tx.studioEditJob.findFirst({ where: { id: job, organizationId: org } });
       if (!row || !['TECHNICAL_READY', 'REVIEWED'].includes(row.state) || row.generation !== generation || row.artifactSha256 !== sha256 ||
-          !row.storagePath || studioFingerprint(row.technicalReceipt) !== technicalFingerprint) throw new ConflictException('Review the current verified Studio result');
+          !row.storagePath || !row.reviewedAt || studioFingerprint(row.technicalReceipt) !== technicalFingerprint) throw new ConflictException('Review the current verified Studio result');
       const ids = (row.input as any).media.map((m: any) => m.id);
       const active = await tx.media.findMany({ where: { id: { in: ids }, organizationId: org, deletedAt: null }, select: { id: true, path: true } });
       if (active.length !== ids.length || (row.input as any).media.some((m: any) => !active.some(a => a.id === m.id && a.path === m.path))) throw new NotFoundException('Studio source or B-roll was removed');
@@ -119,7 +134,7 @@ export class StudioEditRepository {
       }
       const media = await tx.media.create({ data: { id: 'studio-' + row.id, organizationId: org, name: 'studio-' + row.id + '.mp4',
         originalName: 'reviewed-studio-edit.mp4', path: row.storagePath, type: 'video', fileSize: row.artifactBytes! } });
-      await tx.studioEditJob.update({ where: { id: row.id }, data: { state: 'REVIEWED', outputMediaId: media.id, reviewedByUserId: user, reviewedAt: new Date() } });
+      await tx.studioEditJob.update({ where: { id: row.id }, data: { state: 'REVIEWED', outputMediaId: media.id } });
       return media;
     });
   }
