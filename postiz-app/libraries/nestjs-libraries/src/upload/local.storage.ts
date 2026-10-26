@@ -1,10 +1,10 @@
-import { IUploadProvider } from './upload.interface';
+import { IUploadProvider, StudioOutputIntent, studioOutputKey, verifyStudioFile } from './upload.interface';
 import { mkdirSync, unlink, writeFileSync } from 'fs';
 // @ts-ignore
 import mime from 'mime';
 import { extname } from 'path';
 import { randomUUID } from 'crypto';
-import { copyFile, mkdir, rm } from 'fs/promises';
+import { copyFile, mkdir, rm, link, lstat, realpath } from 'fs/promises';
 import { constants } from 'fs';
 import { join } from 'path';
 import { assertRenderedVideoFile } from './rendered-video-file';
@@ -24,6 +24,31 @@ const LOCAL_STORAGE_ALLOWED_MIME = new Set<string>([
 ]);
 export class LocalStorage implements IUploadProvider {
   constructor(private uploadDirectory: string) {}
+
+  async storeStudioOutput(path: string, intent: StudioOutputIntent) {
+    const key = studioOutputKey(intent);
+    await verifyStudioFile(path, intent);
+    const root = await realpath(this.uploadDirectory);
+    const parts = key.split('/'); let directory = root;
+    for (const part of parts.slice(0, -1)) {
+      directory = join(directory, part);
+      await mkdir(directory, { recursive: true });
+      const info = await lstat(directory);
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Unsafe Studio output directory');
+    }
+    const destination = join(directory, parts.at(-1)!);
+    const temporary = join(directory, `.studio-${randomUUID()}.tmp`);
+    try {
+      await copyFile(path, temporary, constants.COPYFILE_EXCL);
+      await verifyStudioFile(temporary, intent);
+      try { await link(temporary, destination); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      const info = await lstat(destination);
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error('Unsafe Studio output file');
+      await verifyStudioFile(destination, intent);
+      return { key, path: `${process.env.FRONTEND_URL}/uploads/${key}`, sha256: intent.sha256, bytes: intent.bytes };
+    } finally { await rm(temporary, { force: true }); }
+  }
 
   async uploadFromPath(path: string, originalName: string) {
     await assertRenderedVideoFile(path);
