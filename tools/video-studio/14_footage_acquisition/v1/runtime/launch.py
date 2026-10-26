@@ -1,5 +1,5 @@
 """Trusted host launcher only. Docker socket/config is never mounted into jobs."""
-import io,json,os,re,subprocess,tarfile,time,uuid
+import io,json,os,re,subprocess,tarfile,time,uuid,threading
 from pathlib import Path
 
 def pinned(image):
@@ -21,6 +21,7 @@ class Runtime:
     def copy(self,name,source,target,limit):
         # Stream only the requested regular tar member; never extract remote paths.
         p=subprocess.Popen(['docker','cp',name+':'+source,'-'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+        watchdog=threading.Timer(20,p.kill);watchdog.daemon=True;watchdog.start()
         try:
             with tarfile.open(fileobj=p.stdout,mode='r|') as archive:
                 members=iter(archive);member=next(members)
@@ -35,6 +36,7 @@ class Runtime:
                 if next(members,None) is not None: raise ValueError('unexpected_output')
             if p.wait(timeout=10): raise ValueError('copy_failed')
         finally:
+            watchdog.cancel()
             if p.poll() is None: p.kill();p.wait()
     def acquire(self,request,policy,job):
         self.call(['volume','create',self.volume]);self.created=True
@@ -45,17 +47,23 @@ class Runtime:
         spec=json.dumps({'request':request,'policy':policy}).encode()
         meta=json.loads(self.call(['exec','-i',worker,'python','runtime/worker.py'],input=spec,timeout=policy['acquisitionSeconds']+5))
         self.copy(worker,'/job/download.bin',job/'download.bin',policy['trafficBytes'])
-        offline=self.spawn('offline',self.offline,['--network','none','--mount',f'type=bind,src={job.resolve()},dst=/input,readonly','--mount',f'type=bind,src={Path(__file__).resolve().parent.parent},dst=/adapter,readonly'])
+        offline=self.spawn('offline',self.offline,['--network','none','--mount',f'type=bind,src={Path(__file__).resolve().parent.parent},dst=/adapter,readonly'])
+        # Host job remains mode0700. Transfer bounded bytes into UID10001's own
+        # tmpfs, rather than making a private host directory world-readable.
+        with open(job/'download.bin','rb') as source:
+            self.call(['exec','-i',offline,'python','-c',"import sys,shutil; f=open('/job/download.bin','xb'); shutil.copyfileobj(sys.stdin.buffer,f,65536); f.close()"],stdin=source,timeout=30)
         facts=json.loads(self.call(['exec','-i',offline,'python','/adapter/validate_media.py'],input=spec,timeout=policy['normalizeSeconds']+5))
         if facts.get('fullDecode')!='PASS': raise ValueError('invalid_media')
         self.copy(offline,'/job/asset.mp4',job/'asset.mp4',policy['assetBytes'])
         return meta,facts
     def close(self):
+        failed=[]
         for name in reversed(self.names):
             try: self.call(['rm','-f',name])
-            except (OSError,subprocess.SubprocessError): pass
+            except (OSError,subprocess.SubprocessError): failed.append(name)
         if self.created:
             try: self.call(['volume','rm',self.volume])
-            except (OSError,subprocess.SubprocessError): pass
+            except (OSError,subprocess.SubprocessError): failed.append(self.volume)
+        if failed: raise ValueError('owned_runtime_cleanup_failed: '+','.join(failed))
     def __enter__(self): return self
     def __exit__(self,*args): self.close()

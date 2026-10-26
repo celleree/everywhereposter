@@ -1,9 +1,9 @@
-"""Executed only in the offline image with /input read-only and /job tmpfs."""
+"""Executed only in the offline image with bounded staged bytes in /job tmpfs."""
 import hashlib,json,math,os,subprocess,sys
 from pathlib import Path
 
 def run(spec):
-    timeout=spec['policy']['normalizeSeconds'];source='/input/download.bin';output='/job/asset.mp4'
+    timeout=spec['policy']['normalizeSeconds'];source='/job/download.bin';output='/job/asset.mp4'
     def probe(file):
         raw=subprocess.check_output(['/usr/bin/ffprobe','-v','error','-protocol_whitelist','file,pipe','-show_streams','-show_format','-of','json',file],timeout=min(15,timeout))
         if len(raw)>1024*1024: raise ValueError('metadata_over_budget')

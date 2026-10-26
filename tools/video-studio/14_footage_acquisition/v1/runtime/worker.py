@@ -11,6 +11,23 @@ def arguments(url):
             '--no-progress','--no-warnings','--fixup','never','--no-part',
             '--no-overwrites','--format','best[ext=mp4]/best','--',url]
 
+def completed_download(code,file,limit):
+    # Official yt-dlp exits101 when max-downloads=1 stops after the first file.
+    # Neither code alone proves success: require bytes, then offline media QA.
+    if code not in [0,101] or not os.path.isfile(file) or os.path.islink(file) or not 0<os.stat(file).st_size<=limit:
+        raise ValueError('invalid_media')
+
+def check_metadata(meta,request,policy):
+    duration=meta.get('duration')
+    if meta.get('_type') in ['playlist','multi_video'] or meta.get('is_live') or meta.get('live_status') in ['is_live','is_upcoming','post_live']:
+        raise ValueError('unsupported_source')
+    # Generic direct MP4 commonly has no duration; authoritative bounded probing
+    # occurs offline after byte/time-limited acquisition, never assume its length.
+    if duration is not None:
+        if type(duration) not in [int,float] or not 0<duration<=policy['sourceSeconds']: raise ValueError('unsupported_source')
+        if request['interval'][1]>duration: raise ValueError('invalid_interval')
+    return duration
+
 def run(request,policy):
     validate(request,policy);start();started=time.monotonic();args=arguments(request['url'])
     def remaining(): return max(.01,policy['acquisitionSeconds']-(time.monotonic()-started))
@@ -19,13 +36,10 @@ def run(request,policy):
         info.seek(0);raw=info.read(1024*1024+1)
         if len(raw)>1024*1024: raise ValueError('metadata_over_budget')
         meta=json.loads(raw)
-    duration=meta.get('duration')
-    if meta.get('_type') in ['playlist','multi_video'] or meta.get('is_live') or meta.get('live_status') in ['is_live','is_upcoming','post_live'] or type(duration) not in [int,float] or not 0<duration<=policy['sourceSeconds']:
-        raise ValueError('unsupported_source')
-    if request['interval'][1]>duration: raise ValueError('invalid_interval')
-    subprocess.run(args[:-2]+['--max-downloads','1','--max-filesize',str(policy['trafficBytes']),'-o','/job/download.bin']+args[-2:],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=remaining(),check=True)
+    duration=check_metadata(meta,request,policy)
+    result=subprocess.run(args[:-2]+['--max-downloads','1','--max-filesize',str(policy['trafficBytes']),'-o','/job/download.bin']+args[-2:],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=remaining(),check=False)
     file='/job/download.bin'
-    if not os.path.isfile(file) or os.path.islink(file) or not 0<os.stat(file).st_size<=policy['trafficBytes']: raise ValueError('invalid_media')
+    completed_download(result.returncode,file,policy['trafficBytes'])
     return {'status':'downloaded','duration':duration,'sourceId':str(meta.get('id',''))[:200],'extractor':str(meta.get('extractor_key',''))[:200]}
 
 if __name__=='__main__':

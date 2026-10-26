@@ -17,8 +17,8 @@ transport, IP literals, private/mixed A records or unknown CDN hosts. HTTPS is
 verified end-to-end by yt-dlp; the product never disables certificate checks.
 The Docker launcher is trusted host code, not inside either worker. Containers
 receive no Docker socket, app environment, home directory or broad host mounts.
-Only the offline validator gets the unique job input directory read-only and
-this adapter source directory read-only. All workers have bounded tmpfs, dropped
+Only this adapter source directory is mounted read-only into the offline validator.
+Input bytes are streamed into its UID-owned private tmpfs; the host job stays 0700. All workers have bounded tmpfs, dropped
 capabilities, non-root UID, no published ports and no-new-privileges.
 
 This topology is implemented, NOT yet Linux-verified. No Windows fallback or
@@ -100,7 +100,7 @@ content store, source-version polling or distributed exactly-once guarantee.
 A crashed owner lock fails closed; operator reviews/removes that one stale lock
 only after proving the previous owner is gone. Corrupt records are never reused
 or overwritten automatically. Unique partial job directories are removed on
-failure; container cleanup targets only generated names. Cache must be private
+failure; container cleanup targets only generated names; cleanup failures are surfaced and prevent cache publication. Cache must be private
 and trusted, not writable by untrusted users or other tenants.
 
 Receipt binds cacheKey, asset hash, acquired input hash, actual media facts/coverage,
