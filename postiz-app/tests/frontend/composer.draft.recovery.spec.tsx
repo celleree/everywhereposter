@@ -124,6 +124,9 @@ import {
   snapshotComposerDraft,
   useComposerDraftRecovery,
   INTERRUPTED_GENERATION,
+  readSubmissionStatus,
+  immediateReceiptKey,
+  readImmediateReceipt,
 } from '../../apps/frontend/src/components/new-launch/composer.draft.recovery';
 
 const integration: any = {
@@ -231,6 +234,197 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   delete process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL;
+});
+
+describe('reviewed immediate publication recovery', () => {
+  let previousLocks: PropertyDescriptor | undefined;
+  let recovery: ReturnType<typeof useComposerDraftRecovery>;
+  const Probe = () => { recovery = useComposerDraftRecovery(); return <span>Immediate fixture</span>; };
+  const status = (id: string, state = 'processing', recoverability = 'locked') => ({ submissionId: id, destinations: [{
+    integrationId: 'channel-1', postId: 'root-1', generation: 1, postState: state === 'published' ? 'PUBLISHED' : 'QUEUE',
+    providerState: state === 'published' ? 'SUCCEEDED' : state === 'uncertain' ? 'UNCERTAIN' : 'READY',
+    workflowState: state === 'failed-before-provider' ? 'FAILED' : 'unknown', state, recoverability,
+  }] });
+  const mount = async () => {
+    const view = render(<ComposerDraftRecovery integrations={[integration]}><Probe /></ComposerDraftRecovery>);
+    await screen.findByText('Immediate fixture');
+    act(() => useLaunchStore.getState().setGlobalValue([{ id: 'source', content: 'Reviewed caption', delay: 0, media: [] }]));
+    return view;
+  };
+  const begin = async () => {
+    let id: string | null = null;
+    await act(async () => { id = await recovery.beginImmediateSubmission(['channel-1']); });
+    return id!;
+  };
+  beforeEach(() => {
+    previousLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    let held = false;
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: jest.fn(async (_name: string, _options: unknown, run: any) => {
+        if (held) return run(null);
+        held = true; try { return await run({ name: 'fixture-lock' }); } finally { held = false; }
+      }),
+    } });
+  });
+  afterEach(() => {
+    if (previousLocks) Object.defineProperty(navigator, 'locks', previousLocks);
+    else delete (navigator as any).locks;
+  });
+
+  it('flushes one durable identity before admission and refuses repeated confirmation', async () => {
+    await mount(); const id = await begin();
+    expect(id).toMatch(/^[a-f0-9]{32}$/);
+    expect(draft().journal).toMatchObject({ attemptId: id, durableImmediate: true, destinationIds: ['channel-1'] });
+    expect(readImmediateReceipt(localStorage.getItem(immediateReceiptKey(key())))?.attemptId).toBe(id);
+    expect(await begin()).toBeNull();
+    expect(draft().journal?.attemptId).toBe(id);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['missing-locks', 'busy-lock', 'storage-failure'])('starts no request when %s prevents persistence/coordination', async failure => {
+    await mount();
+    if (failure === 'missing-locks') Object.defineProperty(navigator, 'locks', { configurable: true, value: undefined });
+    if (failure === 'busy-lock') (navigator.locks.request as jest.Mock).mockImplementation(async (_name, _options, run) => run(null));
+    const spy = failure === 'storage-failure' ? jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw Error('quota'); }) : null;
+    try { expect(await begin()).toBeNull(); expect(mockFetch).not.toHaveBeenCalled(); } finally { spy?.mockRestore(); }
+  });
+
+  it('adopts a competing tab identity rather than overwriting it', async () => {
+    await mount();
+    const other = snapshotComposerDraft(mockUser.id, mockUser.orgId, 'now', { attemptId: 'other-tab-attempt-123', startedAt: 1, destinationIds: ['channel-1'], durableImmediate: true });
+    localStorage.setItem(key(), JSON.stringify(other));
+    expect(await begin()).toBeNull();
+    expect(draft().journal?.attemptId).toBe('other-tab-attempt-123');
+  });
+
+  it('adopts a same-identity durable upgrade before autosave or discard', async () => {
+    await mount();
+    act(() => expect(recovery.prepareSubmission(['channel-1'])).toBe(true));
+    const stored = draft(); stored.journal!.durableImmediate = true;
+    localStorage.setItem(key(), JSON.stringify(stored));
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: key() })));
+    act(() => useLaunchStore.getState().setGlobalValueText(0, 'Retained draft edits'));
+    expect(draft().journal).toMatchObject({ attemptId: stored.journal!.attemptId, durableImmediate: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new draft' }));
+    await screen.findByText('Resolve the existing publishing attempt before starting a new draft.');
+    expect(draft().journal?.durableImmediate).toBe(true);
+    expect(await begin()).toBeNull();
+  });
+
+  it('retains the authoritative receipt when stale autosave overwrites the draft after reading its journal', async () => {
+    await mount();
+    const prepared = snapshotComposerDraft(mockUser.id, mockUser.orgId, 'now', {
+      attemptId: 'prepared-attempt-1234', startedAt: 1, destinationIds: ['channel-1'],
+    });
+    localStorage.setItem(key(), JSON.stringify(prepared));
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: key() })));
+    const originalSet = Storage.prototype.setItem;
+    let injected = false;
+    const spy = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (storageKey, value) {
+      if (storageKey === key() && !injected) {
+        injected = true;
+        originalSet.call(this, immediateReceiptKey(key()), JSON.stringify({ ...prepared.journal, durableImmediate: true }));
+      }
+      originalSet.call(this, storageKey, value);
+    });
+    try { act(() => useLaunchStore.getState().setGlobalValueText(0, 'Late autosave')); } finally { spy.mockRestore(); }
+    expect(injected).toBe(true);
+    expect(draft().journal?.durableImmediate).toBeUndefined(); // The raced draft write really happened.
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new draft' }));
+    await screen.findByText('Resolve the existing publishing attempt before starting a new draft.');
+    expect(readImmediateReceipt(localStorage.getItem(immediateReceiptKey(key())))?.attemptId).toBe(prepared.journal!.attemptId);
+    expect(await begin()).toBeNull();
+  });
+
+  it('recovers the receipt independently when a stale tab erased the draft journal', async () => {
+    const view = await mount(); const id = await begin(); view.unmount();
+    localStorage.removeItem(key());
+    mockFetch.mockImplementation(async () => ({ ok: true, json: async () => status(id, 'uncertain') }));
+    await mount(); await screen.findByText('Business: Outcome unconfirmed');
+    expect(await begin()).toBeNull();
+    expect(readImmediateReceipt(localStorage.getItem(immediateReceiptKey(key())))?.attemptId).toBe(id);
+  });
+
+  it.each(['missing-media', 'disabled-account'])('recovers the receipt when %s blocks draft hydration', async cause => {
+    const view = await mount(); const id = await begin();
+    act(() => {
+      useLaunchStore.getState().addOrRemoveSelectedIntegration(integration, {});
+      if (cause === 'missing-media') useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'deleted-media', path: '/gone.mp4' } as any]);
+    });
+    view.unmount();
+    mockFetch.mockImplementation(async (url: string) => url.startsWith('/media/') ? { ok: false } : { ok: true, json: async () => status(id, 'published', 'complete') });
+    render(<ComposerDraftRecovery integrations={[{ ...integration, disabled: cause === 'disabled-account' }]}><Probe /></ComposerDraftRecovery>);
+    await screen.findByText('Business: Published');
+    expect(mockFetch).toHaveBeenCalledWith(`/posts/submissions/${id}`, expect.objectContaining({ method: 'GET' }));
+    expect(screen.queryByRole('button', { name: 'Resume pending dispatch' })).toBeNull();
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard saved draft' }));
+      await screen.findByText('Immediate fixture');
+      expect(localStorage.getItem(key()) || '').not.toContain(id);
+      expect(mockFetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    } finally { confirm.mockRestore(); }
+  });
+
+  it('recovers a lost backend response after refresh through GET only', async () => {
+    const view = await mount(); const id = await begin(); view.unmount();
+    mockFetch.mockImplementation(async () => ({ ok: true, json: async () => status(id, 'published', 'complete') }));
+    await mount();
+    await screen.findByText('Business: Published');
+    expect(mockFetch).toHaveBeenCalledWith(`/posts/submissions/${id}`, expect.objectContaining({ method: 'GET' }));
+    expect(mockFetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    expect(await begin()).toBeNull();
+  });
+
+  it.each(['404', 'lookup-failure', 'malformed', 'uncertain'])('keeps %s outcomes locked, including new-draft controls', async mode => {
+    await mount(); const id = await begin();
+    mockFetch.mockImplementation(async () => {
+      if (mode === 'lookup-failure') throw Error('offline');
+      return { ok: mode !== '404', json: async () => mode === 'malformed' ? { ...status(id), destinations: [] } : status(id, 'uncertain') };
+    });
+    await act(async () => recovery.checkImmediateSubmission());
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new draft' }));
+    await screen.findByText('Resolve the existing publishing attempt before starting a new draft.');
+    expect(draft().journal?.attemptId).toBe(id);
+    expect(screen.queryByRole('button', { name: 'Resume pending dispatch' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Retry publishing to/ })).toBeNull();
+    expect(mockFetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+  });
+
+  it.each([['processing', 'resume-dispatch', 'Resume pending dispatch', '/resume'],
+    ['failed-before-provider', 'retry-before-provider', 'Retry publishing to Business', '/destinations/channel-1/retry']])(
+    'uses only the existing %s recovery action', async (state, recoverability, label, suffix) => {
+      await mount(); const id = await begin();
+      mockFetch.mockImplementation(async () => ({ ok: true, json: async () => status(id, state, recoverability) }));
+      await act(async () => recovery.checkImmediateSubmission());
+      fireEvent.click(await screen.findByRole('button', { name: label }));
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledWith(`/posts/submissions/${id}${suffix}`, expect.objectContaining({ method: 'POST' })));
+      expect(mockFetch.mock.calls.some(([url]) => url === '/posts')).toBe(false);
+    }
+  );
+
+  it('rejects status identity/destination mismatches and never offers actions for uncertain provider calls', () => {
+    const journal = { attemptId: 'attempt-1234567890', startedAt: 1, destinationIds: ['channel-1'], durableImmediate: true as const };
+    expect(() => readSubmissionStatus(status('other-attempt-123'), journal)).toThrow();
+    const response = status(journal.attemptId, 'uncertain', 'retry-before-provider');
+    expect(() => readSubmissionStatus(response, journal)).toThrow();
+    response.destinations[0].integrationId = 'foreign-channel';
+    expect(() => readSubmissionStatus(response, journal)).toThrow();
+  });
+
+  it('discards late status responses after an organization change', async () => {
+    const view = await mount(); const id = await begin();
+    let release!: (value: any) => void;
+    mockFetch.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    let pending!: Promise<void>;
+    act(() => { pending = recovery.checkImmediateSubmission(); });
+    mockUser = { id: 'user-1', orgId: 'another-org' };
+    view.rerender(<ComposerDraftRecovery integrations={[integration]}><Probe /></ComposerDraftRecovery>);
+    await screen.findByText('Immediate fixture');
+    await act(async () => { release({ ok: true, json: async () => status(id, 'published', 'complete') }); await pending; });
+    expect(screen.queryByText('Business: Published')).toBeNull();
+    expect(localStorage.getItem(key()) || '').not.toContain(id);
+  });
 });
 
 it('recovers meaningful work and live provider settings through the actual standalone Create mount chain', async () => {
