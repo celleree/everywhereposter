@@ -235,6 +235,7 @@ afterEach(() => {
 });
 
 describe('reviewed immediate publication recovery', () => {
+  let previousLocks: PropertyDescriptor | undefined;
   let recovery: ReturnType<typeof useComposerDraftRecovery>;
   const Probe = () => { recovery = useComposerDraftRecovery(); return <span>Immediate fixture</span>; };
   const status = (id: string, state = 'processing', recoverability = 'locked') => ({ submissionId: id, destinations: [{
@@ -254,6 +255,7 @@ describe('reviewed immediate publication recovery', () => {
     return id!;
   };
   beforeEach(() => {
+    previousLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
     let held = false;
     Object.defineProperty(navigator, 'locks', { configurable: true, value: {
       request: jest.fn(async (_name: string, _options: unknown, run: any) => {
@@ -261,6 +263,10 @@ describe('reviewed immediate publication recovery', () => {
         held = true; try { return await run({ name: 'fixture-lock' }); } finally { held = false; }
       }),
     } });
+  });
+  afterEach(() => {
+    if (previousLocks) Object.defineProperty(navigator, 'locks', previousLocks);
+    else delete (navigator as any).locks;
   });
 
   it('flushes one durable identity before admission and refuses repeated confirmation', async () => {
@@ -286,6 +292,41 @@ describe('reviewed immediate publication recovery', () => {
     localStorage.setItem(key(), JSON.stringify(other));
     expect(await begin()).toBeNull();
     expect(draft().journal?.attemptId).toBe('other-tab-attempt-123');
+  });
+
+  it('adopts a same-identity durable upgrade before autosave or discard', async () => {
+    await mount();
+    act(() => expect(recovery.prepareSubmission(['channel-1'])).toBe(true));
+    const stored = draft(); stored.journal!.durableImmediate = true;
+    localStorage.setItem(key(), JSON.stringify(stored));
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: key() })));
+    act(() => useLaunchStore.getState().setGlobalValueText(0, 'Retained draft edits'));
+    expect(draft().journal).toMatchObject({ attemptId: stored.journal!.attemptId, durableImmediate: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new draft' }));
+    await screen.findByText('Resolve the existing publishing attempt before starting a new draft.');
+    expect(draft().journal?.durableImmediate).toBe(true);
+    expect(await begin()).toBeNull();
+  });
+
+  it.each(['missing-media', 'disabled-account'])('recovers the receipt when %s blocks draft hydration', async cause => {
+    const view = await mount(); const id = await begin();
+    act(() => {
+      useLaunchStore.getState().addOrRemoveSelectedIntegration(integration, {});
+      if (cause === 'missing-media') useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'deleted-media', path: '/gone.mp4' } as any]);
+    });
+    view.unmount();
+    mockFetch.mockImplementation(async (url: string) => url.startsWith('/media/') ? { ok: false } : { ok: true, json: async () => status(id, 'published', 'complete') });
+    render(<ComposerDraftRecovery integrations={[{ ...integration, disabled: cause === 'disabled-account' }]}><Probe /></ComposerDraftRecovery>);
+    await screen.findByText('Business: Published');
+    expect(mockFetch).toHaveBeenCalledWith(`/posts/submissions/${id}`, expect.objectContaining({ method: 'GET' }));
+    expect(screen.queryByRole('button', { name: 'Resume pending dispatch' })).toBeNull();
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard saved draft' }));
+      await screen.findByText('Immediate fixture');
+      expect(localStorage.getItem(key()) || '').not.toContain(id);
+      expect(mockFetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    } finally { confirm.mockRestore(); }
   });
 
   it('recovers a lost backend response after refresh through GET only', async () => {

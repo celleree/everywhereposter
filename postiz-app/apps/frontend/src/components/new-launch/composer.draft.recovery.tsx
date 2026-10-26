@@ -590,7 +590,8 @@ export function ComposerDraftRecovery({
 
   const checkImmediateSubmission = async (action?: 'resume' | string) => {
     const journal = journalRef.current;
-    if (!scope || currentScope.current !== scope || readyScopeRef.current !== scope || !journal?.durableImmediate || recoveryMutation.current) return;
+    if (!scope || currentScope.current !== scope || !journal?.durableImmediate || recoveryMutation.current ||
+        (action && readyScopeRef.current !== scope)) return;
     // Only a current server classification can expose a recovery mutation.
     if (action && (!submissionStatus || submissionStatus.submissionId !== journal.attemptId ||
         !submissionStatus.destinations.some(item => action === 'resume'
@@ -608,7 +609,7 @@ export function ComposerDraftRecovery({
       const response = await latest.current.fetcher(`/posts/submissions/${encodeURIComponent(journal.attemptId)}${suffix}`, { method: action ? 'POST' : 'GET', signal: controller.signal });
       if (!response.ok) throw new Error('Publishing status is unavailable. The original request may have been accepted; do not resend it.');
       const status = readSubmissionStatus(await response.json(), journal);
-      if (stillCurrent()) { setSubmissionStatus(status); setMessage(''); }
+      if (stillCurrent()) { setSubmissionStatus(status); if (phase === 'ready') setMessage(''); }
     } catch {
       if (stillCurrent()) setMessage('Publishing status could not be confirmed. Your attempt remains locked; check status again before taking further action.');
     } finally {
@@ -648,6 +649,9 @@ export function ComposerDraftRecovery({
             fetcher: get,
           } = latest.current;
           const draft = readComposerDraft(raw, identity!.id, identity!.orgId);
+          // Receipt lookup does not depend on the source media still hydrating.
+          journalRef.current = draft.journal;
+          setRestored(draft);
           await hydrateComposerDraft(draft, channels, get, () => active);
           if (!active) return;
           journalRef.current = draft.journal;
@@ -685,7 +689,8 @@ export function ComposerDraftRecovery({
     const stored = raw
       ? readComposerDraft(raw, identity.id, identity.orgId).journal
       : null;
-    if (stored && stored.attemptId !== journalRef.current?.attemptId) {
+    if (stored && (stored.attemptId !== journalRef.current?.attemptId ||
+        (stored.durableImmediate && !journalRef.current?.durableImmediate))) {
       statusRequest.current++;
       setSubmissionStatus(null);
       setCheckingSubmission(false);
@@ -780,7 +785,7 @@ export function ComposerDraftRecovery({
   }, [phase, scope]);
 
   useEffect(() => {
-    if (phase === 'ready' && restored?.journal?.durableImmediate) void checkImmediateSubmission();
+    if ((phase === 'ready' || phase === 'blocked') && restored?.journal?.durableImmediate) void checkImmediateSubmission();
     return () => { statusRequest.current++; };
   }, [phase, scope, restored]);
 
@@ -898,13 +903,23 @@ export function ComposerDraftRecovery({
     setAttempt((value) => value + 1);
     };
     try { if (scope) adoptJournal(); } catch { return; }
-    if (journalRef.current?.durableImmediate) {
+    if (journalRef.current && navigator.locks?.request) {
       if (!navigator.locks?.request) return;
       void navigator.locks.request(`publishing:${scope}`, { ifAvailable: true }, lock => {
         if (lock && currentScope.current === scope) discard();
       }).catch(() => setMessage('The saved publishing attempt could not be cleared safely.'));
-    } else discard();
+    } else if (!journalRef.current?.durableImmediate) discard();
   };
+  const submissionRecovery = journalRef.current?.durableImmediate && <div aria-label="Submission status">
+    {submissionStatus?.destinations.map(item => <div key={item.integrationId}>
+      <p>{integrations.find(account => account.id === item.integrationId)?.name || 'Selected account'}: {submissionLabels[item.state]}</p>
+      {phase === 'ready' && item.recoverability === 'retry-before-provider' && <button type="button" disabled={checkingSubmission}
+        onClick={() => void checkImmediateSubmission(item.integrationId)}>Retry publishing to {integrations.find(account => account.id === item.integrationId)?.name || 'selected account'}</button>}
+    </div>)}
+    <button type="button" disabled={checkingSubmission} onClick={() => void checkImmediateSubmission()}>Check publishing status</button>
+    {phase === 'ready' && submissionStatus?.destinations.some(item => item.recoverability === 'resume-dispatch') && <button type="button"
+      disabled={checkingSubmission} onClick={() => void checkImmediateSubmission('resume')}>Resume pending dispatch</button>}
+  </div>;
   if (phase === 'loading')
     return <div role="status">Restoring your composer…</div>;
   if (phase === 'blocked')
@@ -912,6 +927,7 @@ export function ComposerDraftRecovery({
       <div role="alert">
         {message}
         <p>Your saved text and settings have been retained.</p>
+        {submissionRecovery}
         <button type="button" onClick={() => setAttempt((value) => value + 1)}>
           Retry recovery
         </button>
@@ -959,16 +975,7 @@ export function ComposerDraftRecovery({
             <button type="button" className="min-h-[44px] underline" onClick={() => setAcknowledged(value => !value)}>{acknowledged ? 'Show recovery details' : 'Acknowledge notice'}</button>
             <button type="button" className="min-h-[44px] underline" onClick={startBlank}>Start a new draft</button>
           </div>
-          {journalRef.current?.durableImmediate && <div aria-label="Submission status">
-            {submissionStatus?.destinations.map(item => <div key={item.integrationId}>
-              <p>{integrations.find(account => account.id === item.integrationId)?.name || 'Selected account'}: {submissionLabels[item.state]}</p>
-              {item.recoverability === 'retry-before-provider' && <button type="button" disabled={checkingSubmission}
-                onClick={() => void checkImmediateSubmission(item.integrationId)}>Retry publishing to {integrations.find(account => account.id === item.integrationId)?.name || 'selected account'}</button>}
-            </div>)}
-            <button type="button" disabled={checkingSubmission} onClick={() => void checkImmediateSubmission()}>Check publishing status</button>
-            {submissionStatus?.destinations.some(item => item.recoverability === 'resume-dispatch') && <button type="button"
-              disabled={checkingSubmission} onClick={() => void checkImmediateSubmission('resume')}>Resume pending dispatch</button>}
-          </div>}
+          {submissionRecovery}
         </section>
       )}
       <React.Fragment key={attempt}>{children}</React.Fragment>
