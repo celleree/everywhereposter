@@ -19,25 +19,55 @@ class Runtime:
         self.call(['run','-d',*self.common(name),*args,image,'python','-c','import time; time.sleep(360)'])
         return name
     def copy(self,name,source,target,limit):
-        # Stream only the requested regular tar member; never extract remote paths.
-        p=subprocess.Popen(['docker','cp',name+':'+source,'-'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+        if source not in ('/job/download.bin','/job/asset.mp4'): raise ValueError('invalid_output_path')
+        # The job directory is tmpfs: docker cp cannot export it. Stream a
+        # single regular file from the unprivileged container instead.
+        producer="""import os,stat,sys,tarfile
+path=sys.argv[1]
+fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+with os.fdopen(fd,'rb') as f:
+ st=os.fstat(f.fileno())
+ if not stat.S_ISREG(st.st_mode): raise ValueError('not_regular')
+ info=tarfile.TarInfo(os.path.basename(path)); info.size=st.st_size
+ with tarfile.open(fileobj=sys.stdout.buffer,mode='w|') as archive: archive.addfile(info,f)
+"""
+        p=subprocess.Popen(['docker','exec',name,'python','-c',producer,source],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        # Drain stderr to avoid blocking the producer, retaining only its presence.
+        # Never expose container diagnostics, which may contain sensitive values.
+        stderr_seen=[]
+        def drain():
+            while True:
+                block=p.stderr.read(4096)
+                if not block: break
+                if not stderr_seen: stderr_seen.append(True)
+        reader=threading.Thread(target=drain,daemon=True);reader.start()
         watchdog=threading.Timer(20,p.kill);watchdog.daemon=True;watchdog.start()
         try:
-            with tarfile.open(fileobj=p.stdout,mode='r|') as archive:
-                members=iter(archive);member=next(members)
-                if not member.isfile() or member.size<=0 or member.size>limit: raise ValueError('unsafe_or_oversize_output')
-                stream=archive.extractfile(member)
-                with open(target,'xb') as out:
-                    remaining=member.size
-                    while remaining:
-                        block=stream.read(min(65536,remaining))
-                        if not block: raise ValueError('truncated_output')
-                        out.write(block);remaining-=len(block)
-                if next(members,None) is not None: raise ValueError('unexpected_output')
+            try:
+                with tarfile.open(fileobj=p.stdout,mode='r|') as archive:
+                    members=iter(archive);member=next(members)
+                    if member.name!=os.path.basename(source) or not member.isfile() or member.size<=0 or member.size>limit: raise ValueError('unsafe_or_oversize_output')
+                    stream=archive.extractfile(member)
+                    with open(target,'xb') as out:
+                        remaining=member.size
+                        while remaining:
+                            block=stream.read(min(65536,remaining))
+                            if not block: raise ValueError('truncated_output')
+                            out.write(block);remaining-=len(block)
+                    if next(members,None) is not None: raise ValueError('unexpected_output')
+            except (tarfile.TarError,StopIteration) as exc:
+                raise ValueError('invalid_or_truncated_output_stream') from exc
             if p.wait(timeout=10): raise ValueError('copy_failed')
+        except ValueError as exc:
+            if p.poll() is None: p.kill()
+            p.wait();reader.join()
+            # Report only a fixed classification, never raw stderr.
+            if stderr_seen: raise ValueError(str(exc)+': producer_stderr_present') from exc
+            raise
         finally:
             watchdog.cancel()
             if p.poll() is None: p.kill();p.wait()
+            reader.join();p.stdout.close();p.stderr.close()
     def acquire(self,request,policy,job):
         self.call(['volume','create',self.volume]);self.created=True
         gateway=self.spawn('proxy',self.image,['--network','bridge','--mount',f'type=volume,src={self.volume},dst=/ipc'])
