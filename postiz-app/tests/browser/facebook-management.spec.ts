@@ -111,8 +111,14 @@ for (const mode of ['reject', 'timeout', 'accepted-timeout']) {
 
 test('Facebook management: composer creates a real receipt then opens same-ID text actions', async ({ page, context }, info) => {
   await reset(context.request, { empty: true });
+  const submissionIds: string[] = [];
+  await page.route(`${browserOrigin}/backend-api/posts/submissions/*`, route => route.continue());
   await page.route(`${browserOrigin}/backend-api/posts`, route => {
-    if (route.request().method() === 'POST') expect(route.request().postDataJSON().submissionId).toMatch(/^[0-9a-f-]{36}$/);
+    if (route.request().method() === 'POST') {
+      const id = route.request().postDataJSON().submissionId;
+      expect(id).toMatch(/^[a-zA-Z0-9_-]{16,128}$/);
+      submissionIds.push(id);
+    }
     return route.continue();
   });
   await page.route(`${browserOrigin}/backend-api/posts/should-shortlink`, route => route.continue());
@@ -131,6 +137,17 @@ test('Facebook management: composer creates a real receipt then opens same-ID te
   const proof = await evidence(context.request);
   expect(proof.posts).toHaveLength(1);
   expect(proof.posts[0]).toMatchObject({ state: 'PUBLISHED', content: 'Original Browser Page A text' });
+  expect(submissionIds).toHaveLength(1);
+  const statusResponse = await context.request.get(`${api}/posts/submissions/${encodeURIComponent(submissionIds[0])}`);
+  expect(statusResponse.ok()).toBeTruthy();
+  expect(await statusResponse.json()).toMatchObject({
+    submissionId: submissionIds[0],
+    destinations: [{ postId: proof.posts[0].id, integrationId: proof.posts[0].integration.id, recoverability: 'complete' }],
+  });
+  const missing = await context.request.get(`${api}/posts/submissions/missing-submission-attempt`);
+  expect(missing.status()).toBe(404);
+  const unauthorized = await context.request.get(`${api}/posts/submissions/${encodeURIComponent(submissionIds[0])}`, { headers: { auth: 'invalid-fixture-session' } });
+  expect(unauthorized.status()).toBe(401);
   expect(proof.calls.filter((call: any) => call.method === 'POST' && call.id.endsWith('/feed'))).toHaveLength(1);
   await openPost(page, info);
   await expect(page.getByRole('textbox', { name: 'Post message' })).toHaveValue('Original Browser Page A text');
@@ -146,7 +163,11 @@ test('Facebook management: composer creates a real receipt then opens same-ID te
   const deleted = await evidence(context.request);
   expect(deleted.posts[0]).toMatchObject({ releaseId: proof.posts[0].releaseId, state: 'DELETED_REMOTE' });
   expect(deleted.remote).toHaveLength(0);
+  expect(submissionIds).toHaveLength(1);
   await noHorizontalOverflow(page);
+  await reset(context.request, { empty: true });
+  const otherOrg = await context.request.get(`${api}/posts/submissions/${encodeURIComponent(submissionIds[0])}`);
+  expect(otherOrg.status()).toBe(404);
 });
 
 test('Facebook management: stale editor cannot overwrite newer confirmed text', async ({ page, context }, info) => {

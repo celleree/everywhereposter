@@ -169,6 +169,40 @@ describePostgres('durable submissions against isolated PostgreSQL', () => {
     ).toEqual(results[0]);
   });
 
+  it('recovers reviewed video across destinations after response loss without repeating an uncertain provider call', async () => {
+    const video = await prisma.media.create({ data: { organizationId: org, name: 'reviewed.mp4', path: '/uploads/reviewed.mp4', type: 'video' } });
+    request.posts.forEach((post, index) => {
+      post.value[0].image = [{ id: video.id, path: video.path }] as any;
+      post.value[0].content = `Reviewed destination ${index}`;
+    });
+    const copies = await Promise.all([service.submit(org, request), service.submit(org, request)]);
+    expect(copies[0]).toEqual(copies[1]);
+    const roots = copies[0];
+    const first = jest.fn(async () => receipt(roots[0].postId));
+    const lost = jest.fn(async () => { throw Error('Provider accepted video; response lost'); });
+    await runProvider(roots[0].postId, 0, first);
+    await expect(runProvider(roots[1].postId, 1, lost)).rejects.toMatchObject({ type: 'submission_uncertain' });
+    service = new PublishingSubmissionService(prisma as any, repository, temporal as any);
+    const recovered = await service.reconcile(org, request.submissionId);
+    expect(recovered.destinations.map(item => item.state)).toEqual(['published', 'uncertain']);
+    expect(await service.submit(org, request)).toEqual(roots);
+    expect(await runProvider(roots[0].postId, 0, first)).toEqual(receipt(roots[0].postId));
+    await expect(runProvider(roots[1].postId, 1, lost)).rejects.toMatchObject({ type: 'submission_uncertain' });
+    await expect(service.retryBeforeProvider(org, request.submissionId, channels[1])).rejects.toBeInstanceOf(ConflictException);
+    expect(first).toHaveBeenCalledTimes(1); expect(lost).toHaveBeenCalledTimes(1);
+    expect(await prisma.post.count({ where: { organizationId: org } })).toBe(2);
+    await expect(service.reconcile('different-org', request.submissionId)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rejects a video from another organization and atomically rolls back all destinations', async () => {
+    const other = await prisma.organization.create({ data: { name: 'Foreign fixture' } });
+    const video = await prisma.media.create({ data: { organizationId: other.id, name: 'foreign.mp4', path: '/uploads/foreign.mp4', type: 'video' } });
+    request.posts[1].value[0].image = [{ id: video.id, path: video.path }] as any;
+    await expect(service.submit(org, request)).rejects.toThrow('Source media is unavailable');
+    expect(await prisma.post.count({ where: { organizationId: org } })).toBe(0);
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it('rejects changed captions, settings, media and destinations without new posts', async () => {
     await service.submit(org, request);
     for (const changed of [
