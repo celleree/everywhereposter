@@ -17,9 +17,15 @@ import { buildVideoEditDecisionList } from '../../libraries/nestjs-libraries/src
 
 const output = { id: 'output-1', path: '/edited.mp4', originalName: 'Original-edited.mp4', type: 'video' };
 const video = { id: 'video-1', path: '/fixture.mp4', originalName: 'Original.mp4', type: 'video' };
+function studioFallback() {
+  return Object.fromEntries(['org-1', 'org-2'].flatMap(org => [
+    [unstable_serialize(['studio-availability', 'user-1:' + org]), { enabled: false }],
+    [unstable_serialize(['studio-jobs', 'user-1:' + org]), []],
+  ]));
+}
 function legacyConfig() {
   return { provider: () => new Map(), dedupingInterval: 0, revalidateIfStale: false,
-    fallback: Object.fromEntries(['org-1', 'org-2'].map(org => [unstable_serialize(['word-editor-availability', 'user-1:' + org]), { enabled: false }])) };
+    fallback: { ...studioFallback(), ...Object.fromEntries(['org-1', 'org-2'].map(org => [unstable_serialize(['word-editor-availability', 'user-1:' + org]), { enabled: false }])) } };
 }
 function mount() {
   return render(<SWRConfig value={legacyConfig()}><VideoEditorWorkspace /></SWRConfig>);
@@ -54,6 +60,15 @@ it('starts empty with a conservative explicit pacing default and no mutation', (
   expect(screen.getByRole('button', { name: 'Create edit' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Download MP4' })).toBeNull();
   expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('keeps inactive Studio reads scoped when editing in another organization', async () => {
+  mockUser = { id: 'user-1', orgId: 'org-2' };
+  mount();
+  expect(mockFetch).not.toHaveBeenCalled();
+  select(); await screen.findByLabelText('Edited video preview');
+  expect(mockFetch.mock.calls.filter(([url]) => url === '/media/video-1')).toHaveLength(1);
+  expect(mockFetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
 });
 
 it('loads one existing media record and exposes manual playback and observed metadata', async () => {
@@ -163,7 +178,7 @@ it('waits for mode selection and keeps native mode during worker recovery', asyn
   localStorage.setItem('everywhereposter:video-editor-selection:v1:user-1:org-1', JSON.stringify({ version: 1, sourceId: video.id, pacing: 'relaxed' }));
   let resolve!: (value: unknown) => void;
   mockFetch.mockReturnValueOnce(new Promise(done => { resolve = done; }));
-  render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}><VideoEditorWorkspace /></SWRConfig>);
+  render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, revalidateIfStale: false, fallback: studioFallback() }}><VideoEditorWorkspace /></SWRConfig>);
   expect(screen.getByRole('status').textContent).toContain('Loading editor');
   expect(screen.queryByRole('button', { name: 'Choose video' })).toBeNull();
   await act(async () => resolve({ ok: true, json: async () => ({ enabled: true, ready: false }) }));

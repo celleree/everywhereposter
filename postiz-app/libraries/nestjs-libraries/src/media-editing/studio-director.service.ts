@@ -144,7 +144,12 @@ export class StudioDirectorService {
       subscription?.subscriptionTier === 'LAUNCH_V1', bounded => this.invoke(bounded));
     // The licensed font is explicitly staged by runtime provisioning, never found
     // through a filesystem scan or copied from a private dependency directory.
-    const plan = compileStudioPlan(row, raw, assets, framing, geometry.ids, bounds, response?.choices?.[0]?.message?.parsed, refs);
+    // Persisted JSON remains untrusted; narrow its envelope before plan validation.
+    const choices = response && typeof response === 'object' && !Array.isArray(response) ? response.choices : undefined;
+    const first = Array.isArray(choices) ? choices[0] : undefined;
+    const message = first && typeof first === 'object' && !Array.isArray(first) ? first.message : undefined;
+    const direction = message && typeof message === 'object' && !Array.isArray(message) ? message.parsed : undefined;
+    const plan = compileStudioPlan(row, raw, assets, framing, geometry.ids, bounds, direction, refs);
     const target = join(dir, 'authored-plan.json');
     try { await writeFile(target, JSON.stringify(plan), { flag: 'wx', mode: 0o600 }); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || studioFingerprint(await studioJson(target)) !== studioFingerprint(plan)) throw e; }
