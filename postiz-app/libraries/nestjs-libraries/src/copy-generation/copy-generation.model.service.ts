@@ -1,5 +1,5 @@
 import { PrepaidCopyContextService } from '@gitroom/nestjs-libraries/services/prepaid-copy-context.service';
-import { LUNA_CHAT, SOL_CHAT } from '@gitroom/nestjs-libraries/openai/model-config';
+import { LUNA_CHAT, customerCopyChat } from '@gitroom/nestjs-libraries/openai/model-config';
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { execFile } from 'child_process';
@@ -537,7 +537,7 @@ Rules:
     promptConstraints: string
   ): Promise<z.infer<typeof PlatformDraftSchema>> {
     const response = await this.completion('draft', {
-      ...SOL_CHAT,
+      ...customerCopyChat(),
       messages: [
         {
           role: 'system',
@@ -575,7 +575,7 @@ Return a JSON object with draft, angle, hook, and cta.`,
     hardCap: number;
   }): Promise<z.infer<typeof RewriteDraftSchema>> {
     const response = await this.completion('rewrite', {
-      ...SOL_CHAT,
+      ...customerCopyChat(),
       messages: [
         {
           role: 'system',

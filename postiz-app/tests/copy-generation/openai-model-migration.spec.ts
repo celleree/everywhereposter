@@ -57,3 +57,40 @@ it('preserves ten post alternatives using compatible single-choice Sol requests'
     expect(body.n).toBeUndefined(); expect(body.temperature).toBeUndefined();
   }
 });
+
+
+describe('customer copy readiness (offline configuration checks)', () => {
+  const before = { ...process.env };
+  const terra = 'gpt-6.1-terra';
+  const card = { billingContext: 'standard-text-receipt-no-extra-charges', rateVersion: 'synthetic', per: '1',
+    rates: { inputUncachedLow: '1000', inputCachedLow: '50', outputLow: '5000',
+      inputUncachedHigh: '2000', inputCachedHigh: '100', outputHigh: '7500' } };
+  afterEach(() => {
+    for (const k of ['AI_COPY_TERRA_ENABLED','AI_WALLET_TEXT_RATE_CARDS']) {
+      if (before[k] === undefined) delete process.env[k]; else process.env[k] = before[k];
+    }
+  });
+  it.each([undefined, '', 'false', 'yes'])('keeps Sol when enablement is %s', value => {
+    value === undefined ? delete process.env.AI_COPY_TERRA_ENABLED : process.env.AI_COPY_TERRA_ENABLED = value;
+    process.env.AI_WALLET_TEXT_RATE_CARDS = JSON.stringify({ [terra]: card });
+    expect(require('@gitroom/nestjs-libraries/openai/model-config').customerCopyChat().model).toBe('gpt-6.1-sol');
+  });
+  it.each(['', '{}', 'invalid', JSON.stringify({ [terra]: { ...card, rates: {} } }),
+    JSON.stringify({ [terra]: { ...card, per: '0' } }),
+    JSON.stringify({ [terra]: { ...card, billingContext: 'unverified' } })])('keeps Sol without a valid card: %s', cards => {
+    process.env.AI_COPY_TERRA_ENABLED = 'true'; process.env.AI_WALLET_TEXT_RATE_CARDS = cards;
+    expect(require('@gitroom/nestjs-libraries/openai/model-config').customerCopyChat().model).toBe('gpt-6.1-sol');
+  });
+  it('selects Terra before dispatch only when explicitly enabled and priced', async () => {
+    process.env.AI_COPY_TERRA_ENABLED = 'true'; process.env.AI_WALLET_TEXT_RATE_CARDS = JSON.stringify({ [terra]: card });
+    mocks().parse.mockResolvedValue({ choices: [{ message: { parsed: { draft: 'Grounded' } } }] });
+    const service = new CopyGenerationModelService();
+    const brief = { platform: { name: 'LinkedIn' }, strategy: { coreMessage: 'Facts' }, source: { facts: ['Facts'] } } as any;
+    await service.generatePlatformDraft(brief, 'Facts', 'No inventions');
+    await service.rewriteDraft({ brief, draft: 'Facts', reasons: [], targetCharacters: 100, hardCap: 200 });
+    for (const [request] of mocks().parse.mock.calls) {
+      expect(request).toMatchObject({ model: terra, reasoning_effort: 'medium' });
+      expect(request.tools).toBeUndefined(); expect(request.temperature).toBeUndefined();
+    }
+  });
+});

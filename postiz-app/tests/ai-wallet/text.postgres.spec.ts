@@ -166,4 +166,18 @@ const response = () => ({ id: randomUUID(), model: request.model, service_tier: 
       prompt_tokens_details: { cached_tokens: 1 }, completion_tokens_details: { reasoning_tokens: 1 } } }));
     await run(); expect(await wallet.quotedOperation(org,key)).toMatchObject({ chargedNanos: 1305632n });
   });
+  it.each([['Low', 10, 2, '27720'], ['High', 272001, 1, '652827120']])('settles Terra %s standard rates with unchanged markup', async (_, input, cached, expected) => {
+    const terra = 'gpt-6.1-terra';
+    process.env.AI_WALLET_TEXT_RATE_CARDS = JSON.stringify({ [terra]: { billingContext: 'standard-text-receipt-no-extra-charges',
+      rateVersion: 'public-standard-fixture', per: '1', rates: { inputUncachedLow: '1000', inputCachedLow: '50', outputLow: '5000',
+        inputUncachedHigh: '2000', inputCachedHigh: '100', outputHigh: '7500' } } });
+    await db.aiWallet.update({ where: { organizationId: org }, data: { balanceNanos: 100000000000n } });
+    const body = { ...request, model: terra, reasoning_effort: 'medium' };
+    invoke.mockResolvedValue({ ...response(), model: terra, usage: { prompt_tokens: input, completion_tokens: 3, total_tokens: Number(input) + 3,
+      prompt_tokens_details: { cached_tokens: cached }, completion_tokens_details: { reasoning_tokens: 1 } } });
+    await Promise.allSettled([run(body), run(body)]); await run(body);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(await wallet.quotedOperation(org, key)).toMatchObject({ model: terra, state: 'SETTLED', chargedNanos: BigInt(expected) });
+  });
+
 });

@@ -34,7 +34,7 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
   beforeAll(async () => { const u=new URL(fixture!); if (!['127.0.0.1','localhost'].includes(u.hostname)||u.pathname!='/ep_ai_wallet_test') throw Error('Disposable fixture required');
     db=new PrismaClient({datasources:{db:{url:fixture}}});await db.$connect(); });
   beforeEach(async () => {
-    Object.assign(process.env,{BILLING_ENABLED:'true',AI_WALLET_ENABLED:'true',AI_WALLET_TEXT_ENABLED:'true',AI_WALLET_TEXT_RATE_CARDS:JSON.stringify(cards)});
+    Object.assign(process.env,{BILLING_ENABLED:'true',AI_WALLET_ENABLED:'true',AI_WALLET_TEXT_ENABLED:'true',AI_COPY_TERRA_ENABLED:'false',AI_WALLET_TEXT_RATE_CARDS:JSON.stringify(cards)});
     org=randomUUID();body={requestKey:randomUUID(),mediaId:'fixture-media',platforms:['linkedin'],goal:'position'};
     await db.organization.create({data:{id:org,name:'Offline guided text',paymentId:`cus_${org}`,allowTrial:false,
       subscription:{create:{subscriptionTier:'LAUNCH_V1',totalChannels:0,period:'MONTHLY'}}}});await db.aiWallet.create({data:{organizationId:org,balanceNanos:100000000n}});
@@ -47,7 +47,7 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
         :{draft:'We hand-label small batches and check the stock twice before shipping.',angle:'Specific lesson',hook:'Check details',cta:''}}}],
       usage:{prompt_tokens:10,completion_tokens:3,total_tokens:13,prompt_tokens_details:{cached_tokens:2},completion_tokens_details:{reasoning_tokens:1}}}));
   });
-  afterAll(async()=>{for(const k of ['BILLING_ENABLED','AI_WALLET_ENABLED','AI_WALLET_TEXT_ENABLED','AI_WALLET_TEXT_RATE_CARDS']) before[k]===undefined?delete process.env[k]:process.env[k]=before[k];await db?.$disconnect();});
+  afterAll(async()=>{for(const k of ['BILLING_ENABLED','AI_WALLET_ENABLED','AI_WALLET_TEXT_ENABLED','AI_COPY_TERRA_ENABLED','AI_WALLET_TEXT_RATE_CARDS']) before[k]===undefined?delete process.env[k]:process.env[k]=before[k];await db?.$disconnect();});
   const guardFor=(organizationId:string,requestKey:string)=>{
     const permissions=new PermissionsService(subscriptions,{countPostsFromDay:async()=>999999} as any,{} as any,{} as any,wallet);
     const handlers=[[AuthorizationActions.Create,Sections.POSTS_PER_MONTH],[AuthorizationActions.Create,Sections.GUIDED_COPY]];
@@ -294,4 +294,47 @@ const cards = Object.fromEntries(['gpt-6-luna','gpt-6.1-sol'].map(m => [m, { rat
       if(failure==='unknown'||stage==='source') expect(storage.size).toBe(1);
     }finally{for(const [k,descriptor] of Object.entries(saved)) descriptor?Object.defineProperty(globalThis,k,descriptor):delete(globalThis as any)[k];}
   });
+  it.each(['disabled', 'missing-card', 'ready'])('selects the new-copy model before reservation: %s', async readiness => {
+    process.env.AI_COPY_TERRA_ENABLED = readiness === 'disabled' ? 'false' : 'true';
+    if (readiness !== 'missing-card') process.env.AI_WALLET_TEXT_RATE_CARDS = JSON.stringify({ ...cards, 'gpt-6.1-terra': cards['gpt-6.1-sol'] });
+    await collect(scope.scope(org, body, () => stages(model)));
+    expect(parse.mock.calls.map(([req]) => req.model)).toEqual(['gpt-6-luna', readiness === 'ready' ? 'gpt-6.1-terra' : 'gpt-6.1-sol', readiness === 'ready' ? 'gpt-6.1-terra' : 'gpt-6.1-sol']);
+  });
+  it.each([false, true])('retains settled model across readiness changes (initial Terra=%s)', async initialTerra => {
+    process.env.AI_COPY_TERRA_ENABLED = String(initialTerra);
+    process.env.AI_WALLET_TEXT_RATE_CARDS = JSON.stringify({ ...cards, 'gpt-6.1-terra': cards['gpt-6.1-sol'] });
+    await collect(scope.scope(org, body, () => stages(model)));
+    process.env.AI_COPY_TERRA_ENABLED = String(!initialTerra);
+    delete process.env.AI_WALLET_TEXT_RATE_CARDS;
+    const restarted = new PrepaidCopyContextService(subscriptions, wallet, new AiWalletTextService(wallet));
+    await collect(restarted.scope(org, body, () => stages(new CopyGenerationModelService(restarted))));
+    expect(parse).toHaveBeenCalledTimes(3);
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(3);
+  });
+  it('does not switch or redispatch an uncertain Terra draft after readiness is revoked', async () => {
+    process.env.AI_COPY_TERRA_ENABLED = 'true';
+    process.env.AI_WALLET_TEXT_RATE_CARDS = JSON.stringify({ ...cards, 'gpt-6.1-terra': cards['gpt-6.1-sol'] });
+    parse.mockRejectedValueOnce(Error('Lost provider response'));
+    const draftOnly = (m: CopyGenerationModelService) => async function*() { yield await m.generatePlatformDraft({ platform: { name: 'LinkedIn' } } as any, 'Facts', 'No inventions'); };
+    await expect(collect(scope.scope(org, body, draftOnly(model)))).rejects.toThrow('pending reconciliation');
+    process.env.AI_COPY_TERRA_ENABLED = 'false'; delete process.env.AI_WALLET_TEXT_RATE_CARDS;
+    const restarted = new PrepaidCopyContextService(subscriptions, wallet, new AiWalletTextService(wallet));
+    await expect(collect(restarted.scope(org, body, draftOnly(new CopyGenerationModelService(restarted))))).rejects.toThrow('pending reconciliation');
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(0);
+  });
+  it('recovers a reserved Terra operation with its original quote after preference/card removal', async () => {
+    process.env.AI_COPY_TERRA_ENABLED = 'true';
+    process.env.AI_WALLET_TEXT_RATE_CARDS = JSON.stringify({ ...cards, 'gpt-6.1-terra': cards['gpt-6.1-sol'] });
+    const dispatch = jest.spyOn(wallet, 'dispatch').mockRejectedValueOnce(Error('Interrupted before dispatch'));
+    const draftOnly = (m: CopyGenerationModelService) => async function*() { yield await m.generatePlatformDraft({ platform: { name: 'LinkedIn' } } as any, 'Facts', 'No inventions'); };
+    await expect(collect(scope.scope(org, body, draftOnly(model)))).rejects.toThrow('Interrupted before dispatch');
+    dispatch.mockRestore(); process.env.AI_COPY_TERRA_ENABLED = 'false'; delete process.env.AI_WALLET_TEXT_RATE_CARDS;
+    const restarted = new PrepaidCopyContextService(subscriptions, wallet, new AiWalletTextService(wallet));
+    await collect(restarted.scope(org, body, draftOnly(new CopyGenerationModelService(restarted))));
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(parse.mock.calls[0][0].model).toBe('gpt-6.1-terra');
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org } })).toBe(1);
+  });
+
 });

@@ -347,3 +347,25 @@ describe('CopyGenerationModelService structured output schemas', () => {
     });
   });
 });
+
+
+// Six fixed evaluation briefs. Mocked outputs test plumbing and constraints,
+// not actual Terra writing quality; use these briefs for a separately budgeted blind comparison.
+describe('grounded customer-copy evaluation fixtures', () => {
+  it.each([
+    ['LinkedIn', 'We hand-label every batch.', 'Keep the founder voice; no invented growth claims.'],
+    ['Instagram', 'The desk is made from reclaimed oak.', 'Use one concrete detail; no invented sustainability certification.'],
+    ['Threads', 'We released the calendar on Tuesday.', 'Short conversational caption; no unsupported popularity claims.'],
+    ['X', 'The workshop starts at 10am on Saturday.', 'Respect the platform cap; retain the time.'],
+    ['Facebook', 'The repair took two hours.', 'Rewrite without hype; preserve the duration.'],
+    ['YouTube', 'The demonstration shows three keyboard shortcuts.', 'Describe this video; no invented results or extra steps.'],
+  ])('preserves the %s fixture and writing constraints', async (name, fact, rubric) => {
+    const parse = getParseMock(); parse.mockReset().mockResolvedValue({ choices: [{ message: { parsed: { draft: fact } } }] });
+    const service = new CopyGenerationModelService();
+    const result = await service.generatePlatformDraft({ platform: { name, targetCharacters: 180, hashtags: 'none', lineBreaks: 'moderate', ctaStyle: 'none' } } as any,
+      `Grounding fact: ${fact}`, rubric);
+    const request = parse.mock.calls[0][0];
+    expect(request.messages[0].content).toContain(fact); expect(request.messages[0].content).toContain(rubric);
+    expect(request.messages[1].content).toContain(name); expect(result.draft).toBe(fact);
+  });
+});

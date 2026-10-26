@@ -10,13 +10,14 @@ Automatic merge is authorized only for pull requests bounded to `docs/brain/DEPL
 
 ## Recommended root route
 
-- Primary: GPT-6 Astra / High
-- Fallback: GPT-5.6 Sol / High when Astra is unavailable
+- Primary: GPT-6.1 Sol / Medium or High
+- Use High for complex engineering, ambiguous planning and independent review; use Max/Ultra only when justified by planning ambiguity.
 - Local worker: `qwen3:8b` through Ollama under the Codex `--oss` harness for cheap, bounded, low-risk work
-- Default non-local implementation worker: GPT-5.6 Terra / Medium
-- Mechanical cloud worker: GPT-5.6 Luna / Low or Medium
-- Independent reviewer: GPT-5.6 Sol / High
-- Escalate difficult architecture, repeated failures, high-risk root-cause work, or large-context integration decisions to GPT-6 Astra / High
+- Engineering worker: GPT-6.1 Sol / Medium or High
+- Scoped computer-use and customer-facing writing worker: GPT-6.1 Terra / Medium, High when justified
+- Mechanical cloud worker: GPT-6 Luna / Low or Medium
+- Independent reviewer: GPT-6.1 Sol / High
+- Discuss justification with the user before any Astra escalation; difficulty alone is not authorization.
 
 Choose model and reasoning separately. Optimize for the lowest expected total cost of a correct verified result, including retries and rework.
 
@@ -35,7 +36,7 @@ Run it through the local Ollama-backed Codex harness, for example:
 
 `codex --oss -m qwen3:8b`
 
-Escalate from the local worker to Terra / Medium when:
+Escalate from the local worker to Sol / Medium or High when:
 
 - implementation contains meaningful business or application logic;
 - scope grows beyond the original bounded contract;
@@ -53,7 +54,7 @@ After bounded implementation, use the [release-coordinator lifecycle](../GITHUB-
 
 - GPT-6 Luna: routine evidence checking, polling/waiting, deterministic release coordination, and concise reporting.
 - GPT-6.1 Sol: ambiguous failures or substantive diagnosis/repair; escalation itself does not authorize repair.
-- GPT-6 Astra: unusually complex/high-risk architecture or repeated-failure situations.
+- Astra: only after discussing justification with the user.
 
 Model names are routing guidance, not safety mechanisms. Repository gates and matching live evidence remain authoritative. The release coordinator cannot replace the independent reviewer, general merge approval, or production approval. The roadmap-specific merge exception below remains narrowly scoped.
 
@@ -180,7 +181,7 @@ Do not repeat the same failed approach without new evidence.
 - First failure: inspect the failure evidence and make the smallest bounded correction.
 - Repeated failure or ambiguous root cause: escalate reasoning/model strength before widening scope.
 - Two failed automated attempts on the same task should trigger root reassessment rather than blind retry.
-- Cross-phase architectural conflicts, repeated verification failure, or expensive-to-get-wrong infrastructure decisions should escalate to Astra / High.
+- Cross-phase conflicts or repeated failures require Sol reassessment; discuss any proposed Astra escalation with the user first.
 
 ## Bound coordination cost
 
@@ -277,3 +278,12 @@ For `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`:
 - Phase 5 bounded readiness work is underway from initial startup evidence: frontend readiness appeared about 31.5s after container start, while orchestrator Nest startup appeared about 50.9s after start. The fixed 45s process check can precede all managed-process startup and does not establish full application readiness. Existing frontend and orchestrator health routes returned HTTP 200 after deployment.
 - Phase 6 benchmark preparation is complete; final measurements remain pending.
 - Do not redo Phase 0 unless new evidence materially contradicts the recorded baseline.
+
+
+## Scoped Sol/Terra delegation
+
+Use GPT-6.1 Sol to coordinate and verify bounded engineering work; delegate scoped computer use or customer-facing writing to GPT-6.1 Terra and simple helpers to GPT-6 Luna. No Fast mode. Parent and worker agree scope, plan, owned paths, exclusions and acceptance before implementation. Delegate only when the benefit exceeds briefing/review overhead; tiny tasks can stay with the coordinator.
+
+Keep one browser/desktop owner per shared session. Explicitly release custody before another agent acts. A worker returns the result, actual model/reasoning, commit/artifact identity, evidence, checks run and uncertainties. Sol verifies observable outcomes, factual/voice constraints and required exact-HEAD code review/CI; the implementer is not its own independent reviewer. Missing access or a denied action is a blocker, not permission to try another route.
+
+Native Terra execution was confirmed by the parent on2026-10-26. Select only model/reasoning combinations exposed by the current execution surface: native Codex options and API reasoning options differ. Medium is the usual Terra starting point; High requires task justification. This guidance changes no running root model, global settings, other users' defaults, workspace entitlements or tool permissions. API model selection and credentials are separate. Existing approval, ownership and release gates remain in force.

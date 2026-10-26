@@ -6,8 +6,8 @@ import { normalizeOpenAiTokens } from './ai-wallet-usage';
 
 export const TEXT_INPUT_BYTES = 32768;
 export const TEXT_OUTPUT_TOKENS = 4096;
-const CONTEXT_TOKENS = '1050000'; // Both supported model context windows; deliberately over-reserved.
-const models = ['gpt-6-luna', 'gpt-6.1-sol'];
+const CONTEXT_TOKENS = '1050000'; // Supported model context windows; deliberately over-reserved.
+const models = ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-terra'];
 const enabled = (v?: string) => v?.trim().toLowerCase() === 'true';
 const limits = { inputUncachedLow: '272000', inputCachedLow: '272000', outputLow: '4096',
   inputUncachedHigh: CONTEXT_TOKENS, inputCachedHigh: CONTEXT_TOKENS, outputHigh: '4096' };
@@ -17,7 +17,7 @@ export type TextRequest = { model: string; reasoning_effort: string;
 /** Text-only, single completion. Explicit account tariffs cover both input tiers,
  * cached input, reasoning output and the selected processing region. No defaults.
  * Cache-write/tool/media charges without authoritative units are unsupported.
- * Model limits: developers.openai.com/api/docs/models/gpt-6-luna and gpt-6.1-sol. */
+ * Model limits: developers.openai.com/api/docs/models/{gpt-6-luna,gpt-6.1-sol,gpt-6.1-terra}. */
 @Injectable()
 export class AiWalletTextService {
   constructor(private readonly wallet: AiWalletService) {}
