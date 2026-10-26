@@ -1,0 +1,3 @@
+numpy==2.3.3
+# Fixture/contact-sheet utilities only; not required by render or final QA.
+Pillow==11.3.0

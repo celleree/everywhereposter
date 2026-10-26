@@ -1,3 +1,4 @@
+import {EASY_PROFILE,EASY_EFFECTS} from './effect-content-bounds.mjs';
 import {selectProfiles} from './safe-zone-profiles.mjs';
 
 const EPS = 1e-10;
@@ -58,7 +59,7 @@ export function assessSafeZones(project,frames) {
   const profiles=selectProfiles(config),cells=intersectProfiles(profiles),findings=[];
   for(const p of profiles)if(p.confidence!=='official')findings.push({severity:'warning',code:'PROFILE_NOT_OFFICIAL_ORGANIC',profile:p.id,confidence:p.confidence});
   // Caller-supplied boxes cannot certify motion/text inside the unavailable private effects.
-  for(const e of project.effects)findings.push({severity:'error',code:'UNVERIFIED_CRITICAL_EFFECT_BOUNDS',event:e.id});
+  for(const e of project.effects){if(project.profile===EASY_PROFILE&&EASY_EFFECTS.includes(e.type))findings.push({severity:'info',code:'EFFECT_MEASUREMENT_REQUIRED',event:e.id});else findings.push({severity:'error',code:'UNVERIFIED_CRITICAL_EFFECT_BOUNDS',event:e.id});}
   const tracks=new Map([['source',{assetId:project.source.assetId,from:0,frames}],...project.broll.map(b=>[b.id,b])]);
   const regions=config.focalRegions??[],seen=new Set();
   if(!Array.isArray(regions)||regions.length>200)throw Error('Invalid focal-region inventory');

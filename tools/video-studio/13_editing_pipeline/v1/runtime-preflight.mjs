@@ -8,7 +8,7 @@ const lockfiles=['package-lock.json','pnpm-lock.yaml','yarn.lock'];
 const report=(status,checks)=>({schemaVersion:1,status,runtimeCompatibility:'UNVERIFIED',checks});
 const invalid=detail=>report('CONFIG_INVALID',[{name:'configuration',status:'INVALID',detail}]);
 
-function validate(config){
+export function validateRuntimeConfig(config){
  if(!config||Array.isArray(config)||typeof config!=='object'||config.schemaVersion!==1)return 'Use a JSON object with schemaVersion 1.';
  if(Object.keys(config).some(key=>key!=='schemaVersion'&&!Object.hasOwn(fields,key)))return 'Unknown configuration fields are forbidden; use only the documented path fields. Credentials and environment settings are not accepted.';
  for(const key of Object.keys(fields)){
@@ -43,7 +43,7 @@ async function withinRoot(root,relative){
 }
 
 export async function inspectRuntimeConfig(config,configDirectory){
- const error=validate(config);
+ const error=validateRuntimeConfig(config);
  if(error)return invalid(error);
  const checks=[],roots={};
  for(const [name,kind] of Object.entries(fields)){

@@ -1,0 +1,13 @@
+node_modules/
+projects/
+render-cache/
+.bundle*/
+qa/
+__pycache__/
+*.mp4
+*.wav
+*.m4a
+*.ttf
+*.png
+runtime.local.json
+owned.local.json

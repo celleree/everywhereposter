@@ -1,3 +1,9 @@
+# Historical pilot handoff
+
+This document below is historical evidence, not acceptance of the accessible
+profile. Current contract and runtime requirements are in README.md, CONTRACT.md
+and SOURCE-RUNTIME-MANIFEST.md. Historical private effect exports cannot be
+re-created by the accessible profile and are not silently substituted.
 # Combined editing pilot — completed handoff
 
 Executor: arund, Ubuntu WSL. Root was the sole implementation owner; helpers

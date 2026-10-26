@@ -1,3 +1,4 @@
+import {EASY_PROFILE,EASY_EFFECTS,validateEasyEffect} from './effect-content-bounds.mjs';
 // JSON is the boundary between the AI director, Cooked, preview and export.
 import {assessSafeZones,safeZoneCacheContent} from './safe-zones.mjs';
 export const EFFECTS = ['CinematicGrade','PersonPopOut','ImageCollage','ChatDrop','ShoulderZoom','AppleKeyCards','DynamicChecklist','MatchCut','VelocityLineGraph','IrisEffect','ProductDemo','FreebieDoc','ZoomThroughCut','CursorTracker','PixelatedCloseUp'];
@@ -18,7 +19,7 @@ export function chunkContent(p,first,last){
   const captions=p.captions.filter(c=>words.get(c.wordIds[0]).start*p.canvas.fps<=last&&(words.get(c.wordIds.at(-1)).end+.12)*p.canvas.fps>first).map(c=>({...c,words:c.wordIds.map(id=>words.get(id))}));
   const active=events=>events.filter(e=>e.from<=last&&e.from+e.frames>first);
   // Editorial notes/revision labels do not change pixels; timed decisions do.
-  return {first,last,canvas:p.canvas,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};
+  return {first,last,canvas:p.canvas,profile:p.profile,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};
 }
 export function validateProject(p){
   if(!p||p.schemaVersion!==1||!text(p.id,80)||!integer(p.revision,1,10000))fail('Unsupported project identity/version');
@@ -32,10 +33,12 @@ export function validateProject(p){
     if(a.kind==='video'&&(!number(a.duration,0.01,1800)||!number(a.fps,1,120)))fail('Missing video clock');
     assets.set(a.id,a);
   }
+  if(new Set(p.assets.map(a=>a.file)).size!==p.assets.length)fail('Asset staging filenames must be unique');
   if(assets.get(p.source.assetId)?.sha256!==p.source.sha256)fail('Source/asset identity mismatch');
   if(!Array.isArray(p.cuts)||!p.cuts.length||p.cuts.length>1000)fail('Missing bounded cuts');
   let previous=0;
   for(const c of p.cuts){if(!integer(c.in,previous,p.source.frames-1)||!integer(c.out,c.in+1,p.source.frames)||!text(c.reason))fail('Cuts must preserve source order and bounds');previous=c.out;}
+  if(p.profile!==undefined&&p.profile!==EASY_PROFILE)fail('Unsupported effect profile');
   const frames=frameCount(p),seconds=frames/p.canvas.fps;
   if(!Array.isArray(p.words)||!p.words.length||p.words.length>20000)fail('Missing aligned transcript');
   const words=new Map();let wordStart=-1;
@@ -56,7 +59,7 @@ export function validateProject(p){
   for(const e of p.broll){const a=assets.get(e.assetId);if(!a)fail('Unknown B-roll asset');if(a.kind==='video'&&(!number(e.sourceStart,0,a.duration)||e.sourceStart+e.frames/p.canvas.fps>a.duration+.001))fail('B-roll exceeds source');}
   const ordered=[...p.broll].sort((a,b)=>a.from-b.from);for(let i=1;i<ordered.length;i++)if(ordered[i].from<ordered[i-1].from+ordered[i-1].frames)fail('Overlapping B-roll');
   for(const e of p.effects){
-    if(!EFFECTS.includes(e.type)||!e.props||typeof e.props!=='object'||Array.isArray(e.props))fail('Unsupported effect');
+    if(!(p.profile===EASY_PROFILE?EASY_EFFECTS:EFFECTS).includes(e.type)||!e.props||typeof e.props!=='object'||Array.isArray(e.props))fail('Unsupported effect');
     if(e.type==='PersonPopOut')fail('PersonPopOut needs a revision-bound matte adapter; unavailable in this pilot');
     if(['CinematicGrade','MatchCut','ZoomThroughCut','ShoulderZoom'].includes(e.type))fail('Full-frame effects need a separate speaker/framing adapter; unavailable in this pilot');
     const b=e.bounds;if(!b||!['x','y','width','height'].every(k=>number(b[k],0,1920))||b.width<=0||b.height<=0||b.x<60||b.x+b.width>1020||b.y<0||b.y+b.height>1440)fail('Effect exceeds portrait or caption safe area');
@@ -66,6 +69,7 @@ export function validateProject(p){
     if(Object.keys(e.props).some(k=>forbidden.includes(k)))fail('Effect props cannot override validated media or geometry');
     // No paths or URLs may bypass the asset registry in nested props.
     const scan=v=>{if(v&&typeof v==='object'){for(const [k,x]of Object.entries(v)){if(['src','source','url','file','path','__proto__','constructor','prototype'].includes(k))fail('Unsafe nested effect property');scan(x);}}else if(typeof v==='number'&&!number(v,-10000,10000))fail('Unbounded effect parameter');else if(typeof v==='string'&&(v.length>1000||/https?:|file:|\.\.\//.test(v)))fail('Unsafe effect string');};scan(e.props);
+    if(p.profile===EASY_PROFILE){validateEasyEffect(e,assets,p.canvas.fps);continue;}
     if(['IrisEffect','ProductDemo','FreebieDoc','PixelatedCloseUp'].includes(e.type)&&!e.assetId)fail('Effect requires a registered media asset');
     if(['FreebieDoc','PixelatedCloseUp'].includes(e.type)&&assets.get(e.assetId)?.kind!=='image')fail('Effect requires a still image');
     if(e.assetId&&assets.get(e.assetId)?.kind==='video'&&(!number(e.sourceStart??0,0,assets.get(e.assetId).duration)||(e.sourceStart??0)+e.frames/p.canvas.fps>assets.get(e.assetId).duration))fail('Effect video exceeds source');
@@ -76,7 +80,8 @@ export function validateProject(p){
     const requirements={ChatDrop:'messages',DynamicChecklist:'items',AppleKeyCards:'cards',ProductDemo:'camera',VelocityLineGraph:'points',CursorTracker:'path'};
     if(requirements[e.type]&&(!Array.isArray(e.props[requirements[e.type]])||!e.props[requirements[e.type]].length||e.props[requirements[e.type]].length>24))fail('Effect needs bounded configuration');
   }
+  if(p.profile===EASY_PROFILE)for(let i=0;i<p.effects.length;i++)for(const b of p.effects.slice(i+1)){const a=p.effects[i];if(a.from<b.from+b.frames&&a.from+a.frames>b.from&&overlaps(a.bounds,b.bounds))fail('Overlapping accessible effect regions');}
   if(!p.director||!text(p.director.summary,3000)||!Array.isArray(p.director.decisions))fail('Missing AI direction record');
-  for(const cue of p.instructions?.requiredCues??[]){if(!text(cue.id,80)||!EFFECTS.includes(cue.effect)||p.effects.filter(e=>e.directiveId===cue.id&&e.type===cue.effect).length!==1)fail('An explicit script effect cue was lost');}
+  for(const cue of p.instructions?.requiredCues??[]){if(!text(cue.id,80)||!(p.profile===EASY_PROFILE?EASY_EFFECTS:EFFECTS).includes(cue.effect)||p.effects.filter(e=>e.directiveId===cue.id&&e.type===cue.effect).length!==1)fail('An explicit script effect cue was lost');}
   return {frames,seconds,assets,words,safeZones:assessSafeZones(p,frames)};
 }

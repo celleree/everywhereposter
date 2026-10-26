@@ -1,1 +1,21 @@
-{"name":"everywhere-poster-editing-pipeline","private":true,"type":"module","scripts":{"test":"node --test tests/*.test.mjs","preview":"node run.mjs serve","render":"node run.mjs render"}}
+{
+  "name": "everywhere-poster-studio-accessible",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Manifest-driven owned Easy graphics profile",
+  "dependencies": {
+    "@remotion/bundler": "4.0.530",
+    "@remotion/renderer": "4.0.530",
+    "remotion": "4.0.530",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "@remotion/player": "4.0.530",
+    "esbuild": "0.28.1"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "preview": "node run.mjs serve",
+    "render": "node run.mjs render"
+  }
+}
