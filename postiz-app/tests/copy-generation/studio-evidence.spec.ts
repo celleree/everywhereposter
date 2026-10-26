@@ -6,6 +6,8 @@ import { tmpdir } from 'os';
 import { validateStudioEvidence, validateStudioFraming } from '../../libraries/nestjs-libraries/src/media-editing/studio-evidence';
 import { createCookedWorker } from '../../libraries/nestjs-libraries/src/media-editing/cooked-worker';
 import { CookedWorkerClient } from '../../libraries/nestjs-libraries/src/media-editing/cooked-worker-client';
+import { CookedReviewService } from '../../libraries/nestjs-libraries/src/media-editing/cooked-review.service';
+import { Readable } from 'stream';
 
 const hash = (s: string | Buffer) => createHash('sha256').update(s).digest('hex');
 function evidence() {
@@ -40,8 +42,9 @@ it('requires a real stationary/single-speaker confirmation and bounded observati
 });
 it('exports actual private IPC snapshots, rejects stale/foreign requests and retains copied custody after close', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'studio-ipc-'))), source = join(root, 'input.mp4'), raw: any = evidence();
-  await writeFile(source, 'original'); let receipt: any;
+  await writeFile(source, 'original'); let receipt: any, nativeRuns = 0;
   const runtime = { run: async (input: any) => {
+    nativeRuns++;
     const workspace = await mkdtemp(join(root, 'native-')), editDirectory = join(workspace, 'edit'); await mkdir(editDirectory);
     await copyFile(input.sourcePath, join(workspace, 'source.mp4')); await writeFile(join(editDirectory, 'cut.mp4'), 'aligned-audio');
     for (const [key, name] of Object.entries({ rawWords: 'words.raw.json', words: 'words.json', decisions: 'decisions.json', policy: 'boundary-policy.json', report: 'report.json' })) await writeFile(join(editDirectory, name), JSON.stringify(raw.files[key].value));
@@ -58,8 +61,35 @@ it('exports actual private IPC snapshots, rejects stale/foreign requests and ret
     await assert.rejects(client.studioEvidence('foreign', 'source', raw.jobId, 0));
     await assert.rejects(client.studioEvidence('org', 'source', raw.jobId, 1));
     await assert.rejects(client.studioAudio('org', 'source', raw.jobId, 0, hash('wrong'), 13, join(root, 'wrong.mp4')));
-    const retained = join(root, 'retained.mp4'); await client.studioAudio('org', 'source', raw.jobId, 0, snapshot.audio.sha256, snapshot.audio.bytes, retained);
+    const retained = join(root, 'retained.mp4'), originalCall = (client as any).call.bind(client);
+    (client as any).call = async () => Object.assign(new Readable({ read() { this.push('ali'); this.destroy(Error('interrupted transfer')); } }), { statusCode: 200, headers: { 'content-length': snapshot.audio.bytes } });
+    await assert.rejects(client.studioAudio('org', 'source', raw.jobId, 0, snapshot.audio.sha256, snapshot.audio.bytes, retained));
+    await assert.rejects(readFile(retained)); // Partial transfer never occupies the final name.
+    (client as any).call = originalCall;
+    await client.studioAudio('org', 'source', raw.jobId, 0, snapshot.audio.sha256, snapshot.audio.bytes, retained);
+    assert.equal(nativeRuns, 1);
     await client.json('/find?request=' + request, 'org', 'source', 'DELETE');
     assert.equal(hash(await readFile(retained)), snapshot.audio.sha256); assert.equal((await readFile(source)).toString(), 'original');
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }
+});
+it.each([429, 503, undefined])('distinguishes proven native admission rejection (%s) from uncertain transport', async status => {
+  const root = await mkdtemp(join(tmpdir(), 'studio-admission-')), source = join(root, 'source.mp4'); await writeFile(source, 'original');
+  try {
+    const service = new CookedReviewService({ getMediaByOrganizationIdAndId: async () => ({ type: 'video', path: source }) } as any,
+      { probeForCooked: async () => ({ fps: 30, width: 360, height: 640, durationMs: 6000 }) } as any);
+    (service as any).readyClient = async () => ({ json: async () => { throw Object.assign(Error('absent'), { status: 404 }); },
+      create: async () => { throw Object.assign(Error('native rejection or transport loss'), { status }); } });
+    let result: any; try { await service.studioSource('org', 'source', randomUUID(), root, true); } catch (e) { result = e; }
+    assert.ok(result); assert.equal(result.studioNotAdmitted === true, status === 429 || status === 503);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+it('never labels a known existing native job as not admitted when later export is pending', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'studio-existing-')), source = join(root, 'source.mp4'); await writeFile(source, 'original');
+  try {
+    const service = new CookedReviewService({ getMediaByOrganizationIdAndId: async () => ({ type: 'video', path: source }) } as any,
+      { probeForCooked: async () => ({ fps: 30, width: 360, height: 640, durationMs: 6000 }) } as any);
+    (service as any).readyClient = async () => ({ json: async () => ({ status: 'working', jobId: randomUUID(), revision: 0 }) });
+    let result: any; try { await service.studioSource('org', 'source', randomUUID(), root, true); } catch (e) { result = e; }
+    assert.ok(result); assert.notEqual(result.studioNotAdmitted, true);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -1,6 +1,7 @@
 import { request } from 'http';
 import { createReadStream, createWriteStream } from 'fs';
-import { stat } from 'fs/promises';
+import { stat, lstat, link, rm } from 'fs/promises';
+import { createHash, randomUUID } from 'crypto';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { IncomingMessage } from 'http';
@@ -70,9 +71,19 @@ export class CookedWorkerClient {
         !Number.isSafeInteger(bytes) || bytes < 1 || bytes > 100 * 1024 * 1024) throw Error('INVALID_STUDIO_AUDIO');
     const response = await this.call(`/jobs/${job}/studio-audio?revision=${revision}&sha256=${sha256}`, 'GET', org, media);
     if (response.statusCode !== 200 || Number(response.headers['content-length']) !== bytes) { response.destroy(); throw Error('INVALID_STUDIO_AUDIO'); }
-    let size = 0;
-    const bounded = new Transform({ transform(chunk, _, done) { size += chunk.length; done(size > bytes ? Error('STUDIO_AUDIO_TOO_LARGE') : null, chunk); } });
-    await pipeline(response, bounded, createWriteStream(file, { flags: 'wx', mode: 0o600 }));
-    if ((await stat(file)).size !== bytes) throw Error('INCOMPLETE_STUDIO_AUDIO');
+    const temporary = file + '.part-' + randomUUID();
+    const verify = async (path: string) => {
+      const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink() || info.size !== bytes) throw Error('INCOMPLETE_STUDIO_AUDIO');
+      const h = createHash('sha256'); for await (const b of createReadStream(path)) h.update(b);
+      if (h.digest('hex') !== sha256) throw Error('STUDIO_AUDIO_HASH_MISMATCH');
+    };
+    try {
+      let size = 0;
+      const bounded = new Transform({ transform(chunk, _, done) { size += chunk.length; done(size > bytes ? Error('STUDIO_AUDIO_TOO_LARGE') : null, chunk); } });
+      await pipeline(response, bounded, createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
+      await verify(temporary);
+      try { await link(temporary, file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      await verify(file);
+    } finally { await rm(temporary, { force: true }).catch(() => {}); }
   }
 }

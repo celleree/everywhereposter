@@ -148,7 +148,7 @@ it('normalizes new-upload direction/observation without accepting a manifest or 
   assert.throws(() => normalizeStudioRequest({ ...request, creative, manifest: {} }));
   assert.throws(() => normalizeStudioRequest({ ...request, creative: { ...creative, framing: { ...creative.framing, stationary: false } } }));
 });
-async function withUploadProducer(test: (service: StudioEditService, row: any, counts: any) => Promise<void>, uncertain = false) {
+async function withUploadProducer(test: (service: StudioEditService, row: any, counts: any) => Promise<void>, uncertain = false, admissionFailure?: 'known' | 'unknown') {
   const root = await mkdtemp(join(tmpdir(), 'studio-upload-')), privateRoot = join(root, 'private'), publicRoot = join(root, 'uploads');
   await mkdir(privateRoot); await mkdir(publicRoot);
   const env: Record<string, string | undefined> = {}, settings: Record<string, string> = { STUDIO_EDITOR_ENABLED: 'true', STUDIO_EDITOR_ORGANIZATIONS: 'owner',
@@ -160,7 +160,7 @@ async function withUploadProducer(test: (service: StudioEditService, row: any, c
       creative: { brief: 'My actual uploaded source', framing: { x: .28, y: .28, width: .44, height: .24, confirmed: true, stationary: true, singleSpeaker: true } } };
     const row: any = { id: randomUUID(), organizationId: 'owner', sourceMediaId: 'video', state: 'ADMITTED', generation: 1, inputFingerprint: h,
       input: { request, media: [{ id: 'video', path: '/owned/video.mp4' }, { id: 'still', path: '/owned/still.png' }] } };
-    const counts = { native: 0, direction: 0, render: 0 };
+    const counts = { native: 0, direction: 0, render: 0, actualNative: 0, allows: [] as boolean[] };
     const value = (value: any) => ({ value, sha256: h });
     const raw = { schemaVersion: 1, organizationId: 'owner', mediaId: 'video', jobId: randomUUID(), revision: 0, sourceSha256: h,
       fps: 30, totalFrames: 180, width: 360, height: 640, audio: { sha256: h, bytes: 13 }, files: {
@@ -168,7 +168,13 @@ async function withUploadProducer(test: (service: StudioEditService, row: any, c
         policy: value({ version: 'quiet-block-v1', sourceSha256: h, fps: 30, total: 180 }),
         report: value({ fps: 30, policy: 'quiet-block-v1', final_s: 6, frames: [[0, 180]] }), decisions: value([{ start: 0, end: 6 }]) } };
     const jobs = { admit: async () => row, get: async () => row, claim: async () => { row.state = 'RUNNING'; row.leaseToken = randomUUID(); return row; } };
-    const cooked = { studioSource: async (_org: string, _media: string, _request: string, dir: string) => { counts.native++; await writeFile(join(dir, 'evidence.json'), JSON.stringify(raw)); return raw; } };
+    const cooked = { studioSource: async (_org: string, _media: string, _request: string, dir: string, allowCreate: boolean) => {
+      counts.native++; counts.allows.push(allowCreate);
+      if (admissionFailure === 'known' && counts.native === 1) throw Object.assign(Error('busy, no job created'), { studioNotAdmitted: true });
+      if (allowCreate) counts.actualNative++;
+      if (admissionFailure === 'unknown' && counts.native === 1) throw Error('native response lost');
+      await writeFile(join(dir, 'evidence.json'), JSON.stringify(raw)); return raw;
+    } };
     const director = { prepareAssets: async () => [{ mediaId: 'video', sha256: h }], produce: async () => { counts.direction++; if (uncertain) throw Error('UNKNOWN'); return { generated: 'from current evidence' }; } };
     const db = { media: { findMany: async () => row.input.media } };
     const service = new StudioEditService(jobs as any, db as any, cooked as any, director as any);
@@ -191,4 +197,19 @@ it('resuming uncertain direction uses retained evidence and never starts a repla
     assert.equal(counts.native, 1); assert.equal(counts.direction, 2); assert.equal(counts.render, 0);
     const status: any = await service.status('owner', row.id); assert.equal(status.phase, 'NEEDS_VERIFICATION');
   }, true);
+});
+it('a proven non-admission can retry after the worker becomes free without a stranded request', async () => {
+  await withUploadProducer(async (service, row, counts) => {
+    assert.equal(counts.actualNative, 0); assert.equal(row.state, 'RUNNING');
+    const status: any = await service.status('owner', row.id); assert.equal(status.phase, 'WAITING_FOR_WORKER');
+    await service.resume('owner', row.id); await (service as any).running.get('owner:' + row.id);
+    assert.equal(counts.allows.join(','), 'true,true'); assert.equal(counts.actualNative, 1); assert.equal(counts.render, 1);
+  }, false, 'known');
+});
+it('an uncertain native dispatch can only find the same job rather than create another', async () => {
+  await withUploadProducer(async (service, row, counts) => {
+    assert.equal(counts.actualNative, 1);
+    await service.resume('owner', row.id); await (service as any).running.get('owner:' + row.id);
+    assert.equal(counts.allows.join(','), 'true,false'); assert.equal(counts.actualNative, 1); assert.equal(counts.render, 1);
+  }, false, 'unknown');
 });

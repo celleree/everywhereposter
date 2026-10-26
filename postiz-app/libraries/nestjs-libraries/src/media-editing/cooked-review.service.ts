@@ -68,14 +68,16 @@ export class CookedReviewService {
   // Internal handoff only. Caller owns a retained private Studio directory; no
   // client path or native filesystem location is accepted through HTTP.
   async studioSource(org: string, id: string, requestId: string, dir: string, allowCreate: boolean) {
-    const source = await this.owner(org, id);
-    const prepared = await prepareEditorSource(source.path, source.originalName || source.name);
+    const admission = { started: false, rejected: false };
+    let prepared: Awaited<ReturnType<typeof prepareEditorSource>> | undefined;
     try {
+      const source = await this.owner(org, id);
+      prepared = await prepareEditorSource(source.path, source.originalName || source.name);
       const originalSha256 = await studioHashFile(prepared.inputPath), metadata = await this.probe.probeForCooked(prepared.inputPath);
       if (metadata.fps !== 30 || metadata.durationMs > 60_000 || Math.abs(metadata.width / metadata.height - 9 / 16) > .001) {
         throw new BadRequestException('Studio beta supports portrait CFR30 originals up to60seconds within the existing native resource limits');
       }
-      const native = allowCreate ? await this.create(org, id, { requestId }) : await this.find(org, id, requestId);
+      const native = allowCreate ? await this.create(org, id, { requestId }, admission) : await this.find(org, id, requestId);
       if (native.status !== 'ready' || !UUID.test(native.jobId || '') || !Number.isSafeInteger(native.revision)) throw new ConflictException('Source evidence is still pending; no second native job was dispatched');
       const client = await this.client(org), raw = await client.studioEvidence(org, id, native.jobId, native.revision);
       if (raw.jobId !== native.jobId || raw.revision !== native.revision) throw new ConflictException('Native evidence revision changed');
@@ -100,9 +102,12 @@ export class CookedReviewService {
       // request releases its temporary native copies, never the uploaded Media.
       await client.json('/find?request=' + requestId, org, id, 'DELETE').catch(() => {});
       return raw;
-    } finally { await prepared.cleanup(); }
+    } catch (error) {
+      if (allowCreate && (!admission.started || admission.rejected)) throw Object.assign(new Error('Native admission was not dispatched'), { studioNotAdmitted: true });
+      throw error;
+    } finally { await prepared?.cleanup(); }
   }
-  async create(org: string, id: string, body: { requestId: string }) {
+  async create(org: string, id: string, body: { requestId: string }, admission?: { started: boolean; rejected: boolean }) {
     const source = await this.owner(org, id);
     if (!body || Object.keys(body).some(k => k !== 'requestId') || !UUID.test(body.requestId || '')) throw new BadRequestException();
     if (this.creating) throw new HttpException('Another video is being prepared.', 429);
@@ -110,11 +115,20 @@ export class CookedReviewService {
     try {
       const client = await this.readyClient(org);
       // Recovery reads never start a second native job.
-      try { return await client.json('/find?request=' + body.requestId, org, id); }
+      try { const existing = await client.json('/find?request=' + body.requestId, org, id); if (admission) admission.started = true; return existing; }
       catch (e) { if ((e as { status?: number }).status !== 404) throw e; }
       prepared = await prepareEditorSource(source.path, source.originalName || source.name);
       const metadata = await this.probe.probeForCooked(prepared.inputPath);
-      const result = await this.safe(() => client.create(org, id, body.requestId, prepared!.inputPath, metadata));
+      const result = await this.safe(async () => {
+        if (admission) admission.started = true;
+        try { return await client.create(org, id, body.requestId, prepared!.inputPath, metadata); }
+        catch (error) {
+          // These explicit worker responses occur before POST /jobs inserts its
+          // retained job. A timeout/connection loss/422 never proves non-dispatch.
+          if (admission && [429, 503].includes((error as { status?: number }).status!)) admission.rejected = true;
+          throw error;
+        }
+      });
       await this.owner(org, id); return result;
     } finally { await prepared?.cleanup().catch(() => {}); this.creating = false; }
   }

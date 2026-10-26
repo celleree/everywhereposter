@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { join } from 'path';
 import { createReadStream } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, rmdir, writeFile } from 'fs/promises';
 import { PrismaService } from '../database/prisma/prisma.service';
 import { UploadFactory } from '../upload/upload.factory';
 import { StudioEditRepository, StudioEditRequest, normalizeStudioRequest } from './studio-edit.repository';
@@ -37,16 +37,20 @@ export class StudioEditService {
     return { id: row.id, generation: row.generation, state: row.state };
   }
   async resume(org: string, job: string) {
-    const row = await this.jobs.get(org, job); await this.assertOwned(org, row); await studioRuntime(org);
+    const row = await this.jobs.get(org, job); await this.assertOwned(org, row); const config = await studioRuntime(org);
     if (row.state !== 'RUNNING' || !(row.input as any).request.creative) throw new ConflictException('This Studio edit cannot be resumed');
+    if (!this.running.has(org + ':' + row.id)) {
+      const dir = studioDirectory(config, row); await mkdir(dir, { recursive: true, mode: 0o700 });
+      await writeFile(join(dir, 'producer-status.json'), JSON.stringify({ phase: 'RUNNING' }));
+    }
     this.startProducer(org, row); return { id: row.id, generation: row.generation, state: row.state };
   }
   private startProducer(org: string, row: any) {
     const key = org + ':' + row.id;
     if (this.running.has(key)) return;
-    const operation = this.produce(org, row).catch(async () => {
+    const operation = this.produce(org, row).catch(async error => {
       // No raw provider/native errors, transcripts or paths in the public ledger.
-      try { const c = await studioRuntime(org); await writeFile(join(studioDirectory(c, row), 'producer-status.json'), JSON.stringify({ phase: 'NEEDS_VERIFICATION', message: 'This edit needs verification or adjustment. No automatic paid retry will run. Your original is unchanged.' })); } catch {}
+      try { const c = await studioRuntime(org); await writeFile(join(studioDirectory(c, row), 'producer-status.json'), JSON.stringify({ phase: error?.studioNotAdmitted === true ? 'WAITING_FOR_WORKER' : 'NEEDS_VERIFICATION' })); } catch {}
     }).finally(() => this.running.delete(key));
     this.running.set(key, operation);
   }
@@ -59,9 +63,24 @@ export class StudioEditService {
     catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
       let allowCreate = false;
-      try { await writeFile(join(dir, 'native-dispatch.json'), JSON.stringify({ requestId: row.id, inputFingerprint: row.inputFingerprint }), { flag: 'wx', mode: 0o600 }); allowCreate = true; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-      raw = await this.cooked.studioSource(org, row.sourceMediaId, row.id, dir, allowCreate);
+      const marker = join(dir, 'native-dispatch.json'), guard = join(dir, 'native-admission.lock');
+      // Atomic, short filesystem admission transition shared across processes.
+      // A retained PENDING marker can only find/recover the same native job.
+      await mkdir(guard);
+      try {
+        let prior: any;
+        try { prior = await studioJson(marker); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        if (prior && (prior.requestId !== row.id || prior.inputFingerprint !== row.inputFingerprint)) throw new ConflictException('Native admission identity changed');
+        allowCreate = !prior || prior.state === 'NOT_ADMITTED';
+        if (allowCreate) await writeFile(marker, JSON.stringify({ requestId: row.id, inputFingerprint: row.inputFingerprint, state: 'PENDING' }), { mode: 0o600 });
+      } finally { await rmdir(guard); }
+      try { raw = await this.cooked.studioSource(org, row.sourceMediaId, row.id, dir, allowCreate); }
+      catch (error) {
+        if (allowCreate && (error as { studioNotAdmitted?: boolean }).studioNotAdmitted === true) {
+          await writeFile(marker, JSON.stringify({ requestId: row.id, inputFingerprint: row.inputFingerprint, state: 'NOT_ADMITTED' }));
+        }
+        throw error;
+      }
     }
     const evidence = validateStudioEvidence(raw, { organizationId: org, mediaId: row.sourceMediaId });
     const current = await this.jobs.get(org, row.id);
@@ -147,6 +166,7 @@ export class StudioEditService {
     if (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state)) {
       try { const c = await studioRuntime(org), progress = await studioJson(join(studioDirectory(c, row), 'producer-status.json'), 4096);
         if (progress.phase === 'NEEDS_VERIFICATION') return { ...response, phase: 'NEEDS_VERIFICATION', message: 'This edit needs verification or adjustment. No automatic paid retry will run. Your original is unchanged.' };
+        if (progress.phase === 'WAITING_FOR_WORKER') return { ...response, phase: 'WAITING_FOR_WORKER', message: 'The native editor was busy, restarting or not ready. No new job was admitted. Resume when it is available; your original is unchanged.' };
       } catch {}
       return response;
     }
