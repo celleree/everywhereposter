@@ -124,9 +124,9 @@ Starting points:
 
 - Local `qwen3:8b` via Ollama/Codex `--oss`: targeted inspection, extraction/classification, simple docs, repetitive edits, straightforward tests, and very bounded low-risk code changes.
 - Luna: mechanical/repetitive cloud work, extraction/classification, targeted inspection, very easy tasks when the local worker is unavailable or unsuitable.
-- Terra: normal bounded coding, micro-PRs, straightforward fixes/tests/routine implementation, and the default escalation from the local worker when meaningful logic, ambiguity, or failed verification appears.
-- Sol: difficult but bounded planning, debugging, unfamiliar subsystems, complex implementation, substantial independent review.
-- Astra: architecture, cross-workstream decisions, difficult root-cause debugging, high-risk review, large-context orchestration, repeated failures, or expensive mistakes.
+- GPT-6.1 Terra: scoped computer use and customer-facing writing after the Sol coordinator supplies a bounded task and acceptance checks.
+- GPT-6.1 Sol: default coordinator and engineering worker; Medium for routine implementation, High for complex planning/coding and independent review.
+- Astra: exceptional escalation only after discussing justification with the user; never select it automatically.
 
 Do not use the local worker as the final independent reviewer or for architecture, authentication/security, database migrations, deployment/infrastructure decisions, destructive operations, or other high-risk work. Follow `docs/brain/ORCHESTRATOR_PROTOCOL.md` for the complete local-worker escalation policy.
 
@@ -197,3 +197,12 @@ Prefer enforcement over prose when practical:
 7. concise agent instruction when stronger enforcement is impractical.
 
 Use `docs/brain/WORKED_LEARNINGS.md`, `FAILED_APPROACHES.md`, `KNOWN_ISSUES.md`, or `DEPLOYMENT_NOTES.md` only for durable knowledge that is likely to prevent meaningful future rework. Do not store secrets, raw logs, temporary state, or routine debugging history.
+
+
+## Scoped Sol/Terra delegation
+
+Use GPT-6.1 Sol to coordinate and verify bounded engineering work; delegate scoped computer use or customer-facing writing to GPT-6.1 Terra and simple helpers to GPT-6 Luna. No Fast mode. Parent and worker agree scope, plan, owned paths, exclusions and acceptance before implementation. Delegate only when the benefit exceeds briefing/review overhead; tiny tasks can stay with the coordinator.
+
+Keep one browser/desktop owner per shared session. Explicitly release custody before another agent acts. A worker returns the result, actual model/reasoning, commit/artifact identity, evidence, checks run and uncertainties. Sol verifies observable outcomes, factual/voice constraints and required exact-HEAD code review/CI; the implementer is not its own independent reviewer. Missing access or a denied action is a blocker, not permission to try another route.
+
+Native Terra execution was confirmed by the parent on2026-10-26. Select only model/reasoning combinations exposed by the current execution surface: native Codex options and API reasoning options differ. Medium is the usual Terra starting point; High requires task justification. This guidance changes no running root model, global settings, other users' defaults, workspace entitlements or tool permissions. API model selection and credentials are separate. Existing approval, ownership and release gates remain in force.

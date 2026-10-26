@@ -194,3 +194,14 @@ Contract references checked 18 October 2026 against installed Stripe 20.4.0 type
 [Refund object](https://docs.stripe.com/api/refunds/object),
 [refund lifecycle and original method](https://docs.stripe.com/refunds), and
 [refund webhook events](https://docs.stripe.com/changelog/acacia/2024-10-28/refund-webhook-update).
+
+
+## Optional Terra preference for guided captions
+
+Only new guided social-caption drafts and rewrites may prefer `gpt-6.1-terra` at Medium reasoning. Summaries remain Luna. This adds no customer model picker, script generator, landing-page generator, audio/video processing, or tool calls. Text-only structured Chat Completions remains the endpoint.
+
+`AI_COPY_TERRA_ENABLED=true` is an operator assertion that the existing account has verified Terra access. Selection also requires a valid Terra entry in `AI_WALLET_TEXT_RATE_CARDS`; otherwise new copy keeps Sol. No flags or cards are activated by this code. Existing prepaid operations retain their persisted model, quote and request fingerprint across default/configuration changes. UNKNOWN dispatches never switch models or retry providers. Existing models, entitlement gates, cost-plus-20% policy and subscription contracts remain unchanged.
+
+Official reference checked 2026-10-26: https://developers.openai.com/api/docs/models/gpt-6.1-terra . Published Standard USD rates per million tokens are uncached input1, cached input0.05, output5. Above272K input tokens the full-request rates are2,0.10,7.50. In integer nanos with `per: "1"`, the six categories are `inputUncachedLow: "1000"`, `inputCachedLow: "50"`, `outputLow: "5000"`, `inputUncachedHigh: "2000"`, `inputCachedHigh: "100"`, `outputHigh: "7500"`. Record an explicit rateVersion and retain the existing billingContext assertion. These reference values are not production configuration or proof of account pricing. Regional premiums and separately charged cache writes require account verification; unsupported receipt charges keep this adapter disabled. Fast, Batch and Flex are outside this path.
+
+Six factual caption briefs in the model unit suite are offline plumbing fixtures, not evidence of Terra writing quality. A separately budgeted blind comparison must score factual grounding, native platform fit, voice, CTA fidelity and hard limits before claiming a quality improvement. No paid evaluation is implied.
