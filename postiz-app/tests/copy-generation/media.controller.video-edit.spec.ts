@@ -28,7 +28,7 @@ describe('Video Editor API contract', () => {
     expect(Reflect.getMetadata(CHECK_POLICIES_KEY, MediaController.prototype.generateVideo)).toEqual([[AuthorizationActions.Create, Sections.AI]]);
     expect(Reflect.getMetadata(CHECK_POLICIES_KEY, CookedReviewController.prototype.status)).toBeUndefined();
     const create = jest.fn();
-    const controller = new MediaController({} as any, {} as any, {} as any, {} as any, {} as any, { create } as any);
+    const controller = new MediaController({} as any, {} as any, {} as any, {} as any, {} as any, { create } as any, {} as any);
     controller.createVideoEdit({ id: 'request-org' } as any, 'source', { schemaVersion: 1 });
     expect(create).toHaveBeenCalledWith('request-org', 'source', { schemaVersion: 1 });
   });
@@ -41,6 +41,9 @@ describe('Video Editor API contract', () => {
   });
 
   const routes = ['standard', 'find', 'create', 'edit', 'output', 'remove', 'view'] as const;
+  it.each(['studioJobs', 'studioJob', 'reviewStudio', 'cancelStudio'] as const)('requires the local-editor grant on Studio %s', name => {
+    expect(Reflect.getMetadata(CHECK_POLICIES_KEY, MediaController.prototype[name])).toEqual([[AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT]]);
+  });
   type Route = typeof routes[number];
   function fixture(editor?: CookedReviewService) {
     const calls = Object.fromEntries(routes.map(name => [name, jest.fn().mockResolvedValue({ bytes: Buffer.from('{}') })]));
@@ -48,7 +51,7 @@ describe('Video Editor API contract', () => {
     const permissions = new PermissionsService(subscription as any, {} as any, {} as any, {} as any);
     const guard = new PoliciesGuard(new Reflector(), permissions);
     const transcription = { ensureTranscriptionStarted: jest.fn(), retry: jest.fn() };
-    const media = new MediaController({} as any, {} as any, {} as any, {} as any, transcription as any, { create: calls.standard } as any);
+    const media = new MediaController({} as any, {} as any, {} as any, {} as any, transcription as any, { create: calls.standard } as any, {} as any);
     const cooked = new CookedReviewController(editor || calls as any);
     const org = { id: 'request-org', createdAt: new Date(), users: [{ role: 'USER' }] };
     const request = { path: '/media/editor-fixture', org, query: {}, headers: { origin: process.env.FRONTEND_URL } };

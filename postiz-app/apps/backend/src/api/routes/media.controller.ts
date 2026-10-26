@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -45,6 +46,7 @@ import { CreateVideoUploadDto } from '@gitroom/nestjs-libraries/dtos/media/creat
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 import { VideoEditorService } from '@gitroom/nestjs-libraries/media-editing/video-editor.service';
 import { CreateVideoEditDto } from '@gitroom/nestjs-libraries/dtos/media/create-video-edit.dto';
+import { StudioEditService } from '@gitroom/nestjs-libraries/media-editing/studio-edit.service';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -58,8 +60,33 @@ export class MediaController {
     private readonly quickUpload: QuickUploadService,
     private _subscriptionService: SubscriptionService,
     private _mediaTranscriptionService: MediaTranscriptionService,
-    private readonly videoEditor: VideoEditorService
+    private readonly videoEditor: VideoEditorService,
+    private readonly studioEditor: StudioEditService
   ) {}
+
+  @Get('/studio/jobs')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  studioJobs(@GetOrgFromRequest() org: Organization) { return this.studioEditor.list(org.id); }
+
+  @Get('/studio/jobs/:job')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  studioJob(@GetOrgFromRequest() org: Organization, @Param('job') job: string) { return this.studioEditor.status(org.id, job); }
+
+  @Post('/studio/jobs/:job/review')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  reviewStudio(@GetOrgFromRequest() org: Organization, @GetUserFromRequest() user: User, @Param('job') job: string, @Body() body: unknown, @Req() req: Request) {
+    this.studioOrigin(req);
+    return this.studioEditor.review(org.id, job, user.id, body);
+  }
+
+  @Delete('/studio/jobs/:job')
+  @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])
+  cancelStudio(@GetOrgFromRequest() org: Organization, @Param('job') job: string, @Req() req: Request) { this.studioOrigin(req); return this.studioEditor.cancel(org.id, job); }
+
+  private studioOrigin(req: Request) {
+    let expected = ''; try { expected = new URL(process.env.FRONTEND_URL!).origin; } catch {}
+    if (!expected || req.headers.origin !== expected) throw new BadRequestException('Use Studio from this application');
+  }
 
   @Post('/:id/video-edits')
   @CheckPolicies([AuthorizationActions.Create, Sections.LOCAL_VIDEO_EDIT])

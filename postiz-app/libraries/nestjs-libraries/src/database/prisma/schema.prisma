@@ -222,6 +222,7 @@ model Star {
 }
 
 model Media {
+  studioOutput StudioEditJob? @relation("StudioOutput")
   studioSources StudioEditJob[] @relation("StudioSource")
   uploadSession VideoUploadSession?
   id                 String              @id @default(uuid())
@@ -248,8 +249,7 @@ model Media {
   @@index([type])
 }
 
-// Internal Studio staging only. No artifact is a reviewed Media derivative until
-// the separate package/QA binding has been implemented and verified.
+// Technical acceptance and explicit human review are separate durable steps.
 model StudioEditJob {
   id String @id @default(uuid())
   organizationId String
@@ -267,6 +267,12 @@ model StudioEditJob {
   artifactBytes Int?
   artifactKey String? @unique
   storagePath String?
+  worker Json?
+  technicalReceipt Json?
+  outputMediaId String? @unique
+  outputMedia Media? @relation("StudioOutput", fields: [outputMediaId], references: [id], onDelete: Restrict)
+  reviewedByUserId String?
+  reviewedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

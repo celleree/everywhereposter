@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { StudioEditRepository, normalizeStudioRequest } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.repository';
+import { studioFingerprint } from '../../libraries/nestjs-libraries/src/media-editing/studio-receipt';
 import { StudioEditService } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.service';
 import { UploadFactory } from '../../libraries/nestjs-libraries/src/upload/upload.factory';
 import { studioOutputKey } from '../../libraries/nestjs-libraries/src/upload/upload.interface';
@@ -85,5 +86,30 @@ describeDatabase('Studio jobs on disposable PostgreSQL', () => {
     expect(stored.state).toBe('OUTPUT_STORED_UNVERIFIED');
     expect(await db.media.count({ where: { organizationId: org } })).toBe(2);
     await expect(db.media.delete({ where: { id: input.sourceMediaId } })).rejects.toThrow();
+  });
+  it('binds one worker identity and promotes only the current stored hash', async () => {
+    const job = await jobs.admit(org, input), running = await jobs.claim(org, job.id, 1), lease = running.leaseToken!;
+    const worker = { planHash: 'a'.repeat(64), manifestHash: 'b'.repeat(64) };
+    await jobs.bindWorker(org, job.id, 1, lease, worker);
+    await jobs.bindWorker(org, job.id, 1, lease, worker);
+    await expect(jobs.bindWorker(org, job.id, 1, lease, { ...worker, planHash: 'c'.repeat(64) })).rejects.toBeInstanceOf(ConflictException);
+    const intent = await jobs.bindOutput(org, job.id, 1, lease, 'a'.repeat(64), 10);
+    await jobs.recordStored(intent, lease, { key: studioOutputKey(intent), path: '/stored', sha256: intent.sha256, bytes: 10 });
+    await expect(jobs.markTechnical(org, job.id, 1, lease, { sha256: 'b'.repeat(64) })).rejects.toBeInstanceOf(ConflictException);
+    expect((await jobs.markTechnical(org, job.id, 1, lease, { sha256: intent.sha256 })).state).toBe('TECHNICAL_READY');
+  });
+  it('concurrent review and lost acknowledgement recover exactly one organization-owned Media row', async () => {
+    const job = await jobs.admit(org, input), running = await jobs.claim(org, job.id, 1), lease = running.leaseToken!;
+    const intent = await jobs.bindOutput(org, job.id, 1, lease, 'a'.repeat(64), 10);
+    await jobs.recordStored(intent, lease, { key: studioOutputKey(intent), path: '/stored', sha256: intent.sha256, bytes: 10 });
+    const technical = { sha256: intent.sha256 }; await jobs.markTechnical(org, job.id, 1, lease, technical);
+    const outputs = await Promise.all(Array.from({ length: 8 }, () => jobs.review(org, job.id, 'synthetic-reviewer', 1, intent.sha256, studioFingerprint(technical))));
+    expect(new Set(outputs.map(o => o.id)).size).toBe(1); expect(outputs[0].organizationId).toBe(org);
+    expect(await db.media.count({ where: { organizationId: org } })).toBe(3);
+    await expect(jobs.review('another-org', job.id, 'synthetic-reviewer', 1, intent.sha256, studioFingerprint(technical))).rejects.toBeInstanceOf(ConflictException);
+    await expect(jobs.review(org, job.id, 'synthetic-reviewer', 2, intent.sha256, studioFingerprint(technical))).rejects.toBeInstanceOf(ConflictException);
+    await db.media.update({ where: { id: outputs[0].id }, data: { deletedAt: new Date() } });
+    await expect(jobs.review(org, job.id, 'synthetic-reviewer', 1, intent.sha256, studioFingerprint(technical))).rejects.toBeInstanceOf(NotFoundException);
+    expect(await db.media.count({ where: { organizationId: org } })).toBe(3);
   });
 });

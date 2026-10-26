@@ -10,6 +10,7 @@ import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { MediaBox } from '@gitroom/frontend/components/media/media.component';
 import styles from './video-editor.module.css';
 import { CookedReviewWorkspace } from './cooked-review.workspace';
+import { StudioReviewWorkspace } from './studio-review.workspace';
 import dayjs from 'dayjs';
 import { VideoEditClient, EditView, isVideo, downloadVideo } from './video-editor.client';
 import type { PacingPreset } from '@gitroom/nestjs-libraries/media-editing/video-edit-decision';
@@ -64,7 +65,7 @@ export function VideoEditorWorkspace() {
     const value = await r.json(); return { enabled: value?.enabled === true };
   }, { revalidateOnFocus: false, shouldRetryOnError: false });
   if (isLoading) return <main className={styles.workspace}><p role="status">Loading editor…</p></main>;
-  return data?.enabled ? <CookedReviewWorkspace key={scope} scope={scope} /> : <Workspace key={scope} scope={scope} />;
+  return <><StudioReviewWorkspace key={'studio-' + scope} scope={scope} />{data?.enabled ? <CookedReviewWorkspace key={scope} scope={scope} /> : <Workspace key={scope} scope={scope} />}</>;
 }
 
 function Workspace({ scope }: { scope: string }) {

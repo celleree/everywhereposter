@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../database/prisma/prisma.service';
 import { StudioOutputIntent, StudioOutputReceipt, studioOutputKey } from '../upload/upload.interface';
+import { studioFingerprint } from './studio-receipt';
+import { Prisma } from '@prisma/client';
 
 export type StudioEditRequest = { requestKey: string; sourceMediaId: string; brollMediaIds: string[];
   destinations: string[]; profile: 'easy-graphics-v1' };
@@ -84,5 +86,41 @@ export class StudioEditRepository {
     const row = await this.get(org, job);
     if (!changed.count && row.state !== 'CANCELLED') throw new ConflictException('Studio job can no longer be cancelled');
     return row;
+  }
+  async bindWorker(org: string, job: string, generation: number, leaseToken: string, worker: Prisma.InputJsonObject) {
+    const changed = await this.db.studioEditJob.updateMany({ where: { id: job, organizationId: org, generation, leaseToken,
+      state: 'RUNNING', worker: { equals: Prisma.DbNull } }, data: { worker } });
+    const row = await this.get(org, job);
+    if ((!changed.count && studioFingerprint(row.worker) !== studioFingerprint(worker)) || row.generation !== generation ||
+        row.leaseToken !== leaseToken || !['RUNNING', 'OUTPUT_STORED_UNVERIFIED', 'TECHNICAL_READY', 'REVIEWED'].includes(row.state)) throw new ConflictException('Studio worker identity changed');
+    return row;
+  }
+  async markTechnical(org: string, job: string, generation: number, leaseToken: string, receipt: any) {
+    const changed = await this.db.studioEditJob.updateMany({ where: { id: job, organizationId: org, generation, leaseToken,
+      state: 'OUTPUT_STORED_UNVERIFIED', artifactSha256: receipt.sha256 }, data: { state: 'TECHNICAL_READY', technicalReceipt: receipt } });
+    const row = await this.get(org, job);
+    if (!changed.count && (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state) || row.generation !== generation || row.leaseToken !== leaseToken ||
+        studioFingerprint(row.technicalReceipt) !== studioFingerprint(receipt))) throw new ConflictException('Studio technical completion is stale');
+    return row;
+  }
+  async review(org: string, job: string, user: string, generation: number, sha256: string, technicalFingerprint: string) {
+    return this.db.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${org + ':studio-review:' + job}, 0))`;
+      const row = await tx.studioEditJob.findFirst({ where: { id: job, organizationId: org } });
+      if (!row || !['TECHNICAL_READY', 'REVIEWED'].includes(row.state) || row.generation !== generation || row.artifactSha256 !== sha256 ||
+          !row.storagePath || studioFingerprint(row.technicalReceipt) !== technicalFingerprint) throw new ConflictException('Review the current verified Studio result');
+      const ids = (row.input as any).media.map((m: any) => m.id);
+      const active = await tx.media.findMany({ where: { id: { in: ids }, organizationId: org, deletedAt: null }, select: { id: true, path: true } });
+      if (active.length !== ids.length || (row.input as any).media.some((m: any) => !active.some(a => a.id === m.id && a.path === m.path))) throw new NotFoundException('Studio source or B-roll was removed');
+      if (row.outputMediaId) {
+        const media = await tx.media.findFirst({ where: { id: row.outputMediaId, organizationId: org, deletedAt: null } });
+        if (!media || media.path !== row.storagePath) throw new NotFoundException('Saved Studio result is unavailable');
+        return media;
+      }
+      const media = await tx.media.create({ data: { id: 'studio-' + row.id, organizationId: org, name: 'studio-' + row.id + '.mp4',
+        originalName: 'reviewed-studio-edit.mp4', path: row.storagePath, type: 'video', fileSize: row.artifactBytes! } });
+      await tx.studioEditJob.update({ where: { id: row.id }, data: { state: 'REVIEWED', outputMediaId: media.id, reviewedByUserId: user, reviewedAt: new Date() } });
+      return media;
+    });
   }
 }
