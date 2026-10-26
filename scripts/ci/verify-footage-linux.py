@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import signal
 import subprocess
@@ -576,10 +577,20 @@ def assert_clean_cancellation(detail):
 
 
 def cancel_child(repo,evidence):
-    _,acquisition,factory=checked_runtime(repo,evidence)
+    package,_,factory=checked_runtime(repo,evidence)
     config=evidence.state['config'];root=Path(evidence.state['workspace'])
     request=evidence.state['request']|{'url':'https://media.fixture.test/hang.mp4'}
-    acquisition.acquire(request,evidence.state['policy'],config,root/'cache-cancel',factory)
+    # Run the canonical CLI, including its own signal setup. Only its imported
+    # launcher gets the same isolated test-network/ownership instrumentation.
+    for name,value in [('request',request),('policy',evidence.state['policy']),('runtime',config)]:
+        write(root/('cancel-'+name+'.json'),value)
+    launch=importlib.import_module('runtime.launch');original=launch.Runtime
+    previous_argv=sys.argv;launch.Runtime=factory
+    sys.argv=[str(package/'acquire.py'),'--request',str(root/'cancel-request.json'),
+              '--policy',str(root/'cancel-policy.json'),'--runtime',str(root/'cancel-runtime.json'),
+              '--cache',str(root/'cache-cancel')]
+    try:runpy.run_path(str(package/'acquire.py'),run_name='__main__')
+    finally:launch.Runtime=original;sys.argv=previous_argv
 
 
 def join_acceptance(repo,evidence):
