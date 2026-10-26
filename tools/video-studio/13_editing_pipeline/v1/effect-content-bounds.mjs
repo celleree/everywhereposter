@@ -12,7 +12,7 @@ export function validateEasyEffect(e,assets,fps=30){
  const list=e.type==='EasyRelationship'?p.nodes:p.panels;
  if(!Array.isArray(list)||list.length<(e.type==='EasyRelationship'?2:1)||list.length>3)throw Error('Invalid effect item count');
  if(e.type==='EasyRelationship'&&(!['flow','split','exchange'].includes(p.layout)||p.layout!=='flow'&&list.length!==2))throw Error('Invalid relationship layout');
- if(e.type==='EasyRelationship'&&e.frames/fps<(list.length-1)*.25+.2)throw Error('Effect ends before its content is revealed');
+ if(e.type==='EasyRelationship'&&(e.frames-1)/fps<(list.length-1)*.25+.2)throw Error('Effect ends before its content is revealed');
  const ids=new Set();
  for(const n of list){
   if(!keys(n,e.type==='EasyRelationship'?['id','label','icon']:['id','assetId','label','at'])||!label(n.id,80)||ids.has(n.id))throw Error('Invalid effect item');ids.add(n.id);

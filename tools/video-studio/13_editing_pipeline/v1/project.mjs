@@ -4,6 +4,7 @@ import {assessSafeZones,safeZoneCacheContent} from './safe-zones.mjs';
 export const EFFECTS = ['CinematicGrade','PersonPopOut','ImageCollage','ChatDrop','ShoulderZoom','AppleKeyCards','DynamicChecklist','MatchCut','VelocityLineGraph','IrisEffect','ProductDemo','FreebieDoc','ZoomThroughCut','CursorTracker','PixelatedCloseUp'];
 export const frameCount = p => p.cuts.reduce((n,c)=>n+c.out-c.in,0);
 export const audioTimeline = p => ({sourceSha256:p.source.sha256,fps:p.canvas.fps,cuts:p.cuts.map(c=>[c.in,c.out])});
+export const captionFrameRange=(c,words,fps,lastWordEnd)=>[Math.floor(words.get(c.wordIds[0]).start*fps),Math.ceil(Math.min(words.get(c.wordIds.at(-1)).end+.12,lastWordEnd)*fps)];
 export function assertPreparedProject(p,receipt,audioHash){
   if(JSON.stringify(audioTimeline(p))!==JSON.stringify(receipt.audioTimeline)||receipt.audioSha256!==audioHash)throw Error('Source/cuts/audio changed: prepare and realign a new revision before rendering');
 }
@@ -16,7 +17,7 @@ export function chunkContent(p,first,last){
   let cursor=0;
   const cuts=p.cuts.map(c=>{const from=cursor;cursor+=c.out-c.in;return{...c,from};}).filter(c=>c.from<=last&&c.from+c.out-c.in>first);
   const words=new Map(p.words.map(w=>[w.id,w]));
-  const captions=p.captions.filter(c=>words.get(c.wordIds[0]).start*p.canvas.fps<=last&&(words.get(c.wordIds.at(-1)).end+.12)*p.canvas.fps>first).map(c=>({...c,words:c.wordIds.map(id=>words.get(id))}));
+  const captions=p.captions.filter(c=>{const [from,end]=captionFrameRange(c,words,p.canvas.fps,p.words.at(-1).end);return from<=last&&end>first;}).map(c=>({...c,words:c.wordIds.map(id=>words.get(id))}));
   const active=events=>events.filter(e=>e.from<=last&&e.from+e.frames>first);
   // Editorial notes/revision labels do not change pixels; timed decisions do.
   return {first,last,canvas:p.canvas,profile:p.profile,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};

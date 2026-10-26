@@ -1,7 +1,7 @@
 import {EasyGraphics} from './EasyGraphics';
 import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {AbsoluteFill,Audio,Img,OffthreadVideo,Sequence,cancelRender,continueRender,delayRender,getRemotionEnvironment,staticFile,useCurrentFrame,useVideoConfig} from 'remotion';
-import {validateProject} from '../project.mjs';
+import {validateProject,captionFrameRange} from '../project.mjs';
 import {assertMeasuredCaption,assertSafeZoneRender,CAPTION_STYLE,planCaption} from '../safe-zones.mjs';
 export function Font(){const[h]=useState(()=>delayRender('Local editorial font'));useEffect(()=>{document.fonts.load('700 72px "EP Plex"').then(f=>{if(!f.length)throw Error('Missing local font');continueRender(h);}).catch(cancelRender);},[h]);return <style>{`@font-face{font-family:'EP Plex';src:url('${staticFile('font.ttf')}');font-weight:700;font-display:block}`}</style>;}
 const media=(a:any,preview:boolean)=>staticFile(preview&&a.previewFile?a.previewFile:a.file);
@@ -46,7 +46,7 @@ export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean}>
  if(p.profile!=='easy-graphics-v1')throw Error('This package renders only easy-graphics-v1; historical effects require their original runtime');
  const rendering=getRemotionEnvironment().isRendering,isPreview=preview&&!rendering,source=assets.get(p.source.assetId);let cursor=0;
  if(rendering&&!hideGraphics)assertSafeZoneRender(safeZones);
- const caption=p.captions.find((c:any)=>frame>=Math.floor(words.get(c.wordIds[0]).start*fps)&&frame<Math.ceil(Math.min(words.get(c.wordIds.at(-1)).end+.12,p.words.at(-1).end)*fps));
+ const caption=p.captions.find((c:any)=>{const [from,end]=captionFrameRange(c,words,fps,p.words.at(-1).end);return frame>=from&&frame<end;});
  const broll=p.broll.find((b:any)=>frame>=b.from&&frame<b.from+b.frames);
  const wordTexts=caption?.wordIds.map((id:string)=>words.get(id).text);
  const faceAvoid=caption&&!broll?p.speaker.faces.filter((f:any)=>f.t>=words.get(caption.wordIds[0]).start-.5&&f.t<=words.get(caption.wordIds.at(-1)).end+.5).map((f:any)=>({x:f.x-20,y:f.y-20,width:f.width+40,height:f.height+40})):[];

@@ -22,7 +22,7 @@ export function EasyGraphics({event:e,assets,cells}:any){
  const opacity=(at:number)=>Math.max(0,Math.min(1,(frame/fps-at)/.2));
  return <svg ref={svg} width={e.bounds.width} height={e.bounds.height} style={{position:'absolute',left:e.bounds.x,top:e.bounds.y,overflow:'visible',fontFamily:'EP Plex',fontWeight:700}}>
   {layout.heading?<text data-critical x={e.bounds.width/2} y={34} textAnchor="middle" fill={ink} fontSize={32}>{layout.heading.text}</text>:null}
-  {layout.connectors.map((c:any,i:number)=><path key={i} data-critical d={c.d} fill="none" stroke={accent} strokeWidth={4} opacity={opacity((i+1)*.25)}/>)}
+  {layout.connectors.map((c:any,i:number)=><path key={i} data-critical d={c.d} fill="none" stroke={accent} strokeWidth={4} opacity={opacity(e.props.layout==='exchange'?.25:(i+1)*.25)}/>)}
   {layout.items.map((n:any,i:number)=>{const x=n.x-e.bounds.x,y=n.y-e.bounds.y,label=lines[i],panel=e.type==='EasyMediaPanels',labelHeight=label.length*44;return <g key={n.id}>
    <rect data-critical x={x+4} y={y+4} width={n.width-8} height={n.height-8} rx={12} fill={e.props.theme==='dark'?'#fffdf8':'#172021'} stroke={ink} strokeWidth={2} opacity={opacity(n.at)}/>
    {panel?<foreignObject x={x+12} y={y+12} width={n.width-24} height={n.height-24-labelHeight} opacity={opacity(n.at)}><Img src={staticFile(assets.get(n.assetId).file)} style={{width:'100%',height:'100%',objectFit:'contain'}}/></foreignObject>:null}
