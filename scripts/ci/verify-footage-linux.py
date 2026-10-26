@@ -64,7 +64,15 @@ def docker(*args, **kwargs):
 def inspect(kind, name):
     result = docker(kind, 'inspect', name, check=False, timeout=10)
     if result.returncode:
-        return None
+        # A daemon/access failure is not evidence that a resource disappeared.
+        absent = {
+            'container': [f'Error: No such container: {name}',f'Error: No such object: {name}'],
+            'volume': [f'Error response from daemon: get {name}: no such volume',f'Error: No such volume: {name}'],
+            'network': [f'Error response from daemon: network {name} not found',f'Error: No such network: {name}'],
+        }
+        message=result.stderr.decode(errors='replace').strip()
+        if message.lower() in [x.lower() for x in absent.get(kind,[])]:return None
+        raise RuntimeError('Resource inspection is uncertain: '+message[:1000])
     return json.loads(result.stdout)[0]
 
 
@@ -78,7 +86,7 @@ class Evidence:
     def valid_resource(self,kind,name):
         owner=self.state['owner']
         if kind=='container':
-            return name in [owner+'-'+role for role in ('registry','fixture','smoke')] or bool(re.fullmatch(r'footage-[a-f0-9]{32}-(proxy|download|offline)',name))
+            return name in [owner+'-'+role for role in ('registry','fixture','smoke','tool-hash')] or bool(re.fullmatch(r'footage-[a-f0-9]{32}-(proxy|download|offline)',name))
         if kind=='volume':return bool(re.fullmatch(r'footage-[a-f0-9]{32}',name))
         return kind=='network' and name==owner+'-network'
 
@@ -237,9 +245,11 @@ HTTPS(('0.0.0.0',443),Web).serve_forever()
 '''
 
 
-def build(evidence, context, name):
+def build(evidence, context, name, dockerfile='Dockerfile'):
     reference = evidence.state['registry'] + '/ci/' + name + ':test'
-    result = docker('build', '--pull=false', '-t', reference, str(context), timeout=600, check=False)
+    recipe=(context/dockerfile).resolve()
+    assert recipe.is_relative_to(context.resolve()) and recipe.is_file()
+    result = docker('build', '--pull=false', '-f', str(recipe), '-t', reference, str(context), timeout=600, check=False)
     (evidence.out / ('build-' + name + '.log')).write_bytes(result.stdout + result.stderr)
     if result.returncode:
         raise AssertionError('Image build failed: ' + name)
@@ -294,7 +304,9 @@ def runtime_acceptance(repo, out):
     finally:
         try:evidence.cleanup();report['cleanup']='PASS'
         except Exception as error:report['cleanup']='FAIL';report['cleanupError']=str(error);raise
-        finally:write(out/'runtime-acceptance.json',report)
+        finally:
+            report['cleanupScope']='Exact owned containers, IPC volumes, fixture network and loopback registry; tool/image build caches expire with the disposable GitHub runner, no global prune'
+            write(out/'runtime-acceptance.json',report)
 
 
 def prepare_runtime(repo, evidence, report):
@@ -311,9 +323,11 @@ def prepare_runtime(repo, evidence, report):
     evidence.state['registry']='127.0.0.1:'+ports[0]['HostPort'];write(evidence.state_path,evidence.state)
     context=root/'contexts';context.mkdir()
     downloader=context/'downloader';shutil.copytree(package,downloader,ignore=shutil.ignore_patterns('__pycache__'))
-    original=build(evidence,downloader,'downloader-original')
+    original=build(evidence,downloader,'downloader-original',dockerfile='runtime/Dockerfile')
     lock=json.loads((package/'runtime/tools.lock.json').read_text())
-    result=docker('run','--rm','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges:true',
+    hash_container=owner+'-tool-hash';evidence.record('container',hash_container)
+    result=docker('run','--rm','--name',hash_container,'--label','ci.footage.owner='+owner,
+                  '--network','none','--cap-drop','ALL','--security-opt','no-new-privileges:true',
                   original,'python','-c',"import hashlib; print(hashlib.file_digest(open('/opt/yt-dlp','rb'),'sha256').hexdigest())")
     assert result.stdout.decode().strip()==lock['ytDlpSha256']
     report['toolsLockSha256']=sha(package/'runtime/tools.lock.json');report['registryImage']=REGISTRY
@@ -335,6 +349,7 @@ def prepare_runtime(repo, evidence, report):
     command(['ffmpeg','-v','error','-n','-f','lavfi','-i','testsrc2=size=360x640:rate=30',
              '-f','lavfi','-i','sine=frequency=220:sample_rate=48000','-t','6','-c:v','libx264',
              '-preset','ultrafast','-crf','18','-c:a','aac',media],timeout=45)
+    shutil.copyfile(media,evidence.out/'generated-source.mp4')
     fixture=context/'fixture';fixture.mkdir()
     for filename in ('server.crt','server.key'):shutil.copyfile(tls/filename,fixture/filename)
     shutil.copyfile(media,fixture/'source.mp4');(fixture/'server.py').write_text(SERVER)
@@ -418,7 +433,11 @@ def exercise_runtime(repo, evidence, report):
         before=len(evidence.resources())
         reused=acquisition.acquire(request|{'context':'Different generated placement'},policy,config,positive,factory)
         assert reused['sha256']==asset['sha256'] and len(evidence.resources())==before
-        return {'assetSha256':asset['sha256'],'acquiredSha256':facts['acquiredSha256'],'duration':facts['duration'],'cacheReuse':True}
+        receipt=Path(asset['path']).parent/'receipt.json'
+        shutil.copyfile(asset['path'],evidence.out/'acquired-generated.mp4')
+        shutil.copyfile(receipt,evidence.out/'acquired-receipt.json')
+        return {'assetSha256':asset['sha256'],'acquiredSha256':facts['acquiredSha256'],
+                'receiptSha256':sha(receipt),'duration':facts['duration'],'cacheReuse':True}
     case(report,'real-https-acquisition-normalization-and-cache',accepted)
     evidence.state.update(request=request,policy=policy,positiveCache=str(positive));write(evidence.state_path,evidence.state)
 
@@ -594,6 +613,9 @@ const {rendererHash}=await readRendererIdentity(process.cwd(),dir+'/public/font.
 const value=await createExportAcceptance({dir,root:process.cwd(),projectHash:await hash(dir+'/project.json'),rendererHash,profile:p.profile,runtimeFile})();
 if(!value.ready||value.status!=='ACCEPTED')throw Error('Joined export not accepted');console.log(JSON.stringify(value));"""
     acceptance=json.loads(command([node,'--input-type=module','-e',verify,project,runtime],cwd=studio).stdout)
+    shutil.copyfile(manifest,evidence.out/'composed-manifest.json')
+    shutil.copyfile(project/'prepare-receipt.json',evidence.out/'joined-prepare-receipt.json')
+    shutil.copyfile(project/'project.json',evidence.out/'joined-project.json')
     shutil.copyfile(project/'final.mp4',evidence.out/'joined-generated.mp4')
     write(evidence.out/'joined-acceptance.json',{'status':'PASS','identity':evidence.state,
           'manifestSha256':sha(manifest),'acquiredReceiptSha256':binding['receiptSha256'],
