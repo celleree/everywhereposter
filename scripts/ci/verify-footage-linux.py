@@ -66,7 +66,8 @@ def inspect(kind, name):
     if result.returncode:
         # A daemon/access failure is not evidence that a resource disappeared.
         absent = {
-            'container': [f'Error: No such container: {name}',f'Error: No such object: {name}'],
+            'container': [f'Error: No such container: {name}',f'Error: No such object: {name}',
+                          f'Error response from daemon: No such container: {name}'],
             'volume': [f'Error response from daemon: get {name}: no such volume',f'Error: No such volume: {name}'],
             'network': [f'Error response from daemon: network {name} not found',f'Error: No such network: {name}'],
         }
