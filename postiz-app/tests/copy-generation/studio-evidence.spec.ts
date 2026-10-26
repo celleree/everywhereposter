@@ -73,23 +73,41 @@ it('exports actual private IPC snapshots, rejects stale/foreign requests and ret
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }
 });
 it.each([429, 503, undefined])('distinguishes proven native admission rejection (%s) from uncertain transport', async status => {
-  const root = await mkdtemp(join(tmpdir(), 'studio-admission-')), source = join(root, 'source.mp4'); await writeFile(source, 'original');
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'studio-admission-'))), source = join(root, 'source.mp4'); await writeFile(source, 'original');
+  const previousUploadDirectory = process.env.UPLOAD_DIRECTORY, previousStorageProvider = process.env.STORAGE_PROVIDER;
+  let lookups = 0, creates = 0;
   try {
-    const service = new CookedReviewService({ getMediaByOrganizationIdAndId: async () => ({ type: 'video', path: source }) } as any,
+    process.env.UPLOAD_DIRECTORY = root; process.env.STORAGE_PROVIDER = 'local';
+    const service = new CookedReviewService({ getMediaByOrganizationIdAndId: async () => ({ type: 'video', path: source.replace(/\\/g, '/') }) } as any,
       { probeForCooked: async () => ({ fps: 30, width: 360, height: 640, durationMs: 6000 }) } as any);
-    (service as any).readyClient = async () => ({ json: async () => { throw Object.assign(Error('absent'), { status: 404 }); },
-      create: async () => { throw Object.assign(Error('native rejection or transport loss'), { status }); } });
+    (service as any).readyClient = async () => ({ json: async () => { lookups++; throw Object.assign(Error('absent'), { status: 404 }); },
+      create: async () => { creates++; throw Object.assign(Error('native rejection or transport loss'), { status }); } });
     let result: any; try { await service.studioSource('org', 'source', randomUUID(), root, true); } catch (e) { result = e; }
+    assert.equal(lookups, 1); assert.equal(creates, 1);
     assert.ok(result); assert.equal(result.studioNotAdmitted === true, status === 429 || status === 503);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    if (previousUploadDirectory === undefined) delete process.env.UPLOAD_DIRECTORY; else process.env.UPLOAD_DIRECTORY = previousUploadDirectory;
+    if (previousStorageProvider === undefined) delete process.env.STORAGE_PROVIDER; else process.env.STORAGE_PROVIDER = previousStorageProvider;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 it('never labels a known existing native job as not admitted when later export is pending', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'studio-existing-')), source = join(root, 'source.mp4'); await writeFile(source, 'original');
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'studio-existing-'))), source = join(root, 'source.mp4'); await writeFile(source, 'original');
+  const previousUploadDirectory = process.env.UPLOAD_DIRECTORY, previousStorageProvider = process.env.STORAGE_PROVIDER;
+  let lookups = 0, creates = 0;
   try {
-    const service = new CookedReviewService({ getMediaByOrganizationIdAndId: async () => ({ type: 'video', path: source }) } as any,
+    process.env.UPLOAD_DIRECTORY = root; process.env.STORAGE_PROVIDER = 'local';
+    const service = new CookedReviewService({ getMediaByOrganizationIdAndId: async () => ({ type: 'video', path: source.replace(/\\/g, '/') }) } as any,
       { probeForCooked: async () => ({ fps: 30, width: 360, height: 640, durationMs: 6000 }) } as any);
-    (service as any).readyClient = async () => ({ json: async () => ({ status: 'working', jobId: randomUUID(), revision: 0 }) });
+    (service as any).readyClient = async () => ({ json: async () => { lookups++; return { status: 'working', jobId: randomUUID(), revision: 0 }; },
+      create: async () => { creates++; throw Error('Existing native job must not be recreated'); } });
     let result: any; try { await service.studioSource('org', 'source', randomUUID(), root, true); } catch (e) { result = e; }
+    assert.equal(lookups, 1); assert.equal(creates, 0);
     assert.ok(result); assert.notEqual(result.studioNotAdmitted, true);
-  } finally { await rm(root, { recursive: true, force: true }); }
+    assert.match(result.message, /Source evidence is still pending/);
+  } finally {
+    if (previousUploadDirectory === undefined) delete process.env.UPLOAD_DIRECTORY; else process.env.UPLOAD_DIRECTORY = previousUploadDirectory;
+    if (previousStorageProvider === undefined) delete process.env.STORAGE_PROVIDER; else process.env.STORAGE_PROVIDER = previousStorageProvider;
+    await rm(root, { recursive: true, force: true });
+  }
 });
