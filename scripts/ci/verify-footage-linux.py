@@ -25,7 +25,11 @@ import uuid
 
 # Official library/registry:3.0.0 index, verified against Docker Hub metadata.
 REGISTRY = 'registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e'
-REQUIRED_UNIT_TESTS = 16  # Fifteen contract tests plus the opt-in Linux smoke.
+REQUIRED_UNIT_TESTS = 19  # Seventeen contract/synthetic tests plus two real Linux tests.
+REQUIRED_REAL_TESTS = {
+    'tests.test_runtime_integration.Tests.test_direct_child_network_has_no_route',
+    'tests.test_runtime_integration.Tests.test_copy_from_real_container_tmpfs',
+}
 REQUIRED_CASES = {
     'official-tool-hash-and-real-unit-smoke','real-https-acquisition-normalization-and-cache',
     'untrusted-tls-certificate-rejected','redirect-unknown','redirect-private',
@@ -88,7 +92,7 @@ class Evidence:
     def valid_resource(self,kind,name):
         owner=self.state['owner']
         if kind=='container':
-            return name in [owner+'-'+role for role in ('registry','fixture','smoke','tool-hash','generator','asset-probe','asset-decode')] or bool(re.fullmatch(r'footage-[a-f0-9]{32}-(proxy|download|offline)',name))
+            return name in [owner+'-'+role for role in ('registry','fixture','smoke','tool-hash','generator','asset-probe','asset-decode')] or bool(re.fullmatch(r'footage-[a-f0-9]{32}-(proxy|download|offline|transport)',name))
         if kind=='volume':return bool(re.fullmatch(r'footage-[a-f0-9]{32}',name))
         return kind=='network' and name==owner+'-network'
 
@@ -154,7 +158,7 @@ def checked_runtime(repo, evidence):
                 args = ['volume', 'create', '--label', 'ci.footage.owner=' + evidence.state['owner'], self.volume]
             if args[:2] == ['run', '-d']:
                 name = args[args.index('--name') + 1]
-                assert name in [self.volume + '-' + role for role in ('proxy', 'download', 'offline')]
+                assert name in [self.volume + '-' + role for role in ('proxy', 'download', 'offline', 'transport')]
                 evidence.record('container', name)
                 args[2:2] = ['--label', 'ci.footage.owner=' + evidence.state['owner']]
                 if name.endswith('-proxy'):
@@ -400,19 +404,28 @@ def prepare_runtime(repo, evidence, report):
     suite=unittest.defaultTestLoader.discover(str(package/'tests'),top_level_dir=str(package))
     # Preserve the smoke's actual network test, adding only owned lifecycle IDs.
     smoke=importlib.import_module('tests.test_runtime_integration');smoke_calls=[]
-    original_subprocess=smoke.subprocess
+    original_subprocess=smoke.subprocess;original_runtime=smoke.Runtime
     def owned_smoke(args,**kwargs):
         assert args[:2]==['docker','run'] and '--rm' in args and '--network' in args
         assert args[args.index('--network')+1]=='none'
         name=owner+'-smoke';evidence.record('container',name);smoke_calls.append(name)
         return subprocess.run(args[:2]+['--name',name,'--label','ci.footage.owner='+owner]+args[2:],**kwargs)
-    smoke.subprocess=types.SimpleNamespace(run=owned_smoke)
-    with open(evidence.out/'unit-tests.log','w') as log:
-        try:result=unittest.TextTestRunner(stream=log,verbosity=2).run(suite)
-        finally:smoke.subprocess=original_subprocess
+    smoke.subprocess=types.SimpleNamespace(**vars(original_subprocess))
+    smoke.subprocess.run=owned_smoke;smoke.Runtime=factory
+    class RecordingResult(unittest.TextTestResult):
+        def __init__(self,*args,**kwargs):
+            super().__init__(*args,**kwargs);self.success_ids=[]
+        def addSuccess(self,test):
+            super().addSuccess(test);self.success_ids.append(test.id())
+    try:
+        with open(evidence.out/'unit-tests.log','w') as log:
+            result=unittest.TextTestRunner(stream=log,verbosity=2,resultclass=RecordingResult).run(suite)
+    finally:
+        smoke.subprocess=original_subprocess;smoke.Runtime=original_runtime
     assert result.testsRun==REQUIRED_UNIT_TESTS and result.wasSuccessful() and not result.skipped
-    assert len(smoke_calls)==1
-    report['unitTests']={'executed':result.testsRun,'skipped':len(result.skipped),'fakeRuntimeContractTests':15,'realNoRouteSmoke':1}
+    assert len(smoke_calls)==1 and REQUIRED_REAL_TESTS <= set(result.success_ids)
+    report['unitTests']={'executed':result.testsRun,'skipped':len(result.skipped),'contractAndSyntheticTests':17,
+                         'realNoRouteSmoke':1,'realTmpfsTransport':1,'successfulTestIds':result.success_ids}
     case(report,'official-tool-hash-and-real-unit-smoke',lambda:report['unitTests'])
 
 
