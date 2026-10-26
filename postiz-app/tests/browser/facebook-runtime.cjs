@@ -43,6 +43,7 @@ module.exports = function facebookRuntime() {
     reconcileFacebookPublished: (...args) => service.reconcile(...args),
     mapTypeToPost: (...args) => postsService.mapTypeToPost(...args),
     createPost: (...args) => create(...args),
+    reconcileSubmission: (...args) => postsService.reconcileSubmission(...args),
   }, undefined, new ShortLinkService());
   let fixture, calls = [], remote = new Map(), mode = 'success';
   let reads = 0;
@@ -107,12 +108,17 @@ module.exports = function facebookRuntime() {
     const pathname = target.pathname;
     if (!pathname.startsWith('/__facebook/') && !/(?:^|;\s*)facebook-fixture=1(?:;|$)/.test(req.headers.cookie || '')) return false;
     const management = /^\/posts\/([^/]+)\/facebook-published(\/reconcile)?$/.exec(pathname);
-    const handled = pathname.startsWith('/__facebook/') || fixture && (management || ['/user/self', '/user/organizations', '/integrations/list', '/integrations', '/posts', '/posts/list'].includes(pathname) || pathname.startsWith('/posts/group/') || /^\/posts\/[^/]+$/.test(pathname) && !['/posts/tags', '/posts/find-slot'].includes(pathname));
+    const submission = /^\/posts\/submissions\/([^/]+)$/.exec(pathname);
+    const handled = pathname.startsWith('/__facebook/') || fixture && (submission || management || ['/user/self', '/user/organizations', '/integrations/list', '/integrations', '/posts', '/posts/list'].includes(pathname) || pathname.startsWith('/posts/group/') || /^\/posts\/[^/]+$/.test(pathname) && !['/posts/tags', '/posts/find-slot'].includes(pathname));
     if (!handled) return false;
     const auth = req.headers.auth || /(?:^|;\s*)auth=([^;]+)/.exec(req.headers.cookie || '')?.[1];
     if (auth !== token) return send(res, {}, 401);
     if (pathname === '/__facebook/reset' && req.method === 'POST') return send(res, await reset(await jsonBody(req)));
     if (!fixture) return send(res, {}, 409);
+    if (submission) {
+      if (req.method !== 'GET') return send(res, {}, 405);
+      return send(res, await controller.reconcileSubmission(fixture.organization, decodeURIComponent(submission[1])));
+    }
     if (pathname === '/__facebook/evidence') return send(res, { calls, reads, posts: (await rows()).map(publicPost), remote: [...remote].map(([id, message]) => ({ id, message })) });
     if (pathname === '/__facebook/mode' && req.method === 'POST') { mode = (await jsonBody(req)).mode; return send(res, {}); }
     if (management) {

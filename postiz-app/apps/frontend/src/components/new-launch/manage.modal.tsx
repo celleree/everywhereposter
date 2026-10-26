@@ -1184,6 +1184,7 @@ export const ManageModal: FC<
       }
 
       let submittedPosts: Array<{ postId: string; integration: string }> = [];
+      let durableSubmissionId: string | null = null;
 
       if (!dummy) {
         try {
@@ -1206,13 +1207,31 @@ export const ManageModal: FC<
               };
             }
 
-            if (recovery.active && standaloneCreate && !existingData.integration && (type === 'now' || type === 'schedule') && !recovery.beginSubmission(data.posts.map((post: any) => post.integration.id))) {
+            const reviewedImmediate = recovery.active && standaloneCreate && !existingData.integration &&
+              type === 'now' && !guidedRequest?.quickUpload;
+            if (reviewedImmediate) {
+              if (data.shortLink || data.inter || data.posts.length > 100 || !data.posts.length ||
+                  new Set(data.posts.map((post: any) => post.integration.id)).size !== data.posts.length ||
+                  data.posts.some((post: any) => post.value.length !== 1 || Object.keys(post.settings).some(key => key.startsWith('plug-')))) {
+                const message = 'Reviewed immediate publishing supports one post per account without comments, repeating, plug actions or shortlinks. Remove those options, or save a draft for a separate publishing flow.';
+                toaster.show(message, 'warning'); setLoading(false);
+                return { ok: false, kind: 'preflight', ambiguous: false, message };
+              }
+              durableSubmissionId = await recovery.beginImmediateSubmission(data.posts.map((post: any) => post.integration.id));
+              if (!durableSubmissionId || !recovery.isImmediateSubmissionCurrent(durableSubmissionId)) {
+                durableSubmissionId = null;
+                setLoading(false);
+                return { ok: false, kind: 'preflight', ambiguous: false, message: 'The publishing attempt could not be saved safely. Check the existing attempt and browser storage before retrying.' };
+              }
+              (data as any).submissionId = durableSubmissionId;
+            }
+            if (!reviewedImmediate && recovery.active && standaloneCreate && !existingData.integration && (type === 'now' || type === 'schedule') && !recovery.beginSubmission(data.posts.map((post: any) => post.integration.id))) {
               setLoading(false);
               return { ok: false, kind: 'preflight', ambiguous: false, message: 'The publishing attempt could not be saved safely. Keep this page open and restore browser storage before trying again.' };
             }
             // New immediate, single-destination Facebook text posts use the existing
             // durable publication receipt so later mutations have trusted provenance.
-            if (type === 'now' && !data.shortLink && !data.inter && data.posts.length === 1 &&
+            if (!reviewedImmediate && type === 'now' && !data.shortLink && !data.inter && data.posts.length === 1 &&
                 integrations.find((integration) => integration.id === data.posts[0].integration.id)?.identifier === 'facebook' && !existingData.integration &&
                 data.posts[0].value.length === 1 && !data.posts[0].value[0].image.length &&
                 !data.posts[0].settings.url && !Object.keys(data.posts[0].settings).some((key) => key.startsWith('plug-'))) {
@@ -1244,18 +1263,25 @@ export const ManageModal: FC<
                 ok: false,
                 kind: 'request',
                 message,
-                ambiguous: Boolean(guidedRequest),
+                ambiguous: Boolean(guidedRequest || durableSubmissionId),
                 ...(guidedRequest?.quickUpload ? { skipped: quickSkipped } : {}),
               };
             }
 
-            if (guidedRequest) {
+            if (guidedRequest || durableSubmissionId) {
               try {
                 const responseBody = await response.json();
-                const destinationIds = new Set(guidedRequest.destinationIds);
+                const destinationIds = new Set(guidedRequest?.destinationIds || data.posts.map((post: any) => post.integration.id));
 
                 if (!Array.isArray(responseBody)) {
                   throw new Error('The publishing response was not a list.');
+                }
+                if (durableSubmissionId && (responseBody.length !== destinationIds.size ||
+                    new Set(responseBody.map((post: any) => post?.postId)).size !== destinationIds.size ||
+                    new Set(responseBody.map((post: any) => post?.integration)).size !== destinationIds.size ||
+                    responseBody.some((post: any) => !destinationIds.has(post?.integration) ||
+                      typeof post.postId !== 'string' || !post.postId.trim()))) {
+                  throw new Error('The publishing response did not match every reviewed destination.');
                 }
 
                 submittedPosts = responseBody
@@ -1301,9 +1327,11 @@ export const ManageModal: FC<
             ok: false,
             kind: 'transport',
             message,
-            ambiguous: Boolean(guidedRequest),
+            ambiguous: Boolean(guidedRequest || durableSubmissionId),
                 ...(guidedRequest?.quickUpload ? { skipped: quickSkipped } : {}),
           };
+        } finally {
+          if (durableSubmissionId) void recovery.checkImmediateSubmission();
         }
 
         if (recovery.active && standaloneCreate && type === 'draft' && !existingData.integration && !addEditSets && !dummy) recovery.savedDraftComplete();
