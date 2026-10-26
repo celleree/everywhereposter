@@ -23,26 +23,44 @@ if [ "$1" = logs ]; then
 fi
 exit 1
 EOF
-chmod +x "$TEST_DIR/docker"
+# Advance a test-owned clock on polling instead of racing wall-clock seconds.
+cat >"$TEST_DIR/date" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" -eq 1 && "$1" = +%s ]] || exit 64
+cat "$FAKE_HEALTH_CLOCK"
+EOF
+cat >"$TEST_DIR/sleep" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" -eq 1 && "$1" =~ ^[1-9][0-9]*$ ]] || exit 64
+now=$(cat "$FAKE_HEALTH_CLOCK")
+printf '%s\n' "$((now + $1))" > "$FAKE_HEALTH_CLOCK"
+EOF
+chmod +x "$TEST_DIR/docker" "$TEST_DIR/date" "$TEST_DIR/sleep"
 
 run_case() {
   local name="$1" expected="$2" pattern="$3" states="$4" timeout_seconds="${5:-2}"
   printf '%s\n' "$states" >"$TEST_DIR/$name.states"
+  printf '0\n' >"$TEST_DIR/$name.clock"
   set +e
-  output=$(DOCKER_BIN="$TEST_DIR/docker" FAKE_DOCKER_STATES="$TEST_DIR/$name.states" \
+  output=$(PATH="$TEST_DIR:$PATH" FAKE_HEALTH_CLOCK="$TEST_DIR/$name.clock" \
+    DOCKER_BIN="$TEST_DIR/docker" FAKE_DOCKER_STATES="$TEST_DIR/$name.states" \
     bash "$SCRIPT_DIR/wait-for-container-health.sh" postiz "$timeout_seconds" 1 2>&1)
   status=$?
   set -e
   [ "$status" -eq "$expected" ] || { printf '%s: expected %s, got %s\n%s\n' "$name" "$expected" "$status" "$output" >&2; exit 1; }
   [[ "$output" == *"$pattern"* ]] || { printf '%s: missing %s\n%s\n' "$name" "$pattern" "$output" >&2; exit 1; }
+  [ "$(cat "$TEST_DIR/$name.clock")" -eq "${6:-0}" ] || { printf '%s: unexpected polling clock\n' "$name" >&2; exit 1; }
 }
 
-run_case healthy 0 'postiz is healthy' $'true|starting|0\ntrue|healthy|0'
+run_case healthy 0 'postiz is healthy' $'true|starting|0\ntrue|healthy|0' 2 1
 run_case exited 1 'exited during deployment readiness' 'false|starting|0'
 run_case restarted 1 'restarted during deployment readiness' 'true|starting|1'
 run_case unhealthy 1 'reported unhealthy' 'true|unhealthy|0'
 run_case missing 1 'malformed or missing health state' 'true|missing|0'
 run_case malformed 1 'malformed or missing health state' 'unexpected'
-run_case timeout 1 'Timed out waiting' 'true|starting|0' 1
+run_case timeout 1 'Timed out waiting' 'true|starting|0' 1 1
+run_case late-health 1 'Timed out waiting' $'true|starting|0\ntrue|starting|0\ntrue|healthy|0' 2 2
 
 printf 'Container health polling tests passed.\n'

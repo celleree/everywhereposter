@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { createReadStream } from 'fs';
 import { randomUUID } from 'crypto';
 import { assertRenderedVideoFile } from './rendered-video-file';
@@ -7,7 +7,7 @@ import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import mime from 'mime-types';
 // @ts-ignore
 import { getExtension } from 'mime';
-import { IUploadProvider } from './upload.interface';
+import { IUploadProvider, StudioOutputIntent, studioOutputKey, verifyStudioFile, verifyStudioBytes } from './upload.interface';
 import axios from 'axios';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { fromBuffer } = require('file-type');
@@ -26,6 +26,40 @@ const ALLOWED_MIME_TYPES = new Set<string>([
 
 class CloudflareStorage implements IUploadProvider {
   private _client: S3Client;
+
+  async storeStudioOutput(path: string, intent: StudioOutputIntent) {
+    const key = studioOutputKey(intent);
+    const verifyStored = async () => {
+      let object;
+      try { object = await this._client.send(new GetObjectCommand({ Bucket: this._bucketName, Key: key }), { abortSignal: AbortSignal.timeout(30000) }); }
+      catch (error) {
+        if ((error as any).$metadata?.httpStatusCode === 404 || ['NoSuchKey', 'NotFound'].includes((error as Error).name)) return false;
+        throw error;
+      }
+      const stream = object.Body as AsyncIterable<Uint8Array> & { destroy?: (error?: Error) => void };
+      const timer = setTimeout(() => stream?.destroy?.(new Error('Studio object verification timed out')), 30000);
+      try {
+        if (!stream || object.ContentLength !== intent.bytes) throw new Error('Studio output size mismatch');
+        await verifyStudioBytes(stream, intent);
+      } finally { clearTimeout(timer); stream?.destroy?.(); }
+      return true;
+    };
+    if (!await verifyStored()) {
+      await verifyStudioFile(path, intent);
+      const body = createReadStream(path);
+      try {
+        await this._client.send(new PutObjectCommand({ Bucket: this._bucketName, Key: key, Body: body,
+          ContentLength: intent.bytes, ContentType: 'video/mp4', IfNoneMatch: '*',
+          Metadata: { sha256: intent.sha256 } }), { abortSignal: AbortSignal.timeout(30000) });
+      } catch (error) {
+        // Includes lost acknowledgements and competing conditional writes. Never
+        // delete/overwrite the immutable object; accept only verified bytes.
+        if (!await verifyStored()) throw error;
+      } finally { body.destroy(); }
+      if (!await verifyStored()) throw new Error('Studio output storage is unconfirmed');
+    }
+    return { key, path: `${this._uploadUrl}/${key}`, sha256: intent.sha256, bytes: intent.bytes };
+  }
 
   constructor(
     accountID: string,

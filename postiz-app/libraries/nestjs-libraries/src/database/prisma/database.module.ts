@@ -22,6 +22,9 @@ import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { VideoEditorService } from '../../media-editing/video-editor.service';
+import { StudioEditRepository } from '../../media-editing/studio-edit.repository';
+import { StudioEditService } from '../../media-editing/studio-edit.service';
+import { StudioDirectorService } from '../../media-editing/studio-director.service';
 import { CookedReviewService } from '../../media-editing/cooked-review.service';
 import { FfmpegVideoEditorService } from '../../media-editing/ffmpeg-video-editor.service';
 import { MediaRepository } from '@gitroom/nestjs-libraries/database/prisma/media/media.repository';
@@ -110,6 +113,9 @@ import { ResumableUploadService } from '../../upload/resumable-upload.service';
     SignatureService,
     MediaService,
     VideoEditorService,
+    StudioEditRepository,
+    StudioEditService,
+    StudioDirectorService,
     CookedReviewService,
     FfmpegVideoEditorService,
     MediaRepository,

@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SWRConfig, unstable_serialize } from 'swr';
 import { VideoEditorWorkspace } from '../../apps/frontend/src/components/video-editor/video-editor.workspace';
+import { StudioReviewWorkspace } from '../../apps/frontend/src/components/video-editor/studio-review.workspace';
 
 const mockFetch = jest.fn();
 const mockOpenModal = jest.fn();
@@ -17,12 +18,24 @@ import { buildVideoEditDecisionList } from '../../libraries/nestjs-libraries/src
 
 const output = { id: 'output-1', path: '/edited.mp4', originalName: 'Original-edited.mp4', type: 'video' };
 const video = { id: 'video-1', path: '/fixture.mp4', originalName: 'Original.mp4', type: 'video' };
+function studioFallback() {
+  return Object.fromEntries(['org-1', 'org-2'].flatMap(org => [
+    [unstable_serialize(['studio-availability', 'user-1:' + org]), { enabled: false }],
+    [unstable_serialize(['studio-jobs', 'user-1:' + org]), []],
+  ]));
+}
 function legacyConfig() {
   return { provider: () => new Map(), dedupingInterval: 0, revalidateIfStale: false,
-    fallback: Object.fromEntries(['org-1', 'org-2'].map(org => [unstable_serialize(['word-editor-availability', 'user-1:' + org]), { enabled: false }])) };
+    fallback: { ...studioFallback(), ...Object.fromEntries(['org-1', 'org-2'].map(org => [unstable_serialize(['word-editor-availability', 'user-1:' + org]), { enabled: false }])) } };
 }
 function mount() {
   return render(<SWRConfig value={legacyConfig()}><VideoEditorWorkspace /></SWRConfig>);
+}
+function mountStudio(fallback: Record<string, unknown> = {}) {
+  return render(<SWRConfig value={{ ...legacyConfig(), fallback: { ...studioFallback(),
+    [unstable_serialize(['studio-availability', 'user-1:org-1'])]: { enabled: true }, ...fallback } }}>
+    <StudioReviewWorkspace scope="user-1:org-1" />
+  </SWRConfig>);
 }
 function select(items = [{ id: 'video-1', path: '/fixture.mp4' }]) {
   fireEvent.click(screen.getByRole('button', { name: 'Choose video' }));
@@ -46,6 +59,62 @@ beforeEach(() => {
   });
 });
 
+it('supports enabled Studio with no jobs without claiming a reviewed output', () => {
+  mountStudio();
+  expect(screen.getByRole('heading', { name: 'Create a Studio edit' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Create Studio edit (uses AI credits)' })).toBeDisabled();
+  expect(screen.queryByLabelText('Studio video to review')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Save reviewed copy' })).toBeNull();
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('keeps Studio safe while jobs load and then resolve to an empty list', async () => {
+  let resolve!: (value: unknown) => void;
+  mockFetch.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  mountStudio({ [unstable_serialize(['studio-jobs', 'user-1:org-1'])]: undefined });
+  expect(screen.getByRole('heading', { name: 'Create a Studio edit' })).toBeTruthy();
+  expect(screen.queryByLabelText('Studio video to review')).toBeNull();
+  await act(async () => resolve({ ok: true, json: async () => [] }));
+  expect(screen.getByRole('heading', { name: 'Create a Studio edit' })).toBeTruthy();
+  expect(screen.queryByLabelText('Recent result')).toBeNull();
+  expect(mockFetch.mock.calls.map(([url]) => url)).toEqual(['/media/studio/jobs']);
+  expect(mockFetch.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+it('does not claim readiness or mutate while a Studio result loads or fails', async () => {
+  let resolve!: (value: unknown) => void;
+  mockFetch.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  mountStudio({ [unstable_serialize(['studio-jobs', 'user-1:org-1'])]: [{ id: 'studio-job', state: 'RUNNING' }] });
+  expect(screen.getByRole('status').textContent).toContain('Preparing');
+  expect(screen.queryByLabelText('Studio video to review')).toBeNull();
+  await act(async () => resolve({ ok: false }));
+  expect(screen.queryByLabelText('Studio video to review')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Save reviewed copy' })).toBeNull();
+  expect(mockFetch.mock.calls.map(([url]) => url)).toEqual(['/media/studio/jobs/studio-job']);
+  expect(mockFetch.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+it.each([
+  ['studio-job', 'STALE_NEEDS_VERIFICATION', false],
+  ['old-job', 'PASS', false],
+  ['studio-job', 'PASS', true],
+])('requires current matching Studio readiness: %s / %s', (resultId, technicalStatus, ready) => {
+  mountStudio({
+    [unstable_serialize(['studio-jobs', 'user-1:org-1'])]: [{ id: 'studio-job', state: 'TECHNICAL_READY' }],
+    [unstable_serialize(['studio-result', 'user-1:org-1', 'studio-job'])]: {
+      id: resultId, generation: 1, sha256: 'a'.repeat(64), state: 'TECHNICAL_READY', technicalStatus, preview: '/private-fixture-preview',
+    },
+  });
+  if (ready) {
+    expect(screen.getByLabelText('Studio video to review').getAttribute('src')).toBe('/private-fixture-preview');
+    expect(screen.getByRole('button', { name: 'Save reviewed copy' })).toBeDisabled();
+  } else {
+    expect(screen.queryByLabelText('Studio video to review')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save reviewed copy' })).toBeNull();
+  }
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
 it('starts empty with a conservative explicit pacing default and no mutation', () => {
   mount();
   expect(screen.getByText('Start with one video')).toBeTruthy();
@@ -54,6 +123,15 @@ it('starts empty with a conservative explicit pacing default and no mutation', (
   expect(screen.getByRole('button', { name: 'Create edit' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Download MP4' })).toBeNull();
   expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('keeps inactive Studio reads scoped when editing in another organization', async () => {
+  mockUser = { id: 'user-1', orgId: 'org-2' };
+  mount();
+  expect(mockFetch).not.toHaveBeenCalled();
+  select(); await screen.findByLabelText('Edited video preview');
+  expect(mockFetch.mock.calls.filter(([url]) => url === '/media/video-1')).toHaveLength(1);
+  expect(mockFetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
 });
 
 it('loads one existing media record and exposes manual playback and observed metadata', async () => {
@@ -163,7 +241,7 @@ it('waits for mode selection and keeps native mode during worker recovery', asyn
   localStorage.setItem('everywhereposter:video-editor-selection:v1:user-1:org-1', JSON.stringify({ version: 1, sourceId: video.id, pacing: 'relaxed' }));
   let resolve!: (value: unknown) => void;
   mockFetch.mockReturnValueOnce(new Promise(done => { resolve = done; }));
-  render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}><VideoEditorWorkspace /></SWRConfig>);
+  render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, revalidateIfStale: false, fallback: studioFallback() }}><VideoEditorWorkspace /></SWRConfig>);
   expect(screen.getByRole('status').textContent).toContain('Loading editor');
   expect(screen.queryByRole('button', { name: 'Choose video' })).toBeNull();
   await act(async () => resolve({ ok: true, json: async () => ({ enabled: true, ready: false }) }));
