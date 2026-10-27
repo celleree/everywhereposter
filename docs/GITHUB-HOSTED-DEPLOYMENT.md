@@ -34,6 +34,49 @@ Stage 1 documents coordination only. [The operating manual](../OPERATING-MANUAL.
 
 Within an explicitly authorized bounded release, the coordinator may inspect live GitHub state, verify identities, commit/push the approved change, create/update its PR, wait for CI/image builds, inspect jobs, gather diagnostics, prepare approval requests, and continue previously authorized substeps. It must not improvise replacement deployment commands. [Model routing](brain/ORCHESTRATOR_PROTOCOL.md#bounded-release-coordinator) permits Luna for routine coordination and escalation for substantive failures.
 
+### Optional readiness check before long validation
+
+Once this change is published, the named release owner can use the opt-in
+readiness checks below when runner execution is within the approved scope.
+These diagnostics do not install tools, repair login, change settings, post
+comments, or run a review. Existing workflow permissions, owner restrictions,
+runner labels, and normal role behavior are unchanged.
+
+1. On the authorized coordinator's executor, **outside the self-hosted runner**,
+   run `bash scripts/agents/check-release-readiness.sh coordinator` using existing
+   GitHub access. Discovery paginates and matches all `self-hosted`, `linux`, and
+   `codex` labels. `READY` means online and idle now; `BUSY` needs a bounded wait
+   under the release owner's deadline; `OFFLINE` includes no matching runner.
+   Inaccessible, incomplete, changing, or malformed results are `UNKNOWN` and
+   stop readiness progression. Do not broaden credentials/permissions or queue
+   a long job to work around unknown/offline state. The helper does not poll.
+2. After `READY`, and only with authorized runner execution, dispatch the short
+   mode from `main`: `gh workflow run codex-development-agents.yml --repo
+   celleree/everywhereposter --ref main -f mode=preflight -f number=<PR>`.
+   Inspect that exact run/attempt. It checks the existing runner's tools, Codex
+   CLI options, local login status, and required gh repository/PR fields. The
+   mode skips normal role execution and its configuration-cleanup step. Probes
+   have 15-second limits, a 90-second probe budget, and a two-minute step limit.
+   Availability can change after discovery; a queued run is not readiness proof.
+3. Record the timestamp, workflow run/attempt (whose jobs identify the runner),
+   target PR/base/HEAD, and categorized result. `CONFIGURED [CODEX_LOGIN]`
+   proves only local login status. **Live Codex authentication, expiry, and
+   model access remain `UNVERIFIED` even when this step passes.** No model
+   request or metered inference is made. The diagnostics may create normal
+   tool-local state; they do not directly read or print credential files.
+
+Preflight is a point-in-time diagnostic, not CI, sandbox-execution proof,
+independent review approval, merge/deployment authority, or feature acceptance.
+Continue all required validation and inspect actual review findings. A separate
+approved live authentication probe would consume the account's Codex/API usage;
+none is included here. These checks catch specific readiness problems and do
+not promise prevention of every future blocker.
+
+Local regression validation is `bash scripts/agents/test-release-readiness.sh`.
+It uses isolated fixtures/stub executables, no real credentials, GitHub requests,
+model calls, or workflow dispatches. Missing tools/authentication require a
+separately authorized repair; this helper never repairs them.
+
 ### Release identity
 
 Maintain one release record in the handoff/run evidence, with these fields as applicable:
