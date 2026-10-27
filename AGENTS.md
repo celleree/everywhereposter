@@ -61,7 +61,7 @@ Do not search every provider or service when the failing route/component already
 - Work in credit-saving mode.
 - Prefer small, targeted fixes.
 - Do not scan the entire repository unless necessary.
-- Do not edit files until you have explained the plan for meaningful non-mechanical work.
+- Explain the plan for meaningful non-mechanical work before editing. Ordinary reversible edits and directly necessary tests within the currently authorized scope need no separate or repeated planning approval.
 - Before editing, identify the likely root cause, smallest coherent fix, files to change, and verification command.
 - Before editing, each implementation task must name its owned paths, shared paths or dependencies, and prohibited paths. When work is parallel, the named integrator must resolve shared ownership before edits begin.
 - Inspect only the files directly related to the task, error, current issue, or governing contract.
@@ -69,7 +69,7 @@ Do not search every provider or service when the failing route/component already
 - Do not rename things unless required.
 - Do not change formatting unless required.
 - Do not add dependencies unless explicitly approved.
-- Run the narrowest relevant tests/checks while iterating; let CI provide broad regression coverage by default.
+- Run focused checks first, then satisfy all required repository validation. Reuse passing evidence only for the exact HEAD, scope, and applicable base/merge-ref identity; repeat checks when changes, failures, or unmet criteria invalidate it. This does not waive required gates or fresh review after a HEAD change.
 - Show/review the final diff and verification evidence.
 - Stop after the approved bounded task is correctly verified; do not continue into adjacent cleanup.
 
@@ -172,12 +172,16 @@ Explicit approval is required before:
 - accessing production data/secrets;
 - destructive Docker/database/filesystem/Git operations.
 
-Reversible branch-local work inside an already approved bounded scope does not require repeated approval at every edit.
+Reversible branch-local work inside an already approved bounded scope does not require repeated approval at every edit. Carry current verified authorization and exclusions forward through continuation/handoffs; do not reinstate a superseded read-only or planning-only phase. A current restriction, denial, or pending approval remains binding. These instructions do not override external approval controls or authorize future work.
 
 For work bounded to `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`, the root orchestrator or assigned responsible agent may merge only under the five-condition authorization in `docs/brain/ORCHESTRATOR_PROTOCOL.md`. Production deployment remains an explicit human approval gate.
 
 ## Bounded release continuation
 
+- Keep one named release owner and a concise handoff of current scope/authorization, exact candidate HEAD, completed evidence, remaining gates, and the next bounded action. Coordinate publication with that owner.
+- Before long release checks, verify readiness in the executor that will run them: matching runner availability, required tool capabilities, and authentication. Static checks, version output, and a configured local login do not prove runtime/API access. Missing or unknown readiness requires diagnosis, not unapproved login repair, installs, settings changes, or production operations.
+- A successful CI or agent workflow is not independent review approval. Inspect the actual review verdict, exact reviewed HEAD, and unresolved findings; keep review, required checks, and human approval as separate evidence.
+- Report local verification, merged code, deployed runtime, and enabled/verified feature behavior separately. Each claim needs its own matching evidence; a green workflow or merged PR alone proves neither deployment nor feature activation.
 - Successful gates permit only the next already-authorized step; they do not grant merge, production, rollback, migration, destructive-operation, or scope-expansion approval.
 - Commit/push before required independent review of the exact live PR HEAD. Any later HEAD change invalidates that review.
 - Stop progression on a failed, cancelled, stale, mismatched, or ambiguous gate. Diagnostics do not authorize repair, production retry, rollback, or an alternate SHA/image.
