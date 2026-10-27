@@ -10,6 +10,16 @@ import { NoAuthIntegrationsController } from '@gitroom/backend/api/routes/no.aut
 import { IntegrationService, hasYoutubeOfflineAuthorization } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { IntegrationRepository } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.repository';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
+import { NotEnoughScopes } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+
+async function expectCallbackDenied(run: () => Promise<unknown>, message: string) {
+  let rejected: unknown;
+  try { await run(); } catch (error) { rejected = error; }
+  // This is the established plain rejection object handled by the route's
+  // NotEnoughScopesFilter, not an Error subclass for Jest's toThrow matcher.
+  expect(rejected).toBeInstanceOf(NotEnoughScopes);
+  expect((rejected as NotEnoughScopes).message).toContain(message);
+}
 
 const auth = { id: 'google-user', name: 'User', picture: '', username: '',
   accessToken: 'synthetic-new-access', refreshToken: 'synthetic-new-refresh', expiresIn: 3600 };
@@ -62,18 +72,18 @@ it.each([false, true])('preserves fresh Google authorization on initial/reconnec
 });
 it.each(invalid)('does not replace a saved grant when Google returns %s', async (_, patch) => {
   const f = callback(); f.provider.authenticate.mockResolvedValue({ ...auth, ...patch } as any);
-  await expect(f.run()).rejects.toThrow('Your saved channel was not changed');
+  await expectCallbackDenied(f.run, 'Your saved channel was not changed');
   expect(f.persistence.createOrUpdateIntegration).not.toHaveBeenCalled(); expect(f.provider.reConnect).not.toHaveBeenCalled();
 });
 it.each(['authenticate', 'reConnect'] as const)('sanitizes %s failure before persistence', async method => {
   const f = callback(); f.provider[method].mockRejectedValue(Error('synthetic-private-provider-detail'));
   const log = jest.spyOn(console, 'error').mockImplementation(() => {});
-  await expect(f.run()).rejects.toThrow('Your saved channel was not changed');
+  await expectCallbackDenied(f.run, 'Your saved channel was not changed');
   expect(f.persistence.createOrUpdateIntegration).not.toHaveBeenCalled(); expect(log).not.toHaveBeenCalled();
 });
 it('refuses reconnecting a different channel', async () => {
   const f = callback(); f.provider.reConnect.mockResolvedValue({ ...auth, id: 'wrong-channel' } as any);
-  await expect(f.run()).rejects.toThrow('Please refresh the channel'); expect(f.persistence.createOrUpdateIntegration).not.toHaveBeenCalled();
+  await expectCallbackDenied(f.run, 'Please refresh the channel'); expect(f.persistence.createOrUpdateIntegration).not.toHaveBeenCalled();
 });
 it.each([false, true])('selects a new/existing channel with fresh offline metadata (existing=%s)', async existing => {
   const f = selection(existing); await f.service.saveProviderPage('org', 'pending', { id: 'channel' });
