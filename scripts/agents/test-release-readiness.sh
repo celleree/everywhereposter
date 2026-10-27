@@ -4,6 +4,7 @@ ROOT=$(git rev-parse --show-toplevel)
 SCRIPT="$ROOT/scripts/agents/check-release-readiness.sh"
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
+FORBIDDEN_CALLS='^codex:exec($| [^-])|^gh:(auth|workflow)( |$)|^gh:(pr|issue) comment( |$)|^gh:api .*--method (POST|PUT|PATCH|DELETE)( |$)|^tool:git:(config|fetch|push)( |$)'
 assert_absent() {
   local status=0
   grep -Eq -- "$1" "$2" || status=$?
@@ -21,6 +22,14 @@ fi
 if (assert_absent sensitive "$TEST_ROOT/missing") >/dev/null 2>&1; then
   echo 'FAIL unreadable-fixture assertion did not stop'; exit 1
 fi
+echo 'gh:pr view 279 --json author' > "$TEST_ROOT/assertion"
+assert_absent "$FORBIDDEN_CALLS" "$TEST_ROOT/assertion"
+for forbidden in 'gh:auth login' 'gh:workflow run' 'gh:pr comment 279' 'gh:api --method POST repos/example' 'tool:git:push'; do
+  printf '%s\n' "$forbidden" > "$TEST_ROOT/assertion"
+  if (assert_absent "$FORBIDDEN_CALLS" "$TEST_ROOT/assertion") >/dev/null 2>&1; then
+    echo 'FAIL prohibited-command assertion did not stop'; exit 1
+  fi
+done
 echo 'PASS safety assertions reject matches and unreadable fixtures'
 REAL_TIMEOUT=$(command -v timeout) || { echo 'BLOCKED: fixture tests require an existing timeout executable.'; exit 1; }
 REAL_JQ=$(command -v jq) || { echo 'BLOCKED: fixture tests require an existing jq executable; no installation attempted.'; exit 1; }
@@ -143,7 +152,7 @@ run_case() {
   fi
   assert_absent 'synthetic-sensitive-output|synthetic-workflow-token' "$case_dir/output"
   assert_absent UNEXPECTED "$case_dir/log"
-  assert_absent '^codex:exec($| [^-])|^gh:.*(comment|workflow|auth|POST)|^tool:git:(config|fetch|push)' "$case_dir/log"
+  assert_absent "$FORBIDDEN_CALLS" "$case_dir/log"
   if [[ "$mode" == coordinator ]]; then
     assert_absent 'codex:' "$case_dir/log"
   fi
