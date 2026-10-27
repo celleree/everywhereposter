@@ -99,7 +99,7 @@ export class AiWalletCheckoutService {
     if (!org) throw new BadRequestException('Organization not found.');
     if (org.paymentId) {
       const saved = await this.client().customers.retrieve(org.paymentId);
-      if (saved.deleted || saved.id !== org.paymentId || saved.livemode !== false) throw new Error('Test billing customer could not be verified.');
+      if (saved.deleted || saved.id !== org.paymentId || !('livemode' in saved) || saved.livemode !== false) throw new Error('Test billing customer could not be verified.');
       return org.paymentId;
     }
     await this.assertPrepaidPlan(organizationId);
@@ -110,7 +110,7 @@ export class AiWalletCheckoutService {
     const saved = await this.db.organization.findUnique({ where: { id: organizationId }, select: { paymentId: true } });
     if (!saved?.paymentId) throw new Error('Billing customer binding failed.');
     const bound = await this.client().customers.retrieve(saved.paymentId);
-    if (bound.deleted || bound.id !== saved.paymentId || bound.livemode !== false) throw new Error('Test billing customer could not be verified.');
+    if (bound.deleted || bound.id !== saved.paymentId || !('livemode' in bound) || bound.livemode !== false) throw new Error('Test billing customer could not be verified.');
     return saved.paymentId;
   }
 
