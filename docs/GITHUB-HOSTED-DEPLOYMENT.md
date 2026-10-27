@@ -41,6 +41,8 @@ readiness checks below when runner execution is within the approved scope.
 These diagnostics do not install tools, repair login, change settings, post
 comments, or run a review. Existing workflow permissions, owner restrictions,
 runner labels, and normal role behavior are unchanged.
+Preflight uses its own concurrency group so it cannot replace a pending normal
+agent role for the same PR.
 
 1. On the authorized coordinator's executor, **outside the self-hosted runner**,
    run `bash scripts/agents/check-release-readiness.sh coordinator` using existing

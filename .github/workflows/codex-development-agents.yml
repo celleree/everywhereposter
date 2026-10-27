@@ -18,7 +18,7 @@ on:
         type: string
 
 concurrency:
-  group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}
+  group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'preflight' && '-preflight' || '' }}
   cancel-in-progress: false
 
 permissions: {}

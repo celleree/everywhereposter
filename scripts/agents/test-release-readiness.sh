@@ -4,6 +4,24 @@ ROOT=$(git rev-parse --show-toplevel)
 SCRIPT="$ROOT/scripts/agents/check-release-readiness.sh"
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
+assert_absent() {
+  local status=0
+  grep -Eq -- "$1" "$2" || status=$?
+  if [[ "$status" != 1 ]]; then
+    echo 'FAIL prohibited output/call or unreadable fixture'
+    exit 1
+  fi
+}
+echo clean > "$TEST_ROOT/assertion"
+assert_absent sensitive "$TEST_ROOT/assertion"
+echo sensitive > "$TEST_ROOT/assertion"
+if (assert_absent sensitive "$TEST_ROOT/assertion") >/dev/null 2>&1; then
+  echo 'FAIL matching-output assertion did not stop'; exit 1
+fi
+if (assert_absent sensitive "$TEST_ROOT/missing") >/dev/null 2>&1; then
+  echo 'FAIL unreadable-fixture assertion did not stop'; exit 1
+fi
+echo 'PASS safety assertions reject matches and unreadable fixtures'
 REAL_TIMEOUT=$(command -v timeout) || { echo 'BLOCKED: fixture tests require an existing timeout executable.'; exit 1; }
 REAL_JQ=$(command -v jq) || { echo 'BLOCKED: fixture tests require an existing jq executable; no installation attempted.'; exit 1; }
 mkdir -p "$TEST_ROOT/bin"
@@ -123,11 +141,11 @@ run_case() {
   if [[ "$status" != "$expected" ]] || ! grep -Fq "$message" "$case_dir/output"; then
     cat "$case_dir/output"; echo "FAIL $name: exit $status, expected $expected / $message"; exit 1
   fi
-  ! grep -Eq 'synthetic-sensitive-output|synthetic-workflow-token' "$case_dir/output"
-  ! grep -Fq UNEXPECTED "$case_dir/log"
-  ! grep -Eq '^codex:exec($| [^-])|^gh:.*(comment|workflow|auth|POST)|^tool:git:(config|fetch|push)' "$case_dir/log"
+  assert_absent 'synthetic-sensitive-output|synthetic-workflow-token' "$case_dir/output"
+  assert_absent UNEXPECTED "$case_dir/log"
+  assert_absent '^codex:exec($| [^-])|^gh:.*(comment|workflow|auth|POST)|^tool:git:(config|fetch|push)' "$case_dir/log"
   if [[ "$mode" == coordinator ]]; then
-    ! grep -Fq 'codex:' "$case_dir/log"
+    assert_absent 'codex:' "$case_dir/log"
   fi
   if [[ "$mode" == runner && "$expected" == 0 ]]; then
     grep -Fq 'UNVERIFIED [CODEX_AUTH]' "$case_dir/output"
@@ -166,6 +184,7 @@ read, write = text.split('  read-role:\n', 1)[1].split('\n  write-role:\n', 1)
 assert text.count('github.actor == github.repository_owner') == 2
 assert text.count('github.triggering_actor == github.repository_owner') == 2
 assert text.count('runs-on: [self-hosted, linux, codex]') == 2
+assert "group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'preflight' && '-preflight' || '' }}" in text
 assert 'permissions: {}' in text
 assert re.search(r'    permissions:\n(.*?)    env:', read, re.S)[1] == '      contents: read\n      issues: write\n      pull-requests: write\n'
 assert re.search(r'    permissions:\n(.*?)    env:', write, re.S)[1] == '      actions: write\n      contents: write\n      issues: read\n      pull-requests: write\n'
