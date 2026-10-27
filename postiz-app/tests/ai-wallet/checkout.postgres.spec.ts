@@ -387,9 +387,14 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     process.env.AI_WALLET_TEST_OFFERS = '[{"id":"synthetic","amountCents":124}]';
     await expect(create('legacy_funded')).rejects.toThrow('different parameters');
     process.env.AI_WALLET_TEST_OFFERS = fixtureEnv.AI_WALLET_TEST_OFFERS;
-    await db.aiWalletTopup.create({ data: { id: randomUUID(), organizationId: org, operationKey: 'legacy_eur',
-      customerId: 'cus_synthetic', amountCents: 123, currency: 'eur', fundedAt: new Date() } });
-    await expect(create('legacy_eur')).rejects.toThrow('different parameters');
+    await expect(db.aiWalletTopup.create({ data: { id: randomUUID(), organizationId: org, operationKey: 'legacy_eur',
+      customerId: 'cus_synthetic', amountCents: 123, currency: 'eur', fundedAt: new Date(),
+      sessionId: `cs_eur_${legacy.id}`, paymentId: `pi_eur_${legacy.id}` } })).rejects.toThrow('AiWalletTopup_valid_funding');
+    // PostgreSQL forbids this currency; separately test the adapter's defensive read validation.
+    const read = jest.spyOn(db.aiWalletTopup, 'findUnique').mockResolvedValueOnce({ ...recorded,
+      currency: 'eur', wallet: { status: 'ACTIVE' } } as any);
+    await expect(create('legacy_funded')).rejects.toThrow('different parameters');
+    read.mockRestore();
     await db.aiWallet.update({ where: { organizationId: org }, data: { status: 'REVIEW' } });
     await expect(create('legacy_funded')).rejects.toThrow('reconciliation');
     await db.aiWallet.update({ where: { organizationId: org }, data: { status: 'ACTIVE' } });
