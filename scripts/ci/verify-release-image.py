@@ -128,7 +128,7 @@ class Verification:
             current = self.inspect(name)
             if current:
                 require(current["Config"].get("Labels", {}).get(LABEL) == self.owner, "Cleanup ownership mismatch")
-                self.docker("rm", "-f", current["Id"], timeout=30)
+                self.docker("rm", "-f", "-v", current["Id"], timeout=30)
         require(all(self.inspect(n) is None for n in self.owned), "Owned resources remain")
 
     def flags(self, role, network, memory="512m"):
@@ -139,6 +139,8 @@ class Verification:
 
     def app(self, image, role, db, command, data=None, action="check"):
         return self.docker("run", "-i", *self.flags(role, "container:" + db), "--workdir", "/app",
+                           "--tmpfs", "/config:rw,nosuid,noexec,size=16m",
+                           "--tmpfs", "/uploads:rw,nosuid,noexec,size=16m",
                            "-e", "DATABASE_URL=" + DATABASE, "-e", "NODE_OPTIONS=--max-old-space-size=256",
                            "-e", "PREFLIGHT_ACTION=" + action, "--entrypoint", command[0],
                            image, *command[1:], data=data, timeout=180)

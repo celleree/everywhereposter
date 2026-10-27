@@ -71,6 +71,15 @@ class SafetyTests(unittest.TestCase):
             with patch.object(subprocess,"run",return_value=failure), self.assertRaises(RuntimeError):
                 check.inspect("fixture")
 
+    def test_cleanup_removes_owned_anonymous_volumes_by_verified_container_id(self):
+        with tempfile.TemporaryDirectory() as root:
+            check=module.Verification(root)
+            check.owned=[check.owner+"-seed"]
+            meta={"Id":"verified-container-id","Config":{"Labels":{module.LABEL:check.owner}}}
+            with patch.object(check,"inspect",side_effect=[meta,None]), patch.object(check,"docker") as docker:
+                check.cleanup()
+            docker.assert_called_once_with("rm","-f","-v","verified-container-id",timeout=30)
+
     def test_recovery_rejects_arbitrary_cleanup_targets(self):
         with tempfile.TemporaryDirectory() as root:
             state=Path(root)/"state.json"
@@ -89,6 +98,17 @@ class SafetyTests(unittest.TestCase):
             self.assertIn("DATABASE_URL="+module.DATABASE,args)
             self.assertFalse(any(x.startswith(("GH_TOKEN=","GITHUB_TOKEN=","OPENAI_API_KEY=","STRIPE_")) for x in args))
             self.assertIn("example.invalid",module.NODE_CHECK)
+            self.assertIn("/config:rw,nosuid,noexec,size=16m",args)
+            self.assertIn("/uploads:rw,nosuid,noexec,size=16m",args)
+
+    def test_remaining_registry_auth_stops_before_any_docker_command(self):
+        with tempfile.TemporaryDirectory() as root:
+            argv=["verify","--candidate-sha",SHA,"--candidate-digest",DIGEST,
+                  "--previous-sha",SHA,"--previous-id",DIGEST,"--auth-directory",root,
+                  "--receipt",root+"/receipt.json","--state",root+"/state.json"]
+            with patch.object(module.os.sys,"argv",argv), patch.object(module.subprocess,"run") as run, self.assertRaises(RuntimeError):
+                module.main()
+            run.assert_not_called()
 
     def test_workflow_has_no_production_connection_and_cleans_auth_first(self):
         text=(ROOT.parent.parent/".github/workflows/release-preflight.yml").read_text()
