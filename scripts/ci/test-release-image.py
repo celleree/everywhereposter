@@ -129,5 +129,67 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(text.count("DOCKER_CONFIG: ${{ runner.temp }}/release-preflight-auth"),4)
 
 
+    def packaged_engine_case(self, mode="ok"):
+        harness=r"""
+const vm=require('vm'),crypto=require('crypto'),path=require('path');
+let input='';process.stdin.on('data',c=>input+=c).on('end',()=>{
+ const {source,mode}=JSON.parse(input),version='a'.repeat(40),calls=[];
+ let writes=0,error=null;
+ const readonly=new Proxy({
+  constants:{X_OK:1},
+  lstatSync:()=>({isFile:()=>mode!=='nonregular'}),
+  statSync:p=>({size:mode==='oversize'?49*1024*1024:mode==='cache-size'&&p.startsWith('/root')&&p.endsWith('libquery-engine')?100:7}),
+  accessSync:()=>{if(mode==='unexecutable')throw Error('EACCES')},
+  readFileSync:p=>Buffer.from(mode==='content'&&p.startsWith('/app')?'changed':'engines')
+ },{get:(o,k)=>k in o?o[k]:(()=>{writes++;throw Object.assign(Error('EROFS'),{code:'EROFS'})})});
+ const modules={fs:readonly,path,crypto,'@prisma/engines-version':{enginesVersion:version},
+ '@prisma/client':{Prisma:{prismaVersion:{engine:mode==='version'?'b'.repeat(40):version}}},
+ child_process:{spawnSync:(command,args,options)=>{calls.push({command,args,env:options.env});return {status:0}}}};
+ const req=name=>{if(!(name in modules))throw Error('Unexpected module');return modules[name]};
+ req.resolve=()=>'/app/node_modules/.prisma/client/default.js';
+ const fixtureProcess={env:{DATABASE_URL:'synthetic'},exitCode:0};
+ try{vm.runInNewContext(source,{require:req,process:fixtureProcess,Buffer})}catch(e){error=e.message}
+ console.log(JSON.stringify({writes,error,calls,exitCode:fixtureProcess.exitCode}));
+});
+"""
+        result=subprocess.run(["node","-e",harness],input=json.dumps({"source":module.NODE_MIGRATE,"mode":mode}),
+                              text=True,capture_output=True,check=True)
+        return json.loads(result.stdout)
+
+    def test_observed_erofs_is_avoided_without_cache_writes_or_exec_tmpfs(self):
+        result=self.packaged_engine_case()
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["writes"],0)
+        self.assertEqual(len(result["calls"]),1)
+        call=result["calls"][0]
+        self.assertEqual(call["command"],"pnpm")
+        self.assertEqual(call["args"],["exec","prisma","migrate","deploy","--schema",module.SCHEMA])
+        self.assertTrue(call["env"]["PRISMA_SCHEMA_ENGINE_BINARY"].startswith("/root/.cache/prisma/master/"))
+        self.assertTrue(call["env"]["PRISMA_QUERY_ENGINE_LIBRARY"].startswith("/app/node_modules/.prisma/client/"))
+        with tempfile.TemporaryDirectory() as root:
+            check=module.Verification(root)
+            with patch.object(check,"inspect",return_value=None):
+                flags=check.flags("baseline","container:fixture")
+            self.assertIn("/tmp:rw,nosuid,noexec,size=64m",flags)
+            self.assertIn("--read-only",flags)
+            self.assertNotIn("--mount",flags)
+
+    def test_packaged_engine_mismatch_or_size_fails_before_migration(self):
+        for mode in ["version","oversize","cache-size","content","unexecutable","nonregular"]:
+            with self.subTest(mode=mode):
+                result=self.packaged_engine_case(mode)
+                self.assertIsNotNone(result["error"])
+                self.assertEqual(result["calls"],[])
+                self.assertEqual(result["writes"],0)
+
+    def test_migration_uses_immutable_engine_program(self):
+        with tempfile.TemporaryDirectory() as root:
+            check=module.Verification(root)
+            with patch.object(check,"app") as app:
+                check.migrate(DIGEST,"baseline","fixture")
+            self.assertEqual(app.call_args.args,(DIGEST,"baseline","fixture",["node","-"]))
+            self.assertEqual(app.call_args.kwargs,{"data":module.NODE_MIGRATE})
+
+
 if __name__ == "__main__":
     unittest.main()

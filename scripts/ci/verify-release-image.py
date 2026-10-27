@@ -47,6 +47,26 @@ console.log(JSON.stringify(Object.fromEntries(fs.readdirSync(root).filter(x=>fs.
 """
 
 
+# Use immutable image engines; the default CLI cache updater writes on read-only roots.
+NODE_MIGRATE = r"""
+const fs=require('fs'),path=require('path'),crypto=require('crypto'),child=require('child_process');
+const version=require('@prisma/engines-version').enginesVersion;
+if(!/^[a-f0-9]{40}$/.test(version) || require('@prisma/client').Prisma.prismaVersion.engine!==version) throw Error('Packaged Prisma engine version mismatch');
+const root='/root/.cache/prisma/master/'+version+'/debian-openssl-3.0.x';
+const schema=root+'/schema-engine';
+const query=path.join(path.dirname(require.resolve('.prisma/client/default')),'libquery_engine-debian-openssl-3.0.x.so.node');
+const files=[schema,query,root+'/libquery-engine'];
+if(files.some(p=>!fs.lstatSync(p).isFile())) throw Error('Packaged Prisma engines must be regular files');
+if(fs.statSync(schema).size+fs.statSync(query).size>48*1024*1024) throw Error('Packaged Prisma engine size exceeds bound');
+fs.accessSync(schema,fs.constants.X_OK);
+if(fs.statSync(query).size!==fs.statSync(root+'/libquery-engine').size) throw Error('Packaged query engine size mismatch');
+const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+if(hash(query)!==hash(root+'/libquery-engine')) throw Error('Packaged query engine content mismatch');
+const result=child.spawnSync('pnpm',['exec','prisma','migrate','deploy','--schema','libraries/nestjs-libraries/src/database/prisma/schema.prisma'],{stdio:'inherit',env:{...process.env,PRISMA_SCHEMA_ENGINE_BINARY:schema,PRISMA_QUERY_ENGINE_LIBRARY:query}});
+if(result.error || result.status!==0) process.exitCode=1;
+"""
+
+
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
@@ -135,7 +155,7 @@ class Verification:
         return ["--name", self.record(role), "--label", LABEL + "=" + self.owner,
                 "--pull", "never", "--network", network, "--read-only", "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges", "--memory", memory, "--memory-swap", memory,
-                "--cpus", "1", "--pids-limit", "128", "--tmpfs", "/tmp:rw,nosuid,size=64m"]
+                "--cpus", "1", "--pids-limit", "128", "--tmpfs", "/tmp:rw,nosuid,noexec,size=64m"]
 
     def app(self, image, role, db, command, data=None, action="check"):
         return self.docker("run", "-i", *self.flags(role, "container:" + db), "--workdir", "/app",
@@ -146,8 +166,7 @@ class Verification:
                            image, *command[1:], data=data, timeout=180)
 
     def migrate(self, image, role, db):
-        self.app(image, role, db, ["/bin/sh", "-lc",
-                 "pnpm exec prisma migrate deploy --schema " + SCHEMA])
+        self.app(image, role, db, ["node", "-"], data=NODE_MIGRATE)
 
     def migration_evidence(self, image, role, db):
         expected = json.loads(self.app(image, role, db, ["node", "-"], data=NODE_MIGRATIONS))
