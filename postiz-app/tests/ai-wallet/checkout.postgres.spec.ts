@@ -315,9 +315,13 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     expect(sdk.checkout.sessions.create).toHaveBeenCalledTimes(1);
     now.mockRestore();
     await deliver(paid()); await deliver(paid());
+    sdk.accounts.retrieve.mockReset().mockRejectedValue(new Error('Synthetic Stripe outage'));
+    sdk.customers.retrieve.mockReset().mockRejectedValue(new Error('Synthetic Stripe outage'));
     await expect(create('late_ack')).resolves.toMatchObject({ topupId: row.id, status: 'funded', url: null });
     expect((await checkout.balance(org)).balanceNanos).toBe('1230000000');
     expect(sdk.checkout.sessions.create).toHaveBeenCalledTimes(1);
+    expect(sdk.accounts.retrieve).not.toHaveBeenCalled();
+    expect(sdk.customers.retrieve).not.toHaveBeenCalled();
   });
 
   it('commits dispatch before the network call and survives a crash before sending', async () => {
@@ -367,18 +371,40 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
       amount_total: 123, currency: 'usd', payment_status: 'paid', payment_intent: 'pi_legacy_funded' };
     await deliver(payment); await deliver(payment);
     const recorded = await db.aiWalletTopup.findUniqueOrThrow({ where: { id: legacy.id } });
+    sdk.accounts.retrieve.mockReset().mockRejectedValue(new Error('Synthetic Stripe outage'));
+    sdk.customers.retrieve.mockReset().mockRejectedValue(new Error('Synthetic Stripe outage'));
     for (let retry = 0; retry < 2; retry++) {
       await expect(create('legacy_funded')).resolves.toEqual({ topupId: legacy.id, status: 'funded', url: null });
     }
     const account = { accountId: 'acct_synthetic', mode: 'test' as const, returnUrl: fixtureEnv.FRONTEND_URL };
     await expect(wallet.createTopup(org, 'legacy_funded', 'cus_other', 123, account)).rejects.toThrow('different parameters');
     await expect(wallet.createTopup(org, 'legacy_funded', 'cus_synthetic', 124, account)).rejects.toThrow('different parameters');
+    for (const paymentId of [null, 'cus_other']) {
+      await db.organization.update({ where: { id: org }, data: { paymentId } });
+      await expect(create('legacy_funded')).rejects.toThrow('different parameters');
+    }
+    await db.organization.update({ where: { id: org }, data: { paymentId: 'cus_synthetic' } });
+    process.env.AI_WALLET_TEST_OFFERS = '[{"id":"synthetic","amountCents":124}]';
+    await expect(create('legacy_funded')).rejects.toThrow('different parameters');
+    process.env.AI_WALLET_TEST_OFFERS = fixtureEnv.AI_WALLET_TEST_OFFERS;
+    await db.aiWalletTopup.create({ data: { id: randomUUID(), organizationId: org, operationKey: 'legacy_eur',
+      customerId: 'cus_synthetic', amountCents: 123, currency: 'eur', fundedAt: new Date() } });
+    await expect(create('legacy_eur')).rejects.toThrow('different parameters');
+    await db.aiWallet.update({ where: { organizationId: org }, data: { status: 'REVIEW' } });
+    await expect(create('legacy_funded')).rejects.toThrow('reconciliation');
+    await db.aiWallet.update({ where: { organizationId: org }, data: { status: 'ACTIVE' } });
     expect(await db.aiWalletTopup.findUnique({ where: { id: legacy.id } })).toEqual(recorded);
     expect(recorded).toMatchObject({ checkoutState: 'LEGACY', stripeAccountId: null, requestFingerprint: null });
     expect(await db.aiWalletLedger.count({ where: { organizationId: org, kind: 'FUNDING' } })).toBe(1);
     expect((await checkout.balance(org)).balanceNanos).toBe('1230000000');
     expect(sdk.checkout.sessions.create).not.toHaveBeenCalled();
     expect(sdk.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(sdk.accounts.retrieve).not.toHaveBeenCalled();
+    expect(sdk.customers.retrieve).not.toHaveBeenCalled();
+    await expect(create('legacy')).rejects.toThrow('Synthetic Stripe outage');
+    expect(sdk.accounts.retrieve).toHaveBeenCalledTimes(1);
+    expect(sdk.customers.retrieve).not.toHaveBeenCalled();
+    expect(sdk.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
   it('enforces immutable dispatch parameters, clocks and retained history in PostgreSQL', async () => {

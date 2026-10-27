@@ -31,7 +31,8 @@ describe('per-plan prepaid AI authorization', () => {
   const checkoutHarness = (tiers: Array<string | null>) => {
     const findFirst = jest.fn();
     tiers.forEach(tier => findFirst.mockResolvedValueOnce(tier ? { subscriptionTier: tier } : null));
-    const db = { subscription: { findFirst }, organization: { findUnique: jest.fn(async () => ({ paymentId: 'cus_synthetic' })) } };
+    const db = { subscription: { findFirst }, organization: { findUnique: jest.fn(async () => ({ paymentId: 'cus_synthetic' })) },
+      aiWalletTopup: { findUnique: jest.fn(async () => null) } };
     const wallet = { createTopup: jest.fn(async () => ({ id: 'topup-1', customerId: 'cus_synthetic',
       amountCents: 500, sessionId: null, fundedAt: null })), bindTopupSession: jest.fn(),
       claimTopupCheckout: jest.fn(async () => ({ id: 'topup-1', sessionId: null, firstDispatchedAt: new Date(),
@@ -46,7 +47,7 @@ describe('per-plan prepaid AI authorization', () => {
       checkout: { sessions: { create, retrieve: jest.fn() } } };
     const service = new AiWalletCheckoutService(db as any, wallet as any);
     jest.spyOn(service as any, 'client').mockReturnValue(sdk);
-    return { service, wallet, create, findFirst };
+    return { service, wallet, create, findFirst, findTopup: db.aiWalletTopup.findUnique };
   };
 
   it.each([
@@ -54,7 +55,7 @@ describe('per-plan prepaid AI authorization', () => {
     ['rechecks the launch plan immediately before Stripe Checkout', ['LAUNCH_V1', 'LAUNCH_V1'], 'success', true, 1],
     ['stops before Stripe when the plan changes after intent creation', ['LAUNCH_V1', 'STANDARD'], 'changed', false, 1],
   ] as const)('%s', async (_name, tiers, outcome, stripeCalled, topupCalls) => {
-    const { service, wallet, create, findFirst } = checkoutHarness([...tiers]);
+    const { service, wallet, create, findFirst, findTopup } = checkoutHarness([...tiers]);
     if (outcome === 'offers') {
       await expect(service.offers('org-1')).rejects.toThrow('not included in this plan');
       await expect(service.createCheckout(...checkoutRequest)).rejects.toThrow('not included in this plan');
@@ -64,6 +65,10 @@ describe('per-plan prepaid AI authorization', () => {
       await expect(service.createCheckout(...checkoutRequest)).rejects.toThrow('not included in this plan');
     }
     expect(findFirst).toHaveBeenCalledTimes(2);
+    if (outcome === 'offers') expect(findTopup).not.toHaveBeenCalled();
+    else expect(findTopup).toHaveBeenCalledWith({ where: {
+      organizationId_operationKey: { organizationId: 'org-1', operationKey: 'request-1' },
+    }, include: { wallet: { select: { status: true } } } });
     expect(wallet.createTopup).toHaveBeenCalledTimes(topupCalls);
     expect(wallet.claimTopupCheckout).toHaveBeenCalledTimes(stripeCalled ? 1 : 0);
     if (stripeCalled) expect(wallet.claimTopupCheckout).toHaveBeenCalledWith('org-1', 'topup-1', 'acct_synthetic');

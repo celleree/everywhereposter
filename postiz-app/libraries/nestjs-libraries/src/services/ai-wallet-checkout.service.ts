@@ -122,6 +122,20 @@ export class AiWalletCheckoutService {
     }
     const offer = this.configuredOffers().find((value) => value.id === offerId);
     if (!offer) throw new BadRequestException('Select a configured test top-up.');
+    // A terminal receipt needs no provider availability or renewed authorization
+    // from Stripe. Validate it against this organization's canonical local state.
+    const recorded = await this.db.aiWalletTopup.findUnique({ where: {
+      organizationId_operationKey: { organizationId, operationKey },
+    }, include: { wallet: { select: { status: true } } } });
+    if (recorded?.fundedAt) {
+      const organization = await this.db.organization.findUnique({ where: { id: organizationId }, select: { paymentId: true } });
+      if (!organization?.paymentId || recorded.customerId !== organization.paymentId ||
+          recorded.amountCents !== offer.amountCents || recorded.currency !== 'usd') {
+        throw new BadRequestException('Topup identity was reused with different parameters.');
+      }
+      if (recorded.wallet?.status !== 'ACTIVE') throw new ServiceUnavailableException('Wallet requires reconciliation.');
+      return { topupId: recorded.id, status: 'funded', url: null };
+    }
     const accountId = await this.accountId();
     const customerId = await this.customer(organizationId);
     const intent = await this.wallet.createTopup(organizationId, operationKey, customerId, offer.amountCents,
