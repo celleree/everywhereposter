@@ -102,6 +102,12 @@ class SafetyTests(unittest.TestCase):
         self.assertIn("if: always()",text)
         self.assertIn("--cleanup",text)
 
+    def test_runner_context_is_used_only_after_job_dispatch(self):
+        text=(ROOT.parent.parent/".github/workflows/release-preflight.yml").read_text()
+        header=text.split("  verify:",1)[1].split("    steps:",1)[0]
+        self.assertNotIn("runner.",header)
+        self.assertEqual(text.count("DOCKER_CONFIG: ${{ runner.temp }}/release-preflight-auth"),4)
+
 
 if __name__ == "__main__":
     unittest.main()
