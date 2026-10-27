@@ -23,6 +23,9 @@ ALTER TABLE "AiWalletTopup" ADD CONSTRAINT "AiWalletTopup_checkout_shape" CHECK 
 
 CREATE FUNCTION "protect_wallet_topup_checkout"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Wallet top-up checkout history cannot be deleted';
+  END IF;
   IF ROW(NEW."id",NEW."organizationId",NEW."operationKey",NEW."customerId",NEW."amountCents",NEW."currency",
          NEW."stripeMode",NEW."stripeAccountId",NEW."requestFingerprint",NEW."requestSnapshot",NEW."createdAt")
     IS DISTINCT FROM
@@ -39,5 +42,5 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER "AiWalletTopup_checkout_immutable" BEFORE UPDATE ON "AiWalletTopup"
+CREATE TRIGGER "AiWalletTopup_checkout_immutable" BEFORE UPDATE OR DELETE ON "AiWalletTopup"
   FOR EACH ROW EXECUTE FUNCTION "protect_wallet_topup_checkout"();

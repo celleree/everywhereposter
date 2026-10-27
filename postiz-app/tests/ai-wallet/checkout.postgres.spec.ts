@@ -349,7 +349,7 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     expect((await checkout.balance(org)).balanceNanos).toBe('0');
   });
 
-  it('does not promote historical unbound records or accept events before durable dispatch', async () => {
+  it('acknowledges only funded legacy records without promotion or another payment', async () => {
     await wallet.createTopup(org, 'legacy', 'cus_synthetic', 123);
     await expect(create('legacy')).rejects.toThrow('identity');
     const row = await wallet.createTopup(org, 'prepared', 'cus_synthetic', 123,
@@ -359,9 +359,29 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
       amount_total: 123, currency: 'usd', payment_status: 'paid', payment_intent: 'pi_prepared' })).rejects.toThrow('account');
     expect(sdk.checkout.sessions.create).not.toHaveBeenCalled();
     expect((await checkout.balance(org)).balanceNanos).toBe('0');
+
+    const legacy = await wallet.createTopup(org, 'legacy_funded', 'cus_synthetic', 123);
+    await wallet.bindTopupSession(org, legacy.id, 'cs_legacy_funded');
+    const payment = { id: 'cs_legacy_funded', livemode: false, mode: 'payment', customer: legacy.customerId,
+      metadata: { service: AI_WALLET_TEST_SERVICE, topupId: legacy.id }, client_reference_id: legacy.id,
+      amount_total: 123, currency: 'usd', payment_status: 'paid', payment_intent: 'pi_legacy_funded' };
+    await deliver(payment); await deliver(payment);
+    const recorded = await db.aiWalletTopup.findUniqueOrThrow({ where: { id: legacy.id } });
+    for (let retry = 0; retry < 2; retry++) {
+      await expect(create('legacy_funded')).resolves.toEqual({ topupId: legacy.id, status: 'funded', url: null });
+    }
+    const account = { accountId: 'acct_synthetic', mode: 'test' as const, returnUrl: fixtureEnv.FRONTEND_URL };
+    await expect(wallet.createTopup(org, 'legacy_funded', 'cus_other', 123, account)).rejects.toThrow('different parameters');
+    await expect(wallet.createTopup(org, 'legacy_funded', 'cus_synthetic', 124, account)).rejects.toThrow('different parameters');
+    expect(await db.aiWalletTopup.findUnique({ where: { id: legacy.id } })).toEqual(recorded);
+    expect(recorded).toMatchObject({ checkoutState: 'LEGACY', stripeAccountId: null, requestFingerprint: null });
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org, kind: 'FUNDING' } })).toBe(1);
+    expect((await checkout.balance(org)).balanceNanos).toBe('1230000000');
+    expect(sdk.checkout.sessions.create).not.toHaveBeenCalled();
+    expect(sdk.checkout.sessions.retrieve).not.toHaveBeenCalled();
   });
 
-  it('enforces immutable dispatch parameters and clocks in PostgreSQL', async () => {
+  it('enforces immutable dispatch parameters, clocks and retained history in PostgreSQL', async () => {
     await create('immutable');
     const row = await db.aiWalletTopup.findFirstOrThrow({ where: { organizationId: org } });
     for (const data of [{ stripeAccountId: 'acct_other' }, { firstDispatchedAt: new Date(0) },
@@ -369,6 +389,21 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
       await expect(db.aiWalletTopup.update({ where: { id: row.id }, data })).rejects.toThrow();
     }
     expect(await db.aiWalletTopup.findUnique({ where: { id: row.id } })).toEqual(row);
+    await expect(db.aiWalletTopup.delete({ where: { id: row.id } })).rejects.toThrow('history cannot be deleted');
+
+    for (const state of ['LEGACY', 'PREPARED', 'DISPATCHED']) {
+      const account = state === 'LEGACY' ? undefined
+        : { accountId: 'acct_synthetic', mode: 'test' as const, returnUrl: fixtureEnv.FRONTEND_URL };
+      const attempt = await wallet.createTopup(org, `retain_${state}`, 'cus_synthetic', 123, account);
+      if (state === 'DISPATCHED') await wallet.claimTopupCheckout(org, attempt.id, 'acct_synthetic');
+      const before = await db.aiWalletTopup.findUniqueOrThrow({ where: { id: attempt.id } });
+      await expect(db.aiWalletTopup.delete({ where: { id: attempt.id } })).rejects.toThrow('history cannot be deleted');
+      expect(await wallet.createTopup(org, `retain_${state}`, 'cus_synthetic', 123, account)).toEqual(before);
+    }
+    await deliver(paid());
+    const funded = await db.aiWalletTopup.findUniqueOrThrow({ where: { id: row.id } });
+    await expect(db.aiWalletTopup.delete({ where: { id: row.id } })).rejects.toThrow('history cannot be deleted');
+    expect(await db.aiWalletTopup.findUnique({ where: { id: row.id } })).toEqual(funded);
   });
 
   it('rolls back early session binding if funding fails, then recovers once', async () => {

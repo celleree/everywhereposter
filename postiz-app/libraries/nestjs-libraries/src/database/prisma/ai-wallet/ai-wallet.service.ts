@@ -373,7 +373,9 @@ export class AiWalletService {
         if (existing.customerId !== customerId || existing.amountCents !== amountCents) {
           throw new Error('Topup identity was reused with different parameters.');
         }
-        if (account) {
+        // A recorded legacy payment is terminal: acknowledge it without
+        // inventing a modern binding or permitting another Checkout dispatch.
+        if (account && !(existing.checkoutState === 'LEGACY' && existing.fundedAt)) {
           const binding = topupBinding(existing.id, customerId, amountCents, account);
           if (existing.checkoutState === 'LEGACY' || existing.stripeAccountId !== binding.stripeAccountId ||
               existing.stripeMode !== binding.stripeMode || existing.requestFingerprint !== binding.requestFingerprint ||
