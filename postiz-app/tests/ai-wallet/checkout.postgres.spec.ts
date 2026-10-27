@@ -43,7 +43,9 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     checkout = new AiWalletCheckoutService(db as any, wallet);
     jest.spyOn(checkout, 'assertPrepaidPlan').mockResolvedValue(undefined);
     sessions = new Map();
-    sdk = { customers: { create: jest.fn(async (_body: any, options: any) => ({ id: `cus_test_${options.idempotencyKey}`, livemode: false })) }, checkout: { sessions: {
+    sdk = { accounts: { retrieve: jest.fn(async () => ({ id: 'acct_synthetic' })) },
+      customers: { retrieve: jest.fn(async (id: string) => ({ id, livemode: false })),
+      create: jest.fn(async (_body: any, options: any) => ({ id: `cus_test_${options.idempotencyKey}`, livemode: false })) }, checkout: { sessions: {
       create: jest.fn(async (params: any, options: any) => {
         if (!sessions.has(options.idempotencyKey)) sessions.set(options.idempotencyKey, {
           id: `cs_test_${params.client_reference_id}`, livemode: false, mode: params.mode, customer: params.customer,
@@ -154,6 +156,8 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
 
   it('serializes the documented opt-out through the pinned SDK without an external request', async () => {
     const transport = jest.fn(async (_url: any, init: any) => {
+      if (String(_url).includes('/v1/account')) return new Response(JSON.stringify({ id: 'acct_synthetic', object: 'account' }), { status: 200 });
+      if (String(_url).includes('/v1/customers/')) return new Response(JSON.stringify({ id: 'cus_synthetic', object: 'customer', livemode: false }), { status: 200 });
       const body = new URLSearchParams(init.body);
       expect(body.get('managed_payments[enabled]')).toBe('false');
       expect(body.get('payment_method_types[0]')).toBe('card');
@@ -170,7 +174,7 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
       httpClient: Stripe.createFetchHttpClient(transport) });
     (checkout as any).client.mockReturnValue(actual);
     await create('serialized_direct_merchant');
-    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledTimes(3);
   });
 
   it('preserves customer, topup and idempotency when retrying a parameter-validation refusal', async () => {
@@ -281,11 +285,110 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     expect((await checkout.balance(org)).balanceNanos).toBe('1230000000');
   });
 
-  it('keeps an early webhook retryable until the session is bound', async () => {
+  it('retains exact dispatch identity across response loss, restart and changed provider retention', async () => {
+    const original = sdk.checkout.sessions.create.getMockImplementation();
+    sdk.checkout.sessions.create.mockImplementationOnce(async (...args: any[]) => {
+      await original(...args); throw Error('lost response');
+    });
+    await expect(create('restart')).rejects.toThrow('lost response');
+    const before = await db.aiWalletTopup.findFirstOrThrow({ where: { organizationId: org } });
+    checkout = new AiWalletCheckoutService(db as any, new AiWalletService({ model: db } as any));
+    jest.spyOn(checkout, 'assertPrepaidPlan').mockResolvedValue(undefined);
+    jest.spyOn(checkout as any, 'client').mockReturnValue(sdk);
+    await create('restart');
+    const after = await db.aiWalletTopup.findUniqueOrThrow({ where: { id: before.id } });
+    expect(after.firstDispatchedAt).toEqual(before.firstDispatchedAt);
+    expect(after.requestFingerprint).toBe(before.requestFingerprint);
+    expect(sdk.checkout.sessions.create.mock.calls[0]).toEqual(sdk.checkout.sessions.create.mock.calls[1]);
+    expect(sessions.size).toBe(1);
+  });
+
+  it('never creates after the retry deadline and recovers a matching signed paid event indefinitely', async () => {
+    const original = sdk.checkout.sessions.create.getMockImplementation();
+    sdk.checkout.sessions.create.mockImplementationOnce(async (...args: any[]) => {
+      await original(...args); throw Error('lost response');
+    });
+    await expect(create('late_ack')).rejects.toThrow('lost response');
+    const row = await db.aiWalletTopup.findFirstOrThrow({ where: { organizationId: org } });
+    const now = jest.spyOn(Date, 'now').mockReturnValue(row.firstDispatchedAt!.getTime() + 24 * 60 * 60 * 1000);
+    await expect(create('late_ack')).rejects.toThrow('reconciliation');
+    expect(sdk.checkout.sessions.create).toHaveBeenCalledTimes(1);
+    now.mockRestore();
+    await deliver(paid()); await deliver(paid());
+    await expect(create('late_ack')).resolves.toMatchObject({ topupId: row.id, status: 'funded', url: null });
+    expect((await checkout.balance(org)).balanceNanos).toBe('1230000000');
+    expect(sdk.checkout.sessions.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits dispatch before the network call and survives a crash before sending', async () => {
+    const claim = wallet.claimTopupCheckout.bind(wallet);
+    jest.spyOn(wallet, 'claimTopupCheckout').mockImplementationOnce(async (...args) => {
+      await claim(...args); throw Error('crash after durable claim');
+    });
+    await expect(create('crash')).rejects.toThrow('crash');
+    const row = await db.aiWalletTopup.findFirstOrThrow({ where: { organizationId: org } });
+    expect(row).toMatchObject({ checkoutState: 'DISPATCHED', sessionId: null });
+    expect(row.firstDispatchedAt).toBeInstanceOf(Date);
+    expect(sdk.checkout.sessions.create).not.toHaveBeenCalled();
+    await create('crash'); expect(sessions.size).toBe(1);
+  });
+
+  it('rejects changed account and immutable callback identity before another checkout', async () => {
+    await create('identity');
+    sdk.accounts.retrieve.mockResolvedValueOnce({ id: 'acct_other' });
+    await expect(create('identity')).rejects.toThrow('identity');
+    const url = process.env.FRONTEND_URL;
+    try {
+      process.env.FRONTEND_URL = 'https://other.example';
+      await expect(create('identity')).rejects.toThrow('identity');
+    } finally { process.env.FRONTEND_URL = url; }
+    expect(sdk.checkout.sessions.create).toHaveBeenCalledTimes(1);
+    sdk.accounts.retrieve.mockResolvedValueOnce({ id: 'acct_other' });
+    await expect(deliver(paid())).rejects.toThrow('account');
+    await expect(deliver(paid(), { account: 'acct_synthetic' })).rejects.toThrow('Connect');
+    expect((await checkout.balance(org)).balanceNanos).toBe('0');
+  });
+
+  it('does not promote historical unbound records or accept events before durable dispatch', async () => {
+    await wallet.createTopup(org, 'legacy', 'cus_synthetic', 123);
+    await expect(create('legacy')).rejects.toThrow('identity');
+    const row = await wallet.createTopup(org, 'prepared', 'cus_synthetic', 123,
+      { accountId: 'acct_synthetic', mode: 'test', returnUrl: fixtureEnv.FRONTEND_URL });
+    await expect(deliver({ id: 'cs_prepared', livemode: false, mode: 'payment', customer: row.customerId,
+      metadata: { service: AI_WALLET_TEST_SERVICE, topupId: row.id }, client_reference_id: row.id,
+      amount_total: 123, currency: 'usd', payment_status: 'paid', payment_intent: 'pi_prepared' })).rejects.toThrow('account');
+    expect(sdk.checkout.sessions.create).not.toHaveBeenCalled();
+    expect((await checkout.balance(org)).balanceNanos).toBe('0');
+  });
+
+  it('enforces immutable dispatch parameters and clocks in PostgreSQL', async () => {
+    await create('immutable');
+    const row = await db.aiWalletTopup.findFirstOrThrow({ where: { organizationId: org } });
+    for (const data of [{ stripeAccountId: 'acct_other' }, { firstDispatchedAt: new Date(0) },
+      { requestFingerprint: 'b'.repeat(64) }, { checkoutState: 'PREPARED' }, { amountCents: 124 }]) {
+      await expect(db.aiWalletTopup.update({ where: { id: row.id }, data })).rejects.toThrow();
+    }
+    expect(await db.aiWalletTopup.findUnique({ where: { id: row.id } })).toEqual(row);
+  });
+
+  it('rolls back early session binding if funding fails, then recovers once', async () => {
+    const original = sdk.checkout.sessions.create.getMockImplementation();
+    sdk.checkout.sessions.create.mockImplementationOnce(async (...args: any[]) => {
+      await original(...args); throw Error('lost response');
+    });
+    await expect(create('rollback')).rejects.toThrow();
+    await expect(deliver({ ...paid(), amount_total: 1 })).rejects.toThrow();
+    expect(await db.aiWalletTopup.findFirst({ where: { organizationId: org } })).toMatchObject({ sessionId: null, fundedAt: null, checkoutState: 'DISPATCHED' });
+    await Promise.all([deliver(paid()), deliver(paid())]);
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org, kind: 'FUNDING' } })).toBe(1);
+  });
+
+  it('atomically binds and funds an early signed webhook before the creation response returns', async () => {
     const original = sdk.checkout.sessions.create.getMockImplementation();
     sdk.checkout.sessions.create.mockImplementationOnce(async (...args: any[]) => {
       const value = await original(...args);
-      await expect(deliver({ ...value, payment_status: 'paid', payment_intent: `pi_${value.id}` })).rejects.toThrow('not yet bound');
+      await deliver({ ...value, payment_status: 'paid', payment_intent: `pi_${value.id}` });
+      expect((await checkout.balance(org)).balanceNanos).toBe('1230000000');
       return value;
     });
     await create(); await deliver(paid());
@@ -301,7 +404,7 @@ suite('test-only Checkout -> signed webhook -> prepaid usage', () => {
     expect(() => hook.stripe(stale)).toThrow();
     const forged = request(value); forged.headers['stripe-signature'] = 't=1,v1=forged';
     expect(() => hook.stripe(forged)).toThrow();
-    await expect(deliver(paid(), { livemode: true })).rejects.toThrow('Live wallet');
+    await expect(deliver(paid(), { livemode: true })).rejects.toThrow('Live');
     expect((await checkout.balance(org)).balanceNanos).toBe('0');
   });
 

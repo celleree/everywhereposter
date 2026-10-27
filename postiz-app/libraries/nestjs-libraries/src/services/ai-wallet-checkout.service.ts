@@ -7,6 +7,7 @@ import { AiWalletService } from '@gitroom/nestjs-libraries/database/prisma/ai-wa
 import { PREPAID_AI_POLICY } from './ai-wallet-pricing';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 import { walletHoldSnapshot } from './ai-wallet-holds';
+import { assertTopupRetryWindow, TOPUP_REQUEST_TIMEOUT_MS } from './ai-wallet-payment-config';
 
 export const AI_WALLET_TEST_SERVICE = 'everywhereposter-ai-wallet-test';
 type Offer = { id: string; amountCents: number };
@@ -43,7 +44,14 @@ export class AiWalletCheckoutService {
     }
   }
 
-  protected client() { this.assertTestAccount(); return new Stripe(process.env.STRIPE_SECRET_KEY!); }
+  protected client() { this.assertTestAccount(); return new Stripe(process.env.STRIPE_SECRET_KEY!,
+    { maxNetworkRetries: 0, timeout: TOPUP_REQUEST_TIMEOUT_MS }); }
+
+  private async accountId() {
+    const account = await this.client().accounts.retrieve();
+    if (!/^acct_[a-zA-Z0-9]{1,100}$/.test(account?.id || '')) throw new ServiceUnavailableException('Test Stripe account could not be verified.');
+    return account.id;
+  }
 
   private configuredOffers(): Offer[] {
     this.assertPurchasesEnabled();
@@ -89,7 +97,11 @@ export class AiWalletCheckoutService {
   private async customer(organizationId: string) {
     const org = await this.db.organization.findUnique({ where: { id: organizationId }, select: { paymentId: true } });
     if (!org) throw new BadRequestException('Organization not found.');
-    if (org.paymentId) return org.paymentId;
+    if (org.paymentId) {
+      const saved = await this.client().customers.retrieve(org.paymentId);
+      if (saved.deleted || saved.id !== org.paymentId || saved.livemode !== false) throw new Error('Test billing customer could not be verified.');
+      return org.paymentId;
+    }
     await this.assertPrepaidPlan(organizationId);
     const customer = await this.client().customers.create({ metadata: { organizationId } },
       { idempotencyKey: `ai-wallet-test-customer:${organizationId}` });
@@ -97,6 +109,8 @@ export class AiWalletCheckoutService {
     await this.db.organization.updateMany({ where: { id: organizationId, paymentId: org.paymentId }, data: { paymentId: customer.id } });
     const saved = await this.db.organization.findUnique({ where: { id: organizationId }, select: { paymentId: true } });
     if (!saved?.paymentId) throw new Error('Billing customer binding failed.');
+    const bound = await this.client().customers.retrieve(saved.paymentId);
+    if (bound.deleted || bound.id !== saved.paymentId || bound.livemode !== false) throw new Error('Test billing customer could not be verified.');
     return saved.paymentId;
   }
 
@@ -108,25 +122,23 @@ export class AiWalletCheckoutService {
     }
     const offer = this.configuredOffers().find((value) => value.id === offerId);
     if (!offer) throw new BadRequestException('Select a configured test top-up.');
+    const accountId = await this.accountId();
     const customerId = await this.customer(organizationId);
-    const intent = await this.wallet.createTopup(organizationId, operationKey, customerId, offer.amountCents);
+    const intent = await this.wallet.createTopup(organizationId, operationKey, customerId, offer.amountCents,
+      { accountId, mode: 'test', returnUrl: process.env.FRONTEND_URL! });
     if (intent.fundedAt) return { topupId: intent.id, status: 'funded', url: null };
-    const callback = new URL('/billing', process.env.FRONTEND_URL);
-    if (!['http:', 'https:'].includes(callback.protocol)) throw new ServiceUnavailableException('Invalid Checkout return URL.');
     // Re-read the durable plan immediately before contacting Stripe. The
     // controller/UI decision may have raced a subscription change.
     await this.assertPrepaidPlan(organizationId);
-    const params: DirectMerchantCheckoutParams = { mode: 'payment', customer: intent.customerId,
-      client_reference_id: intent.id, metadata: { service: AI_WALLET_TEST_SERVICE, topupId: intent.id },
-      // Preserve direct-merchant, card-only Checkout even if the account defaults to Managed Payments.
-      managed_payments: { enabled: false }, payment_method_types: ['card'], allow_promotion_codes: false,
-      line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: intent.amountCents,
-        product_data: { name: 'Prepaid AI credits (test)' } } }],
-      success_url: `${callback.href}?wallet=return`, cancel_url: `${callback.href}?wallet=cancel`,
-    };
-    const session = intent.sessionId
-      ? await this.client().checkout.sessions.retrieve(intent.sessionId)
-      : await this.client().checkout.sessions.create(params, { idempotencyKey: `ai-wallet-topup:${intent.id}` });
+    const attempt = await this.wallet.claimTopupCheckout(organizationId, intent.id, accountId);
+    let session: Stripe.Checkout.Session;
+    if (attempt.sessionId) session = await this.client().checkout.sessions.retrieve(attempt.sessionId);
+    else {
+      // Recheck after DB/plan work; never renew this clock after response loss.
+      assertTopupRetryWindow(attempt.firstDispatchedAt!);
+      session = await this.client().checkout.sessions.create(attempt.requestSnapshot as unknown as DirectMerchantCheckoutParams,
+        { idempotencyKey: `ai-wallet-topup:${intent.id}`, maxNetworkRetries: 0, timeout: TOPUP_REQUEST_TIMEOUT_MS });
+    }
     if (session.livemode !== false || session.mode !== 'payment' || session.customer !== intent.customerId ||
         session.amount_total !== intent.amountCents || session.currency !== 'usd' ||
         session.client_reference_id !== intent.id || session.metadata?.service !== AI_WALLET_TEST_SERVICE ||
@@ -147,22 +159,26 @@ export class AiWalletCheckoutService {
       return this.refunds.handleVerifiedRefundEvent(event);
     }
     this.assertTestAccount();
-    if (event.livemode !== false) throw new BadRequestException('Live wallet events are not supported.');
+    if (event.livemode !== false || event.account) throw new BadRequestException('Live or Connect wallet events are not supported.');
     if (!['checkout.session.completed', 'checkout.session.async_payment_succeeded',
       'checkout.session.async_payment_failed'].includes(event.type)) return { ok: true };
     const session = event.data.object as Stripe.Checkout.Session;
-    const intent = await this.db.aiWalletTopup.findUnique({ where: { sessionId: session.id } });
+    // Metadata only locates a candidate; all stored monetary/account identities
+    // are verified below and again inside the atomic recovery/funding transaction.
+    const intent = typeof session.metadata?.topupId === 'string'
+      ? await this.db.aiWalletTopup.findUnique({ where: { id: session.metadata.topupId } }) : null;
     if (!intent) throw new ServiceUnavailableException('Top-up session is not yet bound.');
     if (session.livemode !== false || session.metadata?.service !== AI_WALLET_TEST_SERVICE ||
         session.metadata?.topupId !== intent.id || session.client_reference_id !== intent.id ||
         session.mode !== 'payment' || session.customer !== intent.customerId ||
         !Number.isSafeInteger(session.amount_total) || session.amount_total! <= 0 ||
         !['paid', 'unpaid'].includes(session.payment_status)) throw new BadRequestException('Invalid wallet Checkout event.');
+    const accountId = await this.accountId();
     const paymentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || null;
     await this.wallet.applyVerifiedTopupEvent({ eventId: event.id, organizationId: intent.organizationId,
       topupId: intent.id, sessionId: session.id, paymentId, customerId: intent.customerId,
       amountCents: session.amount_total!, currency: session.currency?.toLowerCase() || '', mode: 'payment',
-      paymentStatus: session.payment_status as 'paid' | 'unpaid' });
+      paymentStatus: session.payment_status as 'paid' | 'unpaid', account: { accountId, mode: 'test' } });
     return { ok: true };
   }
 }

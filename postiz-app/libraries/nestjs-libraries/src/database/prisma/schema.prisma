@@ -1495,6 +1495,13 @@ model AiWalletTopup {
   sessionId String? @unique
   paymentId String? @unique
   fundedAt DateTime?
+  // Historical rows are never inferred to be safe to redispatch.
+  checkoutState String @default("LEGACY")
+  stripeMode String?
+  stripeAccountId String?
+  requestFingerprint String?
+  requestSnapshot Json?
+  firstDispatchedAt DateTime?
   createdAt DateTime @default(now())
   wallet AiWallet @relation(fields: [organizationId], references: [organizationId])
   ledger AiWalletLedger?
