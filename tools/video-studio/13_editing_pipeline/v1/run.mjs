@@ -60,7 +60,8 @@ if(command==='serve'){
    for(const frame of frames){const file=path.join(dir,'qa',`frame-${frame}-${rendererHash.slice(0,8)}-${projectHash.slice(0,8)}.png`);if(!await exists(file))await renderStill({serveUrl,composition,inputProps:props,frame,output:file,imageFormat:'png',browserExecutable,puppeteerInstance:browser,overwrite:false});console.log('Still',frame);}
   }else{
    const chunksDir=path.join(root,'render-cache',rendererHash,runtimeHash);await mkdir(chunksDir,{recursive:true});const chunks=[];
-   const size=20*p.canvas.fps;
+   // Bound per-call PNG staging while keeping the original global frame clock.
+   const size=5*p.canvas.fps;
    for(let first=0;first<valid.frames;first+=size){const last=Math.min(valid.frames-1,first+size-1),key=createHash('sha256').update(JSON.stringify(chunkContent(p,first,last))).digest('hex'),file=path.join(chunksDir,`${first}-${last}-${key}.mp4`),receipt=file+'.json';
     const reusable=await exists(file)&&await exists(receipt)&&JSON.parse(await readFile(receipt,'utf8')).sha256===await hash(file);
     if(!reusable){if(await exists(file))throw Error('Incomplete chunk exists; preserve it and use a new revision directory');
