@@ -15,7 +15,7 @@ REPOSITORY = "ghcr.io/celleree/publish-everywhere-postiz"
 SCHEMA = "libraries/nestjs-libraries/src/database/prisma/schema.prisma"
 DATABASE = "postgresql://isolated@127.0.0.1:5432/isolated?schema=public"
 LABEL = "everywhereposter.release-preflight"
-ROLES = {"postgres", "baseline", "baseline-sql", "seed", "upgrade", "candidate-sql", "candidate-read", "legacy-read"}
+ROLES = {"postgres", "baseline", "baseline-sql", "seed", "upgrade", "candidate-sql", "candidate-read", "legacy-read", "candidate-wallet", "legacy-wallet"}
 NODE_CHECK = r"""
 const {PrismaClient}=require('@prisma/client');
 const {createHash}=require('crypto');
@@ -38,6 +38,44 @@ const db=new PrismaClient({log:[]});
   return values;
  },{timeout:20000});
  console.log(JSON.stringify({fingerprint:createHash('sha256').update(JSON.stringify(records)).digest('hex'),models:4}));
+})().catch(()=>{process.exitCode=1;}).finally(()=>db.$disconnect());
+"""
+WALLET_MIGRATION = "20261027063000_durable_wallet_topup"
+NODE_WALLET_WRITES = r"""
+const {PrismaClient}=require('@prisma/client');
+const db=new PrismaClient({log:[]});
+const prefix='preflight-wallet-'+process.env.PREFLIGHT_ACTION;
+async function rejected(fn,message){
+ try{await fn();}catch(error){if(String(error.message).includes(message))return;throw error;}
+ throw Error('Expected database guard did not reject');
+}
+(async()=>{
+ await db.aiWallet.upsert({where:{organizationId:'preflight-org'},create:{organizationId:'preflight-org'},update:{}});
+ const legacy=await db.aiWalletTopup.create({data:{id:prefix+'-legacy',organizationId:'preflight-org',operationKey:prefix+'-legacy',customerId:'cus_synthetic',amountCents:123,currency:'usd'}});
+ const shape=await db.$queryRawUnsafe('SELECT "checkoutState" FROM "AiWalletTopup" WHERE id=$1',legacy.id);
+ if(shape[0].checkoutState!=='LEGACY')throw Error('Historical identity default mismatch');
+ const now=new Date();
+ await db.aiWalletTopup.update({where:{id:legacy.id},data:{sessionId:'cs_'+prefix}});
+ await db.aiWalletTopup.update({where:{id:legacy.id},data:{paymentId:'pi_'+prefix,fundedAt:now}});
+ await db.aiWalletTopup.update({where:{id:legacy.id},data:{paymentId:'pi_'+prefix,fundedAt:now}});
+ const immutable='Immutable wallet top-up identity or lifecycle changed';
+ for(const data of [{amountCents:124},{sessionId:'cs_changed'},{paymentId:'pi_changed'},{fundedAt:new Date(0)}])
+  await rejected(()=>db.aiWalletTopup.update({where:{id:legacy.id},data}),immutable);
+ const id=prefix+'-modern';
+ await db.$executeRawUnsafe('INSERT INTO "AiWalletTopup" ("id","organizationId","operationKey","customerId","amountCents","currency","checkoutState","stripeMode","stripeAccountId","requestFingerprint","requestSnapshot") VALUES ($1,$2,$3,$4,123,$5,$6,$7,$8,$9,$10::jsonb)',id,'preflight-org',prefix+'-modern','cus_synthetic','usd','PREPARED','test','acct_synthetic','a'.repeat(64),'{"synthetic":true}');
+ await db.$executeRawUnsafe('UPDATE "AiWalletTopup" SET "checkoutState"=$1,"firstDispatchedAt"=$2 WHERE id=$3','DISPATCHED',now,id);
+ await db.$executeRawUnsafe('UPDATE "AiWalletTopup" SET "checkoutState"=$1,"sessionId"=$2 WHERE id=$3','BOUND','cs_modern_'+prefix,id);
+ await db.aiWalletTopup.update({where:{id},data:{paymentId:'pi_modern_'+prefix,fundedAt:now}});
+ await rejected(()=>db.$executeRawUnsafe('UPDATE "AiWalletTopup" SET "checkoutState"=$1 WHERE id=$2','PREPARED',id),immutable);
+ await rejected(()=>db.$executeRawUnsafe('UPDATE "AiWalletTopup" SET "stripeAccountId"=$1 WHERE id=$2','acct_changed',id),immutable);
+ await rejected(()=>db.$executeRawUnsafe('UPDATE "AiWalletTopup" SET "firstDispatchedAt"=$1 WHERE id=$2',new Date(0),id),immutable);
+ for(const value of [legacy.id,id])
+  await rejected(()=>db.aiWalletTopup.delete({where:{id:value}}),'Wallet top-up checkout history cannot be deleted');
+ for(const [value,payment] of [[legacy.id,'pi_'+prefix],[id,'pi_modern_'+prefix]]){
+  const row=await db.aiWalletTopup.findUniqueOrThrow({where:{id:value}});
+  if(row.paymentId!==payment||row.amountCents!==123||row.fundedAt.getTime()!==now.getTime())throw Error('Guarded record changed');
+ }
+ console.log(JSON.stringify({legacyWrites:true,lifecycleWrites:true,immutableGuards:true,deleteGuards:true}));
 })().catch(()=>{process.exitCode=1;}).finally(()=>db.$disconnect());
 """
 NODE_MIGRATIONS = r"""
@@ -177,6 +215,19 @@ class Verification:
         migration_rows(rows, expected)
         return expected
 
+    def wallet_writes(self, image, role, db):
+        proof = json.loads(self.app(image, role, db, ["node", "-"], data=NODE_WALLET_WRITES, action=role))
+        expected = {"legacyWrites", "lifecycleWrites", "immutableGuards", "deleteGuards"}
+        require(set(proof) == expected and all(value is True for value in proof.values()),
+                "Incomplete wallet write compatibility evidence")
+        return proof
+
+    def wallet_compatibility(self, candidate, previous, db, migrations):
+        if WALLET_MIGRATION not in migrations:
+            return None
+        return {"candidate": self.wallet_writes(candidate, "candidate-wallet", db),
+                "previous": self.wallet_writes(previous, "legacy-wallet", db)}
+
     def run(self, candidate, previous, postgres):
         db = self.owner + "-postgres"
         self.docker("run", "-d", *self.flags("postgres", "none"), "--user", "70:70", "--shm-size", "16m",
@@ -206,7 +257,8 @@ class Verification:
         legacy = json.loads(self.app(previous, "legacy-read", db, ["node", "-"], data=NODE_CHECK))
         require(original == current == legacy and original["models"] == 4, "Synthetic record preservation failed")
         return {"baselineMigrations": old_migrations, "candidateMigrations": new_migrations,
-                "syntheticRecordsPreserved": True, "previousClientCompatible": True}
+                "syntheticRecordsPreserved": True, "previousClientCompatible": True,
+                "walletWriteCompatibility": self.wallet_compatibility(candidate, previous, db, new_migrations)}
 
 
 def main():
