@@ -11,7 +11,7 @@ import {
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { ConnectIntegrationDto } from '@gitroom/nestjs-libraries/dtos/integrations/connect.integration.dto';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
-import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
+import { IntegrationService, hasYoutubeOfflineAuthorization } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
 import { ApiTags } from '@nestjs/swagger';
 import { NotEnoughScopesFilter } from '@gitroom/nestjs-libraries/integrations/integration.missing.scopes';
@@ -150,6 +150,10 @@ export class NoAuthIntegrationsController {
           });
         }
 
+        if (integration === 'youtube' && !hasYoutubeOfflineAuthorization(auth)) {
+          return res({ ...auth, error: 'Google did not return complete offline authorization. Your saved channel was not changed. Reconnect with Google consent to continue.' });
+        }
+
         if (refresh && integrationProvider.reConnect) {
           console.log('reconnect');
           try {
@@ -158,12 +162,12 @@ export class NoAuthIntegrationsController {
               refresh,
               auth.accessToken
             ));
-            return res(integration === 'instagram'
+            return res(['instagram', 'youtube'].includes(integration)
               ? { ...auth, ...newAuth, refreshToken: auth.refreshToken, expiresIn: auth.expiresIn }
               : { ...newAuth, refreshToken: body.refresh });
           } catch (err: any) {
             return res({
-              error: integration === 'instagram' ? 'Instagram reconnection failed. Retry Facebook Login and select the linked Page.' : err.message,
+              error: integration === 'instagram' ? 'Instagram reconnection failed. Retry Facebook Login and select the linked Page.' : integration === 'youtube' ? 'YouTube reconnection failed. Your saved channel was not changed.' : err.message,
               accessToken: '',
               id: '',
               name: '',
@@ -178,6 +182,9 @@ export class NoAuthIntegrationsController {
       } catch (err: any) {
         if (integration === 'instagram') {
           return res({ error: 'Instagram authorization failed. Retry Facebook Login and grant the required permissions.', accessToken: '', id: '', name: '', picture: '', username: '', additionalSettings: [] });
+        }
+        if (integration === 'youtube') {
+          return res({ error: 'YouTube authorization failed. Your saved channel was not changed.', accessToken: '', id: '', name: '', picture: '', username: '', additionalSettings: [] });
         }
         console.error(`Authentication failed for ${integration}`, err);
         if (err instanceof NotEnoughScopes) {

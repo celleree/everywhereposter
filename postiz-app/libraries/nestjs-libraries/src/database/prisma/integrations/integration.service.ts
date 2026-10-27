@@ -32,6 +32,15 @@ import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.sear
 
 dayjs.extend(utc);
 
+// Google may legitimately omit a refresh token. Omission is not revocation,
+// but an incomplete new grant cannot replace a saved channel's offline access.
+export function hasYoutubeOfflineAuthorization(auth: { accessToken?: unknown; refreshToken?: unknown; expiresIn?: unknown }) {
+  return typeof auth.accessToken === 'string' && !!auth.accessToken.trim() &&
+    typeof auth.refreshToken === 'string' && !!auth.refreshToken.trim() &&
+    typeof auth.expiresIn === 'number' && Number.isFinite(auth.expiresIn) && auth.expiresIn > 0 &&
+    Number.isFinite(new Date(Date.now() + auth.expiresIn * 1000).getTime());
+}
+
 type CheckAnalyticsOptions = {
   forceRefresh?: boolean;
   forceAnalyticsRefresh?: boolean;
@@ -422,6 +431,13 @@ export class IntegrationService {
       throw new HttpException('Invalid request', HttpStatus.BAD_REQUEST);
     }
 
+    if (getIntegration.providerIdentifier === 'youtube' && (typeof data?.id !== 'string' || !data.id.trim() || !hasYoutubeOfflineAuthorization({
+      accessToken: getIntegration.token, refreshToken: getIntegration.refreshToken,
+      expiresIn: ((getIntegration.tokenExpiration?.getTime() ?? NaN) - Date.now()) / 1000,
+    }))) {
+      throw new HttpException('Google did not return complete offline authorization. Your saved channel was not changed. Reconnect with Google consent to continue.', HttpStatus.BAD_REQUEST);
+    }
+
     const provider = this._integrationManager.getSocialIntegration(
       getIntegration.providerIdentifier
     );
@@ -438,7 +454,21 @@ export class IntegrationService {
       ? await suppressTracing(fetchPage).catch(() => {
           throw new HttpException('Instagram Page selection failed. Retry Facebook Login and select the linked Page.', HttpStatus.BAD_REQUEST);
         })
+      : getIntegration.providerIdentifier === 'youtube'
+      ? await suppressTracing(fetchPage).catch(() => {
+          throw new HttpException('YouTube channel authorization could not be verified. Your saved channel was not changed.', HttpStatus.BAD_REQUEST);
+        })
       : await fetchPage();
+
+    if (getIntegration.providerIdentifier === 'youtube' && (
+      String(getIntegrationInformation.id) !== data.id ||
+      getIntegrationInformation.access_token !== getIntegration.token ||
+      !hasYoutubeOfflineAuthorization({ accessToken: getIntegrationInformation.access_token,
+        refreshToken: getIntegration.refreshToken,
+        expiresIn: ((getIntegration.tokenExpiration?.getTime() ?? NaN) - Date.now()) / 1000 })
+    )) {
+      throw new HttpException('YouTube channel authorization could not be verified. Your saved channel was not changed.', HttpStatus.BAD_REQUEST);
+    }
 
     await this.checkForDeletedOnceAndUpdate(
       org,
@@ -452,7 +482,7 @@ export class IntegrationService {
       inBetweenSteps: false,
       token: getIntegrationInformation.access_token,
       profile: getIntegrationInformation.username,
-      ...(getIntegration.providerIdentifier === 'instagram' ? {
+      ...(['instagram', 'youtube'].includes(getIntegration.providerIdentifier) ? {
         refreshToken: getIntegration.refreshToken,
         tokenExpiration: getIntegration.tokenExpiration,
         refreshNeeded: false,
