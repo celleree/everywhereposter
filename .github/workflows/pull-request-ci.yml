@@ -200,7 +200,7 @@ jobs:
 
           def migrations(root):
               files = sorted((root / "postiz-app/libraries/nestjs-libraries/src/database/prisma/migrations").glob("*/migration.sql"))
-              require(len(files) == 19, "Expected exactly 19 candidate migrations")
+              require(len(files) == 20, "Expected exactly 20 candidate migrations")
               return {p.parent.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 
           def verify_service(data, expected):
@@ -221,8 +221,8 @@ jobs:
 
           def verify_migrations(text, expected):
               rows = [line.split("|") for line in text.splitlines() if line]
-              require(len(rows) == 19 and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
-              require(len({row[0] for row in rows}) == 19, "Duplicate migration evidence")
+              require(len(rows) == 20 and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
+              require(len({row[0] for row in rows}) == 20, "Duplicate migration evidence")
               require({row[0]: row[1] for row in rows} == expected and all(row[2] == "t" for row in rows), "Migrations differ or did not finish")
 
           def verify_tap(text, expected):

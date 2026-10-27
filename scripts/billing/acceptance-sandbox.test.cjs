@@ -165,7 +165,9 @@ test('real services: raw signed refund before explicit late review reconciles mo
       fn({ ...tx, $queryRaw: tx.$queryRaw.bind(tx), organization: tx.organization, subscription: { create: async () => { throw Error('synthetic rollback'); } } })) };
     await assert.rejects(helper.createCase(broken, Services, {}, evidence, 'OFFLINE_SIMULATED'), /rollback/);
     assert.equal(await db.organization.count(), 0);
-    const sdk = { ...sdkBase(), customers: { create: async (_body, options) => {
+    const sdk = { ...sdkBase(), customers: { retrieve: async customer => {
+      assert.equal(customer, 'cus_synthetic'); return { id: customer, livemode: false };
+    }, create: async (_body, options) => {
       customerCalls++; assert.match(options.idempotencyKey, /^ai-wallet-test-customer:/);
       return { id: 'cus_synthetic', livemode: false };
     } }, checkout: { sessions: {

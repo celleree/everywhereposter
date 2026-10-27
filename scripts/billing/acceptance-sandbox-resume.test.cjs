@@ -66,7 +66,9 @@ test('real services resume one validation-refused case without a new customer/to
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ep-resume-pg-'));
   let customers = 0, purchases = 0, conflict = true;
   const keys = new Set(), records = [];
-  const gated = { checkout: { customers: { create: async () => { customers++; return { id: 'cus_Recovery', livemode: false }; } },
+  const gated = { checkout: { accounts: { retrieve: async () => ({ id: account, object: 'account' }) },
+    customers: { retrieve: async id => { assert.equal(id, 'cus_Recovery'); return { id, livemode: false }; },
+      create: async () => { customers++; return { id: 'cus_Recovery', livemode: false }; } },
     checkout: { sessions: { create: async (params, options) => {
       purchases++; keys.add(options.idempotencyKey); assert.equal(params.managed_payments.enabled, false);
       if (conflict) throw Error('Synthetic pre-execution refusal');
@@ -83,8 +85,6 @@ test('real services resume one validation-refused case without a new customer/to
     const operation = (await helper.verifyResume(db, resume)).operationKey;
     const invalid = [tx => tx.aiWallet.update({ where: { organizationId: state.organizationId }, data: { balanceNanos: 1n } }),
       tx => tx.aiWallet.update({ where: { organizationId: state.organizationId }, data: { status: 'REVIEW' } }),
-      tx => tx.aiWalletTopup.update({ where: { id: state.topupId }, data: { sessionId: 'cs_test_unknown' } }),
-      tx => tx.aiWalletTopup.update({ where: { id: state.topupId }, data: { createdAt: new Date(Date.now() - 86400001) } }),
       tx => tx.subscription.update({ where: { organizationId: state.organizationId }, data: { deletedAt: new Date() } }),
       tx => tx.organization.update({ where: { id: state.organizationId }, data: { paymentId: 'cus_other' } }),
       tx => tx.organization.create({ data: { id: crypto.randomUUID(), name: 'Synthetic ambiguity' } }),
@@ -95,6 +95,12 @@ test('real services resume one validation-refused case without a new customer/to
       await mutate(tx); await assert.rejects(helper.verifyResume({ $transaction: fn => fn(tx) }, resume));
       throw Error('Synthetic rollback');
     }), /rollback/);
+    const originalTopup = await db.aiWalletTopup.findUnique({ where: { id: state.topupId } });
+    for (const data of [{ sessionId: 'cs_test_unknown' }, { createdAt: new Date(Date.now() - 86400001) }]) {
+      await assert.rejects(db.aiWalletTopup.update({ where: { id: state.topupId }, data }));
+      assert.deepEqual(await db.aiWalletTopup.findUnique({ where: { id: state.topupId } }), originalTopup,
+        'Database must reject immutable-history mutation, not rely on an outer fixture rollback');
+    }
     assert.equal((await helper.verifyResume(db, resume)).operationKey, operation);
     const recovered = await helper.createCase(db, Services, gated, { append: value => records.push(value) }, source, resume);
     assert.equal((await recovered.snapshot()).attempts, 1); assert.equal(purchases, 1);

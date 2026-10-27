@@ -130,16 +130,21 @@ const fingerprint = event => crypto.createHash('sha256')
   .update(JSON.stringify(canonical([event.id, event.type, event.livemode, event.account || null, event.data.object]))).digest('hex');
 async function accountGate(sdk, expected) {
   let verified = false;
-  const account = await sdk.accounts.retrieve(); // Installed SDK: GET /v1/account, never /accounts/:id.
-  requireSafe(account.object === 'account' && account.id === expected && account.deleted !== true);
-  noLive(account); verified = true;
+  const readAccount = async () => {
+    const account = await sdk.accounts.retrieve(); // GET /v1/account, never /accounts/:id.
+    requireSafe(account.object === 'account' && account.id === expected && account.deleted !== true);
+    noLive(account); return account;
+  };
+  await readAccount(); verified = true;
   const guarded = async (run) => { requireSafe(verified); const result = await run(); noLive(result); return result; };
   const testObject = async (run) => {
     const result = await guarded(run); requireSafe(result.livemode === false); return result;
   };
   // The only financial SDK capabilities passed into the Checkout production service.
   return {
-    checkout: { customers: { create: (...args) => testObject(() => sdk.customers.create(...args)) },
+    checkout: { accounts: { retrieve: readAccount },
+      customers: { create: (...args) => testObject(() => sdk.customers.create(...args)),
+        retrieve: (...args) => testObject(() => sdk.customers.retrieve(...args)) },
       checkout: { sessions: { create: (...args) => testObject(() => sdk.checkout.sessions.create(...args)),
         retrieve: (...args) => testObject(() => sdk.checkout.sessions.retrieve(...args)) } } },
     event: eventId => guarded(() => sdk.events.retrieve(eventId)),
