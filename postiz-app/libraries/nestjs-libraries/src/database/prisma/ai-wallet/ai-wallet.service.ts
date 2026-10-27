@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import { TopupAccount, topupBinding, topupFingerprint, assertTopupRetryWindow } from '../../../services/ai-wallet-payment-config';
 import { isBillingEnabled } from '@gitroom/helpers/utils/billing.enabled';
 import { PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 
@@ -12,6 +13,7 @@ const MAX_NANOS = 9223372036854775807n;
 const NANOS_PER_CENT = 10000000n;
 
 type VerifiedTopupEvent = {
+  account?: { accountId: string; mode: 'test' };
   eventId: string;
   organizationId: string;
   topupId: string;
@@ -355,7 +357,7 @@ export class AiWalletService {
 
   /** Internal server-created intent. The eventual Checkout adapter must accept
    * only configured offers, never arbitrary client amounts or credit grants. */
-  async createTopup(organizationId: string, operationKey: string, customerId: string, amountCents: number) {
+  async createTopup(organizationId: string, operationKey: string, customerId: string, amountCents: number, account?: TopupAccount) {
     this.enabled();
     [operationKey, customerId].forEach((value) => this.key(value));
     if (!Number.isSafeInteger(amountCents) || amountCents < 1 || amountCents > 2147483647) {
@@ -371,9 +373,34 @@ export class AiWalletService {
         if (existing.customerId !== customerId || existing.amountCents !== amountCents) {
           throw new Error('Topup identity was reused with different parameters.');
         }
+        // A recorded legacy payment is terminal: acknowledge it without
+        // inventing a modern binding or permitting another Checkout dispatch.
+        if (account && !(existing.checkoutState === 'LEGACY' && existing.fundedAt)) {
+          const binding = topupBinding(existing.id, customerId, amountCents, account);
+          if (existing.checkoutState === 'LEGACY' || existing.stripeAccountId !== binding.stripeAccountId ||
+              existing.stripeMode !== binding.stripeMode || existing.requestFingerprint !== binding.requestFingerprint ||
+              topupFingerprint(existing.requestSnapshot) !== binding.requestFingerprint) throw Error('Topup Checkout identity cannot be verified.');
+        }
         return existing;
       }
-      return tx.aiWalletTopup.create({ data: { organizationId, operationKey, customerId, amountCents, currency: 'usd' } });
+      const id = randomUUID();
+      return tx.aiWalletTopup.create({ data: { id, organizationId, operationKey, customerId, amountCents, currency: 'usd',
+        ...(account ? { checkoutState: 'PREPARED', ...topupBinding(id, customerId, amountCents, account) } : {}) } });
+    });
+  }
+
+  /** Commit dispatch identity before contacting Stripe. Retries never move its clock. */
+  async claimTopupCheckout(organizationId: string, id: string, accountId: string) {
+    return this.transact(organizationId, async tx => {
+      const row = await tx.aiWalletTopup.findFirst({ where: { id, organizationId } });
+      if (!row || row.stripeMode !== 'test' || row.stripeAccountId !== accountId ||
+          !row.requestFingerprint || topupFingerprint(row.requestSnapshot) !== row.requestFingerprint ||
+          !['PREPARED', 'DISPATCHED', 'BOUND'].includes(row.checkoutState)) throw Error('Topup Checkout identity cannot be verified.');
+      if (row.sessionId) return row;
+      if (row.checkoutState === 'PREPARED') return tx.aiWalletTopup.update({ where: { id },
+        data: { checkoutState: 'DISPATCHED', firstDispatchedAt: new Date() } });
+      assertTopupRetryWindow(row.firstDispatchedAt!);
+      return row;
     });
   }
 
@@ -384,7 +411,9 @@ export class AiWalletService {
       if (!topup) throw new Error('Topup not found.');
       if (topup.sessionId === sessionId) return topup;
       if (topup.sessionId) throw new Error('Topup session identity changed.');
-      return tx.aiWalletTopup.update({ where: { id }, data: { sessionId } });
+      if (topup.checkoutState !== 'LEGACY' && topup.checkoutState !== 'DISPATCHED') throw Error('Topup was not dispatched.');
+      return tx.aiWalletTopup.update({ where: { id }, data: { sessionId,
+        ...(topup.checkoutState === 'LEGACY' ? {} : { checkoutState: 'BOUND' }) } });
     });
   }
 
@@ -398,12 +427,20 @@ export class AiWalletService {
       event.customerId, event.amountCents, event.currency, event.mode, event.paymentStatus,
     ])).digest('hex');
     return this.transact(event.organizationId, async (tx) => {
+      let topup = await tx.aiWalletTopup.findFirst({ where: { id: event.topupId, organizationId: event.organizationId } });
+      if (topup && topup.checkoutState !== 'LEGACY') {
+        if (!event.account || event.account.mode !== topup.stripeMode || event.account.accountId !== topup.stripeAccountId ||
+            !['DISPATCHED', 'BOUND'].includes(topup.checkoutState) || !topup.requestFingerprint ||
+            topupFingerprint(topup.requestSnapshot) !== topup.requestFingerprint) throw Error('Payment account does not match the topup.');
+      }
       const previous = await tx.aiWalletPaymentEvent.findUnique({ where: { eventId: event.eventId } });
       if (previous) {
         if (previous.fingerprint !== fingerprint) throw new Error('Payment event identity changed.');
         return previous;
       }
-      const topup = await tx.aiWalletTopup.findFirst({ where: { id: event.topupId, organizationId: event.organizationId } });
+      // This binding and any funding commit atomically, including early delivery.
+      if (topup?.checkoutState === 'DISPATCHED' && !topup.sessionId) topup = await tx.aiWalletTopup.update({ where: { id: topup.id },
+        data: { sessionId: event.sessionId, checkoutState: 'BOUND' } });
       if (!topup || topup.customerId !== event.customerId || topup.amountCents !== event.amountCents ||
           topup.currency !== event.currency || event.mode !== 'payment' ||
           topup.sessionId !== event.sessionId ||
