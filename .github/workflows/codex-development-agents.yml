@@ -11,14 +11,14 @@ on:
         description: Agent role to run
         required: true
         type: choice
-        options: [plan, implement, review, repair, memory]
+        options: [plan, implement, review, repair, memory, preflight]
       number:
-        description: Issue or pull request number
+        description: Issue or pull request number (PR for preflight)
         required: true
         type: string
 
 concurrency:
-  group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}
+  group: codex-agent-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'preflight' && '-preflight' || '' }}
   cancel-in-progress: false
 
 permissions: {}
@@ -32,7 +32,7 @@ jobs:
       (
         github.event.repository.private == true ||
         (github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review') ||
-        (github.event_name == 'workflow_dispatch' && inputs.mode == 'review')
+        (github.event_name == 'workflow_dispatch' && (inputs.mode == 'review' || (inputs.mode == 'preflight' && github.ref == 'refs/heads/main')))
       ) &&
       (
         (github.event_name == 'issues' && github.event.label.name == 'agent-ready') ||
@@ -40,7 +40,7 @@ jobs:
         (github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true) ||
         (
           github.event_name == 'workflow_dispatch' &&
-          (inputs.mode == 'plan' || inputs.mode == 'review' || inputs.mode == 'memory')
+          (inputs.mode == 'plan' || inputs.mode == 'review' || inputs.mode == 'memory' || (inputs.mode == 'preflight' && github.ref == 'refs/heads/main'))
         )
       )
     runs-on: [self-hosted, linux, codex]
@@ -60,7 +60,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Check opt-in release readiness
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'preflight'
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_CONFIG_DIR: ${{ runner.temp }}/release-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          PREFLIGHT_PR: ${{ inputs.number }}
+        run: bash scripts/agents/check-release-readiness.sh runner "$PREFLIGHT_PR"
+
       - name: Resolve read-only role and target
+        if: inputs.mode != 'preflight'
         id: task
         shell: bash
         run: |
@@ -79,6 +89,7 @@ jobs:
           fi
 
       - name: Verify trusted runner tools
+        if: inputs.mode != 'preflight'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
@@ -94,6 +105,7 @@ jobs:
           bwrap --version
 
       - name: Run bounded Codex role
+        if: inputs.mode != 'preflight'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
