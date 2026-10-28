@@ -44,6 +44,15 @@ export class AiWalletRefundRequestService {
     }
     throw Error('Refund request transaction retry exhausted.');
   }
+  private async terminalTime(tx: Prisma.TransactionClient, requestId: string): Promise<Date> {
+    // Wall clocks can step backward; transaction-start time can also be stale.
+    // Preserve logical ordering against immutable creation without changing history.
+    const [row] = await tx.$queryRaw<{ resolvedAt: Date }[]>`
+      SELECT GREATEST("createdAt", (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)) AS "resolvedAt"
+      FROM "AiWalletRefundRequest" WHERE "id" = ${requestId}`;
+    if (!row) throw new NotFoundException('Refund request not found.');
+    return row.resolvedAt;
+  }
   private publicRequest(row: AiWalletRefundRequest) {
     return { id: row.id, operationKey: row.operationKey, requestedByUserId: row.requestedByUserId,
       requestedNanos: row.requestedNanos.toString(), createdAt: row.createdAt, status: row.status,
@@ -99,7 +108,7 @@ export class AiWalletRefundRequestService {
       if (!s.wallet || !s.reconciled) throw new ConflictException('Wallet requires reconciliation.');
       await tx.aiWallet.update({ where: { organizationId }, data: { heldNanos: { decrement: row.requestedNanos } } });
       return this.publicRequest(await tx.aiWalletRefundRequest.update({ where: { id }, data: {
-        status: outcome, resolvedByUserId: actorId, resolvedAt: new Date() } }));
+        status: outcome, resolvedByUserId: actorId, resolvedAt: await this.terminalTime(tx, id) } }));
     });
   }
   private assertTestRefunds() {
@@ -342,7 +351,7 @@ export class AiWalletRefundRequestService {
     await tx.aiWalletLedger.create({ data: { organizationId: reviewed.organizationId, externalKey: `refund:${reviewed.refundId}`,
       kind: 'REVERSAL', amountNanos: nanos, refundRequestId: reviewed.requestId } });
     await tx.aiWalletRefundRequest.update({ where: { id: reviewed.requestId }, data: {
-      status: 'REFUNDED', resolvedByUserId: reviewed.reviewedByUserId, resolvedAt: new Date() } });
+      status: 'REFUNDED', resolvedByUserId: reviewed.reviewedByUserId, resolvedAt: await this.terminalTime(tx, reviewed.requestId) } });
   }
   // Existing platform-superadmin authority owns this queue. The cursor embeds
   // the ordering tuple so resolving its row between pages cannot skip a page.
