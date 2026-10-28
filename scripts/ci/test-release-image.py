@@ -191,5 +191,34 @@ let input='';process.stdin.on('data',c=>input+=c).on('end',()=>{
             self.assertEqual(app.call_args.kwargs,{"data":module.NODE_MIGRATE})
 
 
+    def test_wallet_proof_requires_each_guard_to_pass_explicitly(self):
+        proof=dict.fromkeys(["legacyWrites","lifecycleWrites","immutableGuards","deleteGuards"],True)
+        with tempfile.TemporaryDirectory() as root:
+            check=module.Verification(root)
+            with patch.object(check,"app",return_value=json.dumps(proof)) as app:
+                self.assertEqual(check.wallet_writes(DIGEST,"candidate-wallet","fixture"),proof)
+                self.assertEqual(app.call_args.args,(DIGEST,"candidate-wallet","fixture",["node","-"]))
+                self.assertEqual(app.call_args.kwargs,{"data":module.NODE_WALLET_WRITES,"action":"candidate-wallet"})
+            for bad in [{}, {**proof,"deleteGuards":False}, {**proof,"deleteGuards":1}, {**proof,"extra":True}]:
+                with self.subTest(proof=bad), patch.object(check,"app",return_value=json.dumps(bad)), self.assertRaises(RuntimeError):
+                    check.wallet_writes(DIGEST,"candidate-wallet","fixture")
+
+    def test_migration20_requires_both_published_clients(self):
+        with tempfile.TemporaryDirectory() as root:
+            check=module.Verification(root)
+            with patch.object(check,"wallet_writes",return_value={"pass":True}) as probe:
+                self.assertIsNone(check.wallet_compatibility("candidate","previous","fixture",{}))
+                probe.assert_not_called()
+                self.assertEqual(check.wallet_compatibility("candidate","previous","fixture",{module.WALLET_MIGRATION:"checksum"}),
+                                 {"candidate":{"pass":True},"previous":{"pass":True}})
+                self.assertEqual([c.args for c in probe.call_args_list],
+                                 [("candidate","candidate-wallet","fixture"),("previous","legacy-wallet","fixture")])
+            with patch.object(check,"wallet_writes",side_effect=RuntimeError("guard failed")), self.assertRaises(RuntimeError):
+                check.wallet_compatibility("candidate","previous","fixture",{module.WALLET_MIGRATION:"checksum"})
+
+    def test_wallet_probe_is_valid_node_program(self):
+        subprocess.run(["node","--check"],input=module.NODE_WALLET_WRITES,text=True,capture_output=True,check=True)
+
+
 if __name__ == "__main__":
     unittest.main()
