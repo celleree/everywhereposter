@@ -242,11 +242,11 @@ jobs:
               results = data.get("testResults")
               require(isinstance(results, list) and results, "Missing Jest suite evidence")
               if group == "wallet":
-                  for key, expected in {"numTotalTestSuites": 17, "numPassedTestSuites": 17, "numTotalTests": 391, "numPassedTests": 391, "numFailedTests": 0, "numPendingTests": 0, "numTodoTests": 0, "numPendingTestSuites": 0}.items():
+                  for key, expected in {"numTotalTestSuites": 18, "numPassedTestSuites": 18, "numTotalTests": 399, "numPassedTests": 399, "numFailedTests": 0, "numPendingTests": 0, "numTodoTests": 0, "numPendingTestSuites": 0}.items():
                       require(data.get(key) == expected, "Invalid wallet " + key)
-                  require(len(results) == 17 and len({r["name"] for r in results}) == 17, "Invalid wallet suite inventory")
-                  require(wallet_names is not None and len(wallet_names) == 17 and {r["name"].replace("\\", "/") for r in results} == wallet_names, "Wallet suites differ from candidate")
-                  require(sum(len(r.get("assertionResults", [])) for r in results) == 391, "Missing wallet assertion evidence")
+                  require(len(results) == 18 and len({r["name"] for r in results}) == 18, "Invalid wallet suite inventory")
+                  require(wallet_names is not None and len(wallet_names) == 18 and {r["name"].replace("\\", "/") for r in results} == wallet_names, "Wallet suites differ from candidate")
+                  require(sum(len(r.get("assertionResults", [])) for r in results) == 399, "Missing wallet assertion evidence")
                   selected = results
               else:
                   names = {
