@@ -48,6 +48,63 @@ async function settingsFixture(page: any) {
   });
 }
 
+test('Settings: selected navigation retains colors on hover and keyboard focus', async ({ page, isMobile }, info) => {
+  test.skip(isMobile, 'Desktop navigation uses buttons; mobile uses a select.');
+  await settingsFixture(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openApp(page, '/settings');
+  const themeRoot = page.locator('.dark, .light').first();
+  const original = await themeRoot.evaluate(element => element.classList.contains('dark') ? 'dark' : 'light');
+  const navigation = page.getByRole('navigation', { name: 'Settings', exact: true });
+  const global = navigation.getByRole('button', { name: 'Global Settings', exact: true });
+  const next = navigation.getByRole('button').nth(1);
+  const themes = [
+    { name: 'dark', selected: 'rgb(244, 244, 245)', text: 'rgb(24, 24, 27)', hover: 'rgb(24, 24, 27)' },
+    { name: 'light', selected: 'rgb(228, 228, 231)', text: 'rgb(9, 9, 11)', hover: 'rgb(244, 244, 245)' },
+  ];
+  try {
+    for (const theme of themes) {
+      await themeRoot.evaluate((element, selected) => {
+        element.classList.remove('dark', 'light');
+        element.classList.add(selected);
+      }, theme.name);
+      await global.click();
+      await page.mouse.move(1000, 100);
+      await expect(global).toHaveAttribute('aria-pressed', 'true');
+      await expect(global).toHaveCSS('background-color', theme.selected);
+      await expect(global).toHaveCSS('color', theme.text);
+      await next.hover();
+      await expect(next).toHaveCSS('background-color', theme.hover);
+      await global.hover();
+      await capture(page, info, `settings-selected-hover-${theme.name}`);
+      await expect(global).toHaveCSS('background-color', theme.selected);
+      await expect(global).toHaveCSS('color', theme.text);
+      await global.focus();
+      await page.keyboard.press('Tab');
+      await expect(next).toBeFocused();
+      await expect(next).toHaveCSS('outline-style', 'solid');
+      await expect(next).toHaveCSS('outline-width', '2px');
+      await page.keyboard.press('Enter');
+      await expect(next).toHaveAttribute('aria-pressed', 'true');
+      await expect(global).toHaveAttribute('aria-pressed', 'false');
+      await expect(next).toBeFocused();
+      await expect(next).toHaveCSS('background-color', theme.selected);
+      await expect(next).toHaveCSS('color', theme.text);
+      await next.hover();
+      await expect(next).toHaveCSS('background-color', theme.selected);
+      await expect(next).toHaveCSS('color', theme.text);
+      await noHorizontalOverflow(page);
+      await capture(page, info, `settings-keyboard-selected-${theme.name}`);
+    }
+  } finally {
+    await themeRoot.evaluate((element, selected) => {
+      element.classList.remove('dark', 'light');
+      element.classList.add(selected);
+    }, original);
+  }
+});
+
+
 test('Settings: remaining sections, keyboard, menu removals and repeated navigation', async ({ page }, info) => {
   await settingsFixture(page);
   const errors: string[] = [];

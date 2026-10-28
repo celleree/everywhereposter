@@ -130,8 +130,8 @@ export const SettingsPopup: FC<{
               aria-pressed={tabKey === tab}
               aria-controls="settings-panel"
               className={clsx(
-                'min-h-[44px] px-[12px] text-start rounded-[8px] hover:bg-boxHover focus-visible:outline focus-visible:outline-2',
-                tabKey === tab && 'bg-boxFocused text-textItemFocused'
+                'min-h-[44px] px-[12px] text-start rounded-[8px] focus-visible:outline focus-visible:outline-2',
+                tabKey === tab ? 'bg-boxFocused text-textItemFocused' : 'hover:bg-boxHover'
               )}
               onClick={() => setTab(tabKey)}
             >
