@@ -235,7 +235,7 @@ export function CreatorAudit() {
             {needsConnection ? (
               <div className="mt-3">
                 <p>No ready Instagram connection is available. Add or reconnect one to continue.</p>
-                <a className="underline" href="/launches">Add or reconnect a channel</a>
+                <a className="underline" href="/channels">Add or reconnect a channel</a>
               </div>
             ) : (
               <div className="mt-3 flex flex-wrap items-center gap-3">
