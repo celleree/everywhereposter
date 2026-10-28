@@ -63,9 +63,16 @@ echo synthetic-sensitive-output >&2
 case "$*" in
   --help)
     [[ "$SCENARIO" != old-codex ]] || exit 0
-    [[ "$SCENARIO" != option-prefix ]] || { echo '--ask-for-approval --ignore-user-config-extra --config'; exit 0; }
-    echo '--ask-for-approval --ignore-user-config --config' ;;
-  'exec --help') echo '--ephemeral --output-last-message --sandbox' ;;
+    echo '--ask-for-approval --config'
+    [[ "$SCENARIO" != ignore-global-only ]] || echo '--ignore-user-config'
+    exit 0 ;;
+  'exec --help')
+    echo '--ephemeral --output-last-message --sandbox'
+    case "$SCENARIO" in
+      exec-ignore-missing|ignore-global-only) ;;
+      option-prefix) echo '--ignore-user-config-extra' ;;
+      *) echo '--ignore-user-config' ;;
+    esac ;;
   'login status')
     [[ "$SCENARIO" != missing-login ]] || exit 1
     [[ "$SCENARIO" != login-timeout ]] || /bin/sleep 2
@@ -178,6 +185,8 @@ for scenario in missing-login login-timeout; do run_case "$scenario" runner 1 'F
 for scenario in old-gh-repo old-gh-pr wrong-repo missing-workflow-token; do run_case "$scenario" runner 1 'UNKNOWN [GITHUB_API]'; done
 for scenario in fork closed other-base other-author wrong-number malformed-sha; do run_case "$scenario" runner 1 'UNKNOWN [TARGET]'; done
 run_case old-codex runner 1 'UNKNOWN [CODEX_CLI]'
+run_case exec-ignore-missing runner 1 'UNKNOWN [CODEX_CLI]'
+run_case ignore-global-only runner 1 'UNKNOWN [CODEX_CLI]'
 run_case option-prefix runner 1 'UNKNOWN [CODEX_CLI]'
 run_case missing-codex runner 1 'UNKNOWN [TOOLS]'
 run_case tool-failure runner 1 'UNKNOWN [TOOLS]'

@@ -79,10 +79,10 @@ has_option() {
   local pattern="(^|[[:space:],])${2}([[:space:]=]|$)"
   [[ "$1" =~ $pattern ]]
 }
-for flag in --ask-for-approval --ignore-user-config --config; do
+for flag in --ask-for-approval --config; do
   has_option "$cli_help" "$flag" || fail CODEX_CLI 'Codex does not advertise a required global option.'
 done
-for flag in --ephemeral --output-last-message --sandbox; do
+for flag in --ignore-user-config --ephemeral --output-last-message --sandbox; do
   has_option "$exec_help" "$flag" || fail CODEX_CLI 'Codex does not advertise a required exec option.'
 done
 probe codex login status >/dev/null 2>&1 || {
