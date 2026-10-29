@@ -17,6 +17,7 @@ services:
       FRONTEND_URL: '${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
       NEXT_PUBLIC_BACKEND_URL: '${PUBLIC_BACKEND_URL:?PUBLIC_BACKEND_URL is required. Use localhost/local tunnel for local dev, not the production domain.}'
       JWT_SECRET: '${JWT_SECRET}'
+      AUTH_TRUSTED_PROXY_CIDRS: '${AUTH_TRUSTED_PROXY_CIDRS:-}'
       CREATOR_AUDIT_ENABLED: '${CREATOR_AUDIT_ENABLED:-false}'
       CREATOR_AUDIT_SERVICE_URL: '${CREATOR_AUDIT_SERVICE_URL:-}'
       CREATOR_AUDIT_SERVICE_SECRET: '${CREATOR_AUDIT_SERVICE_SECRET:-}'
