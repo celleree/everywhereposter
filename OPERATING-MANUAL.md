@@ -220,6 +220,23 @@ repair, or restoring a backup. Restore plans must account for intervening data
 writes and downtime. No automatic down migration, reset, volume change, or
 destructive restore is part of startup or this change.
 
+## Authentication attempt limits and proxy identity
+
+Login is limited to 10 requests per minute per client IP; registration, activation,
+resend and password recovery each allow 5 per 15 minutes. Rejections return 429
+and Retry-After. Existing registration, OAuth and public-post quota semantics remain.
+
+Public deployments must set AUTH_TRUSTED_PROXY_CIDRS to the explicitly trusted
+nginx/tunnel peer IPs or narrow CIDRs (plus loopback if the app's own nginx forwards
+requests). An empty value is allowed for direct localhost development; it refuses
+startup for a public FRONTEND_URL. Never use a catch-all subnet or trust arbitrary
+forwarded headers. The limiter walks X-Forwarded-For from the socket peer right to
+left, stopping at the nearest untrusted address. CF-Connecting-IP is not a bypass.
+Keep origin ports private and ensure the final trusted ingress appends/overwrites
+the actual client address. Revalidate the configured peer addresses after network
+or proxy changes. Verify two distinct fixture clients have independent buckets
+before activation. Do not deploy with one shared tunnel-IP bucket.
+
 ## Server And Environment Notes
 
 - Usual live repo path: /home/arund/publish-everywhere-git
