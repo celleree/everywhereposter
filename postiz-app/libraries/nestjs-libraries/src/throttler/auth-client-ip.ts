@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { applyDecorators, BadRequestException, SetMetadata } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { BlockList, isIP } from 'node:net';
 import type { Request } from 'express';
 
@@ -61,6 +62,6 @@ export const AUTH_RATE_LIMITS = {
   recovery: { default: { limit: 5, ttl: 900_000, blockDuration: 900_000 } },
 };
 
-export const isLimitedAuthRequest = (req: Pick<Request, 'method' | 'url'>) =>
-  req.method === 'POST' && /^\/auth\/(login|register|forgot|forgot-return|activate|resend-activation)\/?$/i
-    .test(req.url.split('?')[0]);
+export const AUTH_RATE_LIMITED = 'auth-rate-limited';
+export const AuthRateLimit = (options: Parameters<typeof Throttle>[0]) =>
+  applyDecorators(SetMetadata(AUTH_RATE_LIMITED, true), Throttle(options));

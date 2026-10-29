@@ -1,6 +1,7 @@
 jest.mock('@gitroom/backend/services/auth/auth.service', () => ({ AuthService: class AuthService {} }));
 jest.mock('@gitroom/nestjs-libraries/services/email.service', () => ({ EmailService: class EmailService {} }));
 jest.mock('@sentry/nestjs', () => ({ metrics: { count: jest.fn() } }));
+import { request as httpRequest } from 'node:http';
 import { Controller, Post } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
@@ -109,6 +110,23 @@ describe('actual auth controller and guard over local HTTP (no providers/product
     for (let i = 0; i < 10; i++) expect((await post('/AUTH/LOGIN/?next=/public/v1/posts')).status).toBe(200);
     expect((await post('/auth/login')).status).toBe(429);
   });
+  it.each(['/auth/login#fragment', 'http://fixture.invalid/auth/login'])
+    ('limits the router-selected login handler for raw request target %s', async (target) => {
+      const raw = () => new Promise<number>((resolve, reject) => {
+        const endpoint = new URL(base);
+        const req = httpRequest({ hostname: endpoint.hostname, port: endpoint.port,
+          path: target, method: 'POST', headers: { 'content-type': 'application/json',
+            'x-forwarded-for': '198.51.100.10, 172.30.60.6' } }, response => {
+          response.resume(); response.on('end', () => resolve(response.statusCode!));
+        });
+        req.on('error', reject);
+        req.end(JSON.stringify({ email: 'fixture@example.invalid', password: 'test-password', provider: 'LOCAL' }));
+      });
+      for (let i = 0; i < 10; i++) expect(await raw()).toBe(200);
+      expect(await raw()).toBe(429);
+      expect((await post('/auth/login')).status).toBe(429);
+      expect(auth.routeAuth).toHaveBeenCalledTimes(10);
+    });
   it('leaves OAuth callbacks and provider links available after the login bucket is exhausted', async () => {
     for (let i = 0; i < 10; i++) await post('/auth/login');
     expect((await post('/auth/oauth/generic/exists')).status).toBe(200);

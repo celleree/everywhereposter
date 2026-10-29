@@ -9,8 +9,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
-import { Throttle } from '@nestjs/throttler';
-import { AUTH_RATE_LIMITS } from '@gitroom/nestjs-libraries/throttler/auth-client-ip';
+import { AUTH_RATE_LIMITS, AuthRateLimit } from '@gitroom/nestjs-libraries/throttler/auth-client-ip';
 
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
 import { LoginUserDto } from '@gitroom/nestjs-libraries/dtos/auth/login.user.dto';
@@ -45,7 +44,7 @@ export class AuthController {
   }
 
   @Post('/register')
-  @Throttle(AUTH_RATE_LIMITS.recovery)
+  @AuthRateLimit(AUTH_RATE_LIMITS.recovery)
   async register(
     @Req() req: Request,
     @Body() body: CreateOrgUserDto,
@@ -120,7 +119,7 @@ export class AuthController {
   }
 
   @Post('/login')
-  @Throttle(AUTH_RATE_LIMITS.login)
+  @AuthRateLimit(AUTH_RATE_LIMITS.login)
   async login(
     @Req() req: Request,
     @Body() body: LoginUserDto,
@@ -185,7 +184,7 @@ export class AuthController {
   }
 
   @Post('/forgot')
-  @Throttle(AUTH_RATE_LIMITS.recovery)
+  @AuthRateLimit(AUTH_RATE_LIMITS.recovery)
   async forgot(@Body() body: ForgotPasswordDto) {
     try {
       await this._authService.forgot(body.email);
@@ -200,7 +199,7 @@ export class AuthController {
   }
 
   @Post('/forgot-return')
-  @Throttle(AUTH_RATE_LIMITS.recovery)
+  @AuthRateLimit(AUTH_RATE_LIMITS.recovery)
   async forgotReturn(@Body() body: ForgotReturnPasswordDto) {
     const reset = await this._authService.forgotReturn(body);
     return {
@@ -214,7 +213,7 @@ export class AuthController {
   }
 
   @Post('/activate')
-  @Throttle(AUTH_RATE_LIMITS.recovery)
+  @AuthRateLimit(AUTH_RATE_LIMITS.recovery)
   async activate(
     @Body('code') code: string,
     @Body('datafast_visitor_id') datafast_visitor_id: string,
@@ -247,7 +246,7 @@ export class AuthController {
   }
 
   @Post('/resend-activation')
-  @Throttle(AUTH_RATE_LIMITS.recovery)
+  @AuthRateLimit(AUTH_RATE_LIMITS.recovery)
   async resendActivation(@Body() body: ResendActivationDto) {
     try {
       await this._authService.resendActivationEmail(body.email);
