@@ -1,15 +1,16 @@
 import { alignmentHash, coveringFrames, createSourceMap, removableInteriorFrames, sourceWordId } from '../../libraries/nestjs-libraries/src/media-editing/studio-source-clock';
 
 const source = 'a'.repeat(64);
-const identity = { sourceSha256: source, rawAlignmentBytesSha256: 'b'.repeat(64), engineName: 'engine', engineVersion: '1',
-  modelArtifactSha256: 'c'.repeat(64), language: 'en', canonicalOptionsSha256: 'd'.repeat(64),
+const identity = { sourceSha256: source, rawAlignmentBytesSha256: 'b'.repeat(64), engineName: 'fixture-aligner', engineVersion: '1.0.0',
+  modelArtifactSha256: 'c'.repeat(64), language: 'en', canonicalOptionsSha256: '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',
   clock: { fpsNumerator: 30, fpsDenominator: 1, audioSampleRate: 48000, origin: 'known-zero' } };
 const alignment = alignmentHash(identity);
 
 it('uses fixed versioned tuple vectors and binds every supplied identity component', () => {
-  expect(alignment).toBe('e478b64065b062198c48923475a9f32c435109417c3faba33fa8243b75172e3c');
-  expect(sourceWordId(source, alignment, 0)).toBe('a520a7f902e970ff9cf00fa46b079188cd1dd3ad27bad7ffa49b7c64664b4324');
-  expect(createSourceMap(source, alignment, 180, [[0, 60], [90, 180]]).mapHash).toBe('8d0ece8d67e484e35e3af74a9dfd52bf1225fc33bda5adc571e19918ca20d2b4');
+  expect(alignment).toBe('3e36f18abf3dada533d6d66835c6b0546386467577981be9f809c87b86357b02');
+  expect(sourceWordId(source, alignment, 0)).toBe('53c43924db849d399b4e61f244546dd4e9ee73a5d79a50c25b82112f934c5d66');
+  expect(sourceWordId(source, alignment, 1)).toBe('7541ec0967de7bf9cf12121bd6f269131c66090e1f94e2a152e4e186f42f104c');
+  expect(createSourceMap(source, alignment, 180, [[0, 60], [90, 180]]).mapHash).toBe('e1cad0d5aee58b59939cf5803921685438c8631975b80fd5e212287f4266a81b');
   for (const change of [{ sourceSha256: 'e'.repeat(64) }, { rawAlignmentBytesSha256: 'e'.repeat(64) },
     { engineName: 'other' }, { engineVersion: '2' }, { modelArtifactSha256: 'e'.repeat(64) },
     { language: 'fr' }, { canonicalOptionsSha256: 'e'.repeat(64) }, { clock: { ...identity.clock, audioSampleRate: 44100 } }]) {
