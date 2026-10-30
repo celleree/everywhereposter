@@ -46,6 +46,7 @@ if [[ "$MODE" == coordinator ]]; then
     .[0].total_count as $total | [.[].runners[]] as $all |
     if ($all | length) != $total or ($all | map(.id) | unique | length) != $total
     then error("incomplete pages") else $all end |
+    map(.labels |= map(.name |= ascii_downcase)) |
     map(select(([.labels[].name] | index("self-hosted")) != null and
                ([.labels[].name] | index("linux")) != null and
                ([.labels[].name] | index("codex")) != null)) |
