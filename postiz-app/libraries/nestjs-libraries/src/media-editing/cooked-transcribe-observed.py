@@ -1,5 +1,6 @@
 """Private, deliberately incomplete observations around the pinned native transcriber."""
 import hashlib
+import builtins
 import dataclasses
 import inspect
 import math
@@ -212,19 +213,28 @@ class NativeObserver:
 
     def run(self, original, actual, *args, **kwargs):
         package, previous = None, None
+        native_import = builtins.__import__
+        def imported(name, globals=None, locals=None, fromlist=(), level=0):
+            nonlocal package, previous
+            module = native_import(name, globals, locals, fromlist, level)  # Native initialization failures propagate once.
+            if name == "faster_whisper" and globals is original.__globals__ and "WhisperModel" in (fromlist or ()) and package is None:
+                try:
+                    package, previous = module, module.WhisperModel
+                    package.WhisperModel = lambda *a, **k: self.constructor(previous, package, *a, **k)
+                except Exception:
+                    self.degrade()
+                    if previous is not None:
+                        package.WhisperModel = previous
+            return module
         try:
-            # Match upstream's ordering: HF_HOME is set before the first SDK import.
-            os.environ.setdefault("HF_HOME", str(actual["HOME"] / "models"))
-            import faster_whisper as package
-            previous = package.WhisperModel
-            package.WhisperModel = lambda *a, **k: self.constructor(previous, package, *a, **k)
+            # Upstream owns HF_HOME and its sole SDK import; observe only successful return before IMPORT_FROM.
+            builtins.__import__ = imported
         except Exception:
             self.degrade()
-            if previous is not None:
-                package.WhisperModel = previous
         try:
             return original(*args, **kwargs)
         finally:
+            builtins.__import__ = native_import
             for restore in reversed(self.restores):
                 try:
                     restore()

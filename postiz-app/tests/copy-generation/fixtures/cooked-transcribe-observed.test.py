@@ -217,6 +217,7 @@ class NativeCapture(unittest.TestCase):
             import faster_whisper as sdk
             self.addCleanup(lambda: sys.modules.pop("faster_whisper", None))
             constructor = sdk.WhisperModel
+            native_import = O.builtins.__import__
             def native(count=2):
                 from faster_whisper import WhisperModel
                 instance = WhisperModel(self.env["AI_EDITOR_WHISPER_MODEL"], device="cpu", compute_type="int8")
@@ -251,6 +252,7 @@ class NativeCapture(unittest.TestCase):
                             self.assertEqual(loaded["models"][0]["filesBefore"], loaded["models"][0]["filesAfter"])
                     count = 0 if mode == "constructor" else 1 if mode in ("transcribe", "lazy") else 65 if mode == "overflow" else 2
                     self.assertEqual(sdk.attempts[previous:], ["constructor"] + ["transcribe"] * count)
+                    self.assertIs(O.builtins.__import__, native_import)
                     self.assertIs(sdk.WhisperModel, constructor)
                     self.assertTrue(all("transcribe" not in vars(i) for i in sdk.instances))
             with patch.dict(sys.modules, {"faster_whisper": None}), self.assertRaises(ModuleNotFoundError):
@@ -264,6 +266,37 @@ class NativeCapture(unittest.TestCase):
             with self.assertRaises(ValueError): O.model_files(model.parent)
             model.unlink(); model.symlink_to(self.source)
             with self.assertRaises(OSError): O.model_files(model.parent)
+
+    @unittest.skipUnless(os.environ.get("COOKED_PINNED_TRANSCRIBE"), "opt-in actual pinned import failure")
+    def test_pinned_failed_sdk_initialization_is_never_replayed(self):
+        import builtins, contextlib, io, runpy
+        script = Path(os.environ["COOKED_PINNED_TRANSCRIBE"])
+        self.assertEqual(O.digest(script), O.SCRIPT_SHA)
+        native = runpy.run_path(str(script), run_name="failure_fixture")["run_whisper"]
+        package = self.sdk() / "__init__.py"
+        native_import = builtins.__import__
+        with patch.dict(os.environ, self.env), patch.object(sys, "path", [str(self.root), *sys.path]):
+            for error, transient in (("ImportError", False), ("ImportError", True), ("RuntimeError", False)):
+                with self.subTest(error=error, transient=transient):
+                    package.write_text('import os\nfrom pathlib import Path\np=Path(os.environ["TRACE"])\n'
+                        'n=int(p.read_text())+1 if p.exists() else 1\np.write_text(str(n))\n'
+                        'print("SDK initialization", flush=True)\nprint("SDK diagnostic", file=__import__("sys").stderr)\n'
+                        + ('if n == 1: ' if transient else '') + 'raise ' + error + '("SDK failure sentinel")\n')
+                    results = []
+                    for wrapped in (False, True):
+                        self.trace.unlink(missing_ok=True); sys.modules.pop("faster_whisper", None)
+                        stdout, stderr = io.StringIO(), io.StringIO()
+                        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                            try:
+                                if wrapped: O.NativeObserver().run(native, native.__globals__, self.root / "unused.wav", "en")
+                                else: native(self.root / "unused.wav", "en")
+                            except BaseException as failure: outcome = (type(failure), str(failure))
+                            else: self.fail("native import failure was swallowed")
+                        results.append((stdout.getvalue(), stderr.getvalue(), outcome))
+                        self.assertEqual(self.trace.read_text(), "1")
+                        self.assertIs(builtins.__import__, native_import)
+                    self.assertEqual(results[0], results[1])
+                    self.assertEqual(results[0][:2], ("SDK initialization\n", "SDK diagnostic\n"))
 
     @unittest.skipUnless(os.environ.get("COOKED_PINNED_TRANSCRIBE"), "opt-in actual pinned upstream/fake SDK")
     def test_actual_pinned_upstream_fake_sdk_bytes_and_cache(self):
