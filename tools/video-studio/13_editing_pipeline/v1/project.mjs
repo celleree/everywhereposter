@@ -5,6 +5,30 @@ export const EFFECTS = ['CinematicGrade','PersonPopOut','ImageCollage','ChatDrop
 export const frameCount = p => p.cuts.reduce((n,c)=>n+c.out-c.in,0);
 export const audioTimeline = p => ({sourceSha256:p.source.sha256,fps:p.canvas.fps,cuts:p.cuts.map(c=>[c.in,c.out])});
 export const captionFrameRange=(c,words,fps,lastWordEnd)=>[Math.floor(words.get(c.wordIds[0]).start*fps),Math.ceil(Math.min(words.get(c.wordIds.at(-1)).end+.12,lastWordEnd)*fps)];
+// Producers must verify this capability before emitting an opt-in policy: older
+// packages ignore unknown project fields and would silently render legacy timing.
+export const CAPTION_TIMING_CAPABILITY=Object.freeze({
+  version:1,field:'captionTimingPolicy',default:'legacy-v1',
+  policies:Object.freeze(['legacy-v1','trim-trailing-hold-v1']),
+});
+export function captionTimingPolicy(p){
+  const policy=p.captionTimingPolicy===undefined?CAPTION_TIMING_CAPABILITY.default:p.captionTimingPolicy;
+  if(!CAPTION_TIMING_CAPABILITY.policies.includes(policy))throw Error('Unsupported caption timing policy');
+  return policy;
+}
+export function captionFrameRanges(p,words=new Map(p.words.map(w=>[w.id,w]))){
+  const policy=captionTimingPolicy(p),fps=p.canvas.fps,lastEnd=p.words.at(-1).end;
+  return p.captions.map((c,i)=>{
+    const [from,end]=captionFrameRange(c,words,fps,lastEnd),next=p.captions[i+1];
+    if(policy==='trim-trailing-hold-v1'&&next){
+      const nextStart=Math.floor(words.get(next.wordIds[0]).start*fps);
+      const wordEnd=Math.ceil(Math.max(...c.wordIds.map(id=>words.get(id).end))*fps);
+      // Remove hold only. Preserve real overlap, same-frame and empty ranges.
+      if(nextStart<end&&nextStart>=wordEnd&&nextStart>from)return [from,nextStart];
+    }
+    return [from,end];
+  });
+}
 export function assertPreparedProject(p,receipt,audioHash){
   if(JSON.stringify(audioTimeline(p))!==JSON.stringify(receipt.audioTimeline)||receipt.audioSha256!==audioHash)throw Error('Source/cuts/audio changed: prepare and realign a new revision before rendering');
 }
@@ -17,13 +41,15 @@ export function chunkContent(p,first,last){
   let cursor=0;
   const cuts=p.cuts.map(c=>{const from=cursor;cursor+=c.out-c.in;return{...c,from};}).filter(c=>c.from<=last&&c.from+c.out-c.in>first);
   const words=new Map(p.words.map(w=>[w.id,w]));
-  const captions=p.captions.filter(c=>{const [from,end]=captionFrameRange(c,words,p.canvas.fps,p.words.at(-1).end);return from<=last&&end>first;}).map(c=>({...c,words:c.wordIds.map(id=>words.get(id))}));
+  const ranges=captionFrameRanges(p,words);
+  const captions=p.captions.flatMap((c,i)=>{const [from,end]=ranges[i];return from<=last&&end>first?[{...c,frameRange:ranges[i],words:c.wordIds.map(id=>words.get(id))}]:[];});
   const active=events=>events.filter(e=>e.from<=last&&e.from+e.frames>first);
   // Editorial notes/revision labels do not change pixels; timed decisions do.
-  return {first,last,canvas:p.canvas,profile:p.profile,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};
+  return {first,last,captionTimingPolicy:captionTimingPolicy(p),canvas:p.canvas,profile:p.profile,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};
 }
 export function validateProject(p){
   if(!p||p.schemaVersion!==1||!text(p.id,80)||!integer(p.revision,1,10000))fail('Unsupported project identity/version');
+  captionTimingPolicy(p);
   if(!p.canvas||!integer(p.canvas.width,320,3840)||!integer(p.canvas.height,320,3840)||p.canvas.width%2||p.canvas.height%2||!integer(p.canvas.fps,24,60)||Math.abs(p.canvas.width/p.canvas.height-9/16)>.001)fail('Expected an even-sized portrait canvas');
   if(!p.source||!integer(p.source.frames,1,60*60*30)||!/^[a-f0-9]{64}$/.test(p.source.sha256)||!text(p.source.assetId,80))fail('Invalid source provenance');
   if(!Array.isArray(p.assets)||!p.assets.length||p.assets.length>100)fail('Invalid asset inventory');
@@ -84,5 +110,5 @@ export function validateProject(p){
   if(p.profile===EASY_PROFILE)for(let i=0;i<p.effects.length;i++)for(const b of p.effects.slice(i+1)){const a=p.effects[i];if(a.from<b.from+b.frames&&a.from+a.frames>b.from&&overlaps(a.bounds,b.bounds))fail('Overlapping accessible effect regions');}
   if(!p.director||!text(p.director.summary,3000)||!Array.isArray(p.director.decisions))fail('Missing AI direction record');
   for(const cue of p.instructions?.requiredCues??[]){if(!text(cue.id,80)||!(p.profile===EASY_PROFILE?EASY_EFFECTS:EFFECTS).includes(cue.effect)||p.effects.filter(e=>e.directiveId===cue.id&&e.type===cue.effect).length!==1)fail('An explicit script effect cue was lost');}
-  return {frames,seconds,assets,words,safeZones:assessSafeZones(p,frames)};
+  return {frames,seconds,assets,words,captionRanges:captionFrameRanges(p,words),safeZones:assessSafeZones(p,frames)};
 }
