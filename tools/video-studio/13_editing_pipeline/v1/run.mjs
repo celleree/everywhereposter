@@ -8,11 +8,12 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {validateProject,chunkContent,assertPreparedProject} from './project.mjs';
+import {validateProject,chunkContent,assertPreparedProject,CAPTION_TIMING_CAPABILITY} from './project.mjs';
 import {readRendererIdentity,createExportAcceptance} from './export-acceptance.mjs';
 import {runtimeIdentity} from './runtime.mjs';
 import {readBindings} from './receipt-bindings.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url)),command=process.argv[2],dir=path.resolve(process.argv[3]??'projects/talking-head-v1');
+if(command==='capabilities'){console.log(JSON.stringify({captionTiming:CAPTION_TIMING_CAPABILITY}));process.exit(0);}
 const runtimeAt=process.argv.indexOf('--runtime');
 if(runtimeAt<0||!process.argv[runtimeAt+1])throw Error('Explicit --runtime config required');
 const runtimeFile=path.resolve(process.argv[runtimeAt+1]);
