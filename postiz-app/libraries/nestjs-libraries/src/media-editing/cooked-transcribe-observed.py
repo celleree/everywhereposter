@@ -109,16 +109,19 @@ def model_files(directory):
     return result
 
 
-def binding(value):
+def binding(value, *, returned_options=False):
     # Only bounded primitives/containers/dataclasses. No repr, arbitrary iteration or audio paths.
     budget = [8192, 65536]
-    def clean(v, depth=0):
+    def clean(v, depth=0, path=()):
         if type(v) is str and len(v) > 65536:
             raise ValueError("options-limit")
         budget[0] -= 1
         budget[1] -= len(json.dumps(v, ensure_ascii=True)) if type(v) is str else 8
         if budget[0] < 0 or budget[1] < 0 or depth > 12:
             raise ValueError("options-limit")
+        # This SDK field uses +inf for an unbounded duration; retain its value in strict JSON.
+        if returned_options and path == ("vad_options", "max_speech_duration_s") and type(v) is float and v == math.inf:
+            return {"$sdkNumber": "positive-infinity"}
         if v is None or type(v) in (str, bool, int, float):
             if type(v) is str and len(v) > 65536 or type(v) in (int, float) and (not math.isfinite(v) or abs(v) > 2**53 - 1):
                 raise ValueError("unsupported-scalar")
@@ -127,11 +130,13 @@ def binding(value):
             if len(dataclasses.fields(v)) > 1024:
                 raise ValueError("options-limit")
             v = {f.name: getattr(v, f.name) for f in dataclasses.fields(v)}
+        if type(v) is dict and "$sdkNumber" in v:
+            raise ValueError("reserved-observation-tag")
         if type(v) in (list, tuple) and len(v) <= 1024:
-            return [clean(x, depth + 1) for x in v]
+            return [clean(x, depth + 1, path + (str(i),)) for i, x in enumerate(v)]
         if type(v) is dict and len(v) <= 1024 and all(type(k) is str and len(k) <= 1024 for k in v):
             budget[1] -= sum(len(json.dumps(k, ensure_ascii=True)) for k in v)
-            return {k: clean(v[k], depth + 1) for k in sorted(v)}
+            return {k: clean(v[k], depth + 1, path + (k,)) for k in sorted(v)}
         raise ValueError("unsupported-options")
     data = json.dumps(clean(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
     raw = data.encode("utf-8")
@@ -145,8 +150,8 @@ class NativeObserver:
         self.models, self.calls, self.restores, self.checks = [], [], [], []
         self.used, self.failed = 0, False
 
-    def capture(self, value):
-        result = binding(value)
+    def capture(self, value, *, returned_options=False):
+        result = binding(value, returned_options=returned_options)
         self.used += result["byteCount"]
         if self.used > 65536:
             raise ValueError("aggregate-options-limit")
@@ -198,7 +203,7 @@ class NativeObserver:
                         raise ValueError("call-observation-unavailable")
                     info = result[1]
                     call["returned"] = self.capture({k: getattr(info, k) for k in
-                        ("transcription_options", "vad_options", "language", "language_probability", "all_language_probs") if hasattr(info, k)})
+                        ("transcription_options", "vad_options", "language", "language_probability", "all_language_probs") if hasattr(info, k)}, returned_options=True)
                     self.calls.append(call)
                 except Exception:
                     self.degrade()

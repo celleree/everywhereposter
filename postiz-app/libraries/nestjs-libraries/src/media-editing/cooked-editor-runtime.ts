@@ -60,14 +60,17 @@ async function validateObservation(workspace: string, sourceSha256: string) {
       if (bytes.length !== value.byteCount || optionBytes > 65536 ||
           createHash('sha256').update(bytes).digest('hex') !== value.sha256) return false;
       let nodes = 8192;
-      const supported = (v: any, depth = 0): boolean => {
+      const supported = (v: any, depth = 0, path: string[] = []): boolean => {
         if (--nodes < 0 || depth > 12) return false;
         if (v === null || typeof v === 'boolean') return true;
         if (typeof v === 'string') return v.length <= 65536;
         if (typeof v === 'number') return Number.isFinite(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER;
-        if (Array.isArray(v)) return v.length <= 1024 && v.every(x => supported(x, depth + 1));
+        if (Array.isArray(v)) return v.length <= 1024 && v.every((x, i) => supported(x, depth + 1, [...path, String(i)]));
+        if (Object.prototype.hasOwnProperty.call(v, '$sdkNumber')) return kind === 'returned' &&
+          path.length === 2 && path[0] === 'vad_options' && path[1] === 'max_speech_duration_s' &&
+          Object.keys(v).length === 1 && v.$sdkNumber === 'positive-infinity';
         return typeof v === 'object' && Object.keys(v).length <= 1024 &&
-          Object.keys(v).every(k => k.length <= 1024 && supported(v[k], depth + 1));
+          Object.keys(v).every(k => k.length <= 1024 && supported(v[k], depth + 1, [...path, k]));
       };
       const parsed = JSON.parse(value.canonicalUTF8);
       const ascii = (v: string) => JSON.stringify(v).replace(/[\u007f-\uffff]/g,
@@ -92,7 +95,7 @@ async function validateObservation(workspace: string, sourceSha256: string) {
     const observedOptions = observedModel && options?.state === 'observed' && options.basis === 'transcribe-API-calls' &&
       Array.isArray(options.calls) && options.calls.length <= 64 && options.calls.every((c: any, i: number) =>
         c.id === i + 1 && loaded.models.some((m: any) => m.id === c.modelId) &&
-        binding(c.explicit) && binding(c.defaulted) && binding(c.returned)) && options.byteCount === optionBytes;
+        binding(c.explicit) && binding(c.defaulted) && binding(c.returned, 'returned')) && options.byteCount === optionBytes;
     if (!(unknown(loaded) && unknown(options)) && !(observedModel && observedOptions)) throw new Error('NATIVE_SHAPE');
     const fields = ['index', 'codec_name', 'sample_rate', 'channels', 'time_base', 'start_pts', 'start_time'];
     const candidate = (value: any) => value && !Array.isArray(value) &&

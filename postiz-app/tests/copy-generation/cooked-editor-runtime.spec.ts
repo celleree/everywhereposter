@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -150,10 +151,11 @@ describe('private cooked native boundary', () => {
     expect(calls.some(c => c.stage === 'render')).toBe(true);
     await runtime.cleanup(result.jobId, 'o');
   });
-  it.each(['valid', 'python-json', 'hash', 'bytes', 'references', 'order', 'model', 'budget', 'unsupported', 'canonical', 'count'])(
+  it.each(['valid', 'python-json', 'hash', 'bytes', 'references', 'order', 'model', 'budget', 'unsupported', 'canonical', 'count', 'python-vad', 'tag-field', 'tag-view', 'tag-extra', 'tag-nan', 'tag-negative', 'raw-nan', 'raw-infinity', 'raw-negative'])(
     'validates native observed bindings and bounds: %s', async variant => {
-      const bind = (data: any) => { const canonicalUTF8 = JSON.stringify(data); return { canonicalUTF8,
-        byteCount: Buffer.byteLength(canonicalUTF8), sha256: createHash('sha256').update(canonicalUTF8).digest('hex') }; };
+      const raw = (canonicalUTF8: string) => ({ canonicalUTF8,
+        byteCount: Buffer.byteLength(canonicalUTF8), sha256: createHash('sha256').update(canonicalUTF8).digest('hex') });
+      const bind = (data: any) => raw(JSON.stringify(data));
       const runtime = new CookedEditorRuntime(config, async c => {
         await runner(c); if (c.stage !== 'transcribe') return;
         const path = join(c.workspace, 'edit/alignment-observation.json'), r = JSON.parse(await readFile(path, 'utf8'));
@@ -161,6 +163,19 @@ describe('private cooked native boundary', () => {
         const m = { id: 'model-1', constructorCodeSha256: 'b'.repeat(64), filesBefore: files, filesAfter: { ...files },
           requested: bind({ device: 'cpu' }), sdkVersion: bind('fixture'), actualSettings: bind({}) };
         const call = { id: 1, modelId: m.id, explicit: bind({ vad_filter: true }), defaulted: bind({}), returned: bind({ language: 'en' }) };
+        if (variant === 'python-vad') {
+          const code = 'import importlib.util,json,sys; s=importlib.util.spec_from_file_location("o",sys.argv[1]); o=importlib.util.module_from_spec(s); s.loader.exec_module(o); print(json.dumps(o.binding({"vad_options":{"max_speech_duration_s":float("inf")}},returned_options=True)))';
+          call.returned = JSON.parse(execFileSync('python3', ['-I', '-B', '-c', code, join(__dirname,
+            '../../libraries/nestjs-libraries/src/media-editing/cooked-transcribe-observed.py')], { encoding: 'utf8' }));
+        }
+        if (variant.startsWith('tag-')) {
+          const tag: any = { $sdkNumber: variant === 'tag-nan' ? 'NaN' : variant === 'tag-negative' ? 'negative-infinity' : 'positive-infinity' };
+          if (variant === 'tag-extra') tag.extra = true;
+          call.returned = bind({ vad_options: { [variant === 'tag-field' ? 'threshold' : 'max_speech_duration_s']: tag } });
+          if (variant === 'tag-view') { call.explicit = call.returned; call.returned = bind({}); }
+        }
+        if (variant.startsWith('raw-')) call.returned = raw('{"vad_options":{"max_speech_duration_s":' +
+          (variant === 'raw-nan' ? 'NaN' : variant === 'raw-negative' ? '-Infinity' : 'Infinity') + '}}');
         if (variant === 'python-json') {
           call.returned.canonicalUTF8 = '{"language":"\\u00e9","probability":1e-07}';
           call.returned.byteCount = Buffer.byteLength(call.returned.canonicalUTF8);
@@ -180,7 +195,7 @@ describe('private cooked native boundary', () => {
         await writeFile(path, JSON.stringify(r));
       });
       const result = await runtime.run(input).catch(e => e);
-      if (['valid', 'python-json'].includes(variant)) expect(calls.some(c => c.stage === 'render')).toBe(true);
+      if (['valid', 'python-json', 'python-vad'].includes(variant)) expect(calls.some(c => c.stage === 'render')).toBe(true);
       else { expect(result.message).toBe('OBSERVATION_PROTOCOL_FAILURE'); expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']); }
       await runtime.cleanup(result.jobId, 'o');
     });

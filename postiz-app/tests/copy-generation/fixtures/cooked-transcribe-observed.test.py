@@ -176,6 +176,14 @@ assert "HF_HOME" in os.environ
 __version__ = "fixture-1"
 instances = []
 attempts = []
+@dataclass
+class VadOptions:
+    threshold: float = 0.5
+    neg_threshold: float = None
+    min_speech_duration_ms: int = 0
+    max_speech_duration_s: float = float("inf")
+    min_silence_duration_ms: int = 2000
+    speech_pad_ms: int = 400
 class WhisperModel:
     def __init__(self, model_size_or_path, **kwargs):
         attempts.append("constructor")
@@ -190,9 +198,14 @@ class WhisperModel:
         @dataclass
         class Options:
             beam_size: int = 7
-        info = N(transcription_options=Options(), vad_options={"returned": True}, language="en",
+        info = N(transcription_options=Options(), vad_options=VadOptions(min_silence_duration_ms=500), language="en",
                  language_probability=0.9, all_language_probs=[("en", 0.9)])
         if os.environ.get("SDK_FAIL") == "unsupported": info.vad_options = object()
+        mode = os.environ.get("SDK_FAIL")
+        if mode in ("nan-vad", "negative-vad"):
+            info.vad_options.max_speech_duration_s = float("nan" if mode == "nan-vad" else "-inf")
+        if mode == "infinite-option": info.transcription_options.beam_size = float("inf")
+        if mode == "reserved-tag": info.vad_options.max_speech_duration_s = {"$sdkNumber": "positive-infinity"}
         def segments():
             if os.environ.get("SDK_FAIL") == "lazy": raise RuntimeError("native lazy")
             words = [N(word="um", start=0.2, end=2.3)] if clip_timestamps == "0" else [
@@ -227,7 +240,7 @@ class NativeCapture(unittest.TestCase):
                     self.assertEqual(len(instance.results), i + 1)
                     self.assertEqual(list(result[0])[0].words[0].word, "um")
                 return instance
-            for mode in ("", "unsupported", "constructor", "transcribe", "lazy", "overflow", "budget", "mutate"):
+            for mode in ("", "unsupported", "constructor", "transcribe", "lazy", "overflow", "budget", "mutate", "nan-vad", "negative-vad", "infinite-option", "reserved-tag"):
                 with self.subTest(mode=mode), patch.dict(os.environ, {"SDK_FAIL": mode}):
                     previous = len(sdk.attempts)
                     observer = O.NativeObserver()
@@ -248,6 +261,8 @@ class NativeCapture(unittest.TestCase):
                             self.assertTrue(json.loads(calls[0]["explicit"]["canonicalUTF8"])["vad_filter"])
                             self.assertFalse(json.loads(calls[1]["defaulted"]["canonicalUTF8"])["vad_filter"])
                             self.assertEqual(json.loads(calls[0]["returned"]["canonicalUTF8"])["transcription_options"]["beam_size"], 7)
+                            returned = json.loads(calls[0]["returned"]["canonicalUTF8"], parse_constant=lambda v: self.fail(v))
+                            self.assertEqual(returned["vad_options"]["max_speech_duration_s"], {"$sdkNumber": "positive-infinity"})
                             self.assertNotIn("private-audio-path", json.dumps(options))
                             self.assertEqual(loaded["models"][0]["filesBefore"], loaded["models"][0]["filesAfter"])
                     count = 0 if mode == "constructor" else 1 if mode in ("transcribe", "lazy") else 65 if mode == "overflow" else 2
@@ -257,7 +272,7 @@ class NativeCapture(unittest.TestCase):
                     self.assertTrue(all("transcribe" not in vars(i) for i in sdk.instances))
             with patch.dict(sys.modules, {"faster_whisper": None}), self.assertRaises(ModuleNotFoundError):
                 O.NativeObserver().run(native, {"HOME": self.root})
-            for bad in (object(), float("nan"), "x" * 70000, ["x" * 10000] * 10):
+            for bad in (object(), float("nan"), float("inf"), float("-inf"), "x" * 70000, ["x" * 10000] * 10):
                 with self.assertRaises(ValueError): O.binding(bad)
             model = self.root / "configured-model/model.bin"
             with model.open("wb") as f: f.truncate(75 * 1024 * 1024)
@@ -321,6 +336,25 @@ class NativeCapture(unittest.TestCase):
         self.receipt.unlink(); (self.root / "faster_whisper/__init__.py").write_text('raise AssertionError("cache imported SDK")')
         result = self.run_native(); self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.receipt.read_bytes())["effectiveOptions"]["state"], "unknown")
+
+    @unittest.skipUnless(os.environ.get("COOKED_ACTUAL_SDK_VAD") == "1", "opt-in installed SDK, no model/inference")
+    def test_z_installed_sdk_vad_without_model_or_inference(self):
+        from importlib.metadata import version
+        from faster_whisper import WhisperModel
+        from faster_whisper.vad import VadOptions
+        self.assertEqual(version("faster-whisper"), "1.2.1")
+        with patch.object(WhisperModel, "__init__", side_effect=AssertionError("model forbidden")), patch.object(WhisperModel, "transcribe", side_effect=AssertionError("inference forbidden")):
+            vad = VadOptions(min_silence_duration_ms=500)
+            self.assertEqual(vad.max_speech_duration_s, float("inf"))
+            bound = O.binding({"vad_options": vad}, returned_options=True)
+            parsed = json.loads(bound["canonicalUTF8"], parse_constant=lambda v: self.fail(v))
+            self.assertEqual(parsed["vad_options"]["max_speech_duration_s"], {"$sdkNumber": "positive-infinity"})
+            self.assertEqual(parsed["vad_options"]["min_silence_duration_ms"], 500)
+            for value in (float("nan"), float("-inf")):
+                vad.max_speech_duration_s = value
+                with self.assertRaises(ValueError): O.binding({"vad_options": vad}, returned_options=True)
+            output = os.environ.get("COOKED_SDK_BINDING_OUTPUT")
+            if output: Path(output).write_text(json.dumps({"sdkVersion": version("faster-whisper"), "modelConstructed": False, "inferencePerformed": False, "returned": bound}))
 
 
 if __name__ == "__main__":
