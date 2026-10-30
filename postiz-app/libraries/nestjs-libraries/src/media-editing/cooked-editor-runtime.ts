@@ -53,6 +53,47 @@ async function validateObservation(workspace: string, sourceSha256: string) {
     const text = (value: any) => typeof value === 'string' && value.length > 0 && value.length <= 1024;
     const unknown = (value: any) => value?.state === 'unknown' && text(value.reason);
     const sha = (value: any) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+    let optionBytes = 0;
+    const binding = (value: any, kind = 'object') => {
+      if (!value || typeof value.canonicalUTF8 !== 'string' || !sha(value.sha256)) return false;
+      const bytes = Buffer.from(value.canonicalUTF8, 'utf8'); optionBytes += bytes.length;
+      if (bytes.length !== value.byteCount || optionBytes > 65536 ||
+          createHash('sha256').update(bytes).digest('hex') !== value.sha256) return false;
+      let nodes = 8192;
+      const supported = (v: any, depth = 0): boolean => {
+        if (--nodes < 0 || depth > 12) return false;
+        if (v === null || typeof v === 'boolean') return true;
+        if (typeof v === 'string') return v.length <= 65536;
+        if (typeof v === 'number') return Number.isFinite(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER;
+        if (Array.isArray(v)) return v.length <= 1024 && v.every(x => supported(x, depth + 1));
+        return typeof v === 'object' && Object.keys(v).length <= 1024 &&
+          Object.keys(v).every(k => k.length <= 1024 && supported(v[k], depth + 1));
+      };
+      const parsed = JSON.parse(value.canonicalUTF8);
+      const ascii = (v: string) => JSON.stringify(v).replace(/[\u007f-\uffff]/g,
+        c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+      const canonical = (v: any): string => typeof v === 'string' ? ascii(v) : v === null || typeof v !== 'object' ?
+        JSON.stringify(v) : Array.isArray(v) ? '[' + v.map(canonical).join(',') + ']' :
+        '{' + Object.keys(v).sort().map(k => ascii(k) + ':' + canonical(v[k])).join(',') + '}';
+      // Python and JS spell finite binary64 exponents differently; normalize only number tokens.
+      const normalized = value.canonicalUTF8.replace(/"(?:\\.|[^"\\])*"|(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+        (token: string, number: string) => number === undefined ? token : JSON.stringify(Number(number)));
+      return supported(parsed) && (kind === 'version' ? parsed === null || typeof parsed === 'string' :
+        parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) && canonical(parsed) === normalized;
+    };
+    const hashes = (value: any) => value && Object.keys(value).length === 4 && ['model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'].every(
+      key => value[key] === null || sha(value[key]));
+    const loaded = receipt.configuredModel?.actualLoadedModel, options = receipt.effectiveOptions;
+    const observedModel = loaded?.state === 'observed' && Array.isArray(loaded.models) &&
+      loaded.models.length > 0 && loaded.models.length <= 64 && loaded.models.every((m: any, i: number) =>
+        m.id === `model-${i + 1}` && sha(m.constructorCodeSha256) && hashes(m.filesBefore) && sha(m.filesBefore['model.bin']) &&
+        hashes(m.filesAfter) && Object.keys(m.filesBefore).every(k => m.filesBefore[k] === m.filesAfter[k]) &&
+        binding(m.requested) && binding(m.sdkVersion, 'version') && (unknown(m.actualSettings) || binding(m.actualSettings)));
+    const observedOptions = observedModel && options?.state === 'observed' && options.basis === 'transcribe-API-calls' &&
+      Array.isArray(options.calls) && options.calls.length <= 64 && options.calls.every((c: any, i: number) =>
+        c.id === i + 1 && loaded.models.some((m: any) => m.id === c.modelId) &&
+        binding(c.explicit) && binding(c.defaulted) && binding(c.returned)) && options.byteCount === optionBytes;
+    if (!(unknown(loaded) && unknown(options)) && !(observedModel && observedOptions)) throw new Error('NATIVE_SHAPE');
     const fields = ['index', 'codec_name', 'sample_rate', 'channels', 'time_base', 'start_pts', 'start_time'];
     const candidate = (value: any) => value && !Array.isArray(value) &&
       ['codec_name', 'sample_rate', 'time_base', 'start_time'].every(key => value[key] === null || text(value[key])) &&
@@ -70,7 +111,7 @@ async function validateObservation(workspace: string, sourceSha256: string) {
       (unknown(origin) || (audio.candidates.length === 1 && Number.isSafeInteger(origin?.numerator) &&
         Number.isSafeInteger(origin?.denominator) && origin.denominator > 0 && origin.basis === 'source-presentation-PTS-only'));
     if (!(unknown(audio) || observedAudio) ||
-        model?.basis !== 'configured-file-hashes-only' || !unknown(model.actualLoadedModel) ||
+        model?.basis !== 'configured-file-hashes-only' ||
         !['model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'].every(key => model.files?.[key] === null || sha(model.files?.[key])) ||
         receipt.extraction?.requested?.sampleRate !== 16000 || receipt.extraction.requested.channels !== 1 ||
         receipt.extraction.requested.codec !== 'pcm_s16le' ||
@@ -81,7 +122,7 @@ async function validateObservation(workspace: string, sourceSha256: string) {
         receipt.sourceSha256 !== sourceSha256 || receipt.sourceAfterSha256 !== sourceSha256 ||
         receipt.upstream?.commit !== 'bce911c1d0652f30b64fd5283cc4aa9fa92811c9' ||
         receipt.upstream?.transcribeSha256 !== '9964a0bb316e75d666cce6b2f7ebe7d5414b6e3d293c38c8cd22d77e5dd2102e' ||
-        !['decoderArray', 'effectiveOptions', 'quietBlockVAD', 'outputPCM'].every(key =>
+        !['decoderArray', 'quietBlockVAD', 'outputPCM'].every(key =>
           unknown(receipt[key])) ||
         await digest(join(workspace, 'source.mp4')) !== sourceSha256) throw new Error('BINDING');
     const raw = join(workspace, 'edit/words.raw.json');

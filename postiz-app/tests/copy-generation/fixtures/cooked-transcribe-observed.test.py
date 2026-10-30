@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 MEDIA = Path(__file__).resolve().parents[3] / "libraries/nestjs-libraries/src/media-editing"
@@ -166,6 +167,127 @@ class Observation(unittest.TestCase):
         self.assertEqual(list(self.root.glob(".observation-*")), [])
         with self.assertRaisesRegex(ValueError, "probe limit"):
             O.bounded_command([sys.executable, "-c", 'import sys;sys.stdout.write("x"*70000)'])
+
+
+SDK = r'''import os
+from dataclasses import dataclass
+from types import SimpleNamespace as N
+assert "HF_HOME" in os.environ
+__version__ = "fixture-1"
+instances = []
+attempts = []
+class WhisperModel:
+    def __init__(self, model_size_or_path, **kwargs):
+        attempts.append("constructor")
+        if os.environ.get("SDK_FAIL") == "constructor": raise RuntimeError("native constructor")
+        self.model = N(device="observed-cpu", compute_type="observed-int8")
+        self.results = []; instances.append(self)
+    def transcribe(self, audio, language=None, word_timestamps=False, initial_prompt=None,
+                   beam_size=5, condition_on_previous_text=True, vad_filter=False,
+                   vad_parameters=None, clip_timestamps="0"):
+        attempts.append("transcribe")
+        if os.environ.get("SDK_FAIL") == "transcribe": raise RuntimeError("native transcribe")
+        @dataclass
+        class Options:
+            beam_size: int = 7
+        info = N(transcription_options=Options(), vad_options={"returned": True}, language="en",
+                 language_probability=0.9, all_language_probs=[("en", 0.9)])
+        if os.environ.get("SDK_FAIL") == "unsupported": info.vad_options = object()
+        def segments():
+            if os.environ.get("SDK_FAIL") == "lazy": raise RuntimeError("native lazy")
+            words = [N(word="um", start=0.2, end=2.3)] if clip_timestamps == "0" else [
+                N(word="um", start=0.2, end=1.0), N(word="yes", start=1.0, end=2.3)]
+            yield N(words=words)
+        result = (segments(), info); self.results.append(result)
+        return result
+'''
+
+
+class NativeCapture(unittest.TestCase):
+    setUp, run_native = Observation.setUp, Observation.run_native
+    def sdk(self):
+        package = self.root / "faster_whisper"
+        package.mkdir(); (package / "__init__.py").write_text(SDK)
+        return package
+
+    def test_native_identity_defaults_restoration_and_degradation(self):
+        self.sdk()
+        with patch.dict(os.environ, self.env), patch.object(sys, "path", [str(self.root), *sys.path]):
+            os.environ.setdefault("HF_HOME", str(self.root / "home"))
+            import faster_whisper as sdk
+            self.addCleanup(lambda: sys.modules.pop("faster_whisper", None))
+            constructor = sdk.WhisperModel
+            def native(count=2):
+                from faster_whisper import WhisperModel
+                instance = WhisperModel(self.env["AI_EDITOR_WHISPER_MODEL"], device="cpu", compute_type="int8")
+                for i in range(count):
+                    result = instance.transcribe("private-audio-path", language="en", vad_filter=True) if i == 0 else instance.transcribe("private-audio-path", clip_timestamps=[0.2, 2.3])
+                    self.assertIs(result, instance.results[-1]); self.assertIs(result[1], instance.results[-1][1])
+                    self.assertEqual(len(instance.results), i + 1)
+                    self.assertEqual(list(result[0])[0].words[0].word, "um")
+                return instance
+            for mode in ("", "unsupported", "constructor", "transcribe", "lazy", "overflow", "budget", "mutate"):
+                with self.subTest(mode=mode), patch.dict(os.environ, {"SDK_FAIL": mode}):
+                    previous = len(sdk.attempts)
+                    observer = O.NativeObserver()
+                    if mode == "budget": observer.used = 65535
+                    if mode in ("constructor", "transcribe", "lazy"):
+                        with self.assertRaisesRegex(RuntimeError, "native " + mode): observer.run(native, {"HOME": self.root})
+                    else:
+                        instance = observer.run(native, {"HOME": self.root}, 65 if mode == "overflow" else 2)
+                        self.assertNotIn("transcribe", vars(instance))
+                        if mode == "mutate": (self.root / "configured-model/model.bin").write_bytes(b"changed")
+                        loaded, options = observer.finish()
+                        if mode: self.assertEqual(options["state"], "unknown")
+                        else:
+                            self.assertEqual(json.loads(loaded["models"][0]["actualSettings"]["canonicalUTF8"])["device"], "observed-cpu")
+                            self.assertNotIn(str(self.root), json.dumps(loaded))
+                            calls = options["calls"]
+                            self.assertEqual([c["id"] for c in calls], [1, 2])
+                            self.assertTrue(json.loads(calls[0]["explicit"]["canonicalUTF8"])["vad_filter"])
+                            self.assertFalse(json.loads(calls[1]["defaulted"]["canonicalUTF8"])["vad_filter"])
+                            self.assertEqual(json.loads(calls[0]["returned"]["canonicalUTF8"])["transcription_options"]["beam_size"], 7)
+                            self.assertNotIn("private-audio-path", json.dumps(options))
+                            self.assertEqual(loaded["models"][0]["filesBefore"], loaded["models"][0]["filesAfter"])
+                    count = 0 if mode == "constructor" else 1 if mode in ("transcribe", "lazy") else 65 if mode == "overflow" else 2
+                    self.assertEqual(sdk.attempts[previous:], ["constructor"] + ["transcribe"] * count)
+                    self.assertIs(sdk.WhisperModel, constructor)
+                    self.assertTrue(all("transcribe" not in vars(i) for i in sdk.instances))
+            with patch.dict(sys.modules, {"faster_whisper": None}), self.assertRaises(ModuleNotFoundError):
+                O.NativeObserver().run(native, {"HOME": self.root})
+            for bad in (object(), float("nan"), "x" * 70000, ["x" * 10000] * 10):
+                with self.assertRaises(ValueError): O.binding(bad)
+            model = self.root / "configured-model/model.bin"
+            with model.open("wb") as f: f.truncate(75 * 1024 * 1024)
+            self.assertEqual(O.model_files(model.parent)["model.bin"], O.digest(model))
+            with model.open("wb") as f: f.truncate(512 * 1024 * 1024 + 1)
+            with self.assertRaises(ValueError): O.model_files(model.parent)
+            model.unlink(); model.symlink_to(self.source)
+            with self.assertRaises(OSError): O.model_files(model.parent)
+
+    @unittest.skipUnless(os.environ.get("COOKED_PINNED_TRANSCRIBE"), "opt-in actual pinned upstream/fake SDK")
+    def test_actual_pinned_upstream_fake_sdk_bytes_and_cache(self):
+        self.sdk(); self.script = Path(os.environ["COOKED_PINNED_TRANSCRIBE"])
+        self.assertEqual(O.digest(self.script), O.SCRIPT_SHA)
+        self.driver.write_text(self.driver.read_text().replace('o.observe(', 'sys.path.insert(0, ' + repr(str(self.root)) + '); o.observe('))
+        self.env.update(AI_EDITOR_HOME=str(self.root / "native-home"), HF_HOME=str(self.root / "hf"), PYTHONPATH=str(self.root))
+        self.env.pop("HF_HOME", None)
+        # Isolated mode ignores PYTHONPATH; use the existing launcher with a tiny path-setting driver for the direct baseline.
+        direct = self.root / "direct.py"
+        direct.write_text('import sys, runpy\nsys.dont_write_bytecode=True\nsys.path.insert(0, ' + repr(str(self.root)) + ')\nsys.argv=sys.argv[1:]\nsys.path.insert(0, str(__import__("pathlib").Path(sys.argv[0]).parent))\nrunpy.run_path(sys.argv[0],run_name="__main__")\n')
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        "sine=frequency=440:sample_rate=44100:duration=2.5", "-af", "adelay=200,apad=pad_dur=0.3", str(self.source)], check=True)
+        baseline = subprocess.run([sys.executable, "-I", str(direct), str(self.script), *self.args], env=self.env, capture_output=True)
+        self.assertEqual(baseline.returncode, 0, baseline.stderr); raw = self.raw.read_bytes()
+        import shutil
+        shutil.rmtree(self.root / "native-home/cache")
+        result = self.run_native(); self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((result.stdout, result.stderr, self.raw.read_bytes()), (baseline.stdout, baseline.stderr, raw))
+        receipt = json.loads(self.receipt.read_bytes()); calls = receipt["effectiveOptions"]["calls"]
+        self.assertEqual(len(calls), 2); self.assertFalse(json.loads(calls[1]["defaulted"]["canonicalUTF8"])["vad_filter"])
+        self.receipt.unlink(); (self.root / "faster_whisper/__init__.py").write_text('raise AssertionError("cache imported SDK")')
+        result = self.run_native(); self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.receipt.read_bytes())["effectiveOptions"]["state"], "unknown")
 
 
 if __name__ == "__main__":

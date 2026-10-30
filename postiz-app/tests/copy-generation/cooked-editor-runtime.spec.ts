@@ -150,6 +150,40 @@ describe('private cooked native boundary', () => {
     expect(calls.some(c => c.stage === 'render')).toBe(true);
     await runtime.cleanup(result.jobId, 'o');
   });
+  it.each(['valid', 'python-json', 'hash', 'bytes', 'references', 'order', 'model', 'budget', 'unsupported', 'canonical', 'count'])(
+    'validates native observed bindings and bounds: %s', async variant => {
+      const bind = (data: any) => { const canonicalUTF8 = JSON.stringify(data); return { canonicalUTF8,
+        byteCount: Buffer.byteLength(canonicalUTF8), sha256: createHash('sha256').update(canonicalUTF8).digest('hex') }; };
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c); if (c.stage !== 'transcribe') return;
+        const path = join(c.workspace, 'edit/alignment-observation.json'), r = JSON.parse(await readFile(path, 'utf8'));
+        const files = { ...r.configuredModel.files, 'model.bin': 'a'.repeat(64) };
+        const m = { id: 'model-1', constructorCodeSha256: 'b'.repeat(64), filesBefore: files, filesAfter: { ...files },
+          requested: bind({ device: 'cpu' }), sdkVersion: bind('fixture'), actualSettings: bind({}) };
+        const call = { id: 1, modelId: m.id, explicit: bind({ vad_filter: true }), defaulted: bind({}), returned: bind({ language: 'en' }) };
+        if (variant === 'python-json') {
+          call.returned.canonicalUTF8 = '{"language":"\\u00e9","probability":1e-07}';
+          call.returned.byteCount = Buffer.byteLength(call.returned.canonicalUTF8);
+          call.returned.sha256 = createHash('sha256').update(call.returned.canonicalUTF8).digest('hex');
+        }
+        if (variant === 'hash') call.explicit.sha256 = '0'.repeat(64);
+        if (variant === 'canonical') call.explicit = bind({ z: 1, a: 2 });
+        if (variant === 'bytes') call.explicit.byteCount++;
+        if (variant === 'references') call.modelId = 'model-2';
+        if (variant === 'order') call.id = 2;
+        if (variant === 'model') m.filesAfter['model.bin'] = 'c'.repeat(64);
+        if (variant === 'budget') call.returned = bind('x'.repeat(65536));
+        if (variant === 'unsupported') call.returned = bind([[[[[[[[[[[[[1]]]]]]]]]]]]]);
+        r.configuredModel.actualLoadedModel = { state: 'observed', models: [m] };
+        r.effectiveOptions = { state: 'observed', basis: 'transcribe-API-calls', calls: Array(variant === 'count' ? 65 : 1).fill(call),
+          byteCount: [m.requested, m.sdkVersion, m.actualSettings, call.explicit, call.defaulted, call.returned].reduce((n, b) => n + b.byteCount, 0) };
+        await writeFile(path, JSON.stringify(r));
+      });
+      const result = await runtime.run(input).catch(e => e);
+      if (['valid', 'python-json'].includes(variant)) expect(calls.some(c => c.stage === 'render')).toBe(true);
+      else { expect(result.message).toBe('OBSERVATION_PROTOCOL_FAILURE'); expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']); }
+      await runtime.cleanup(result.jobId, 'o');
+    });
   it('fails closed for unsupported metadata, missing files, symlinks, nonprivate roots and unsafe limits', async () => {
     const runtime = new CookedEditorRuntime(config, runner);
     for (const metadata of [{ ...input.metadata, fps: 31 }, { ...input.metadata, width: 1920, height: 1080 }, { ...input.metadata, durationMs: 240001 }, { ...input.metadata, alignedTimestamps: false }]) {
