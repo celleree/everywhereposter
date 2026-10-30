@@ -7,10 +7,31 @@ import { CookedCommand, CookedConfig, CookedEditorRuntime, PreparedCookedSource,
 
 describe('private cooked native boundary', () => {
   let root: string, config: CookedConfig, input: PreparedCookedSource, calls: CookedCommand[];
+  const observedAudio = () => {
+    const candidate = { index: 0, codec_name: 'aac', sample_rate: '44100', channels: 1,
+      time_base: '1/44100', start_pts: 0, start_time: '0.000000' };
+    return { state: 'observed', sha256: 'a'.repeat(64), toolVersion: 'fixture-ffprobe', candidates: [candidate],
+      selectedStream: { ...candidate }, presentationOrigin: { numerator: 0, denominator: 1, basis: 'source-presentation-PTS-only' } };
+  };
   const runner = async (c: CookedCommand) => {
     calls.push(c);
     if (c.stage === 'prepare_boundaries') await writeFile(join(c.workspace, 'edit/boundary-policy.json'), JSON.stringify({
       version: 'quiet-block-v1', sourceSha256: createHash('sha256').update(await readFile(join(c.workspace, 'source.mp4'))).digest('hex'), blocks: [[1, 2], [3, 5]] }));
+    if (c.stage === 'transcribe') {
+      const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex');
+      const source = hash(await readFile(join(c.workspace, 'source.mp4'))), raw = Buffer.from('[{"text":"um"}]');
+      await writeFile(join(c.workspace, 'edit/words.raw.json'), raw);
+      const unknown = { state: 'unknown', reason: 'fixture-unobserved' };
+      await writeFile(join(c.workspace, 'edit/alignment-observation.json'), JSON.stringify({
+        version: 'alignment-observation-v1', status: 'INCOMPLETE', sourceSha256: source, sourceAfterSha256: source,
+        rawAlignmentBytesSha256: hash(raw), upstream: { commit: 'bce911c1d0652f30b64fd5283cc4aa9fa92811c9',
+          transcribeSha256: '9964a0bb316e75d666cce6b2f7ebe7d5414b6e3d293c38c8cd22d77e5dd2102e' },
+        sourceAudio: unknown, configuredModel: { basis: 'configured-file-hashes-only', actualLoadedModel: unknown,
+          files: { 'model.bin': null, 'config.json': null, 'tokenizer.json': null, 'vocabulary.txt': null } },
+        extraction: { requested: { sampleRate: 16000, channels: 1, codec: 'pcm_s16le' }, toolVersion: null, wav: unknown },
+        decoderArray: unknown, effectiveOptions: unknown, quietBlockVAD: unknown, outputPCM: unknown,
+      }), { mode: 0o600 });
+    }
     if (c.stage === 'render') {
       await writeFile(join(c.workspace, 'edit/cut.mp4'), 'native cut');
       await writeFile(join(c.workspace, 'edit/cut.transcript.json'), 'stale cache');
@@ -39,13 +60,95 @@ describe('private cooked native boundary', () => {
     expect(calls[0].env).not.toHaveProperty('COOKED_SECRET_TEST');
     expect(calls[0].env.HOME).toBe(join(receipt.workspace, 'home'));
     expect(calls[0].env.HF_HUB_OFFLINE).toBe('1');
-    expect(calls.find(c => c.stage === 'transcribe')!.args).toContain('whisper');
+    const transcription = calls.find(c => c.stage === 'transcribe')!;
+    expect(transcription.script).toContain('cooked-transcribe-observed.py');
+    expect(transcription.args).toEqual([join(config.sourceRoot, 'plugins/ai-editor/skills/cut/scripts/transcribe.py'),
+      join(receipt.workspace, 'source.mp4'), join(receipt.editDirectory, 'words.raw.json'), '--engine', 'whisper', '--lang', 'en']);
     expect(calls[0].rssBytes).toBe(768 * 1024 * 1024);
     expect(await readFile(receipt.cutPath, 'utf8')).toBe('native cut');
     await expect(runtime.cleanup(receipt.jobId, 'other')).rejects.toThrow('NOT_OWNED');
     await expect(runtime.cleanup('../../source.mp4', 'o')).rejects.toThrow('NOT_OWNED');
     expect(await runtime.cleanup(receipt.jobId, 'o')).toMatchObject({ removed: true });
     expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
+  });
+  it.each(['missing', 'partial', 'oversize', 'symlink', 'source', 'raw', 'binding', 'unknowns', 'shape'])(
+    'rejects %s observations before rendering without retry and retains cleanup recovery', async sabotage => {
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c);
+        if (c.stage !== 'transcribe') return;
+        const path = join(c.workspace, 'edit/alignment-observation.json');
+        if (sabotage === 'missing') await rm(path);
+        if (sabotage === 'partial') await writeFile(path, '{"version":');
+        if (sabotage === 'oversize') await writeFile(path, ' '.repeat(256 * 1024 + 1));
+        if (sabotage === 'symlink') { await rm(path); await symlink(input.sourcePath, path); }
+        if (sabotage === 'source') await writeFile(join(c.workspace, 'source.mp4'), 'changed');
+        if (sabotage === 'raw') await writeFile(join(c.workspace, 'edit/words.raw.json'), 'changed');
+        if (sabotage === 'binding' || sabotage === 'unknowns' || sabotage === 'shape') {
+          const receipt = JSON.parse(await readFile(path, 'utf8'));
+          if (sabotage === 'binding') receipt.sourceAfterSha256 = '0'.repeat(64);
+          else if (sabotage === 'shape') receipt.extraction = true;
+          else delete receipt.decoderArray;
+          await writeFile(path, JSON.stringify(receipt));
+        }
+      });
+      const failure = await runtime.run(input).catch(e => e);
+      expect(failure).toMatchObject({ message: 'OBSERVATION_PROTOCOL_FAILURE', jobId: expect.any(String) });
+      expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']);
+      await expect(runtime.revise(failure.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('STALE_OR_FAILED');
+      await runtime.cleanup(failure.jobId, 'o');
+    });
+  it.each([
+    ['review-repro', (a: any) => { Object.keys(a).forEach(key => delete a[key]); a.state = 'observed'; a.candidates = [null]; }],
+    ['null-candidate', (a: any) => { a.candidates = [null]; }],
+    ['missing-candidate-field', (a: any) => { delete a.candidates[0].sample_rate; }],
+    ['candidate-field-type', (a: any) => { a.candidates[0].channels = '1'; }],
+    ['invalid-rate', (a: any) => { a.candidates[0].sample_rate = 'unavailable'; }],
+    ['invalid-time-base', (a: any) => { a.candidates[0].time_base = '44100'; }],
+    ['missing-probe-hash', (a: any) => { delete a.sha256; }],
+    ['invalid-probe-hash', (a: any) => { a.sha256 = 'z'.repeat(64); }],
+    ['missing-version', (a: any) => { delete a.toolVersion; }],
+    ['missing-selection', (a: any) => { delete a.selectedStream; }],
+    ['mismatched-selection', (a: any) => { a.selectedStream.index = 1; }],
+    ['ambiguous-selection', (a: any) => { a.candidates.push({ ...a.candidates[0], index: 1 }); }],
+    ['missing-origin', (a: any) => { delete a.presentationOrigin; }],
+    ['partial-origin', (a: any) => { delete a.presentationOrigin.numerator; }],
+    ['invalid-origin', (a: any) => { a.presentationOrigin.denominator = 0; }],
+    ['wrong-origin-basis', (a: any) => { a.presentationOrigin.basis = 'decoded-zero'; }],
+    ['implicit-unknown', (a: any) => { a.presentationOrigin = { state: 'unknown' }; }],
+  ])('rejects malformed observed audio: %s', async (_name, sabotage) => {
+    const runtime = new CookedEditorRuntime(config, async c => {
+      await runner(c);
+      if (c.stage !== 'transcribe') return;
+      const path = join(c.workspace, 'edit/alignment-observation.json'), receipt = JSON.parse(await readFile(path, 'utf8'));
+      receipt.sourceAudio = observedAudio(); sabotage(receipt.sourceAudio);
+      await writeFile(path, JSON.stringify(receipt));
+    });
+    const failure = await runtime.run(input).catch(e => e);
+    expect(failure).toMatchObject({ message: 'OBSERVATION_PROTOCOL_FAILURE', jobId: expect.any(String) });
+    expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']);
+    await runtime.cleanup(failure.jobId, 'o');
+  });
+  it.each(['single', 'nullable-fields', 'ambiguous', 'no-streams'])('accepts structurally valid incomplete audio: %s', async variant => {
+    const runtime = new CookedEditorRuntime(config, async c => {
+      await runner(c);
+      if (c.stage !== 'transcribe') return;
+      const path = join(c.workspace, 'edit/alignment-observation.json'), receipt = JSON.parse(await readFile(path, 'utf8'));
+      const audio: any = observedAudio(), unknown = { state: 'unknown', reason: 'fixture-unobserved' };
+      if (variant === 'nullable-fields') {
+        audio.candidates[0] = Object.fromEntries(Object.keys(audio.candidates[0]).map(key => [key, null]));
+        audio.selectedStream = { ...audio.candidates[0] }; audio.presentationOrigin = unknown; audio.toolVersion = null;
+      }
+      if (variant === 'ambiguous' || variant === 'no-streams') {
+        audio.candidates = variant === 'no-streams' ? [] : [...audio.candidates, { ...audio.candidates[0], index: 1 }];
+        audio.selectedStream = unknown; audio.presentationOrigin = unknown;
+      }
+      if (variant === 'single') receipt.extraction.wav = { state: 'observed', sha256: 'b'.repeat(64),
+        sampleRate: 16000, channels: 1, sampleWidthBytes: 2, sampleCount: 1600, compression: 'NONE', origin: unknown };
+      receipt.sourceAudio = audio; await writeFile(path, JSON.stringify(receipt));
+    });
+    const result = await runtime.run(input);
+    expect(calls.some(c => c.stage === 'render')).toBe(true);
+    await runtime.cleanup(result.jobId, 'o');
   });
   it('fails closed for unsupported metadata, missing files, symlinks, nonprivate roots and unsafe limits', async () => {
     const runtime = new CookedEditorRuntime(config, runner);

@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { createHash, randomUUID } from 'crypto';
 import { appendFileSync, constants, createReadStream, existsSync, statSync } from 'fs';
-import { cp, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'fs/promises';
+import { cp, copyFile, lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative } from 'path';
 import { PACING_SETTINGS } from './video-edit-decision';
 import { COOKED_EDITOR_LIMITS as LIMITS } from './cooked-editor-limits';
@@ -37,6 +37,58 @@ const digest = async (path: string) => {
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
 };
+// Availability gate only: incomplete observations never promote semantic eligibility.
+async function validateObservation(workspace: string, sourceSha256: string) {
+  try {
+    const file = await open(join(workspace, 'edit/alignment-observation.json'), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let receipt: any;
+    try {
+      const info = await file.stat();
+      if (!info.isFile() || info.size <= 0 || info.size > 256 * 1024 || (info.mode & 0o077)) throw new Error('FILE');
+      const buffer = Buffer.alloc(256 * 1024 + 1);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+      if (bytesRead !== info.size) throw new Error('SIZE');
+      receipt = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
+    } finally { await file.close(); }
+    const text = (value: any) => typeof value === 'string' && value.length > 0 && value.length <= 1024;
+    const unknown = (value: any) => value?.state === 'unknown' && text(value.reason);
+    const sha = (value: any) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+    const fields = ['index', 'codec_name', 'sample_rate', 'channels', 'time_base', 'start_pts', 'start_time'];
+    const candidate = (value: any) => value && !Array.isArray(value) &&
+      ['codec_name', 'sample_rate', 'time_base', 'start_time'].every(key => value[key] === null || text(value[key])) &&
+      [['sample_rate', /^\d+$/], ['time_base', /^-?\d+\/-?\d+$/], ['start_time', /^-?\d+(?:\.\d+)?$/]].every(
+        ([key, pattern]) => value[key as string] === null || (pattern as RegExp).test(value[key as string])) &&
+      ['index', 'channels', 'start_pts'].every(key => value[key] === null || (Number.isSafeInteger(value[key]) &&
+        (key === 'start_pts' || value[key] >= (key === 'channels' ? 1 : 0))));
+    const audio = receipt.sourceAudio, wav = receipt.extraction?.wav, model = receipt.configuredModel;
+    const origin = audio?.presentationOrigin;
+    const observedAudio = audio?.state === 'observed' && sha(audio.sha256) &&
+      (audio.toolVersion === null || text(audio.toolVersion)) && Array.isArray(audio.candidates) &&
+      audio.candidates.length <= 32 && audio.candidates.every(candidate) &&
+      (audio.candidates.length === 1 ? candidate(audio.selectedStream) &&
+        fields.every(key => audio.selectedStream[key] === audio.candidates[0][key]) : unknown(audio.selectedStream)) &&
+      (unknown(origin) || (audio.candidates.length === 1 && Number.isSafeInteger(origin?.numerator) &&
+        Number.isSafeInteger(origin?.denominator) && origin.denominator > 0 && origin.basis === 'source-presentation-PTS-only'));
+    if (!(unknown(audio) || observedAudio) ||
+        model?.basis !== 'configured-file-hashes-only' || !unknown(model.actualLoadedModel) ||
+        !['model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'].every(key => model.files?.[key] === null || sha(model.files?.[key])) ||
+        receipt.extraction?.requested?.sampleRate !== 16000 || receipt.extraction.requested.channels !== 1 ||
+        receipt.extraction.requested.codec !== 'pcm_s16le' ||
+        !(receipt.extraction.toolVersion === null || text(receipt.extraction.toolVersion)) ||
+        !(unknown(wav) || (wav?.state === 'observed' && sha(wav.sha256) && wav.compression === 'NONE' && unknown(wav.origin) &&
+          ['sampleRate', 'channels', 'sampleWidthBytes', 'sampleCount'].every(key => Number.isSafeInteger(wav[key]) && wav[key] >= (key === 'sampleCount' ? 0 : 1))))) throw new Error('SHAPE');
+    if (receipt.version !== 'alignment-observation-v1' || receipt.status !== 'INCOMPLETE' ||
+        receipt.sourceSha256 !== sourceSha256 || receipt.sourceAfterSha256 !== sourceSha256 ||
+        receipt.upstream?.commit !== 'bce911c1d0652f30b64fd5283cc4aa9fa92811c9' ||
+        receipt.upstream?.transcribeSha256 !== '9964a0bb316e75d666cce6b2f7ebe7d5414b6e3d293c38c8cd22d77e5dd2102e' ||
+        !['decoderArray', 'effectiveOptions', 'quietBlockVAD', 'outputPCM'].every(key =>
+          unknown(receipt[key])) ||
+        await digest(join(workspace, 'source.mp4')) !== sourceSha256) throw new Error('BINDING');
+    const raw = join(workspace, 'edit/words.raw.json');
+    await regular(raw);
+    if (receipt.rawAlignmentBytesSha256 !== await digest(raw)) throw new Error('RAW_BINDING');
+  } catch { throw new Error('OBSERVATION_PROTOCOL_FAILURE'); }
+}
 const bounded = (value: number | undefined, ceiling: number) => {
   const n = value ?? ceiling;
   if (!Number.isSafeInteger(n) || n <= 0 || n > ceiling) throw new Error('INVALID_LIMIT');
@@ -182,6 +234,7 @@ export class CookedEditorRuntime {
       job.command = { python: this.config.python, launcher: this.config.launcherPath, workspace, env,
         rssBytes: this.rss, workspaceBytes: this.disk };
       const helper = join(dirname(this.config.launcherPath), 'cooked-quiet-blocks.py'); await regular(helper);
+      const observer = join(dirname(this.config.launcherPath), 'cooked-transcribe-observed.py'); await regular(observer);
       await this.execute(job, 'prepare_boundaries', helper, ['prepare', this.config.sourceRoot, source, edit, JSON.stringify(PACING_SETTINGS.relaxed)], started);
       const policy = JSON.parse(await readFile(join(edit, 'boundary-policy.json'), 'utf8'));
       if (policy.version !== 'quiet-block-v1' || policy.sourceSha256 !== job.sourceSha256 || !Array.isArray(policy.blocks) ||
@@ -189,8 +242,8 @@ export class CookedEditorRuntime {
             r.some(n => typeof n !== 'number' || !Number.isFinite(n)) || r[0] < 0 || r[0] >= r[1] || r[1] > job!.durationSeconds)) throw new Error('INVALID_BOUNDARY_POLICY');
       job.blocks = policy.blocks;
       for (const stage of ['transcribe', 'build_timeline', 'render', 'audit_render', 'verify'] as const) {
-        await this.execute(job, stage, stage === 'build_timeline' || stage === 'audit_render' ? helper : join(native, scripts[stage]),
-          stage === 'build_timeline' || stage === 'audit_render' ? [stage === 'build_timeline' ? 'build' : 'audit', this.config.sourceRoot, source, edit] : args[stage], started);
+        await this.execute(job, stage, stage === 'build_timeline' || stage === 'audit_render' ? helper : stage === 'transcribe' ? observer : join(native, scripts[stage]),
+          stage === 'build_timeline' || stage === 'audit_render' ? [stage === 'build_timeline' ? 'build' : 'audit', this.config.sourceRoot, source, edit] : stage === 'transcribe' ? [join(native, scripts.transcribe), ...args.transcribe] : args[stage], started);
       }
       await this.review(job, 'start', started); await this.review(job, 'final', started);
       await regular(join(edit, 'cut.mp4'));
@@ -207,6 +260,7 @@ export class CookedEditorRuntime {
     if (remaining <= 0) throw new Error('OVERALL_TIMEOUT');
     if (await bytes(job.workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
     await this.runner({ ...job.command!, stage, script, args, timeoutMs: Math.min(this.stageMs, remaining) });
+    if (stage === 'transcribe') await validateObservation(job.workspace, job.sourceSha256);
     if (Date.now() - started >= this.overallMs) throw new Error('OVERALL_TIMEOUT');
     if (await bytes(job.workspace) > this.disk) throw new Error('WORKSPACE_LIMIT');
   }

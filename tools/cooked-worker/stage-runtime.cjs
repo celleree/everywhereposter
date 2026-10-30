@@ -7,7 +7,7 @@ const root = fs.realpathSync(path.resolve(__dirname, '../..'));
 const media = 'postiz-app/libraries/nestjs-libraries/src/media-editing/';
 const sources = [
   ...['cooked-editor-runtime', 'cooked-worker', 'video-edit-decision', 'cooked-editor-limits'].map(n => media + n + '.ts'),
-  ...['cooked-editor-launcher.py', 'cooked-quiet-blocks.py', 'cooked-editor-apply.py'].map(n => media + n),
+  ...['cooked-editor-launcher.py', 'cooked-quiet-blocks.py', 'cooked-editor-apply.py', 'cooked-transcribe-observed.py'].map(n => media + n),
   'tools/cooked-worker/worker-entry.cjs', 'tools/cooked-worker/worker-health.cjs',
 ];
 const hash = data => crypto.createHash('sha256').update(data).digest('hex');

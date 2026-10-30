@@ -7,7 +7,7 @@ const path = require('node:path');
 const {execFileSync, spawnSync} = require('node:child_process');
 const root = path.resolve(__dirname, '../..');
 const media = 'postiz-app/libraries/nestjs-libraries/src/media-editing/';
-const expected = ['cooked-editor-runtime.js', 'cooked-worker.js', 'video-edit-decision.js', 'cooked-editor-limits.js', 'cooked-editor-launcher.py', 'cooked-quiet-blocks.py', 'cooked-editor-apply.py', 'worker-entry.cjs', 'worker-health.cjs'].sort();
+const expected = ['cooked-editor-runtime.js', 'cooked-worker.js', 'video-edit-decision.js', 'cooked-editor-limits.js', 'cooked-editor-launcher.py', 'cooked-quiet-blocks.py', 'cooked-editor-apply.py', 'cooked-transcribe-observed.py', 'worker-entry.cjs', 'worker-health.cjs'].sort();
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cooked-staging-test-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
@@ -23,7 +23,7 @@ function fixture(t) {
   const run = (output, revision = sha) => spawnSync(process.execPath, [path.join(repo, 'tools/cooked-worker/stage-runtime.cjs'), revision, output], {encoding: 'utf8'});
   return {dir, repo, sha, commit, run};
 }
-test('exact nine-file closure, required apply helper, unchanged Dockerfile and reproducible metadata', t => {
+test('exact ten-file closure, required apply helper, unchanged Dockerfile and reproducible metadata', t => {
   const f = fixture(t), a = path.join(f.dir, 'a'), b = path.join(f.dir, 'b');
   for (const out of [a, b]) { const result = f.run(out); assert.equal(result.status, 0, result.stderr); }
   assert.deepEqual(fs.readdirSync(path.join(a, 'runtime')).sort(), expected);
@@ -34,10 +34,10 @@ test('exact nine-file closure, required apply helper, unchanged Dockerfile and r
   for (const name of expected) assert.equal(manifest.runtimeHashes[name], createHash('sha256').update(fs.readFileSync(path.join(a, 'runtime', name))).digest('hex'));
   for (const name of ['staging-manifest.json', ...expected.map(n => 'runtime/' + n)]) assert.deepEqual(fs.readFileSync(path.join(a, name)), fs.readFileSync(path.join(b, name)));
   assert.match(fs.readFileSync(path.join(a, 'runtime/cooked-editor-runtime.js'), 'utf8'), /require\("\.\/cooked-editor-limits"\)/);
-  fs.appendFileSync(path.join(f.repo, media + 'cooked-editor-apply.py'), '\n# new reviewed source\n');
+  fs.appendFileSync(path.join(f.repo, media + 'cooked-transcribe-observed.py'), '\n# new reviewed source\n');
   const next = f.commit(), c = path.join(f.dir, 'c'); assert.equal(f.run(c, next).status, 0);
   const changed = JSON.parse(fs.readFileSync(path.join(c, 'staging-manifest.json')));
-  assert.equal(changed.sourceSHA, next); assert.notEqual(changed.runtimeHashes['cooked-editor-apply.py'], manifest.runtimeHashes['cooked-editor-apply.py']);
+  assert.equal(changed.sourceSHA, next); assert.notEqual(changed.runtimeHashes['cooked-transcribe-observed.py'], manifest.runtimeHashes['cooked-transcribe-observed.py']);
 });
 test('runtime remains readable and traversable by the image user under umask077', t => {
   const f = fixture(t), out = path.join(f.dir, 'restricted-umask');
@@ -53,7 +53,7 @@ test('rejects invalid SHA, existing/relative/in-repo/symlink output and dirty so
   fs.mkdirSync(out); assert.notEqual(f.run(out).status, 0); assert.deepEqual(fs.readdirSync(out), []);
   assert.notEqual(f.run('relative').status, 0); assert.notEqual(f.run(path.join(f.repo, 'output')).status, 0);
   fs.symlinkSync(f.dir, path.join(f.dir, 'alias')); assert.notEqual(f.run(path.join(f.dir, 'alias', 'new')).status, 0);
-  fs.writeFileSync(path.join(f.repo, media + 'cooked-editor-apply.py'), '# dirty');
+  fs.writeFileSync(path.join(f.repo, media + 'cooked-transcribe-observed.py'), '# dirty');
   assert.match(f.run(path.join(f.dir, 'dirty')).stderr, /Clean checkout required/);
 });
 test('compiler diagnostics and missing or symlinked required sources fail before output', t => {
