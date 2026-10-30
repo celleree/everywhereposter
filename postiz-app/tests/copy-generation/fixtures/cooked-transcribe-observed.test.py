@@ -123,6 +123,64 @@ class Observation(unittest.TestCase):
         self.assertEqual(r["extraction"]["wav"]["state"], "unknown")
         self.assertEqual(json.loads(self.raw.read_bytes()), [{"text": "cached"}])
 
+    def test_oversized_configured_model_cache_hit_rejects_before_reading_or_sdk_import(self):
+        self.cache.write_text('[{"text":"cached"}]')
+        model = self.root / "configured-model/model.bin"
+        with model.open("wb") as f: f.truncate(512 * 1024 * 1024 + 1)
+        direct = self.run_native(False)
+        self.assertEqual(direct.returncode, 0, direct.stderr)
+        raw = self.raw.read_bytes(); self.trace.unlink()
+        guard = '''import builtins, os
+from pathlib import Path
+native_open = builtins.open
+class MetadataOnly:
+    def __init__(self, stream): self.stream = stream
+    def __enter__(self): return self
+    def __exit__(self, *args): return self.stream.__exit__(*args)
+    def fileno(self): return self.stream.fileno()
+    def read(self, *args): raise AssertionError("oversized model content read")
+def guarded_open(file, *args, **kwargs):
+    stream = native_open(file, *args, **kwargs)
+    return MetadataOnly(stream) if isinstance(file, (str, os.PathLike)) and Path(file).parent == Path(os.environ["AI_EDITOR_WHISPER_MODEL"]) and os.fstat(stream.fileno()).st_size >= 512 * 1024 * 1024 else stream
+builtins.open = guarded_open
+def audit(event, args):
+    if event == "import" and args[0].startswith("faster_whisper"): raise AssertionError("cache imported SDK")
+sys.addaudithook(audit)
+'''
+        self.driver.write_text(self.driver.read_text().replace('o.observe(', guard + 'o.observe('))
+        for aggregate in (False, True):
+            with self.subTest(aggregate=aggregate):
+                if aggregate:
+                    model.write_bytes(b"x")
+                    with (model.parent / "config.json").open("wb") as f: f.truncate(512 * 1024 * 1024)
+                self.trace.unlink(missing_ok=True)
+                result = self.run_native()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(b"OBSERVATION_PROTOCOL_FAILURE:CONFIGURED_MODEL", result.stderr)
+                self.assertIn(b"model-limit", result.stderr)
+                self.assertNotIn(b"oversized model content read", result.stderr)
+                self.assertNotIn(b"cache imported SDK", result.stderr)
+                self.assertEqual((result.stdout, self.raw.read_bytes()), (direct.stdout, raw))
+                self.assertEqual([e[0] for e in self.events()], ["main"])
+                self.assertFalse(self.receipt.exists())
+
+    def test_missing_or_symlink_configured_files_preserve_cache_unknowns(self):
+        self.cache.write_text('[{"text":"cached"}]')
+        directory = self.root / "configured-model"
+        (directory / "model.bin").unlink()
+        for variant in ("missing-file", "missing-directory", "symlink-file"):
+            with self.subTest(variant=variant):
+                if variant == "missing-directory": directory.rmdir()
+                if variant == "symlink-file":
+                    directory.mkdir(); (directory / "model.bin").symlink_to(self.source)
+                self.receipt.unlink(missing_ok=True)
+                result = self.run_native()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                receipt = json.loads(self.receipt.read_bytes())
+                self.assertEqual(receipt["configuredModel"]["files"], dict.fromkeys(O.MODEL_FILES))
+                self.assertEqual(receipt["configuredModel"]["actualLoadedModel"]["state"], "unknown")
+                self.assertEqual(receipt["effectiveOptions"]["state"], "unknown")
+
     def test_upstream_failure_preserved_and_no_seal(self):
         env = {**self.env, "FAIL_NATIVE": "1"}
         for wrapped in (False, True):
@@ -336,6 +394,12 @@ class NativeCapture(unittest.TestCase):
         self.receipt.unlink(); (self.root / "faster_whisper/__init__.py").write_text('raise AssertionError("cache imported SDK")')
         result = self.run_native(); self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.receipt.read_bytes())["effectiveOptions"]["state"], "unknown")
+        self.receipt.unlink()
+        with (self.root / "configured-model/model.bin").open("wb") as f: f.truncate(512 * 1024 * 1024 + 1)
+        result = self.run_native()
+        self.assertIn(b"OBSERVATION_PROTOCOL_FAILURE:CONFIGURED_MODEL", result.stderr)
+        self.assertEqual(self.raw.read_bytes(), raw)
+        self.assertFalse(self.receipt.exists())
 
     @unittest.skipUnless(os.environ.get("COOKED_ACTUAL_SDK_VAD") == "1", "opt-in installed SDK, no model/inference")
     def test_z_installed_sdk_vad_without_model_or_inference(self):

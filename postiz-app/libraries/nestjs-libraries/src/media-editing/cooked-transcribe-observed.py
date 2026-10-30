@@ -79,14 +79,19 @@ def probe(source):
 
 
 # Separate from the 64KiB aggregate options budget: the pinned local model is ~75MiB.
-def model_files(directory):
+def model_files(directory, *, require_model=True):
     directory = Path(directory)
-    if not directory.is_dir() or directory.is_symlink():
+    if not directory.is_dir():
+        if require_model:
+            raise ValueError("nonlocal-model")
+        return {name: None for name in MODEL_FILES}
+    if require_model and directory.is_symlink():
         raise ValueError("nonlocal-model")
     result, total = {}, 0
     for name in MODEL_FILES:
         file = directory / name
-        if not file.exists() and not file.is_symlink():
+        if (not file.exists() and not file.is_symlink()) or (not require_model and
+                (not file.is_file() or file.is_symlink())):
             result[name] = None
             continue
         with open(file, "rb", opener=lambda path, flags: os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK)) as stream:
@@ -104,7 +109,7 @@ def model_files(directory):
             if count != before.st_size or (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
                 raise ValueError("model-mutated")
             result[name] = h.hexdigest()
-    if result["model.bin"] is None:
+    if require_model and result["model.bin"] is None:
         raise ValueError("missing-model")
     return result
 
@@ -305,10 +310,10 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
         raise RuntimeError("OBSERVATION_PROTOCOL_FAILURE:SOURCE_CHANGED")
     loaded, options = observer.finish()
     model = Path(os.environ.get("AI_EDITOR_WHISPER_MODEL", "small"))
-    files = {}
-    for name in MODEL_FILES:
-        file = model / name
-        files[name] = digest(file) if file.is_file() and not file.is_symlink() else None
+    try:
+        files = model_files(model, require_model=False)
+    except (OSError, ValueError) as error:
+        raise RuntimeError("OBSERVATION_PROTOCOL_FAILURE:CONFIGURED_MODEL") from error
     try:
         version = bounded_command(["ffmpeg", "-version"]).decode("utf-8").splitlines()[0]
     except (OSError, ValueError, UnicodeError, IndexError):
