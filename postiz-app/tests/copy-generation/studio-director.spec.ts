@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { StudioDirectorService, compileStudioPlan, studioEffectBounds } from '../../libraries/nestjs-libraries/src/media-editing/studio-director.service';
+import * as captionPlan from '../../libraries/nestjs-libraries/src/media-editing/studio-caption-plan';
 import { studioFingerprint } from '../../libraries/nestjs-libraries/src/media-editing/studio-receipt';
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -99,4 +100,44 @@ it('fails invalid evidence and missing local prerequisites before metering', asy
     f.raw.files.words.value[0].start = undefined; await assert.rejects(service.produce(c, f.job, f.raw, f.assets, dir));
     delete f.raw.files.words.value[0].start; await assert.rejects(service.produce(c, f.job, f.raw, f.assets, dir)); assert.equal(charged, false);
   }, { run: async () => { charged = true; throw Error('Must not meter'); } });
+});
+
+it('changes only caption groups compared with the legacy authored manifest', () => {
+  const f = fixture(), plan = compileStudioPlan(f.job, f.raw, f.assets, f.framing, ['linkedin-organic-v1'], f.bounds, f.direction, f.refs);
+  const oldGrouping = jest.spyOn(captionPlan, 'groupStudioCaptions').mockImplementation(words =>
+    Array.from({ length: Math.ceil(words.length / 4) }, (_, i) => ({ wordIds: words.slice(i * 4, i * 4 + 4).map(w => w.id) })));
+  let legacy;
+  try { legacy = compileStudioPlan(f.job, f.raw, f.assets, f.framing, ['linkedin-organic-v1'], f.bounds, f.direction, f.refs); }
+  finally { oldGrouping.mockRestore(); }
+  assert.deepEqual(plan.manifest.project.captions, [{ wordIds: ['w0', 'w1'] }, { wordIds: ['w2'] }, { wordIds: ['w3'] }]);
+  const withoutCaptions = (p: any) => { const copy = structuredClone(p); delete copy.manifest.project.captions; return copy; };
+  assert.deepEqual(withoutCaptions(plan), withoutCaptions(legacy));
+});
+it.each(['legacy', 'direction', 'timing', 'groups'])('replays only verified existing groups and rejects unrelated %s drift', async change => {
+  await withProducer(async (f, service, dir, c) => {
+    const first = await service.produce(c, f.job, f.raw, f.assets, dir), existing = structuredClone(first);
+    existing.manifest.project.captions = [{ wordIds: ['w0', 'w1', 'w2', 'w3'] }];
+    if (change === 'direction') existing.manifest.project.director.summary = 'Changed';
+    if (change === 'timing') existing.manifest.project.words[0].start += .001;
+    if (change === 'groups') existing.manifest.project.captions = [{ wordIds: ['w0', 'w1'] }, { wordIds: ['w2', 'w3'] }];
+    const target = join(dir, 'authored-plan.json'), bytes = JSON.stringify(existing);
+    await writeFile(target, bytes);
+    if (change === 'legacy') {
+      const replay = await service.produce(c, f.job, f.raw, f.assets, dir);
+      assert.equal(studioFingerprint(replay), studioFingerprint(existing));
+      assert.deepEqual(replay.manifest.project.captions, existing.manifest.project.captions);
+      assert.deepEqual(replay.manifest.project.words, first.manifest.project.words);
+    } else await assert.rejects(service.produce(c, f.job, f.raw, f.assets, dir));
+    assert.equal(await readFile(target, 'utf8'), bytes);
+  }, { run: async (_org: string, _key: string, _fingerprint: string, _request: any, _allowed: boolean, invoke: any) => invoke({}) });
+});
+
+it('derives caption seams from cumulative kept frames despite removed source gaps', () => {
+  const f = fixture();
+  Object.assign(f.raw.files.rawWords.value[1], { start: 1.95, end: 2 });
+  Object.assign(f.raw.files.words.value[1], { start: 1.95, end: 2 });
+  Object.assign(f.raw.files.rawWords.value[2], { start: 3, end: 3.15 });
+  Object.assign(f.raw.files.words.value[2], { start: 2, end: 2.15 });
+  const plan = compileStudioPlan(f.job, f.raw, f.assets, f.framing, ['linkedin-organic-v1'], f.bounds, f.direction, f.refs);
+  assert.deepEqual(plan.manifest.project.captions, ['w0', 'w1', 'w2', 'w3'].map(id => ({ wordIds: [id] })));
 });

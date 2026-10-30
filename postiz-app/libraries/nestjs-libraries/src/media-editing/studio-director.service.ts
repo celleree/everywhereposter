@@ -1,3 +1,4 @@
+import { groupStudioCaptions } from './studio-caption-plan';
 import { Injectable } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -71,7 +72,8 @@ export function compileStudioPlan(job: any, raw: any, assets: StudioAsset[], fra
     return { id: 'broll-' + i, assetId: asset.id, from, frames, sourceStart: 0, anchorWords: [cue.anchorWordId], reason: cue.reason };
   });
   for (const list of [effects, broll]) for (let i = 1; i < list.length; i++) if (list[i].from < list[i - 1].from + list[i - 1].frames) throw Error('Overlapping direction cues need adjustment');
-  const captions = []; for (let i = 0; i < evidence.words.length; i += 4) captions.push({ wordIds: evidence.words.slice(i, i + 4).map(w => w.id) });
+  let keptFrames = 0;
+  const captions = groupStudioCaptions(evidence.words, evidence.cuts.map(c => keptFrames += c.out - c.in));
   return { assetMediaIds: Object.fromEntries(assets.map(a => [a.id, a.mediaId])), manifest: { schemaVersion: 1,
     project: { schemaVersion: 1, id: job.id, revision: job.generation, profile: 'easy-graphics-v1', canvas: { width: 1080, height: 1920, fps: 30 },
       source: { assetId: source.id, sha256: source.sha256, frames: evidence.totalFrames }, assets: assets.map(({ path, mediaId, ...a }) => a),
@@ -152,7 +154,18 @@ export class StudioDirectorService {
     const plan = compileStudioPlan(row, raw, assets, framing, geometry.ids, bounds, direction, refs);
     const target = join(dir, 'authored-plan.json');
     try { await writeFile(target, JSON.stringify(plan), { flag: 'wx', mode: 0o600 }); }
-    catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || studioFingerprint(await studioJson(target)) !== studioFingerprint(plan)) throw e; }
+    catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      const existing = await studioJson(target);
+      if (studioFingerprint(existing) === studioFingerprint(plan)) return existing;
+      // Interrupted V1 jobs already bind the legacy four-word groups downstream.
+      // Accept only the exact old compiler result, never arbitrary caption drift.
+      const words = plan.manifest.project.words, captions = [];
+      for (let i = 0; i < words.length; i += 4) captions.push({ wordIds: words.slice(i, i + 4).map((w: any) => w.id) });
+      const legacy = { ...plan, manifest: { ...plan.manifest, project: { ...plan.manifest.project, captions } } };
+      if (studioFingerprint(existing) !== studioFingerprint(legacy)) throw e;
+      return existing;
+    }
     return plan;
   }
 }
