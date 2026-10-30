@@ -37,14 +37,43 @@ function derive(start: number, end: number, totalFrames: number, interior: boole
 export const coveringFrames = (start: number, end: number, totalFrames: number): FrameRange => derive(start, end, totalFrames, false);
 export const removableInteriorFrames = (start: number, end: number, totalFrames: number): FrameRange => derive(start, end, totalFrames, true);
 
-export function createSourceMap(sourceSha256: string, alignment: string, totalFrames: number, keptRanges: FrameRange[]) {
-  if (!validHash(sourceSha256) || !validHash(alignment) || !totalValid(totalFrames) || !Array.isArray(keptRanges) || !keptRanges.length) fail();
+function validatedRanges(totalFrames: number, keptRanges: FrameRange[]) {
+  if (!totalValid(totalFrames) || !Array.isArray(keptRanges) || !keptRanges.length) fail();
   let previous = 0, outputFrames = 0;
   const ranges = keptRanges.map(r => {
     if (!Array.isArray(r) || r.length !== 2 || !Number.isSafeInteger(r[0]) || !Number.isSafeInteger(r[1]) ||
         r[0] < previous || r[1] <= r[0] || r[1] > totalFrames) fail();
     previous = r[1]; outputFrames += r[1] - r[0]; return [r[0], r[1]] as FrameRange;
   });
+  return { ranges, outputFrames };
+}
+function projectValidatedWords(totalFrames: number, ranges: FrameRange[], words: SourceWord[]) {
+  if (!Array.isArray(words)) fail();
+  let previousEnd = 0, previousOrdinal = -1;
+  return words.flatMap(word => {
+    if (!word || !ordinal(word.ordinal) || word.ordinal <= previousOrdinal || !validString(word.text)) fail();
+    seconds(word.start, word.end, totalFrames);
+    if (word.start < previousEnd) fail();
+    previousEnd = word.end; previousOrdinal = word.ordinal;
+    let cursor = 0;
+    for (const [start, end] of ranges) {
+      const lo = start / 30, hi = end / 30;
+      if (word.start >= lo && word.end <= hi) return [{ ...word,
+        start: cursor / 30 + (word.start - lo), end: cursor / 30 + (word.end - lo) }];
+      if (word.start < hi && word.end > lo) fail();
+      cursor += end - start;
+    }
+    return [];
+  });
+}
+// Projection alone does not construct an alignment identity or attest provenance.
+export function projectSourceWords(totalFrames: number, keptRanges: FrameRange[], words: SourceWord[]) {
+  return projectValidatedWords(totalFrames, validatedRanges(totalFrames, keptRanges).ranges, words);
+}
+
+export function createSourceMap(sourceSha256: string, alignment: string, totalFrames: number, keptRanges: FrameRange[]) {
+  if (!validHash(sourceSha256) || !validHash(alignment)) fail();
+  const { ranges, outputFrames } = validatedRanges(totalFrames, keptRanges);
   const mapHash = hash(['ep-source-map-v1', sourceSha256, alignment, 30, totalFrames, ranges]);
   function forward(frame: number): number | null {
     if (!Number.isSafeInteger(frame) || frame < 0 || frame > totalFrames) fail();
@@ -65,23 +94,8 @@ export function createSourceMap(sourceSha256: string, alignment: string, totalFr
     return null;
   }
   function projectWords(words: SourceWord[]) {
-    if (!Array.isArray(words)) fail();
-    let previousEnd = 0, previousOrdinal = -1;
-    return words.flatMap(word => {
-      if (!word || !ordinal(word.ordinal) || word.ordinal <= previousOrdinal || !validString(word.text)) fail();
-      seconds(word.start, word.end, totalFrames);
-      if (word.start < previousEnd) fail();
-      previousEnd = word.end; previousOrdinal = word.ordinal;
-      let cursor = 0;
-      for (const [start, end] of ranges) {
-        const lo = start / 30, hi = end / 30;
-        if (word.start >= lo && word.end <= hi) return [{ ...word, id: sourceWordId(sourceSha256, alignment, word.ordinal),
-          start: cursor / 30 + (word.start - lo), end: cursor / 30 + (word.end - lo) }];
-        if (word.start < hi && word.end > lo) fail();
-        cursor += end - start;
-      }
-      return [];
-    });
+    return projectValidatedWords(totalFrames, ranges, words)
+      .map(word => ({ ...word, id: sourceWordId(sourceSha256, alignment, word.ordinal) }));
   }
   return { mapHash, outputFrames, forward, inverse, projectWords };
 }
