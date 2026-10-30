@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { studioAlignmentEvidence } from '../../libraries/nestjs-libraries/src/media-editing/studio-alignment-evidence';
-import { alignmentHash, createSourceMap, sourceWordId } from '../../libraries/nestjs-libraries/src/media-editing/studio-source-clock';
+import { alignmentHash, createSourceMap, projectSourceWords, sourceWordId } from '../../libraries/nestjs-libraries/src/media-editing/studio-source-clock';
 
 const a = 'a'.repeat(64), b = 'b'.repeat(64), c = 'c'.repeat(64);
 const expected = { organizationId: 'org', mediaId: 'media' };
@@ -96,4 +96,19 @@ it.each([undefined, identity()])('enforces source and output bounds and output a
   assert.throws(() => view(shifted, id));
   // The decimal projection differs by a few binary64 units, but is still the same timing.
   assert.doesNotThrow(() => view(fixture(), id));
+});
+
+it('shares A1 projection without an identity and preserves mapping and rejection behavior', () => {
+  const ranges: [number, number][] = [[0, 60], [90, 180]];
+  const words = fixture().files.rawWords.value.map((w, ordinal) => ({ ...w, ordinal }));
+  const before = JSON.stringify({ ranges, words });
+  const plain = projectSourceWords(180, ranges, words);
+  const identified = createSourceMap(a, alignmentHash(identity()), 180, ranges).projectWords(words);
+  assert.deepEqual(identified.map(({ id, ...word }) => word), plain);
+  assert.deepEqual(plain.map(w => w.ordinal), [0, 2]);
+  assert.equal(JSON.stringify({ ranges, words }), before);
+  const partial = [{ ...words[0], end: 2.1 }];
+  assert.throws(() => projectSourceWords(180, ranges, partial));
+  assert.throws(() => createSourceMap(a, alignmentHash(identity()), 180, ranges).projectWords(partial));
+  assert.throws(() => projectSourceWords(180, [[0, 61], [60, 180]], words));
 });

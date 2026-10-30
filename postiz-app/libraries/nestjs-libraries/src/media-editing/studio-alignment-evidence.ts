@@ -1,5 +1,5 @@
 import { validateStudioEvidence } from './studio-evidence';
-import { alignmentHash, AlignmentIdentity, createSourceMap, FrameRange } from './studio-source-clock';
+import { alignmentHash, AlignmentIdentity, createSourceMap, FrameRange, projectSourceWords } from './studio-source-clock';
 
 // Observations are labeled by clock domain; absence is unknown, never an inferred rate.
 export type AudioClockObservation = { domain: 'source' | 'decoded' | 'output'; sampleRate?: number; origin?: 'known-zero' | 'unknown' };
@@ -30,20 +30,8 @@ export function studioAlignmentEvidence(
   const raw = normalize(evidence.files.rawWords.value, validated.totalFrames / 30);
   const output = normalize(evidence.files.words.value, validated.frames / 30);
   const ranges: FrameRange[] = validated.cuts.map(c => [c.in, c.out]);
-  // Compare the whole-word projection in both identity states, allowing only binary64 arithmetic error.
-  const projected: { text: string; start: number; end: number }[] = [];
-  for (const word of raw) {
-    let cursor = 0;
-    for (const [start, end] of ranges) {
-      const lo = start / 30, hi = end / 30;
-      if (word.start >= lo && word.end <= hi) {
-        projected.push({ text: word.text, start: cursor / 30 + (word.start - lo), end: cursor / 30 + (word.end - lo) });
-        break;
-      }
-      if (word.start < hi && word.end > lo) fail();
-      cursor += end - start;
-    }
-  }
+  // A1 owns whole-word projection even when an identity is unavailable.
+  const projected = projectSourceWords(validated.totalFrames, ranges, raw);
   const sameTime = (a: number, b: number) => Math.abs(a - b) <= Number.EPSILON * 8 * Math.max(1, validated.totalFrames / 30);
   if (projected.length !== output.length || projected.some((w, i) => w.text !== output[i].text ||
       !sameTime(w.start, output[i].start) || !sameTime(w.end, output[i].end))) fail();
