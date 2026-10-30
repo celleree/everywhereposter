@@ -164,6 +164,49 @@ sys.addaudithook(audit)
                 self.assertEqual([e[0] for e in self.events()], ["main"])
                 self.assertFalse(self.receipt.exists())
 
+    def test_configured_path_replacement_between_files_never_seals(self):
+        self.cache.write_text('[{"text":"cached"}]')
+        directory = self.root / "configured-model"
+        model, config = directory / "model.bin", directory / "config.json"
+        direct = self.run_native(False)
+        self.assertEqual(direct.returncode, 0, direct.stderr)
+        raw = self.raw.read_bytes()
+        guard = '''import builtins, os
+from pathlib import Path
+native_open = builtins.open
+directory = Path(os.environ["AI_EDITOR_WHISPER_MODEL"])
+switched = False
+def replacing_open(file, *args, **kwargs):
+    global switched
+    if isinstance(file, (str, os.PathLike)) and Path(file) == directory / "config.json" and not switched:
+        switched = True
+        replacement = directory / "replacement"
+        replacement.write_bytes(b"new model"); replacement.replace(directory / "model.bin")
+        if os.environ["REPLACE_CONFIG"] == "1":
+            replacement.write_bytes(b"new config"); replacement.replace(directory / "config.json")
+        (directory / "replacement-marker").write_text("replaced")
+    return native_open(file, *args, **kwargs)
+builtins.open = replacing_open
+def audit(event, args):
+    if event == "import" and args[0].startswith("faster_whisper"): raise AssertionError("cache imported SDK")
+sys.addaudithook(audit)
+'''
+        self.driver.write_text(self.driver.read_text().replace('o.observe(', guard + 'o.observe('))
+        for replace_config in (False, True):
+            with self.subTest(replace_config=replace_config):
+                model.write_bytes(b"old model"); config.write_bytes(b"old config")
+                self.trace.unlink(missing_ok=True); self.receipt.unlink(missing_ok=True)
+                result = self.run_native(env={**self.env, "REPLACE_CONFIG": str(int(replace_config))})
+                self.assertIn(b"OBSERVATION_PROTOCOL_FAILURE:CONFIGURED_MODEL", result.stderr)
+                self.assertIn(b"model-path-changed", result.stderr)
+                self.assertNotIn(b"cache imported SDK", result.stderr)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((result.stdout, self.raw.read_bytes()), (direct.stdout, raw))
+                self.assertEqual((directory / "replacement-marker").read_text(), "replaced")
+                self.assertEqual(model.read_bytes(), b"new model")
+                self.assertEqual([e[0] for e in self.events()], ["main"])
+                self.assertFalse(self.receipt.exists())
+
     def test_missing_or_symlink_configured_files_preserve_cache_unknowns(self):
         self.cache.write_text('[{"text":"cached"}]')
         directory = self.root / "configured-model"

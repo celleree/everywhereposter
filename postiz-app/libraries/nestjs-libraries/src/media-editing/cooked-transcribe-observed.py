@@ -87,6 +87,15 @@ def model_files(directory, *, require_model=True):
         return {name: None for name in MODEL_FILES}
     if require_model and directory.is_symlink():
         raise ValueError("nonlocal-model")
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    def path_identity(file):
+        try:
+            return identity(file.lstat())
+        except FileNotFoundError:
+            return None
+    # Bound the scan once, then revalidate every pathname; never retry model-file hashing.
+    initial = {name: path_identity(directory / name) for name in MODEL_FILES}
     result, total = {}, 0
     for name in MODEL_FILES:
         file = directory / name
@@ -96,6 +105,8 @@ def model_files(directory, *, require_model=True):
             continue
         with open(file, "rb", opener=lambda path, flags: os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK)) as stream:
             before = os.fstat(stream.fileno())
+            if identity(before) != initial[name]:
+                raise ValueError("model-path-changed")
             total += before.st_size
             if not stat.S_ISREG(before.st_mode) or total > 512 * 1024 * 1024:
                 raise ValueError("model-limit")
@@ -106,9 +117,11 @@ def model_files(directory, *, require_model=True):
                     raise ValueError("model-mutated")
                 h.update(chunk)
             after = os.fstat(stream.fileno())
-            if count != before.st_size or (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            if count != before.st_size or identity(before) != identity(after):
                 raise ValueError("model-mutated")
             result[name] = h.hexdigest()
+    if initial != {name: path_identity(directory / name) for name in MODEL_FILES}:
+        raise ValueError("model-path-changed")
     if require_model and result["model.bin"] is None:
         raise ValueError("missing-model")
     return result
