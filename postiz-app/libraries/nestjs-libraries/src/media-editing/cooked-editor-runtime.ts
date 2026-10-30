@@ -50,16 +50,32 @@ async function validateObservation(workspace: string, sourceSha256: string) {
       if (bytesRead !== info.size) throw new Error('SIZE');
       receipt = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
     } finally { await file.close(); }
-    const unknown = (value: any) => value?.state === 'unknown' && typeof value.reason === 'string' && value.reason.length > 0;
+    const text = (value: any) => typeof value === 'string' && value.length > 0 && value.length <= 1024;
+    const unknown = (value: any) => value?.state === 'unknown' && text(value.reason);
     const sha = (value: any) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
-    const wav = receipt.extraction?.wav, model = receipt.configuredModel;
-    if (!(unknown(receipt.sourceAudio) || (receipt.sourceAudio?.state === 'observed' &&
-          Array.isArray(receipt.sourceAudio.candidates) && receipt.sourceAudio.candidates.length <= 32)) ||
+    const fields = ['index', 'codec_name', 'sample_rate', 'channels', 'time_base', 'start_pts', 'start_time'];
+    const candidate = (value: any) => value && !Array.isArray(value) &&
+      ['codec_name', 'sample_rate', 'time_base', 'start_time'].every(key => value[key] === null || text(value[key])) &&
+      [['sample_rate', /^\d+$/], ['time_base', /^-?\d+\/-?\d+$/], ['start_time', /^-?\d+(?:\.\d+)?$/]].every(
+        ([key, pattern]) => value[key as string] === null || (pattern as RegExp).test(value[key as string])) &&
+      ['index', 'channels', 'start_pts'].every(key => value[key] === null || (Number.isSafeInteger(value[key]) &&
+        (key === 'start_pts' || value[key] >= (key === 'channels' ? 1 : 0))));
+    const audio = receipt.sourceAudio, wav = receipt.extraction?.wav, model = receipt.configuredModel;
+    const origin = audio?.presentationOrigin;
+    const observedAudio = audio?.state === 'observed' && sha(audio.sha256) &&
+      (audio.toolVersion === null || text(audio.toolVersion)) && Array.isArray(audio.candidates) &&
+      audio.candidates.length <= 32 && audio.candidates.every(candidate) &&
+      (audio.candidates.length === 1 ? candidate(audio.selectedStream) &&
+        fields.every(key => audio.selectedStream[key] === audio.candidates[0][key]) : unknown(audio.selectedStream)) &&
+      (unknown(origin) || (audio.candidates.length === 1 && Number.isSafeInteger(origin?.numerator) &&
+        Number.isSafeInteger(origin?.denominator) && origin.denominator > 0 && origin.basis === 'source-presentation-PTS-only'));
+    if (!(unknown(audio) || observedAudio) ||
         model?.basis !== 'configured-file-hashes-only' || !unknown(model.actualLoadedModel) ||
         !['model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'].every(key => model.files?.[key] === null || sha(model.files?.[key])) ||
         receipt.extraction?.requested?.sampleRate !== 16000 || receipt.extraction.requested.channels !== 1 ||
         receipt.extraction.requested.codec !== 'pcm_s16le' ||
-        !(unknown(wav) || (wav?.state === 'observed' && sha(wav.sha256) && unknown(wav.origin) &&
+        !(receipt.extraction.toolVersion === null || text(receipt.extraction.toolVersion)) ||
+        !(unknown(wav) || (wav?.state === 'observed' && sha(wav.sha256) && wav.compression === 'NONE' && unknown(wav.origin) &&
           ['sampleRate', 'channels', 'sampleWidthBytes', 'sampleCount'].every(key => Number.isSafeInteger(wav[key]) && wav[key] >= (key === 'sampleCount' ? 0 : 1))))) throw new Error('SHAPE');
     if (receipt.version !== 'alignment-observation-v1' || receipt.status !== 'INCOMPLETE' ||
         receipt.sourceSha256 !== sourceSha256 || receipt.sourceAfterSha256 !== sourceSha256 ||

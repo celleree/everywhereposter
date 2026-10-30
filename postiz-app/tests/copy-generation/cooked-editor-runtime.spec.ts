@@ -7,6 +7,12 @@ import { CookedCommand, CookedConfig, CookedEditorRuntime, PreparedCookedSource,
 
 describe('private cooked native boundary', () => {
   let root: string, config: CookedConfig, input: PreparedCookedSource, calls: CookedCommand[];
+  const observedAudio = () => {
+    const candidate = { index: 0, codec_name: 'aac', sample_rate: '44100', channels: 1,
+      time_base: '1/44100', start_pts: 0, start_time: '0.000000' };
+    return { state: 'observed', sha256: 'a'.repeat(64), toolVersion: 'fixture-ffprobe', candidates: [candidate],
+      selectedStream: { ...candidate }, presentationOrigin: { numerator: 0, denominator: 1, basis: 'source-presentation-PTS-only' } };
+  };
   const runner = async (c: CookedCommand) => {
     calls.push(c);
     if (c.stage === 'prepare_boundaries') await writeFile(join(c.workspace, 'edit/boundary-policy.json'), JSON.stringify({
@@ -22,7 +28,7 @@ describe('private cooked native boundary', () => {
           transcribeSha256: '9964a0bb316e75d666cce6b2f7ebe7d5414b6e3d293c38c8cd22d77e5dd2102e' },
         sourceAudio: unknown, configuredModel: { basis: 'configured-file-hashes-only', actualLoadedModel: unknown,
           files: { 'model.bin': null, 'config.json': null, 'tokenizer.json': null, 'vocabulary.txt': null } },
-        extraction: { requested: { sampleRate: 16000, channels: 1, codec: 'pcm_s16le' }, wav: unknown },
+        extraction: { requested: { sampleRate: 16000, channels: 1, codec: 'pcm_s16le' }, toolVersion: null, wav: unknown },
         decoderArray: unknown, effectiveOptions: unknown, quietBlockVAD: unknown, outputPCM: unknown,
       }), { mode: 0o600 });
     }
@@ -91,6 +97,59 @@ describe('private cooked native boundary', () => {
       await expect(runtime.revise(failure.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('STALE_OR_FAILED');
       await runtime.cleanup(failure.jobId, 'o');
     });
+  it.each([
+    ['review-repro', (a: any) => { Object.keys(a).forEach(key => delete a[key]); a.state = 'observed'; a.candidates = [null]; }],
+    ['null-candidate', (a: any) => { a.candidates = [null]; }],
+    ['missing-candidate-field', (a: any) => { delete a.candidates[0].sample_rate; }],
+    ['candidate-field-type', (a: any) => { a.candidates[0].channels = '1'; }],
+    ['invalid-rate', (a: any) => { a.candidates[0].sample_rate = 'unavailable'; }],
+    ['invalid-time-base', (a: any) => { a.candidates[0].time_base = '44100'; }],
+    ['missing-probe-hash', (a: any) => { delete a.sha256; }],
+    ['invalid-probe-hash', (a: any) => { a.sha256 = 'z'.repeat(64); }],
+    ['missing-version', (a: any) => { delete a.toolVersion; }],
+    ['missing-selection', (a: any) => { delete a.selectedStream; }],
+    ['mismatched-selection', (a: any) => { a.selectedStream.index = 1; }],
+    ['ambiguous-selection', (a: any) => { a.candidates.push({ ...a.candidates[0], index: 1 }); }],
+    ['missing-origin', (a: any) => { delete a.presentationOrigin; }],
+    ['partial-origin', (a: any) => { delete a.presentationOrigin.numerator; }],
+    ['invalid-origin', (a: any) => { a.presentationOrigin.denominator = 0; }],
+    ['wrong-origin-basis', (a: any) => { a.presentationOrigin.basis = 'decoded-zero'; }],
+    ['implicit-unknown', (a: any) => { a.presentationOrigin = { state: 'unknown' }; }],
+  ])('rejects malformed observed audio: %s', async (_name, sabotage) => {
+    const runtime = new CookedEditorRuntime(config, async c => {
+      await runner(c);
+      if (c.stage !== 'transcribe') return;
+      const path = join(c.workspace, 'edit/alignment-observation.json'), receipt = JSON.parse(await readFile(path, 'utf8'));
+      receipt.sourceAudio = observedAudio(); sabotage(receipt.sourceAudio);
+      await writeFile(path, JSON.stringify(receipt));
+    });
+    const failure = await runtime.run(input).catch(e => e);
+    expect(failure).toMatchObject({ message: 'OBSERVATION_PROTOCOL_FAILURE', jobId: expect.any(String) });
+    expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']);
+    await runtime.cleanup(failure.jobId, 'o');
+  });
+  it.each(['single', 'nullable-fields', 'ambiguous', 'no-streams'])('accepts structurally valid incomplete audio: %s', async variant => {
+    const runtime = new CookedEditorRuntime(config, async c => {
+      await runner(c);
+      if (c.stage !== 'transcribe') return;
+      const path = join(c.workspace, 'edit/alignment-observation.json'), receipt = JSON.parse(await readFile(path, 'utf8'));
+      const audio: any = observedAudio(), unknown = { state: 'unknown', reason: 'fixture-unobserved' };
+      if (variant === 'nullable-fields') {
+        audio.candidates[0] = Object.fromEntries(Object.keys(audio.candidates[0]).map(key => [key, null]));
+        audio.selectedStream = { ...audio.candidates[0] }; audio.presentationOrigin = unknown; audio.toolVersion = null;
+      }
+      if (variant === 'ambiguous' || variant === 'no-streams') {
+        audio.candidates = variant === 'no-streams' ? [] : [...audio.candidates, { ...audio.candidates[0], index: 1 }];
+        audio.selectedStream = unknown; audio.presentationOrigin = unknown;
+      }
+      if (variant === 'single') receipt.extraction.wav = { state: 'observed', sha256: 'b'.repeat(64),
+        sampleRate: 16000, channels: 1, sampleWidthBytes: 2, sampleCount: 1600, compression: 'NONE', origin: unknown };
+      receipt.sourceAudio = audio; await writeFile(path, JSON.stringify(receipt));
+    });
+    const result = await runtime.run(input);
+    expect(calls.some(c => c.stage === 'render')).toBe(true);
+    await runtime.cleanup(result.jobId, 'o');
+  });
   it('fails closed for unsupported metadata, missing files, symlinks, nonprivate roots and unsafe limits', async () => {
     const runtime = new CookedEditorRuntime(config, runner);
     for (const metadata of [{ ...input.metadata, fps: 31 }, { ...input.metadata, width: 1920, height: 1080 }, { ...input.metadata, durationMs: 240001 }, { ...input.metadata, alignedTimestamps: false }]) {
