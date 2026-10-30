@@ -497,9 +497,9 @@ jobs:
           import os, re
           from pathlib import Path
           text = (Path(os.environ['STUDIO_EVIDENCE']) / 'tests.tap').read_text()
-          for name, value in {'tests': 87, 'pass': 87, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}.items():
+          for name, value in {'tests': 96, 'pass': 96, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}.items():
               assert re.findall(r'^# ' + name + r' (\d+)\s*$', text, re.M) == [str(value)], name
-          print('PASS: all 87 Studio tests executed without skips')
+          print('PASS: all 96 Studio tests executed without skips')
           PY
           node --input-type=module - <<'JS'
           import fs from 'node:fs';
