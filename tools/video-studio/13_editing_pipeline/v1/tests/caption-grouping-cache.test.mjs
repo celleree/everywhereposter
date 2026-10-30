@@ -19,12 +19,28 @@ test('regrouping across the 5s boundary invalidates both chunks but preserves di
   assert.deepEqual(affected.map(c=>c.wordIds),[['w0'],['w1']]); // 120ms tail still intersects.
   assert.equal(affected[1].words[0].start,5.05);
 });
-test('existing first-active selection can hide brief groups under the unchanged 120ms tail',()=>{
+test('legal same-span merges restore brief words hidden by the unchanged 120ms tail',()=>{
   const words=[{id:'a',text:'Yes.',start:0,end:.24},{id:'b',text:'Go!',start:.21,end:.22},
     {id:'c',text:'Now',start:.23,end:.7}],map=new Map(words.map(w=>[w.id,w]));
   const groups=words.map(w=>({wordIds:[w.id]}));
   const ranges=groups.map(c=>captionFrameRange(c,map,30,.7));
   const visible=Array.from({length:21},(_,frame)=>groups.findIndex((_,i)=>frame>=ranges[i][0]&&frame<ranges[i][1]));
   assert.ok(visible.includes(0));assert.equal(visible.includes(1),false);assert.ok(visible.includes(2));
-  assert.deepEqual(groups.flatMap(c=>c.wordIds),['a','b','c']); // Membership is preserved; visibility is not promised.
+  const repaired=[{wordIds:['a','b']},{wordIds:['c']}];
+  const shown=new Set();
+  for(let frame=0;frame<21;frame++){
+    const active=repaired.find(c=>{const [from,end]=captionFrameRange(c,map,30,.7);return frame>=from&&frame<end;});
+    active?.wordIds.forEach(id=>shown.add(id));
+  }
+  assert.deepEqual([...shown],['a','b','c']);
+  // Across a retained-span seam the equivalent repair is forbidden. With the
+  // final short word at the seam, separate groups cannot both become visible.
+  const seamWords=[{id:'left',text:'Before',start:.1,end:1},{id:'right',text:'Go!',start:1,end:1.01}];
+  const seamMap=new Map(seamWords.map(w=>[w.id,w])),separate=seamWords.map(w=>({wordIds:[w.id]}));
+  const activeIds=new Set();
+  for(let frame=0;frame<31;frame++){
+    separate.find(c=>{const [from,end]=captionFrameRange(c,seamMap,30,1.01);return frame>=from&&frame<end;})?.wordIds.forEach(id=>activeIds.add(id));
+  }
+  assert.deepEqual([...activeIds],['left']);
+  assert.deepEqual(captionFrameRange({wordIds:['left','right']},seamMap,30,1.01),[3,31]);
 });

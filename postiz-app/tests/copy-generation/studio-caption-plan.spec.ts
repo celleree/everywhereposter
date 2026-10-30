@@ -32,11 +32,32 @@ it('bounds rapid speech, long text and duration without dropping isolated words 
   assert.deepEqual(check(make(['Supercalifragilisticexpialidocious', 'works'])), [['w0'], ['w1']]);
   assert.deepEqual(check(make(['extraordinary', 'demonstration', 'today'])), [['w0', 'w1'], ['w2']]);
   assert.deepEqual(check(make(['slow', 'held', 'phrase'], [0, .8, 1.6], .9)), [['w0', 'w1'], ['w2']]);
+  const overlap = make(['Yes.', 'Go!', 'Now'], [0, .21, .23], 0);
+  overlap[0].end = .24; overlap[1].end = .22; overlap[2].end = .7;
+  assert.deepEqual(check(overlap), [['w0', 'w1'], ['w2']]);
+  const visible = (groups: string[][], ws = overlap) => {
+    const seen = new Set<string>(), byId = new Map(ws.map(w => [w.id, w]));
+    for (let frame = 0; frame < 30 * ws[ws.length - 1].end; frame++) {
+      const active = groups.find(g => frame >= Math.floor(byId.get(g[0])!.start * 30) &&
+        frame < Math.ceil(Math.min(byId.get(g[g.length - 1])!.end + .12, ws[ws.length - 1].end) * 30));
+      active?.forEach(id => seen.add(id));
+    }
+    return [...seen].sort();
+  };
+  assert.deepEqual(visible(check(overlap)), visible([overlap.map(w => w.id)]));
+  const full = make(['a', 'b', 'c', 'long.', 'brief!', 'later'], [0, .01, .02, .03, .04, .3], 0);
+  [.1, .11, .12, .5, .1, .7].forEach((end, i) => full[i].end = end);
+  assert.deepEqual(check(full), [['w0', 'w1', 'w2', 'w3'], ['w4', 'w5']]);
+  assert.deepEqual(visible(check(full), full), visible([['w0', 'w1', 'w2', 'w3'], ['w4', 'w5']], full));
   assert.deepEqual(check(make(['alone'])), [['w0']]); assert.deepEqual(check([]), []);
 });
 it('separates retained spans at cumulative output boundaries, including exact-boundary words', () => {
   const words = make(['before', 'after', 'next'], [1.8, 2, 2.2], .2);
   assert.deepEqual(check(words, [60, 150]), [['w0'], ['w1', 'w2']]);
+  const finalBrief = make(['Before', 'Go!'], [.1, 1], 0);
+  finalBrief[0].end = 1; finalBrief[1].end = 1.01;
+  // Visibility cannot justify merging across a retained-span seam.
+  assert.deepEqual(check(finalBrief, [30, 31]), [['w0'], ['w1']]);
   // Source spans [0,60), [90,180): the removed source second is absent.
   // Using source in=90 as the seam would wrongly merge these output words.
   assert.deepEqual(check(make(['left', 'right'], [1.95, 2], .05), [60, 150]), [['w0'], ['w1']]);
