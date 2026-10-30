@@ -2,10 +2,10 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {fixture} from './fixture.mjs';
-import {captionFrameRange,chunkContent,validateProject} from '../project.mjs';
+import {captionFrameRange,captionFrameRanges,chunkContent,validateProject} from '../project.mjs';
 
 test('regrouping across the 5s boundary invalidates both chunks but preserves distant cache keys',()=>{
-  const p=fixture();
+  const p=fixture();p.captionTimingPolicy='trim-trailing-hold-v1';
   p.words=[{id:'w0',text:'First.',start:4.8,end:4.9},{id:'w1',text:'Next',start:5.05,end:5.2},
     {id:'w2',text:'Distant',start:70,end:70.3}];
   p.effects=[];p.broll=[];
@@ -19,7 +19,7 @@ test('regrouping across the 5s boundary invalidates both chunks but preserves di
   assert.deepEqual(affected.map(c=>c.wordIds),[['w0'],['w1']]); // 120ms tail still intersects.
   assert.equal(affected[1].words[0].start,5.05);
 });
-test('legal same-span merges restore brief words hidden by the unchanged 120ms tail',()=>{
+test('same-span merges and opt-in timing restore brief words while legacy replay stays unchanged',()=>{
   const words=[{id:'a',text:'Yes.',start:0,end:.24},{id:'b',text:'Go!',start:.21,end:.22},
     {id:'c',text:'Now',start:.23,end:.7}],map=new Map(words.map(w=>[w.id,w]));
   const groups=words.map(w=>({wordIds:[w.id]}));
@@ -33,8 +33,8 @@ test('legal same-span merges restore brief words hidden by the unchanged 120ms t
     active?.wordIds.forEach(id=>shown.add(id));
   }
   assert.deepEqual([...shown],['a','b','c']);
-  // Across a retained-span seam the equivalent repair is forbidden. With the
-  // final short word at the seam, separate groups cannot both become visible.
+  // Legacy timing hides a final brief word at a seam. The opt-in policy
+  // trims only the previous hold, preserving distinct group membership.
   const seamWords=[{id:'left',text:'Before',start:.1,end:1},{id:'right',text:'Go!',start:1,end:1.01}];
   const seamMap=new Map(seamWords.map(w=>[w.id,w])),separate=seamWords.map(w=>({wordIds:[w.id]}));
   const activeIds=new Set();
@@ -43,4 +43,14 @@ test('legal same-span merges restore brief words hidden by the unchanged 120ms t
   }
   assert.deepEqual([...activeIds],['left']);
   assert.deepEqual(captionFrameRange({wordIds:['left','right']},seamMap,30,1.01),[3,31]);
+  const timingProject={canvas:{fps:30},words:seamWords,captions:separate};
+  assert.deepEqual(captionFrameRanges(timingProject),[[3,31],[30,31]]);
+  timingProject.captionTimingPolicy='trim-trailing-hold-v1';
+  const optedRanges=captionFrameRanges(timingProject),optedIn=new Set();
+  assert.deepEqual(optedRanges,[[3,30],[30,31]]);
+  for(let frame=0;frame<31;frame++){
+    separate.find((_,i)=>frame>=optedRanges[i][0]&&frame<optedRanges[i][1])?.wordIds.forEach(id=>optedIn.add(id));
+  }
+  assert.deepEqual([...optedIn],['left','right']);
+  assert.deepEqual(separate.flatMap(c=>c.wordIds),seamWords.map(w=>w.id));
 });

@@ -15,6 +15,7 @@ import { StudioApprovedPlan, StudioRuntime, studioHashFile, studioJson } from '.
 import { StudioFraming, validateStudioEvidence, validateStudioFraming } from './studio-evidence';
 
 const execute = promisify(execFile);
+const CAPTION_TIMING_POLICY = 'trim-trailing-hold-v1';
 const label = z.object({ text: z.string(), icon: z.enum(['recording', 'document', 'conversation', 'product']), assetId: z.string() }).strict();
 const DirectionSchema = z.object({ summary: z.string(), effects: z.array(z.object({
   kind: z.enum(['relationship', 'panels']), anchorWordId: z.string(), labels: z.array(label),
@@ -42,7 +43,7 @@ export function studioEffectBounds(rectangles: { x: number; y: number; width: nu
   if (!candidates.length) throw Error('Adjust the confirmed framing or destination selection: readable graphics do not fit');
   return candidates.sort((a, b) => b.width * b.height - a.width * a.height || a.y - b.y || a.x - b.x)[0];
 }
-export function compileStudioPlan(job: any, raw: any, assets: StudioAsset[], framing: StudioFraming, profiles: string[], bounds: any, direction: any, refs: any): StudioApprovedPlan {
+export function compileStudioPlan(job: any, raw: any, assets: StudioAsset[], framing: StudioFraming, profiles: string[], bounds: any, direction: any, refs: any, captionTimingPolicy?: typeof CAPTION_TIMING_POLICY): StudioApprovedPlan {
   const evidence = validateStudioEvidence(raw, { organizationId: job.organizationId, mediaId: job.sourceMediaId });
   const observed = validateStudioFraming(framing);
   if (observed.sourceSha256 && observed.sourceSha256 !== evidence.sourceSha256) throw Error('The reused framing belongs to different source bytes');
@@ -75,7 +76,7 @@ export function compileStudioPlan(job: any, raw: any, assets: StudioAsset[], fra
   let keptFrames = 0;
   const captions = groupStudioCaptions(evidence.words, evidence.cuts.map(c => keptFrames += c.out - c.in));
   return { assetMediaIds: Object.fromEntries(assets.map(a => [a.id, a.mediaId])), manifest: { schemaVersion: 1,
-    project: { schemaVersion: 1, id: job.id, revision: job.generation, profile: 'easy-graphics-v1', canvas: { width: 1080, height: 1920, fps: 30 },
+    project: { schemaVersion: 1, id: job.id, revision: job.generation, profile: 'easy-graphics-v1', ...(captionTimingPolicy ? { captionTimingPolicy } : {}), canvas: { width: 1080, height: 1920, fps: 30 },
       source: { assetId: source.id, sha256: source.sha256, frames: evidence.totalFrames }, assets: assets.map(({ path, mediaId, ...a }) => a),
       cuts: evidence.cuts, words: evidence.words, captions, speaker: { count: 1, faces: [...new Set([...Array.from({ length: Math.floor(evidence.frames / 30) + 1 }, (_, t) => t), evidence.frames / 30])].map(t => ({ t,
         x: observed.x * 1080, y: observed.y * 1920, width: observed.width * 1080, height: observed.height * 1920 })) },
@@ -91,6 +92,19 @@ export class StudioDirectorService {
   constructor(private readonly textService: AiWalletTextService, private readonly subscriptions: SubscriptionRepository) {}
   private invoke(request: any) {
     return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'sk-proj-', maxRetries: 0, timeout: 60_000 }).chat.completions.parse(request);
+  }
+  private async captionTiming(config: StudioRuntime): Promise<typeof CAPTION_TIMING_POLICY> {
+    const result = await execute(config.node, [join(config.root, 'run.mjs'), 'capabilities'],
+      { timeout: 30_000, maxBuffer: 65536, env: { PATH: process.env.PATH } });
+    const capability = JSON.parse(result.stdout)?.captionTiming;
+    if (!exact(capability, 'default,field,policies,version') || capability.version !== 1 ||
+        capability.field !== 'captionTimingPolicy' || capability.default !== 'legacy-v1' ||
+        !Array.isArray(capability.policies) || !capability.policies.includes('legacy-v1') ||
+        !capability.policies.includes(CAPTION_TIMING_POLICY) ||
+        capability.policies.some((p: unknown) => p !== 'legacy-v1' && p !== CAPTION_TIMING_POLICY)) {
+      throw Error('Studio package does not support the required caption timing capability');
+    }
+    return CAPTION_TIMING_POLICY;
   }
   private async geometry(config: StudioRuntime, destinations: string[]) {
     const script = `import{pathToFileURL}from'node:url';import path from'node:path';const root=process.argv[1],d=JSON.parse(process.argv[2]);const runtime=await import(pathToFileURL(path.join(root,'runtime.mjs')));await runtime.runtimeIdentity(process.argv[3],root);const p=await import(pathToFileURL(path.join(root,'safe-zone-profiles.mjs')));const s=await import(pathToFileURL(path.join(root,'safe-zones.mjs')));const profiles=d.map(x=>p.SAFE_ZONE_PROFILES.find(v=>v.platform===x));if(profiles.some(x=>!x))throw Error('Unknown destination');console.log(JSON.stringify({ids:profiles.map(x=>x.id),rectangles:s.usableRectangles(s.intersectProfiles(profiles))}));`;
@@ -127,6 +141,15 @@ export class StudioDirectorService {
     const source = assets.find(a => a.mediaId === row.sourceMediaId);
     if (!source || source.sha256 !== evidence.sourceSha256 || source.fps !== 30 || source.width !== evidence.width || source.height !== evidence.height ||
         Math.abs(source.duration! * 30 - evidence.totalFrames) > 1) throw Error('Original source clock changed');
+    const target = join(dir, 'authored-plan.json');
+    let prior: StudioApprovedPlan | undefined;
+    try { prior = await studioJson(target); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+    const priorPolicy = prior?.manifest?.project?.captionTimingPolicy;
+    if (priorPolicy !== undefined && priorPolicy !== CAPTION_TIMING_POLICY) throw Error('Unknown authored caption timing policy');
+    // Old authored plans keep their original absent policy, even with an older
+    // package. New opt-in is verified before metering, outside paid fingerprints.
+    const policy = prior && priorPolicy === undefined ? undefined : await this.captionTiming(config);
     const geometry = await this.geometry(config, row.input.request.destinations);
     const bounds = studioEffectBounds(geometry.rectangles, framing);
     const ref = async (name: string) => ({ path: join(dir, name), sha256: await studioHashFile(join(dir, name)) });
@@ -151,21 +174,26 @@ export class StudioDirectorService {
     const first = Array.isArray(choices) ? choices[0] : undefined;
     const message = first && typeof first === 'object' && !Array.isArray(first) ? first.message : undefined;
     const direction = message && typeof message === 'object' && !Array.isArray(message) ? message.parsed : undefined;
-    const plan = compileStudioPlan(row, raw, assets, framing, geometry.ids, bounds, direction, refs);
-    const target = join(dir, 'authored-plan.json');
-    try { await writeFile(target, JSON.stringify(plan), { flag: 'wx', mode: 0o600 }); }
-    catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      const existing = await studioJson(target);
-      if (studioFingerprint(existing) === studioFingerprint(plan)) return existing;
-      // Interrupted V1 jobs already bind the legacy four-word groups downstream.
-      // Accept only the exact old compiler result, never arbitrary caption drift.
-      const words = plan.manifest.project.words, captions = [];
-      for (let i = 0; i < words.length; i += 4) captions.push({ wordIds: words.slice(i, i + 4).map((w: any) => w.id) });
-      const legacy = { ...plan, manifest: { ...plan.manifest, project: { ...plan.manifest.project, captions } } };
-      if (studioFingerprint(existing) !== studioFingerprint(legacy)) throw e;
-      return existing;
+    const plan = compileStudioPlan(row, raw, assets, framing, geometry.ids, bounds, direction, refs, policy);
+    let existing: StudioApprovedPlan;
+    if (prior) existing = await studioJson(target); // A vanished replay must never become new authoring.
+    else {
+      try { await writeFile(target, JSON.stringify(plan), { flag: 'wx', mode: 0o600 }); return plan; }
+      catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+        existing = await studioJson(target);
+      }
     }
-    return plan;
+    if (studioFingerprint(existing) === studioFingerprint(plan)) return existing;
+    // Retain exact pre-policy A9a grouping and fixed-four-word V1 replay.
+    // The full comparison rejects every unrelated manifest/input drift.
+    const { captionTimingPolicy: _policy, ...project } = plan.manifest.project;
+    const grouped = { ...plan, manifest: { ...plan.manifest, project } };
+    if (studioFingerprint(existing) === studioFingerprint(grouped)) return existing;
+    const words = project.words, captions = [];
+    for (let i = 0; i < words.length; i += 4) captions.push({ wordIds: words.slice(i, i + 4).map((w: any) => w.id) });
+    const legacy = { ...grouped, manifest: { ...grouped.manifest, project: { ...project, captions } } };
+    if (studioFingerprint(existing) !== studioFingerprint(legacy)) throw Error('Studio authored plan changed during recovery');
+    return existing;
   }
 }
