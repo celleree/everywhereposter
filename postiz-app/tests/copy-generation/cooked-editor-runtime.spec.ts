@@ -11,6 +11,21 @@ describe('private cooked native boundary', () => {
     calls.push(c);
     if (c.stage === 'prepare_boundaries') await writeFile(join(c.workspace, 'edit/boundary-policy.json'), JSON.stringify({
       version: 'quiet-block-v1', sourceSha256: createHash('sha256').update(await readFile(join(c.workspace, 'source.mp4'))).digest('hex'), blocks: [[1, 2], [3, 5]] }));
+    if (c.stage === 'transcribe') {
+      const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex');
+      const source = hash(await readFile(join(c.workspace, 'source.mp4'))), raw = Buffer.from('[{"text":"um"}]');
+      await writeFile(join(c.workspace, 'edit/words.raw.json'), raw);
+      const unknown = { state: 'unknown', reason: 'fixture-unobserved' };
+      await writeFile(join(c.workspace, 'edit/alignment-observation.json'), JSON.stringify({
+        version: 'alignment-observation-v1', status: 'INCOMPLETE', sourceSha256: source, sourceAfterSha256: source,
+        rawAlignmentBytesSha256: hash(raw), upstream: { commit: 'bce911c1d0652f30b64fd5283cc4aa9fa92811c9',
+          transcribeSha256: '9964a0bb316e75d666cce6b2f7ebe7d5414b6e3d293c38c8cd22d77e5dd2102e' },
+        sourceAudio: unknown, configuredModel: { basis: 'configured-file-hashes-only', actualLoadedModel: unknown,
+          files: { 'model.bin': null, 'config.json': null, 'tokenizer.json': null, 'vocabulary.txt': null } },
+        extraction: { requested: { sampleRate: 16000, channels: 1, codec: 'pcm_s16le' }, wav: unknown },
+        decoderArray: unknown, effectiveOptions: unknown, quietBlockVAD: unknown, outputPCM: unknown,
+      }), { mode: 0o600 });
+    }
     if (c.stage === 'render') {
       await writeFile(join(c.workspace, 'edit/cut.mp4'), 'native cut');
       await writeFile(join(c.workspace, 'edit/cut.transcript.json'), 'stale cache');
@@ -39,7 +54,10 @@ describe('private cooked native boundary', () => {
     expect(calls[0].env).not.toHaveProperty('COOKED_SECRET_TEST');
     expect(calls[0].env.HOME).toBe(join(receipt.workspace, 'home'));
     expect(calls[0].env.HF_HUB_OFFLINE).toBe('1');
-    expect(calls.find(c => c.stage === 'transcribe')!.args).toContain('whisper');
+    const transcription = calls.find(c => c.stage === 'transcribe')!;
+    expect(transcription.script).toContain('cooked-transcribe-observed.py');
+    expect(transcription.args).toEqual([join(config.sourceRoot, 'plugins/ai-editor/skills/cut/scripts/transcribe.py'),
+      join(receipt.workspace, 'source.mp4'), join(receipt.editDirectory, 'words.raw.json'), '--engine', 'whisper', '--lang', 'en']);
     expect(calls[0].rssBytes).toBe(768 * 1024 * 1024);
     expect(await readFile(receipt.cutPath, 'utf8')).toBe('native cut');
     await expect(runtime.cleanup(receipt.jobId, 'other')).rejects.toThrow('NOT_OWNED');
@@ -47,6 +65,32 @@ describe('private cooked native boundary', () => {
     expect(await runtime.cleanup(receipt.jobId, 'o')).toMatchObject({ removed: true });
     expect(await readFile(input.sourcePath, 'utf8')).toBe('original');
   });
+  it.each(['missing', 'partial', 'oversize', 'symlink', 'source', 'raw', 'binding', 'unknowns', 'shape'])(
+    'rejects %s observations before rendering without retry and retains cleanup recovery', async sabotage => {
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c);
+        if (c.stage !== 'transcribe') return;
+        const path = join(c.workspace, 'edit/alignment-observation.json');
+        if (sabotage === 'missing') await rm(path);
+        if (sabotage === 'partial') await writeFile(path, '{"version":');
+        if (sabotage === 'oversize') await writeFile(path, ' '.repeat(256 * 1024 + 1));
+        if (sabotage === 'symlink') { await rm(path); await symlink(input.sourcePath, path); }
+        if (sabotage === 'source') await writeFile(join(c.workspace, 'source.mp4'), 'changed');
+        if (sabotage === 'raw') await writeFile(join(c.workspace, 'edit/words.raw.json'), 'changed');
+        if (sabotage === 'binding' || sabotage === 'unknowns' || sabotage === 'shape') {
+          const receipt = JSON.parse(await readFile(path, 'utf8'));
+          if (sabotage === 'binding') receipt.sourceAfterSha256 = '0'.repeat(64);
+          else if (sabotage === 'shape') receipt.extraction = true;
+          else delete receipt.decoderArray;
+          await writeFile(path, JSON.stringify(receipt));
+        }
+      });
+      const failure = await runtime.run(input).catch(e => e);
+      expect(failure).toMatchObject({ message: 'OBSERVATION_PROTOCOL_FAILURE', jobId: expect.any(String) });
+      expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']);
+      await expect(runtime.revise(failure.jobId, 'o', { cut: [[1, 2]] }, 0)).rejects.toThrow('STALE_OR_FAILED');
+      await runtime.cleanup(failure.jobId, 'o');
+    });
   it('fails closed for unsupported metadata, missing files, symlinks, nonprivate roots and unsafe limits', async () => {
     const runtime = new CookedEditorRuntime(config, runner);
     for (const metadata of [{ ...input.metadata, fps: 31 }, { ...input.metadata, width: 1920, height: 1080 }, { ...input.metadata, durationMs: 240001 }, { ...input.metadata, alignedTimestamps: false }]) {
