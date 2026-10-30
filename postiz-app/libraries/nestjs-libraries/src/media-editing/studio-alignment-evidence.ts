@@ -47,7 +47,9 @@ export function studioAlignmentEvidence(
   }
   return { mechanicallyValid: true as const, identityStatus: identity ? 'constructible' as const : 'incomplete' as const,
     snapshot, clocks, missingEvidence: [
-      ...(!identity ? ['alignment identity and original source sample rate'] : []),
+      ...(!identity ? ['alignment identity'] : []),
+      ...(clocks.source.sampleRate === null ? ['observed source sample rate'] : []),
+      ...(clocks.source.origin === 'unknown' ? ['observed source origin'] : []),
       ...(clocks.decoded.sampleRate === null ? ['decoded sample rate'] : []),
       ...(clocks.output.sampleRate === null ? ['output sample rate'] : []),
       'trusted provenance', 'speech coverage', 'per-job semantic eligibility', 'human verification',

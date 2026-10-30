@@ -112,3 +112,20 @@ it('shares A1 projection without an identity and preserves mapping and rejection
   assert.throws(() => createSourceMap(a, alignmentHash(identity()), 180, ranges).projectWords(partial));
   assert.throws(() => projectSourceWords(180, [[0, 61], [60, 180]], words));
 });
+
+it.each([undefined, identity()])('reports missing source clock observations independently of identity %s', id => {
+  const absent = view(fixture(), id);
+  assert.ok(absent.missingEvidence.includes('observed source sample rate'));
+  assert.ok(absent.missingEvidence.includes('observed source origin'));
+  const rateOnly = view(fixture(), id, { source: { domain: 'source', sampleRate: 44100 } });
+  assert.equal(rateOnly.missingEvidence.includes('observed source sample rate'), false);
+  assert.ok(rateOnly.missingEvidence.includes('observed source origin'));
+  const originOnly = view(fixture(), id, { source: { domain: 'source', origin: 'known-zero' } });
+  assert.ok(originOnly.missingEvidence.includes('observed source sample rate'));
+  assert.equal(originOnly.missingEvidence.includes('observed source origin'), false);
+  const complete = view(fixture(), id, { source: { domain: 'source', sampleRate: 44100, origin: 'known-zero' } });
+  assert.equal(complete.missingEvidence.includes('observed source sample rate'), false);
+  assert.equal(complete.missingEvidence.includes('observed source origin'), false);
+  assert.ok(complete.missingEvidence.includes('trusted provenance'));
+  assert.equal(complete.semanticCutsEligible, false);
+});
