@@ -78,3 +78,22 @@ it('rejects conflicting labels, origins and source rates; decoded rate is not so
   const noFs: any = identity(); delete noFs.clock.audioSampleRate;
   assert.throws(() => view(fixture(), noFs, { decoded: { domain: 'decoded', sampleRate: 16000 } }));
 });
+
+it.each([undefined, identity()])('enforces source and output bounds and output agreement with identity %s', id => {
+  const beyondSource = fixture();
+  beyondSource.files.report.value.frames = [[0, 60]]; beyondSource.files.report.value.final_s = 2;
+  beyondSource.files.decisions.value = [{ start: 0, end: 2 }];
+  beyondSource.files.rawWords.value = [beyondSource.files.rawWords.value[0], { text: 'late', start: 6, end: 6.0005 }];
+  beyondSource.files.words.value = [beyondSource.files.words.value[0]];
+  assert.throws(() => view(beyondSource, id));
+
+  const beyondOutput = fixture();
+  beyondOutput.files.rawWords.value[2] = { text: 'same', start: 5.8, end: 6 };
+  beyondOutput.files.words.value[1] = { text: 'same', start: 4.8, end: 5.0005 };
+  assert.throws(() => view(beyondOutput, id));
+
+  const shifted = fixture(); shifted.files.words.value[1].start += .0005;
+  assert.throws(() => view(shifted, id));
+  // The decimal projection differs by a few binary64 units, but is still the same timing.
+  assert.doesNotThrow(() => view(fixture(), id));
+});

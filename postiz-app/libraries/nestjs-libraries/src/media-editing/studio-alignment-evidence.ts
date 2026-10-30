@@ -19,24 +19,34 @@ export function studioAlignmentEvidence(
         clock.origin !== undefined && clock.origin !== 'known-zero' && clock.origin !== 'unknown')) fail();
     clocks[domain] = { sampleRate: clock?.sampleRate ?? null, origin: clock?.origin ?? 'unknown' };
   }
-  const normalize = (raw: any[]) => {
+  const normalize = (raw: any[], ceiling: number) => {
     let previousEnd = 0;
     return raw.filter(w => w?.type === 'word' || w?.type === undefined).map((w, ordinal) => {
-      if (!w || !Number.isFinite(w.start) || !Number.isFinite(w.end) || w.end <= w.start || w.start < previousEnd) fail();
+      if (!w || !Number.isFinite(w.start) || !Number.isFinite(w.end) || w.end <= w.start || w.start < previousEnd || w.end > ceiling) fail();
       previousEnd = w.end;
       return { ordinal, text: (w.text ?? w.word).trim(), start: w.start, end: w.end };
     });
   };
-  const raw = normalize(evidence.files.rawWords.value);
-  normalize(evidence.files.words.value);
+  const raw = normalize(evidence.files.rawWords.value, validated.totalFrames / 30);
+  const output = normalize(evidence.files.words.value, validated.frames / 30);
   const ranges: FrameRange[] = validated.cuts.map(c => [c.in, c.out]);
-  // Require strict whole-word containment even when identity is unavailable.
+  // Compare the whole-word projection in both identity states, allowing only binary64 arithmetic error.
+  const projected: { text: string; start: number; end: number }[] = [];
   for (const word of raw) {
+    let cursor = 0;
     for (const [start, end] of ranges) {
       const lo = start / 30, hi = end / 30;
-      if (word.start < hi && word.end > lo && !(word.start >= lo && word.end <= hi)) fail();
+      if (word.start >= lo && word.end <= hi) {
+        projected.push({ text: word.text, start: cursor / 30 + (word.start - lo), end: cursor / 30 + (word.end - lo) });
+        break;
+      }
+      if (word.start < hi && word.end > lo) fail();
+      cursor += end - start;
     }
   }
+  const sameTime = (a: number, b: number) => Math.abs(a - b) <= Number.EPSILON * 8 * Math.max(1, validated.totalFrames / 30);
+  if (projected.length !== output.length || projected.some((w, i) => w.text !== output[i].text ||
+      !sameTime(w.start, output[i].start) || !sameTime(w.end, output[i].end))) fail();
   const mapFor = (alignment: string) => createSourceMap(validated.sourceSha256, alignment, validated.totalFrames, ranges);
   let snapshot: { alignmentHash: string; mapHash: string; words: ReturnType<ReturnType<typeof createSourceMap>['projectWords']> } | null = null;
   if (identity !== undefined) {
@@ -45,10 +55,7 @@ export function studioAlignmentEvidence(
         clocks.source.sampleRate !== null && clocks.source.sampleRate !== identity.clock.audioSampleRate ||
         clocks.source.origin !== 'unknown' && clocks.source.origin !== identity.clock.origin) fail();
     const map = mapFor(hash);
-    const projected = map.projectWords(raw);
-    if (projected.length !== validated.words.length || projected.some((w, i) => w.text !== validated.words[i].text ||
-        Math.abs(w.start - validated.words[i].start) > .001 || Math.abs(w.end - validated.words[i].end) > .001)) fail();
-    snapshot = { alignmentHash: hash, mapHash: map.mapHash, words: projected };
+    snapshot = { alignmentHash: hash, mapHash: map.mapHash, words: map.projectWords(raw) };
   }
   return { mechanicallyValid: true as const, identityStatus: identity ? 'constructible' as const : 'incomplete' as const,
     snapshot, clocks, missingEvidence: [
