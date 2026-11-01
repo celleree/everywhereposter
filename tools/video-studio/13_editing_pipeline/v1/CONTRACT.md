@@ -17,6 +17,34 @@ captions:{path,sha256},receipt:{path,sha256}}` in cooked; actual files must be
 readable and hash-verified. These are upstream custody records, not a claim of
 semantic validation of arbitrary native Cooked formats. No proxy accepted yet.
 
+## Caption timing capability (opt-in)
+
+`node run.mjs capabilities` prints JSON without project/runtime inputs:
+`{"captionTiming":{"version":1,"field":"captionTimingPolicy","default":"legacy-v1","policies":["legacy-v1","trim-trailing-hold-v1"]}}`.
+The same frozen capability is exported as `CAPTION_TIMING_CAPABILITY` from
+project.mjs. A producer MUST verify version, field and supported policy in the
+actual target package before emitting `project.captionTimingPolicy`; older
+packages ignore unknown fields. This prerequisite does not opt in any producer.
+
+Absent policy and explicit `legacy-v1` retain the original frame calculation.
+Unknown policies (including null) fail validation. `trim-trailing-hold-v1`
+starts with the legacy half-open range, then ends a group's trailing hold at
+the next group's floored start frame only when that frame is earlier than the
+legacy end, at or after every word's ceiled end frame in the current group,
+and strictly after the current start. Timestamps, text and next start stay
+unchanged. Genuine overlaps, same-frame/empty ranges, final groups and long
+pauses retain legacy behavior when this condition cannot hold. This does not
+solve every timing anomaly or guarantee readable duration.
+
+Film selection and chunk projection share `captionFrameRanges`. Chunk content
+binds the resolved policy and each intersecting caption's effective frame range;
+a next-group start change can therefore invalidate a preceding 5s chunk.
+Policy changes cannot collide even when effective ranges happen to match.
+Renderer source changes also change renderer identity. Existing cache files,
+final artifacts and receipts are retained, never migrated or automatically
+rerendered. Old acceptance may become stale under this package; validate original
+receipts with their original package/runtime, never stale cache reuse.
+
 ## Registered effects
 
 Common fields: id, type, from (output frame), frames, anchorWords, reason, bounds
