@@ -75,7 +75,7 @@ it('preserves fractional times, zero-duration and overlapping tokens, isolating 
   assert.deepEqual(check(tolerated, [60, 150]), [['w0'], ['w1']]);
 });
 
-it('keeps zero-duration final tokens visible through actual renderer ranges without crossing internal seams', () => {
+it('preserves endpoint and overlapping phrase visibility through actual renderer ranges without crossing seams', () => {
   const module = pathToFileURL(resolve(__dirname, '../../../tools/video-studio/13_editing_pipeline/v1/project.mjs')).href;
   const visible = (words: ReturnType<typeof make>, ends: number[], captions = groupStudioCaptions(words, ends)) => {
     const script = `import {readFileSync} from 'node:fs'; import {captionFrameRanges} from ${JSON.stringify(module)};
@@ -87,9 +87,9 @@ it('keeps zero-duration final tokens visible through actual renderer ranges with
         captionTimingPolicy: 'trim-trailing-hold-v1' }), encoding: 'utf8',
     }));
   };
-  for (const words of [make(['Before.', 'End'], [.6, 1], 0),
+  for (const words of [make(['Before.', 'End'], [.6, 1], 0), make(['Before.', 'End'], [.6, 1.0005], 0),
       make(['one', 'two', 'three', 'four', 'End'], [0, .2, .4, .6, 1], .15)]) {
-    words[words.length - 2].end = .75; words[words.length - 1].end = 1;
+    words[words.length - 2].end = .75; words[words.length - 1].end = words[words.length - 1].start;
     const groups = check(words, [30]);
     assert.deepEqual(visible(words, [30]), words.map(w => w.id));
     if (words.length === 2) {
@@ -97,6 +97,11 @@ it('keeps zero-duration final tokens visible through actual renderer ranges with
       assert.deepEqual(visible(words, [30], groupStudioCaptions(words, [30], 'initial-a9a')), ['w0']);
     } else assert.deepEqual(groups, [['w0', 'w1', 'w2'], ['w3', 'w4']]);
   }
+  const chain = make(['First.', 'Next.', 'Last.'], [0, .3, .61], 0);
+  [.5, .6, .9].forEach((end, i) => chain[i].end = end);
+  assert.deepEqual(check(chain, [30]), [['w0', 'w1'], ['w2']]);
+  assert.deepEqual(visible(chain, [30]), chain.map(w => w.id));
+  assert.deepEqual(visible(chain, [30], groupStudioCaptions(chain, [30], 'endpoint-a9a')), ['w0', 'w2']);
   const seam = make(['left', 'zero', 'right'], [.8, 1, 1.01], 0);
   assert.deepEqual(check(seam, [30, 60]), [['w0'], ['w1'], ['w2']]);
 });

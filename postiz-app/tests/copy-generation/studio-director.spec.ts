@@ -196,16 +196,23 @@ it('never recreates an unversioned plan that disappears during replay', async ()
   } });
 });
 
-it.each([undefined, 'trim-trailing-hold-v1'])('retains exact initial A9a endpoint grouping on replay with policy %s', async policy => {
+it.each([[undefined, 'initial-a9a'], ['trim-trailing-hold-v1', 'initial-a9a'],
+  [undefined, 'endpoint-a9a'], ['trim-trailing-hold-v1', 'endpoint-a9a']] as const)
+('retains exact earlier A9a grouping on replay with policy %s and version %s', async (policy, version) => {
   const cached = new Map<string, any>(); let calls = 0;
   await withProducer(async (f, service, dir, config) => {
-    for (const [name, offset] of [['rawWords', 1], ['words', 0]] as const) {
-      Object.assign(f.raw.files[name].value[3], { start: 4.6 + offset, end: 4.8 + offset });
-      f.raw.files[name].value.push({ type: 'word', text: 'End', start: 5 + offset, end: 5 + offset });
+    if (version === 'initial-a9a') {
+      for (const [name, offset] of [['rawWords', 1], ['words', 0]] as const) {
+        Object.assign(f.raw.files[name].value[3], { start: 4.6 + offset, end: 4.8 + offset });
+        f.raw.files[name].value.push({ type: 'word', text: 'End', start: 5 + offset, end: 5 + offset });
+      }
+    } else for (const name of ['rawWords', 'words'] as const) {
+      for (const [i, start, end] of [[0, 0, .5], [1, .3, .6], [2, .61, .9]])
+        Object.assign(f.raw.files[name].value[i], { text: ['First.', 'Next.', 'Last.'][i], start, end });
     }
-    // Explicit saved bytes represent the original endpoint isolation, not current authoring.
+    // Verify saved bytes from each earlier grouping algorithm, not current authoring.
     const first = await service.produce(config, f.job, f.raw, f.assets, dir), saved = structuredClone(first);
-    saved.manifest.project.captions = captionPlan.groupStudioCaptions(saved.manifest.project.words, [60, 150], 'initial-a9a');
+    saved.manifest.project.captions = captionPlan.groupStudioCaptions(saved.manifest.project.words, [60, 150], version);
     assert.notDeepEqual(saved.manifest.project.captions, first.manifest.project.captions);
     if (!policy) delete saved.manifest.project.captionTimingPolicy;
     const target = join(dir, 'authored-plan.json'), bytes = JSON.stringify(saved); await writeFile(target, bytes);

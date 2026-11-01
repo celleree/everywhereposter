@@ -2,7 +2,7 @@ type CaptionWord = Readonly<{ id: string; text: string; start: number; end: numb
 
 // Presentation only: callers supply validated output-clock words and cumulative
 // kept-frame ends at CFR30. Never infer seams from source in-points or retime words.
-export function groupStudioCaptions(words: readonly CaptionWord[], keptFrameEnds: readonly number[], version: 'current' | 'initial-a9a' = 'current'): { wordIds: string[] }[] {
+export function groupStudioCaptions(words: readonly CaptionWord[], keptFrameEnds: readonly number[], version: 'current' | 'initial-a9a' | 'endpoint-a9a' = 'current'): { wordIds: string[] }[] {
   // The final output end is not a seam. Retain the original algorithm only for
   // exact verification of saved plans, never for newly authored groups.
   const boundaries = version === 'initial-a9a' ? keptFrameEnds : keptFrameEnds.slice(0, -1);
@@ -36,36 +36,63 @@ export function groupStudioCaptions(words: readonly CaptionWord[], keptFrameEnds
   // tail. Merge soft phrase breaks when a legal merge restores token visibility.
   const range = (g: CaptionWord[]) => [Math.floor(g[0].start * 30),
     Math.ceil(Math.min(g[g.length - 1].end + .12, words[words.length - 1].end) * 30)];
+  // Match verified opt-in range selection while deciding visibility repairs.
+  // Candidate merges must retain every previously visible token.
+  const visible = (gs: CaptionWord[][]) => {
+    const ranges = gs.map(range), seen = new Set<string>();
+    for (let i = 0; i < gs.length - 1; i++) {
+      const from = Math.floor(gs[i + 1][0].start * 30);
+      const end = Math.ceil(Math.max(...gs[i].map(w => w.end)) * 30);
+      if (from < ranges[i][1] && from >= end && from > ranges[i][0]) ranges[i][1] = from;
+    }
+    let covered = 0;
+    gs.forEach((g, i) => {
+      const end = Math.min(ranges[i][1], keptFrameEnds[keptFrameEnds.length - 1]);
+      if (end > Math.max(ranges[i][0], covered)) g.forEach(w => seen.add(w.id));
+      covered = Math.max(covered, end);
+    });
+    return seen;
+  };
+  const restores = (candidate: CaptionWord[][], target: CaptionWord[]) => {
+    if (version !== 'current') return true;
+    const before = visible(groups), after = visible(candidate);
+    return [...before, ...target.map(w => w.id)].every(id => after.has(id));
+  };
   const mergeable = (a: CaptionWord[], b: CaptionWord[]) => a.length + b.length <= 4 &&
     b[0].start - Math.max(...a.map(w => w.end)) < .350 &&
     [...a, ...b].every(w => spanOf(w) === spanOf(a[0]) && !boundaries.some(end =>
       w.start < end / 30 && w.end > end / 30 || w.start === w.end && w.start === end / 30));
   for (let i = 0; i < groups.length; i++) {
     const covered = Math.max(0, ...groups.slice(0, i).map(g => range(g)[1]));
-    if (range(groups[i])[1] > Math.max(range(groups[i])[0], covered)) continue;
+    const shown = version === 'current' ? visible(groups) : undefined;
+    if (range(groups[i])[1] > Math.max(range(groups[i])[0], covered) &&
+        (!shown || groups[i].every(w => shown.has(w.id)))) continue;
     const previous = groups[i - 1], next = groups[i + 1];
     if (previous && mergeable(previous, groups[i])) {
       const merged = [...previous, ...groups[i]];
       const earlier = Math.max(0, ...groups.slice(0, i - 1).map(g => range(g)[1]));
-      if (range(merged)[1] > Math.max(range(merged)[0], earlier)) {
+      if (range(merged)[1] > Math.max(range(merged)[0], earlier) &&
+          restores([...groups.slice(0, i - 1), merged, ...groups.slice(i + 1)], groups[i])) {
         groups.splice(i - 1, 2, merged); i -= 2; continue;
       }
     }
     // A full previous group can lend its last word to a hidden endpoint token.
     // Accept only when both replacement groups have visible legacy ranges.
-    if (version === 'current' && i === groups.length - 1 && previous?.length > 1 &&
+    if (version !== 'initial-a9a' && i === groups.length - 1 && previous?.length > 1 &&
         groups[i].every(w => w.start === w.end && w.end === keptFrameEnds[keptFrameEnds.length - 1] / 30)) {
       const head = previous.slice(0, -1), tail = [previous[previous.length - 1], ...groups[i]];
       const earlier = Math.max(0, ...groups.slice(0, i - 1).map(g => range(g)[1]));
       if (mergeable(previous.slice(-1), groups[i]) &&
           range(head)[1] > Math.max(range(head)[0], earlier) &&
-          range(tail)[1] > Math.max(range(tail)[0], range(head)[1], earlier)) {
+          range(tail)[1] > Math.max(range(tail)[0], range(head)[1], earlier) &&
+          restores([...groups.slice(0, i - 1), head, tail, ...groups.slice(i + 1)], groups[i])) {
         groups.splice(i - 1, 2, head, tail); i--; continue;
       }
     }
     if (next && mergeable(groups[i], next)) {
       const merged = [...groups[i], ...next];
-      if (range(merged)[1] > Math.max(range(merged)[0], covered)) groups.splice(i--, 2, merged);
+      if (range(merged)[1] > Math.max(range(merged)[0], covered) &&
+          restores([...groups.slice(0, i), merged, ...groups.slice(i + 2)], groups[i])) groups.splice(i--, 2, merged);
     }
   }
   return groups.map(g => ({ wordIds: g.map(w => w.id) }));
