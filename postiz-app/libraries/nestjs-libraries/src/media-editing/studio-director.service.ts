@@ -202,8 +202,11 @@ export class StudioDirectorService {
     }
     const words = project.words, captions = [];
     for (let i = 0; i < words.length; i += 4) captions.push({ wordIds: words.slice(i, i + 4).map((w: any) => w.id) });
-    const legacy = { ...grouped, manifest: { ...grouped.manifest, project: { ...project, captions } } };
-    if (studioFingerprint(existing) !== studioFingerprint(legacy)) throw Error('Studio authored plan changed during recovery');
-    return existing;
+    for (const candidate of [plan, grouped]) {
+      const legacy = { ...candidate, manifest: { ...candidate.manifest,
+        project: { ...candidate.manifest.project, captions } } };
+      if (studioFingerprint(existing) === studioFingerprint(legacy)) return existing;
+    }
+    throw Error('Studio authored plan changed during recovery');
   }
 }

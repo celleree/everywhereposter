@@ -121,11 +121,11 @@ it('changes only caption groups and the verified timing policy compared with the
   const withoutCaptions = (p: any) => { const copy = structuredClone(p); delete copy.manifest.project.captions; delete copy.manifest.project.captionTimingPolicy; return copy; };
   assert.deepEqual(withoutCaptions(plan), withoutCaptions(legacy));
 });
-it.each(['legacy', 'grouped', 'direction', 'timing', 'groups', 'policy'])('replays only verified existing groups and rejects unrelated %s drift', async change => {
+it.each(['legacy', 'legacy-policy', 'grouped', 'direction', 'timing', 'groups', 'policy'])('replays only verified existing groups and rejects unrelated %s drift', async change => {
   const cached = new Map<string, any>(); let calls = 0;
   await withProducer(async (f, service, dir, c) => {
     const first = await service.produce(c, f.job, f.raw, f.assets, dir), existing = structuredClone(first);
-    delete existing.manifest.project.captionTimingPolicy;
+    if (change !== 'legacy-policy') delete existing.manifest.project.captionTimingPolicy;
     if (change !== 'grouped') existing.manifest.project.captions = [{ wordIds: ['w0', 'w1', 'w2', 'w3'] }];
     if (change === 'direction') existing.manifest.project.director.summary = 'Changed';
     if (change === 'timing') existing.manifest.project.words[0].start += .001;
@@ -133,8 +133,8 @@ it.each(['legacy', 'grouped', 'direction', 'timing', 'groups', 'policy'])('repla
     if (change === 'groups') existing.manifest.project.captions = [{ wordIds: ['w0', 'w1'] }, { wordIds: ['w2', 'w3'] }];
     const target = join(dir, 'authored-plan.json'), bytes = JSON.stringify(existing);
     await writeFile(target, bytes);
-    if (change === 'legacy' || change === 'grouped') {
-      await writeFile(join(dir, 'run.mjs'), 'throw Error("Older package has no capability command");');
+    if (change === 'legacy' || change === 'legacy-policy' || change === 'grouped') {
+      if (change !== 'legacy-policy') await writeFile(join(dir, 'run.mjs'), 'throw Error("Older package has no capability command");');
       const replay = await service.produce(c, f.job, f.raw, f.assets, dir);
       assert.equal(studioFingerprint(replay), studioFingerprint(existing));
       assert.equal(JSON.stringify(replay.manifest.project.captions), JSON.stringify(existing.manifest.project.captions));
