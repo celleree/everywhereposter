@@ -115,6 +115,13 @@ run_case() {
   local runner='{"id":1,"status":"online","busy":false,"labels":[{"name":"self-hosted"},{"name":"linux"},{"name":"codex"}]}'
   local extra='' total=1
   case "$name" in
+    linux-case) runner=$(jq -c '.labels[1].name="Linux"' <<< "$runner") ;;
+    mixed-case) runner=$(jq -c '.labels |= map(.name |= ascii_upcase)' <<< "$runner") ;;
+    mixed-offline) runner=$(jq -c '.status="offline" | .labels |= map(.name |= ascii_upcase)' <<< "$runner") ;;
+    mixed-busy) runner=$(jq -c '.busy=true | .labels |= map(.name |= ascii_upcase)' <<< "$runner") ;;
+    mixed-missing-codex) runner=$(jq -c '.labels=[{"name":"Self-Hosted"},{"name":"Linux"}]' <<< "$runner") ;;
+    mixed-missing-linux) runner=$(jq -c '.labels=[{"name":"Self-Hosted"},{"name":"Codex"}]' <<< "$runner") ;;
+    mixed-missing-self-hosted) runner=$(jq -c '.labels=[{"name":"Linux"},{"name":"Codex"}]' <<< "$runner") ;;
     offline) runner=$(jq -c '.status="offline"' <<< "$runner") ;;
     busy) runner=$(jq -c '.busy=true' <<< "$runner") ;;
     no-match) runner=$(jq -c '.labels=[{"name":"linux"}]' <<< "$runner") ;;
@@ -172,6 +179,13 @@ run_case() {
 }
 
 run_case paginated-ready coordinator 0 'READY [RUNNER]'
+run_case linux-case coordinator 0 'READY [RUNNER]'
+run_case mixed-case coordinator 0 'READY [RUNNER]'
+run_case mixed-offline coordinator 1 'OFFLINE [RUNNER]'
+run_case mixed-busy coordinator 1 'BUSY [RUNNER]'
+for scenario in mixed-missing-codex mixed-missing-linux mixed-missing-self-hosted; do
+  run_case "$scenario" coordinator 1 'No runner matches'
+done
 run_case offline coordinator 1 'OFFLINE [RUNNER]'
 run_case busy coordinator 1 'BUSY [RUNNER]'
 run_case no-match coordinator 1 'No runner matches'
