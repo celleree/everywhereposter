@@ -190,6 +190,15 @@ export class StudioDirectorService {
     const { captionTimingPolicy: _policy, ...project } = plan.manifest.project;
     const grouped = { ...plan, manifest: { ...plan.manifest, project } };
     if (studioFingerprint(existing) === studioFingerprint(grouped)) return existing;
+    let keptFrames = 0;
+    const originalCaptions = groupStudioCaptions(project.words,
+      project.cuts.map((c: any) => keptFrames += c.out - c.in), 'initial-a9a');
+    const original = { ...plan, manifest: { ...plan.manifest,
+      project: { ...plan.manifest.project, captions: originalCaptions } } };
+    if (studioFingerprint(existing) === studioFingerprint(original)) return existing;
+    const unversioned = { ...grouped, manifest: { ...grouped.manifest,
+      project: { ...project, captions: originalCaptions } } };
+    if (studioFingerprint(existing) === studioFingerprint(unversioned)) return existing;
     const words = project.words, captions = [];
     for (let i = 0; i < words.length; i += 4) captions.push({ wordIds: words.slice(i, i + 4).map((w: any) => w.id) });
     const legacy = { ...grouped, manifest: { ...grouped.manifest, project: { ...project, captions } } };

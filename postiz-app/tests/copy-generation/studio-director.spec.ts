@@ -195,3 +195,29 @@ it('never recreates an unversioned plan that disappears during replay', async ()
     fingerprint = value; cached = await invoke({}); return cached;
   } });
 });
+
+it.each([undefined, 'trim-trailing-hold-v1'])('retains exact initial A9a endpoint grouping on replay with policy %s', async policy => {
+  const cached = new Map<string, any>(); let calls = 0;
+  await withProducer(async (f, service, dir, config) => {
+    for (const [name, offset] of [['rawWords', 1], ['words', 0]] as const) {
+      Object.assign(f.raw.files[name].value[3], { start: 4.6 + offset, end: 4.8 + offset });
+      f.raw.files[name].value.push({ type: 'word', text: 'End', start: 5 + offset, end: 5 + offset });
+    }
+    // Explicit saved bytes represent the original endpoint isolation, not current authoring.
+    const first = await service.produce(config, f.job, f.raw, f.assets, dir), saved = structuredClone(first);
+    saved.manifest.project.captions = captionPlan.groupStudioCaptions(saved.manifest.project.words, [60, 150], 'initial-a9a');
+    assert.notDeepEqual(saved.manifest.project.captions, first.manifest.project.captions);
+    if (!policy) delete saved.manifest.project.captionTimingPolicy;
+    const target = join(dir, 'authored-plan.json'), bytes = JSON.stringify(saved); await writeFile(target, bytes);
+    if (!policy) await writeFile(join(dir, 'run.mjs'), 'throw Error("Older package");');
+    const replay = await service.produce(config, f.job, f.raw, f.assets, dir);
+    assert.equal(studioFingerprint(replay), studioFingerprint(saved));
+    assert.equal(await readFile(target, 'utf8'), bytes);
+    saved.manifest.project.director.summary = 'Unrelated drift'; await writeFile(target, JSON.stringify(saved));
+    await assert.rejects(service.produce(config, f.job, f.raw, f.assets, dir), /changed during recovery/);
+  }, { run: async (_org: string, key: string, fingerprint: string, _request: any, _allowed: boolean, invoke: any) => {
+    if (cached.has(key)) { assert.equal(cached.get(key).fingerprint, fingerprint); return cached.get(key).value; }
+    calls++; const value = await invoke({}); cached.set(key, { fingerprint, value }); return value;
+  } });
+  assert.equal(calls, 1);
+});

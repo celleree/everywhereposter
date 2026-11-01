@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { groupStudioCaptions } from '../../libraries/nestjs-libraries/src/media-editing/studio-caption-plan';
 
 const make = (tokens: string[], starts = tokens.map((_, i) => i * .2), duration = .15) =>
@@ -70,4 +73,30 @@ it('preserves fractional times, zero-duration and overlapping tokens, isolating 
     [['w0'], ['w1'], ['w2']]);
   const tolerated = make(['straddle', 'right'], [1.9995, 2.0001], .001);
   assert.deepEqual(check(tolerated, [60, 150]), [['w0'], ['w1']]);
+});
+
+it('keeps zero-duration final tokens visible through actual renderer ranges without crossing internal seams', () => {
+  const module = pathToFileURL(resolve(__dirname, '../../../tools/video-studio/13_editing_pipeline/v1/project.mjs')).href;
+  const visible = (words: ReturnType<typeof make>, ends: number[], captions = groupStudioCaptions(words, ends)) => {
+    const script = `import {readFileSync} from 'node:fs'; import {captionFrameRanges} from ${JSON.stringify(module)};
+      const p=JSON.parse(readFileSync(0,'utf8')),ranges=captionFrameRanges(p),seen=new Set();
+      for(let frame=0;frame<p.frames;frame++)p.captions.find((_,i)=>frame>=ranges[i][0]&&frame<ranges[i][1])?.wordIds.forEach(id=>seen.add(id));
+      process.stdout.write(JSON.stringify([...seen]));`;
+    return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      input: JSON.stringify({ canvas: { fps: 30 }, words, captions, frames: ends[ends.length - 1],
+        captionTimingPolicy: 'trim-trailing-hold-v1' }), encoding: 'utf8',
+    }));
+  };
+  for (const words of [make(['Before.', 'End'], [.6, 1], 0),
+      make(['one', 'two', 'three', 'four', 'End'], [0, .2, .4, .6, 1], .15)]) {
+    words[words.length - 2].end = .75; words[words.length - 1].end = 1;
+    const groups = check(words, [30]);
+    assert.deepEqual(visible(words, [30]), words.map(w => w.id));
+    if (words.length === 2) {
+      assert.deepEqual(groups, [['w0', 'w1']]);
+      assert.deepEqual(visible(words, [30], groupStudioCaptions(words, [30], 'initial-a9a')), ['w0']);
+    } else assert.deepEqual(groups, [['w0', 'w1', 'w2'], ['w3', 'w4']]);
+  }
+  const seam = make(['left', 'zero', 'right'], [.8, 1, 1.01], 0);
+  assert.deepEqual(check(seam, [30, 60]), [['w0'], ['w1'], ['w2']]);
 });
