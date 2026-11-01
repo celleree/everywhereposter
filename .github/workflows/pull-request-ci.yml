@@ -252,7 +252,7 @@ jobs:
                   names = {
                       "frontend": ["ai-wallet", "copy-generation.client", "copy-generation.retry-identity", "composer.draft.recovery", "manage.modal.guided.publish"],
                       "published": ["publishing-submission", "publishing-submission.postgres"],
-                      "copy": ["stripe.launch-plan", "stripe.launch-checkout.integration", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "launch-mcp-entitlements", "launch.permissions", "media.controller.video-edit", "studio-editor.integration", "studio-storage", "studio-bridge", "studio-evidence", "studio-director", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
+                      "copy": ["stripe.launch-plan", "stripe.launch-checkout.integration", "stripe.card-required-trial", "stripe.launch-billing-boundaries", "stripe.billing-activation", "stripe.entitlement-reconciliation", "stripe.lifetime-claim", "launch-ai-route-policies", "launch-mcp-entitlements", "launch.permissions", "media.controller.video-edit", "studio-editor.integration", "studio-storage", "studio-bridge", "studio-evidence", "studio-director", "studio-caption-plan", "refund-request.authorization", "stripe.refund-refusal", "oauth.redemption.integration", "oauth.refresh.integration"],
                   }[group]
                   directory, extension = {"frontend": ("frontend", "tsx"), "copy": ("copy-generation", "ts"), "published": ("published-posts", "ts")}[group]
                   selected = []
@@ -264,7 +264,7 @@ jobs:
               for result in selected:
                   assertions = result.get("assertionResults")
                   require(result.get("status") == "passed" and isinstance(assertions, list) and assertions and all(a.get("status") == "passed" for a in assertions), "Required suite failed or skipped")
-                  expected_count = {"launch.permissions.spec.ts": 17, "media.controller.video-edit.spec.ts": 24, "studio-editor.integration.spec.ts": 15, "studio-storage.spec.ts": 7, "studio-bridge.spec.ts": 30, "studio-evidence.spec.ts": 13, "studio-director.spec.ts": 9, "composer.draft.recovery.spec.tsx": 49, "manage.modal.guided.publish.spec.tsx": 42, "publishing-submission.spec.ts": 15, "publishing-submission.postgres.spec.ts": 36}.get(result["name"].replace("\\", "/").rsplit("/", 1)[-1])
+                  expected_count = {"launch.permissions.spec.ts": 17, "media.controller.video-edit.spec.ts": 24, "studio-editor.integration.spec.ts": 15, "studio-storage.spec.ts": 7, "studio-bridge.spec.ts": 30, "studio-evidence.spec.ts": 13, "studio-director.spec.ts": 32, "studio-caption-plan.spec.ts": 6, "composer.draft.recovery.spec.tsx": 49, "manage.modal.guided.publish.spec.tsx": 42, "publishing-submission.spec.ts": 15, "publishing-submission.postgres.spec.ts": 36}.get(result["name"].replace("\\", "/").rsplit("/", 1)[-1])
                   if expected_count is not None:
                       require(len(assertions) == expected_count, "Unexpected local editor assertion count")
 
@@ -497,9 +497,9 @@ jobs:
           import os, re
           from pathlib import Path
           text = (Path(os.environ['STUDIO_EVIDENCE']) / 'tests.tap').read_text()
-          for name, value in {'tests': 96, 'pass': 96, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}.items():
+          for name, value in {'tests': 98, 'pass': 98, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}.items():
               assert re.findall(r'^# ' + name + r' (\d+)\s*$', text, re.M) == [str(value)], name
-          print('PASS: all 96 Studio tests executed without skips')
+          print('PASS: all 98 Studio tests executed without skips')
           PY
           node --input-type=module - <<'JS'
           import fs from 'node:fs';
