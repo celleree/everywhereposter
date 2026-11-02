@@ -14,7 +14,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
   const directory = useMediaDirectory();
   const [selected, select] = useState(''), [reviewed, confirm] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [source, setSource] = useState<any>(), [visuals, setVisuals] = useState<string[]>([]), [targets, setTargets] = useState(['instagram']);
-  const [brief, setBrief] = useState('Keep my words and add a few clear source-led graphics using my selected supporting visuals.');
+  const [brief, setBrief] = useState('Keep my words and use clear source-led graphics.');
   const [framing, setFraming] = useState<any>({ x: .28, y: .28, width: .44, height: .24 }), [framingConfirmed, setFramingConfirmed] = useState(false);
   const [adjusting, setAdjusting] = useState(false), [pendingRequest, setPendingRequest] = useState<any>();
   const drag = useRef<{ x: number; y: number } | undefined>(undefined), receiptKey = 'everywhereposter:studio-request:v1:' + scope;
@@ -102,9 +102,10 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
   return <section aria-label="Studio results">
     {availability?.enabled && <div>
       <h2>Create a Studio edit</h2>
-      <p>Beta: one stationary speaker, portrait CFR30 original, up to60seconds/100MB and720x1280. Choose supporting visuals. Creative direction uses prepaid AI credits; review the result before saving or posting. Moving/multiple speakers need adjustment; there is no automatic tracking.</p>
+      <p>Beta: one stationary speaker, portrait CFR30 original, up to60seconds/100MB and720x1280. Supporting visuals are optional (up to 8). Creative direction uses prepaid AI credits; review the result before saving or posting. Moving/multiple speakers need adjustment; there is no automatic tracking.</p>
       <button disabled={busy} onClick={() => choose(true)}>Upload or choose source</button>
-      <button disabled={busy || !source} onClick={() => choose(false)}>Choose supporting visuals ({visuals.length}/8)</button>
+      <button disabled={busy || !source} onClick={() => choose(false)}>Choose optional supporting visuals ({visuals.length}/8)</button>
+      {visuals.length > 0 && <button disabled={busy} onClick={() => setVisuals([])}>Clear supporting visuals</button>}
       {source && <>
         <div style={{ position: 'relative', aspectRatio: '9 / 16', maxWidth: 320 }}>
           <video key={source.id} controls playsInline src={directory.set(source.path)} aria-label="Original video for speaker framing" style={{ width: '100%', height: '100%' }} />
@@ -126,7 +127,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
       <label>Direction <textarea maxLength={1000} value={brief} disabled={busy} onChange={e => setBrief(e.target.value)} /></label>
       <fieldset><legend>Framing destinations</legend>{['instagram', 'facebook', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'reddit', 'dribbble'].map(p =>
         <label key={p}><input type="checkbox" checked={targets.includes(p)} disabled={busy} onChange={e => setTargets(v => e.target.checked ? [...v, p] : v.filter(x => x !== p))} />{p}</label>)}</fieldset>
-      <button disabled={busy || !!pendingRequest || !source || !visuals.length || !targets.length || !framingConfirmed || framing.width < .05 || framing.height < .05 || !brief.trim()} onClick={() => void submit()}>Create Studio edit (uses AI credits)</button>
+      <button disabled={busy || !!pendingRequest || !source || !targets.length || !framingConfirmed || framing.width < .05 || framing.height < .05 || !brief.trim()} onClick={() => void submit()}>Create Studio edit (uses AI credits)</button>
       {pendingRequest && <><button disabled={busy} onClick={() => void submit(true)}>Recover last edit request</button>
         <button disabled={busy} onClick={() => { try { localStorage.removeItem(receiptKey); setPendingRequest(undefined); } catch { setError('The prior request could not be cleared.'); } }}>Start another edit (new AI request)</button></>}
     </div>}
