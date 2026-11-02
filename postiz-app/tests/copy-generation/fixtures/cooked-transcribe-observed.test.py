@@ -23,7 +23,7 @@ import sibling
 def extract_audio(src, dst):
     sibling.note(["extract", str(src), str(dst)])
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn",
-                    "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)], check=True)
+                    "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)])
 def run_whisper(wav, lang, terms=()):
     sibling.note(["inference", lang, list(terms), hashlib.sha256(wav.read_bytes()).hexdigest()])
     assert wav.exists()
@@ -120,8 +120,9 @@ class Observation(unittest.TestCase):
         self.assertEqual([e[0] for e in self.events()], ["main"])
         r = json.loads(self.receipt.read_bytes())
         self.assertEqual(r["status"], "INCOMPLETE")
-        self.assertEqual(r["version"], "alignment-observation-v2")
+        self.assertEqual(r["version"], "alignment-observation-v3")
         self.assertEqual(r["decoderArray"]["state"], "unknown")
+        self.assertEqual(r["extraction"]["evidence"]["state"], "unknown")
         self.assertEqual(r["extraction"]["wav"]["state"], "unknown")
         self.assertEqual(json.loads(self.raw.read_bytes()), [{"text": "cached"}])
 
@@ -270,6 +271,109 @@ sys.addaudithook(audit)
         self.assertEqual(list(self.root.glob(".observation-*")), [])
         with self.assertRaisesRegex(ValueError, "probe limit"):
             O.bounded_command([sys.executable, "-c", 'import sys;sys.stdout.write("x"*70000)'])
+
+
+class ExtractionEvidence(unittest.TestCase):
+    setUp, run_native = Observation.setUp, Observation.run_native
+    # Keep this class's suite focused rather than inherit the existing cases twice.
+    def make_source(self, rate=16000, codec="pcm_s16le", shifted=False, gap=False, multi=False, offset=False):
+        source = self.root / ("generated-" + str(len(list(self.root.glob("generated-*")))) + ".mov")
+        args = ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=30:d=0.3"]
+        if shifted: args += ["-itsoffset", "0.1"]
+        args += ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=" + str(rate) + ":duration=0.3"]
+        if multi: args += ["-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000:duration=0.3"]
+        args += ["-map", "0:v", "-map", "1:a"]
+        if multi: args += ["-map", "2:a", "-disposition:a:0", "0", "-disposition:a:1", "default", "-ac:a:1", "2"]
+        if gap: args += ["-bf", "0", "-f", "nut", "-af", "asetpts='PTS+gte(N,2048)*0.1/TB'"]
+        if offset: args += ["-output_ts_offset", "0.1"]
+        subprocess.run([*args, "-c:v", "libx264", "-c:a", codec, str(source)], check=True)
+        self.source = source; self.args[0] = str(source)
+
+    def test_actual_extraction_equivalence_and_negative_clocks(self):
+        zero_hash = None
+        for variant in ("pcm", "shift", "offset", "44100", "48000", "aac", "gap", "multi", "unknown-origin"):
+            with self.subTest(variant=variant):
+                if variant != "unknown-origin":
+                    self.make_source(rate=int(variant) if variant.isdigit() else 44100 if variant == "aac" else 16000,
+                                     codec="aac" if variant == "aac" else "pcm_s16le",
+                                     shifted=variant == "shift", gap=variant == "gap", multi=variant == "multi", offset=variant == "offset")
+                else: self.source = self.root / "source.wav"; self.args[0] = str(self.source)
+                for file in (self.cache, self.receipt, self.trace): file.unlink(missing_ok=True)
+                direct = self.run_native(False); raw = self.raw.read_bytes(); self.cache.unlink()
+                observed = self.run_native()
+                self.assertEqual((observed.returncode, observed.stdout, observed.stderr, self.raw.read_bytes()),
+                                 (direct.returncode, direct.stdout, direct.stderr, raw))
+                receipt = json.loads(self.receipt.read_bytes()); e = receipt["extraction"]["evidence"]
+                self.assertEqual(receipt["status"], "INCOMPLETE")
+                self.assertNotIn(str(self.root), json.dumps(e))
+                if variant == "gap":
+                    packets = json.loads(O.bounded_command(["ffprobe", "-v", "error", "-select_streams", "a",
+                        "-show_packets", "-show_entries", "packet=pts,duration", "-of", "json", str(self.source)]))["packets"]
+                    self.assertEqual(packets[0]["pts"], 0)
+                    self.assertTrue(any(b["pts"] > a["pts"] + a["duration"] for a, b in zip(packets, packets[1:])))
+                    if e["state"] == "unknown": continue
+                self.assertEqual(e["state"], "observed")
+                self.assertEqual(e["encoderSamples"], receipt["extraction"]["wav"]["sampleCount"])
+                if variant == "pcm":
+                    self.assertEqual(e["pcmIdentity"]["state"], "observed")
+                    self.assertEqual(e["pcmIdentity"]["sourceLastFence"], 4800)
+                    self.assertEqual(e["pcmIdentity"]["pcmSha256"],
+                                     "63007fe83a702f28a101739c0be192feb8d6990fb8a4ffe906c393afd83b37d5")
+                    zero_hash = receipt["extraction"]["wav"]["sha256"]
+                else:
+                    self.assertEqual(e["pcmIdentity"]["state"], "unknown")
+                    if variant == "shift":
+                        self.assertEqual(e["encoderFirstPTS"], 1600)
+                        self.assertEqual(receipt["extraction"]["wav"]["sha256"], zero_hash)
+                    if variant == "offset": self.assertNotEqual(e["timestampOffsets"], [0])
+                    if variant == "multi": self.assertEqual(e["streamIndex"], 2)
+                    if variant in ("44100", "48000"): self.assertEqual(e["resampler"]["inputRate"], int(variant))
+
+    def test_trace_bounds_drain_and_native_error_output(self):
+        driver = self.root / "drain.py"
+        lines = ["import importlib.util,subprocess,sys",
+            "s=importlib.util.spec_from_file_location('o',sys.argv[1]);o=importlib.util.module_from_spec(s);s.loader.exec_module(o)",
+            "native=o.subprocess.Popen",
+            "program='import sys;sys.stderr.write('+repr('[info] [error] hidden'+chr(10)+'[info] '+ 'x'*20000 + chr(10))+');sys.stderr.write('+repr('[info] ignore'+chr(10))+ '*3000000);sys.stderr.write('+repr('[error] sentinel'+chr(10))+')'",
+            "o.subprocess.Popen=lambda args,**kw:native([sys.executable,'-c',program],**kw)",
+            "t=o.ExtractionTrace('source','wav');r=t.run(None,t.expected)",
+            "assert r.returncode==0 and t.bad and len(t.inputs)==0",
+            "assert t.finish({})['state']=='unknown'"]
+        driver.write_text(chr(10).join(lines))
+        result = subprocess.run([sys.executable, "-I", str(driver), str(MEDIA / "cooked-transcribe-observed.py")],
+                                capture_output=True, timeout=10)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"", b"sentinel" + bytes([10])))
+        trace = O.ExtractionTrace(self.source, self.root / "unused.wav")
+        sentinel = object(); attempts = []
+        result = trace.run(lambda *a, **k: attempts.append((a, k)) or sentinel, ["unsupported"], check=True)
+        self.assertIs(result, sentinel); self.assertEqual(len(attempts), 1)
+        self.assertEqual(trace.finish({})["state"], "unknown")
+
+    def test_trace_preserves_real_ffmpeg_failure_diagnostics(self):
+        import io, re
+        source, dst = self.root / "invalid.mov", self.root / "output.wav"
+        source.write_bytes(b"invalid media")
+        trace = O.ExtractionTrace(source, dst)
+        direct = subprocess.run(trace.expected, capture_output=True)
+        output = io.BytesIO()
+        with patch.object(sys, "stderr", __import__("types").SimpleNamespace(buffer=output)):
+            actual = trace.run(subprocess.run, trace.expected)
+        normalize = lambda b: re.sub(rb"0x[0-9a-f]+", b"<address>", b)
+        self.assertEqual(actual.returncode, direct.returncode)
+        self.assertEqual(normalize(output.getvalue()), normalize(direct.stderr))
+        self.assertIsNone(actual.stdout); self.assertIsNone(actual.stderr)
+        self.assertEqual(actual.args, trace.expected)
+
+    def test_extraction_interception_restores_on_native_failure(self):
+        namespace = dict(subprocess=subprocess, source=self.source, raw=self.raw)
+        exec(chr(10).join(["def extract_audio(src,dst): raise RuntimeError('native extraction')",
+            "def run_whisper(*a): pass", "def main(): extract_audio(source,raw)"]), namespace)
+        extract = namespace["extract_audio"]
+        with patch.object(O.runpy, "run_path", return_value=namespace), self.assertRaisesRegex(RuntimeError, "native extraction"):
+            O.observe(self.script, self.args, expected_sha=O.digest(self.script))
+        self.assertIs(namespace["subprocess"], subprocess)
+        self.assertIs(namespace["extract_audio"], extract)
+        self.assertFalse(self.receipt.exists())
 
 
 SDK = r'''import os

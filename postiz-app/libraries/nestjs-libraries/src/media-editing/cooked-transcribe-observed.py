@@ -4,6 +4,8 @@ import builtins
 import dataclasses
 import inspect
 import math
+import re
+from types import SimpleNamespace
 import stat
 import json
 import os
@@ -34,12 +36,12 @@ def unknown(reason):
     return {"state": "unknown", "reason": reason}
 
 
-def bounded_command(args):
+def bounded_command(args, limit=64 * 1024):
     # Bound bytes retained even for an unexpectedly large probe. The existing
     # stage supervisor owns subprocess time/resource limits and the process group.
     with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
-        data = proc.stdout.read(64 * 1024 + 1)
-        if len(data) > 64 * 1024:
+        data = proc.stdout.read(limit + 1)
+        if len(data) > limit:
             proc.kill()
             raise ValueError("probe limit")
         if proc.wait() != 0:
@@ -162,6 +164,147 @@ def binding(value, *, returned_options=False):
     if len(raw) > 65536:
         raise ValueError("options-limit")
     return {"canonicalUTF8": data, "byteCount": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+
+
+class ExtractionTrace:
+    """Observe one pinned command; extra diagnostics are drained, never replayed."""
+    def __init__(self, source, dst):
+        self.source, self.dst = Path(source), Path(dst)
+        self.expected = ["ffmpeg", "-v", "error", "-y", "-i", str(source), "-vn", "-ac", "1",
+                         "-ar", "16000", "-c:a", "pcm_s16le", str(dst)]
+        self.bad, self.runs, self.used = False, 0, 0
+        self.streams, self.inputs, self.outputs, self.bases, self.resamplers = [], [], [], set(), []
+        self.version = None
+
+    def line(self, raw):
+        self.used += len(raw)
+        if self.used > 32 * 1024 * 1024 or len(raw) > 16384:
+            self.bad = True
+            return
+        line = raw.decode("utf-8", errors="strict")
+        if "ffmpeg version " in line: self.version = line.split("ffmpeg version ", 1)[1].strip()[:1024]
+        match = re.search(r"Stream #0:(\d+) -> #0:0 \(", line)
+        if match:
+            if self.streams: self.bad = True
+            else: self.streams.append(int(match[1]))
+        if "demuxer+ffmpeg ->" in line and "type:audio " in line:
+            match = re.search(r"ist_index:(?:0:)?(\d+) type:audio pkt_pts:(-?\d+).*?duration:(\d+).*? off:(-?\d+)", line)
+            if not match or len(self.inputs) >= 8192: self.bad = True
+            else: self.inputs.append(tuple(map(int, match.groups())))
+        if "encoder <- type:audio " in line:
+            match = re.search(r"time_base:(\d+)/(\d+)", line)
+            if not match: self.bad = True
+            elif self.bases and tuple(map(int, match.groups())) not in self.bases: self.bad = True
+            else: self.bases.add(tuple(map(int, match.groups())))
+        if "encoder -> type:audio " in line:
+            match = re.search(r"pkt_pts:(-?\d+).*?duration:(\d+)", line)
+            if not match or len(self.outputs) >= 8192: self.bad = True
+            else: self.outputs.append(tuple(map(int, match.groups())))
+        if "auto_aresample" in line and " -> " in line:
+            match = re.search(r"ch:(\d+) chl:\S+ fmt:(\w+) r:(\d+)Hz -> ch:(\d+) chl:\S+ fmt:(\w+) r:(\d+)Hz", line)
+            if not match or self.resamplers: self.bad = True
+            else:
+                a, b, c, d, e, f = match.groups()
+                self.resamplers.append(dict(inputChannels=int(a), inputFormat=b, inputRate=int(c),
+                                            outputChannels=int(d), outputFormat=e, outputRate=int(f)))
+
+    def run(self, original, args, *positional, **keywords):
+        self.runs += 1
+        if self.runs != 1 or args != self.expected or positional or keywords:
+            self.bad = True
+            return original(args, *positional, **keywords)
+        traced = [*args[:2], "level+verbose", "-debug_ts", *args[3:]]
+        # stdout/stdin remain inherited. Reading stderr continuously avoids a
+        # full pipe blocking FFmpeg, even after the evidence budget is exhausted.
+        with subprocess.Popen(traced, stderr=subprocess.PIPE) as proc:
+            continuation, forward = False, False
+            while raw := proc.stderr.readline(16385):
+                if not continuation:
+                    rank = re.match(rb"^(?:\[(?!(?:info|verbose|debug|warning|error|fatal|panic)\])[^]]{1,256}\] )?(?P<rank>\[(?:panic|fatal|error)\] )", raw)
+                    forward = rank is not None
+                    if rank: raw_error = raw[:rank.start("rank")] + raw[rank.end("rank"):]
+                    else: raw_error = raw
+                else: raw_error = raw
+                if forward:
+                    sys.stderr.buffer.write(raw_error); sys.stderr.buffer.flush()
+                try: self.line(raw)
+                except Exception: self.bad = True
+                continuation = not raw.endswith(bytes([10]))
+            return subprocess.CompletedProcess(args, proc.wait())
+
+    def finish(self, wav, audio=None):
+        try:
+            if (self.bad or self.runs != 1 or len(self.streams) != 1 or not self.version or
+                    self.bases != {(1, 16000)} or not self.outputs or len(self.resamplers) > 1):
+                raise ValueError("trace-incomplete")
+            selected = self.streams[0]
+            if not audio or audio.get("state") != "observed" or not any(c["index"] == selected for c in audio["candidates"]):
+                raise ValueError("unbound-stream")
+            inputs = [(p, n, off) for i, p, n, off in self.inputs if i == selected]
+            if not inputs: raise ValueError("missing-input")
+            cursor = self.outputs[0][0]
+            for pts, count in self.outputs:
+                if count <= 0 or pts != cursor: raise ValueError("discontinuous-output")
+                cursor += count
+            result = dict(state="observed", toolVersion=self.version, streamIndex=selected,
+                commandSha256=hashlib.sha256(json.dumps(self.expected[:5] + ["source"] + self.expected[6:-1] +
+                    ["extractedWav"], separators=(",", ":")).encode()).hexdigest(),
+                encoderFirstPTS=self.outputs[0][0], encoderLastFence=cursor, encoderTimeBase=[1, 16000],
+                encoderSamples=cursor-self.outputs[0][0], encoderPackets=len(self.outputs),
+                timestampOffsets=sorted(set(off for _, _, off in inputs)), timestampOffsetBasis="ffmpeg-debug-off-uninterpreted",
+                resampler=self.resamplers[0] if self.resamplers else unknown("not-reported"),
+                pcmIdentity=unknown("unsupported-source-or-transformation"))
+            if len(result["timestampOffsets"]) > 32 or result["encoderSamples"] != wav["sampleCount"]: raise ValueError("WAV-count")
+            try:
+                candidate = audio["selectedStream"]
+                if (candidate.get("codec_name") != "pcm_s16le" or candidate.get("sample_rate") != "16000" or
+                        candidate.get("channels") != 1 or candidate.get("start_pts") != 0 or
+                        candidate.get("time_base") != "1/16000" or audio["presentationOrigin"].get("numerator") != 0):
+                    raise ValueError("unsupported-source-clock")
+                result["pcmIdentity"] = self.identity(inputs, wav, result)
+            except Exception: pass
+            return result
+        except Exception:
+            return unknown("extraction-trace-unavailable-or-incomplete")
+
+    def identity(self, inputs, wav, trace):
+        data = json.loads(bounded_command(["ffprobe", "-v", "error", "-select_streams", "a", "-show_streams",
+            "-show_packets", "-show_entries", "stream=index,codec_name,sample_rate,channels,time_base,start_pts:"
+            "packet=stream_index,pts,duration,pos,size,side_data_list", "-of", "json", str(self.source)], 2 * 1024 * 1024))
+        streams, packets = data["streams"], data["packets"]
+        if len(streams) != 1 or not 0 < len(packets) <= 8192 or not 0 < wav["sampleCount"] <= 240 * 16000: raise ValueError("streams-or-packets")
+        stream = streams[0]
+        if (stream["index"] != trace["streamIndex"] or stream["codec_name"] != "pcm_s16le" or
+                int(stream["sample_rate"]) != 16000 or stream["channels"] != 1 or
+                Fraction(stream["time_base"]) != Fraction(1, 16000) or stream["start_pts"] != 0 or
+                trace["encoderFirstPTS"] != 0 or trace["timestampOffsets"] != [0] or self.resamplers or
+                [wav[k] for k in ("sampleRate", "channels", "sampleWidthBytes")] != [16000, 1, 2]):
+            raise ValueError("unsupported-identity")
+        h, cursor, previous = hashlib.sha256(), 0, -1
+        with self.source.open("rb") as source:
+            size = os.fstat(source.fileno()).st_size
+            if size > 100 * 1024 * 1024: raise ValueError("source-limit")
+            for packet, actual in zip(packets, inputs, strict=True):
+                pts, count, pos, length = packet["pts"], packet["duration"], int(packet["pos"]), int(packet["size"])
+                if (packet["stream_index"] != stream["index"] or packet.get("side_data_list") or
+                        pts != cursor or count <= 0 or length != count * 2 or not 0 < length <= 1024 * 1024 or
+                        pos <= previous or pos + length > size or actual != (pts, count, 0)):
+                    raise ValueError("packet-fence")
+                source.seek(pos); payload = source.read(length)
+                if len(payload) != length: raise ValueError("packet-read")
+                h.update(payload); cursor += count; previous = pos
+        w = hashlib.sha256()
+        with wave.open(str(self.dst), "rb") as stream:
+            count = 0
+            while chunk := stream.readframes(32768):
+                count += len(chunk)
+                if count > 240 * 16000 * 2: raise ValueError("WAV-limit")
+                w.update(chunk)
+            if count != cursor * 2: raise ValueError("WAV-mutated")
+        if cursor != wav["sampleCount"] or h.hexdigest() != w.hexdigest(): raise ValueError("PCM-identity")
+        return dict(state="observed", basis="contiguous-identical-PCM", sourceFirstFence=0, wavFirstFence=0,
+            sourceLastFence=cursor, wavLastFence=cursor, pcmSha256=h.hexdigest(),
+            origin={"numerator": 0, "denominator": 1, "basis": "source-packets-and-extraction-encoder-PTS"})
 
 
 class NativeObserver:
@@ -375,7 +518,7 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
         raise RuntimeError("OBSERVATION_PROTOCOL_FAILURE:UPSTREAM_PIN")
     source, raw = Path(args[0]), Path(args[1])
     before, source_probe = digest(source), probe(source)
-    wavs = []
+    wavs, extraction_trace = [], unknown("no-extraction-observed-cache-reuse-possible")
     observer = NativeObserver()
     # Restore the same sibling-import context installed by the original launcher.
     sys.path.insert(0, str(script.parent))
@@ -386,7 +529,15 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
     extract = actual["extract_audio"]
 
     def observed_extract(*positional, **keywords):
-        result = extract(*positional, **keywords)
+        nonlocal extraction_trace
+        src = positional[0] if positional else keywords["src"]
+        dst = positional[1] if len(positional) > 1 else keywords["dst"]
+        trace, native_subprocess = ExtractionTrace(src, dst), actual["subprocess"]
+        actual["subprocess"] = SimpleNamespace(run=lambda *a, **k: trace.run(native_subprocess.run, *a, **k))
+        try:
+            result = extract(*positional, **keywords)
+        finally:
+            actual["subprocess"] = native_subprocess
         if len(wavs) >= 1:
             raise RuntimeError("OBSERVATION_PROTOCOL_FAILURE:EXTRA_EXTRACTION")
         try:
@@ -401,6 +552,7 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
             wavs.append(unknown("extracted-WAV-header-unavailable"))
         if wavs[0].get("state") == "observed":
             observer.wav_sha = wavs[0]["sha256"]
+            extraction_trace = trace.finish(wavs[0], source_probe)
         return result
 
     native = actual["run_whisper"]
@@ -423,13 +575,15 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
         version = bounded_command(["ffmpeg", "-version"]).decode("utf-8").splitlines()[0]
     except (OSError, ValueError, UnicodeError, IndexError):
         version = None
-    receipt = {"version": "alignment-observation-v2", "status": "INCOMPLETE",
+    if extraction_trace.get("state") == "observed" and "ffmpeg version " + extraction_trace["toolVersion"] != version:
+        extraction_trace = unknown("extraction-tool-identity-inconsistent")
+    receipt = {"version": "alignment-observation-v3", "status": "INCOMPLETE",
         "sourceSha256": before, "sourceAfterSha256": after, "rawAlignmentBytesSha256": digest(raw),
         "upstream": {"commit": PIN, "transcribeSha256": expected_sha}, "sourceAudio": source_probe,
         "configuredModel": {"basis": "configured-file-hashes-only", "files": files,
                             "actualLoadedModel": loaded},
         "extraction": {"requested": {"sampleRate": 16000, "channels": 1, "codec": "pcm_s16le"},
-                       "toolVersion": version, "wav": wavs[0] if wavs
+                       "toolVersion": version, "evidence": extraction_trace, "wav": wavs[0] if wavs
                        else unknown("no-extraction-observed-cache-reuse-possible")},
         "decoderArray": {"state": "observed", "basis": "pre-SDK-VAD-decode-output", "calls": observer.decoders}
             if options.get("state") == "observed" else unknown("native-calls-unavailable"),

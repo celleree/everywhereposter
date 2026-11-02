@@ -200,7 +200,7 @@ describe('private cooked native boundary', () => {
       await runtime.cleanup(result.jobId, 'o');
     });
   it.each(['valid', 'unknown', 'v1', 'version', 'call', 'cross-call', 'model', 'input', 'rate', 'dtype', 'shape',
-    'count', 'bytes', 'bounds', 'digest', 'implementation', 'sdk', 'code', 'path', 'origin', 'mapping', 'missing'])(
+    'count', 'bytes', 'bounds', 'digest', 'implementation', 'sdk', 'code', 'path', 'origin', 'mapping', 'missing', 'extract-valid', 'extract-unknown', 'extract-identity-unknown', 'extract-stream', 'extract-command', 'extract-count', 'extract-offset', 'extract-origin', 'extract-pcm', 'extract-rate', 'extract-missing'])(
     'validates versioned per-call decoded buffers: %s', async variant => {
       const bind = (value: any) => { const canonicalUTF8 = JSON.stringify(value); return { canonicalUTF8,
         byteCount: Buffer.byteLength(canonicalUTF8), sha256: createHash('sha256').update(canonicalUTF8).digest('hex') }; };
@@ -223,9 +223,31 @@ describe('private cooked native boundary', () => {
           implementation: 'faster_whisper.audio.decode_audio', codeSha256: 'e'.repeat(64), sdkVersion: '1.2.1',
           avVersion: '16.0.0', numpyVersion: '2.3.3', origin: unknown, resamplingMap: unknown };
         r.decoderArray = { state: 'observed', basis: 'pre-SDK-VAD-decode-output', calls: [d, { ...d, callId: 2 }] };
+        if (variant.startsWith('extract-')) {
+          r.version = 'alignment-observation-v3'; r.sourceAudio = observedAudio();
+          Object.assign(r.sourceAudio.candidates[0], { codec_name: 'pcm_s16le', sample_rate: '16000', time_base: '1/16000' });
+          r.sourceAudio.selectedStream = { ...r.sourceAudio.candidates[0] }; r.extraction.toolVersion = 'ffmpeg version fixture';
+          const command = ['ffmpeg', '-v', 'error', '-y', '-i', 'source', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', 'extractedWav'];
+          const e: any = r.extraction.evidence = { state: 'observed', toolVersion: 'fixture', streamIndex: 0,
+            commandSha256: createHash('sha256').update(JSON.stringify(command)).digest('hex'), encoderFirstPTS: 0,
+            encoderLastFence: 1600, encoderSamples: 1600, encoderPackets: 2, encoderTimeBase: [1, 16000],
+            timestampOffsets: [0], timestampOffsetBasis: 'ffmpeg-debug-off-uninterpreted', resampler: unknown, pcmIdentity: { state: 'observed', basis: 'contiguous-identical-PCM',
+              sourceFirstFence: 0, wavFirstFence: 0, sourceLastFence: 1600, wavLastFence: 1600, pcmSha256: 'f'.repeat(64),
+              origin: { numerator: 0, denominator: 1, basis: 'source-packets-and-extraction-encoder-PTS' } } };
+          if (variant === 'extract-unknown') r.extraction.evidence = unknown;
+          if (variant === 'extract-identity-unknown') e.pcmIdentity = unknown;
+          if (variant === 'extract-stream') e.streamIndex = 2;
+          if (variant === 'extract-command') e.commandSha256 = '0'.repeat(64);
+          if (variant === 'extract-count') e.encoderSamples++;
+          if (variant === 'extract-offset') e.timestampOffsets = [1];
+          if (variant === 'extract-origin') e.pcmIdentity.origin.numerator = 1;
+          if (variant === 'extract-pcm') e.pcmIdentity.pcmSha256 = 'invalid';
+          if (variant === 'extract-rate') r.sourceAudio.selectedStream.sample_rate = '44100';
+          if (variant === 'extract-missing') delete r.extraction.evidence;
+        }
         if (variant === 'unknown') r.decoderArray.calls[0] = unknown;
         if (variant === 'v1') r.version = 'alignment-observation-v1';
-        if (variant === 'version') r.version = 'alignment-observation-v3';
+        if (variant === 'version') r.version = 'alignment-observation-v4';
         if (variant === 'call') d.callId = 2;
         if (variant === 'cross-call') r.decoderArray.calls.reverse();
         if (variant === 'model') d.modelId = 'model-2';
@@ -247,7 +269,7 @@ describe('private cooked native boundary', () => {
         await writeFile(path, JSON.stringify(r));
       });
       const result = await runtime.run(input).catch(e => e);
-      if (['valid', 'unknown'].includes(variant)) expect(calls.some(c => c.stage === 'render')).toBe(true);
+      if (['valid', 'unknown', 'extract-valid', 'extract-unknown', 'extract-identity-unknown'].includes(variant)) expect(calls.some(c => c.stage === 'render')).toBe(true);
       else { expect(result.message).toBe('OBSERVATION_PROTOCOL_FAILURE'); expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']); }
       await runtime.cleanup(result.jobId, 'o');
     });
