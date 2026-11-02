@@ -16,3 +16,14 @@ it('enforces a separate byte ceiling and digest syntax in the server DTO', async
   dto.byteSize++; expect((await validate(dto)).some(error => error.property === 'byteSize')).toBe(true);
   dto.byteSize--; dto.manifest[0] = 'bogus'; expect((await validate(dto)).some(error => error.property === 'manifest')).toBe(true);
 });
+
+
+it('exposes the durable media creation time for completed transfer presentation without changing session state', async () => {
+  const { ResumableUploadService } = await import('../../libraries/nestjs-libraries/src/upload/resumable-upload.service');
+  const media = { id: 'saved', createdAt: new Date('2026-01-01T00:00:00Z'), path: '/uploads/videos/saved.mp4' };
+  const findFirst = jest.fn().mockResolvedValue({ id: 'saved', status: 'COMPLETE', media, parts: [] });
+  const service = new ResumableUploadService({ videoUploadSession: { findFirst } } as any);
+  expect((await service.get('org', 'saved')).completedAt).toEqual(media.createdAt);
+  expect(findFirst.mock.calls[0][0]).toMatchObject({ where: { id: 'saved', organizationId: 'org' }, include: { media: { select: { createdAt: true } } } });
+  expect(media.path).toBe('/uploads/videos/saved.mp4');
+});

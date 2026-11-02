@@ -1,3 +1,5 @@
+// Success is also discoverable in saved media; recovery and publishing receipts never expire here.
+export const COMPLETED_TRANSFER_DISPLAY_MS = 10_000;
 export const CHUNK_BYTES = 8 * 1024 * 1024;
 export type QuickIntent = { id: string; status: string; results: { integrationId: string; name: string; state: string; reason?: string }[]; message?: string };
 export type QuickConsent = { confirmNoIndividualReview: true; destinations: { id: string; settings: Record<string, any> }[] };
@@ -5,7 +7,7 @@ export type UploadSession = {
   quickIntent?: QuickIntent;
   id: string; clientId?: string; originalName: string; byteSize: number; manifest: string[];
   status: string; parts: { index: number; digest: string; byteSize: number }[];
-  media?: any; error?: string; expiresAt?: string;
+  media?: any; error?: string; expiresAt?: string; completedAt?: string;
 };
 export type TransferState = 'Uploading' | 'Paused' | 'Resume needed' | 'Transfer complete' | 'Finalizing' | 'Failed';
 export type Transfer = { id: string; name: string; bytes: number; sent: number; state: TransferState; session?: UploadSession; error?: string; quickRequested?: boolean; quickError?: string };
@@ -34,11 +36,19 @@ export class ResumableTransfers {
   private runs = new Map<string, Promise<void>>();
   private cancellations = new Map<string, Promise<void>>();
   private dismissed = new Set<string>();
+  private completedObservedAt = new Map<string, number>();
+  private localCompletions = new Set<string>();
+  private autoDismissed = new Set<string>();
   private disposed = false;
   constructor(private fetch: Fetch, private changed: (items: Transfer[]) => void, private organizationId: string) {
     try { this.dismissed = new Set(JSON.parse(localStorage.getItem(this.dismissKey()) || '[]')); } catch {}
+    try { this.autoDismissed = new Set(JSON.parse(localStorage.getItem(this.autoDismissKey()) || '[]')); } catch {}
   }
   private dismissKey() { return 'everywhereposter:dismissed-transfers:' + this.organizationId; }
+  private autoDismissKey() { return this.dismissKey() + ':automatic'; }
+  private saveAutoDismissed() {
+    try { localStorage.setItem(this.autoDismissKey(), JSON.stringify([...this.autoDismissed].slice(-200))); } catch {}
+  }
   canDismiss(item: Transfer) {
     return item.session?.status === 'COMPLETE' && !!item.session.media?.id &&
       !this.controllers.has(item.id) && !this.cancellations.has(item.id) &&
@@ -46,12 +56,15 @@ export class ResumableTransfers {
       (!item.quickRequested || !!item.session.quickIntent) &&
       (!item.session.quickIntent || ['COMPLETE', 'FAILED', 'CANCELLED'].includes(item.session.quickIntent.status));
   }
-  dismiss(id: string) {
+  dismiss(id: string, automatic = false) {
     const item = this.items.get(id);
     if (!item || !this.canDismiss(item)) return;
     this.dismissed.add(item.session!.id);
+    if (automatic) this.autoDismissed.add(item.session!.id);
+    else this.autoDismissed.delete(item.session!.id);
+    this.saveAutoDismissed();
     try { localStorage.setItem(this.dismissKey(), JSON.stringify([...this.dismissed].slice(-200))); } catch {}
-    this.items.delete(id); this.consents.delete(id);
+    this.items.delete(id); this.consents.delete(id); this.completedObservedAt.delete(id); this.localCompletions.delete(id);
     this.changed([...this.items.values()]);
   }
   dismissAttached(mediaIds: Set<string>, protectedIds = new Set<string>()) {
@@ -60,8 +73,20 @@ export class ResumableTransfers {
       // consent uncertainty and errors visible even when media is attached.
       if (!protectedIds.has(item.id) && mediaIds.has(item.session?.media?.id) && !item.error && !item.quickError &&
           !item.quickRequested && !item.session?.quickIntent && this.canDismiss(item)) {
-        this.dismiss(item.id);
+        this.dismiss(item.id, true);
       }
+    }
+  }
+  dismissCompleted(protectedIds = new Set<string>(), now = Date.now()) {
+    for (const item of this.items.values()) {
+      if (protectedIds.has(item.id) || item.state !== 'Transfer complete' || item.error || item.quickError ||
+          item.quickRequested || item.session?.quickIntent || !this.canDismiss(item)) continue;
+      const observedAt = this.completedObservedAt.get(item.id) ?? now;
+      const savedAt = Date.parse(item.session?.completedAt || '');
+      // Old server receipts clear on return. Missing/invalid/future timestamps
+      // get a full local display period, without each poll restarting it.
+      const completedAt = !this.localCompletions.has(item.id) && Number.isFinite(savedAt) && savedAt <= now ? savedAt : observedAt;
+      if (now - completedAt >= COMPLETED_TRANSFER_DISPLAY_MS) this.dismiss(item.id, true);
     }
   }
   private reconcile(item: Transfer, session: UploadSession) {
@@ -76,6 +101,10 @@ export class ResumableTransfers {
   activate() { this.disposed = false; }
   private update(item: Transfer) {
     if (this.disposed) return;
+    if (item.session?.status === 'COMPLETE' && item.session.media?.id && !this.completedObservedAt.has(item.id)) {
+      this.completedObservedAt.set(item.id, Date.now());
+      if (this.files.has(item.id)) this.localCompletions.add(item.id);
+    }
     this.items.set(item.id, item); this.changed([...this.items.values()]);
   }
   private async request(url: string, options?: RequestInit) {
@@ -92,7 +121,13 @@ export class ResumableTransfers {
     const result = await this.request('');
     this.durableQuickUploadEnabled = result.durableQuickUploadEnabled === true;
     for (const session of result.sessions as UploadSession[]) {
-      if (this.dismissed.has(session.id)) continue;
+      if (this.dismissed.has(session.id)) {
+        if (!this.autoDismissed.has(session.id) || !session.quickIntent) continue;
+        this.dismissed.delete(session.id);
+        this.autoDismissed.delete(session.id);
+        try { localStorage.setItem(this.dismissKey(), JSON.stringify([...this.dismissed].slice(-200))); } catch {}
+        this.saveAutoDismissed();
+      }
       const existing = [...this.items.values()].find(item => item.session?.id === session.id || item.id === session.clientId);
       if (existing) {
         this.reconcile(existing, session);
@@ -115,6 +150,7 @@ export class ResumableTransfers {
     // A later explicit publishing choice restores polling for an attached upload
     // whose presentation was dismissed earlier. Never hide its new results.
     this.dismissed.delete(session.id);
+    this.autoDismissed.delete(session.id); this.saveAutoDismissed();
     try { localStorage.setItem(this.dismissKey(), JSON.stringify([...this.dismissed].slice(-200))); } catch {}
     this.update({ ...item, session });
     // Resumable media always uses server consent. Disabled enrollment never falls

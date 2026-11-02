@@ -13,6 +13,7 @@ Read the guide relevant to your task:
 - [Product truth](docs/brain/PRODUCT_TRUTH.md): product promises and constraints.
 - [Current work](docs/brain/CURRENT_WORK.md): priorities and checkpoints.
 - [Operating manual](OPERATING-MANUAL.md): environment, database, and deployment procedures.
+- [Core journey UX checklist and acceptance evidence](docs/browser-acceptance.md#core-journey-ux-checklist): expected behavior, known gaps and regression checks.
 - Development: [workspace scripts and toolchain](postiz-app/package.json), [test guide](postiz-app/tests/README.md).
 
 ## Layout

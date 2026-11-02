@@ -12,7 +12,7 @@ import { pipeline } from 'stream/promises';
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const MEDIA_SELECT = { id: true, name: true, originalName: true, path: true, type: true, thumbnail: true, alt: true };
+const MEDIA_SELECT = { createdAt: true, id: true, name: true, originalName: true, path: true, type: true, thumbnail: true, alt: true };
 
 @Injectable()
 export class ResumableUploadService {
@@ -114,7 +114,7 @@ export class ResumableUploadService {
   async get(org: string, id: string) {
     const row = await this.db.videoUploadSession.findFirst({ where: { id, organizationId: org }, include: { quickIntent: { select: { id: true, status: true, results: true, message: true, consentVersion: true } }, parts: { select: { index: true, digest: true, byteSize: true } }, media: { select: MEDIA_SELECT } } });
     if (!row) throw new NotFoundException('Upload not found.');
-    return { quickIntent: row.quickIntent, id: row.id, clientId: row.clientId, originalName: row.originalName, byteSize: row.byteSize, manifest: row.manifest, status: row.status, expiresAt: row.expiresAt, parts: row.parts, media: row.media, error: row.error, chunkBytes: VIDEO_CHUNK_BYTES, maxBytes: VIDEO_MAX_BYTES };
+    return { completedAt: row.media?.createdAt, quickIntent: row.quickIntent, id: row.id, clientId: row.clientId, originalName: row.originalName, byteSize: row.byteSize, manifest: row.manifest, status: row.status, expiresAt: row.expiresAt, parts: row.parts, media: row.media, error: row.error, chunkBytes: VIDEO_CHUNK_BYTES, maxBytes: VIDEO_MAX_BYTES };
   }
 
   private async claim(org: string, id: string, finalize: boolean) {
