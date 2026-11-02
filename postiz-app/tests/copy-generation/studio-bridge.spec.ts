@@ -248,7 +248,7 @@ it('binds V2 to expected profile while preserving schema 1 receipt envelopes', (
 });
 async function withRuntimeSlots(test: (root: string, v1: string, v2: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), 'studio-slots-'));
-  const settings = { STUDIO_EDITOR_ENABLED: 'true', STUDIO_EDITOR_ORGANIZATIONS: 'owner', STUDIO_EDITOR_WORK_ROOT: root,
+  const settings = { STUDIO_EDITOR_ENABLED: 'true', STUDIO_EDITOR_V2_ENABLED: 'false', STUDIO_EDITOR_ORGANIZATIONS: 'owner', STUDIO_EDITOR_WORK_ROOT: root,
     STUDIO_EDITOR_PACKAGE_ROOT: join(root, 'v1'), STUDIO_EDITOR_RUNTIME: join(root, 'v1.json'),
     STUDIO_EDITOR_V2_PACKAGE_ROOT: join(root, 'v2'), STUDIO_EDITOR_V2_RUNTIME: join(root, 'v2.json'), UPLOAD_DIRECTORY: '' };
   const prior = Object.fromEntries(Object.keys(settings).map(k => [k, process.env[k]]));
@@ -276,10 +276,11 @@ it('keeps runtime slots independent, rejects missing/unknown/foreign selections 
     process.env.STUDIO_EDITOR_ENABLED = 'false'; await assert.rejects(studioRuntime('owner', 'talking-head-v2'));
   });
 });
-it('blocks public V2 creation before admission, native work or model calls even with a configured slot', async () => {
+it.each(['gate', 'readiness'])('blocks public V2 creation before admission/native/model work with unavailable %s', async reason => {
   await withRuntimeSlots(async () => {
     const admit = jest.fn(), native = jest.fn(), direction = jest.fn();
-    const service = new StudioEditService({ admit } as any, {} as any, { studioSource: native } as any, { produce: direction } as any);
+    if (reason === 'readiness') process.env.STUDIO_EDITOR_V2_ENABLED = 'true';
+    const service = new StudioEditService({ admit } as any, {} as any, { studioSource: native } as any, { produce: direction, v2Ready: async () => { throw Error('Studio V2 creation is unavailable'); } } as any);
     await assert.rejects(service.create('owner', { requestKey: randomUUID(), sourceMediaId: 'video', brollMediaIds: [],
       destinations: ['linkedin'], profile: 'talking-head-v2', creative: { brief: 'Grounded source',
         framing: { x: .28, y: .28, width: .44, height: .24, confirmed: true, stationary: true, singleSpeaker: true } } }), /V2 creation is unavailable/);
@@ -320,5 +321,19 @@ it('routes stored V2 recovery, framing and render through its slot and preserves
       delete row.input.request.profile;
       await assert.rejects(service.resume('owner', row.id), /Unknown persisted Studio profile/);
     } finally { stage.mockRestore(); runtime.mockRestore(); }
+  });
+});
+
+it('advertises V2 only after its separate gate, slot and director readiness pass', async () => {
+  await withRuntimeSlots(async () => {
+    const ready = jest.fn().mockResolvedValue(undefined), service = new StudioEditService({} as any, {} as any, {} as any, { v2Ready: ready } as any);
+    assert.equal((await service.availability('owner') as any).sourceOnlyProfile, undefined);
+    process.env.STUDIO_EDITOR_V2_ENABLED = 'true';
+    assert.equal((await service.availability('owner') as any).sourceOnlyProfile, 'talking-head-v2');
+    ready.mockRejectedValue(Error('unready capability/font'));
+    assert.equal((await service.availability('owner') as any).sourceOnlyProfile, undefined);
+    assert.equal((await service.availability('owner')).enabled, true);
+    delete process.env.STUDIO_EDITOR_V2_RUNTIME;
+    assert.equal((await service.availability('owner') as any).sourceOnlyProfile, undefined);
   });
 });

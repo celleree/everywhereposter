@@ -5,6 +5,7 @@ const mockFetch = jest.fn();
 let mockPicker: any;
 let mockJobs: any[] = [];
 let mockResult: any;
+let mockAvailability: any;
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({ useFetch: () => mockFetch }));
 jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({ useModals: () => ({
   openModal: (options: any) => { mockPicker = options.children(() => {} ).props.setMedia; },
@@ -12,12 +13,12 @@ jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({ useModals: (
 jest.mock('@gitroom/frontend/components/media/media.component', () => ({ MediaBox: () => null }));
 jest.mock('@gitroom/react/helpers/use.media.directory', () => ({ useMediaDirectory: () => ({ set: (path: string) => path }) }));
 jest.mock('swr', () => ({ __esModule: true, default: (key: any) => ({
-  data: !key ? undefined : key[0] === 'studio-availability' ? { enabled: true } : key[0] === 'studio-jobs' ? mockJobs : mockResult,
+  data: !key ? undefined : key[0] === 'studio-availability' ? mockAvailability : key[0] === 'studio-jobs' ? mockJobs : mockResult,
   mutate: jest.fn(),
 }) }));
 
 beforeEach(() => {
-  localStorage.clear(); mockJobs = []; mockResult = undefined;
+  localStorage.clear(); mockJobs = []; mockResult = undefined; mockAvailability = { enabled: true };
   Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: () => 'request-id' });
   mockFetch.mockReset().mockImplementation(async (url: string, options?: any) => {
     if (options?.method === 'POST') return { ok: false };
@@ -70,4 +71,26 @@ test('saving requires explicit review of the current verified result', () => {
   expect(screen.queryByRole('button', { name: 'Use in composer' })).toBeNull();
   fireEvent.click(screen.getByRole('checkbox', { name: /watched and listened/ }));
   expect(save).not.toBeDisabled();
+});
+
+test.each([false, true])('advertised V2 is used only for new zero-support requests; supports=%s', async supports => {
+  mockAvailability.sourceOnlyProfile = 'talking-head-v2';
+  render(<StudioReviewWorkspace scope="test" />); await chooseSource();
+  if (supports) {
+    fireEvent.click(screen.getByRole('button', { name: /Choose optional supporting visuals/ }));
+    await act(async () => { await mockPicker([{ id: 'visual' }]); });
+  }
+  fireEvent.click(screen.getByRole('checkbox', { name: /one stationary speaker/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Create Studio edit/ })); await screen.findByRole('alert');
+  const body = JSON.parse(mockFetch.mock.calls.find(([url, options]) => url === '/media/studio/jobs' && options?.method === 'POST')![1].body);
+  expect(body.profile).toBe(supports ? 'easy-graphics-v1' : 'talking-head-v2');
+});
+test('recovers the exact stored V1 body under the original key even when new V2 is advertised', async () => {
+  mockAvailability.sourceOnlyProfile = 'talking-head-v2';
+  const saved = { requestKey: 'old-pending-request', profile: 'easy-graphics-v1', sourceMediaId: 'old-source', brollMediaIds: [], destinations: ['threads'], creative: { brief: 'Retained request' } };
+  const key = 'everywhereposter:studio-request:v1:test', bytes = JSON.stringify(saved); localStorage.setItem(key, bytes);
+  render(<StudioReviewWorkspace scope="test" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Recover last edit request' })); await screen.findByRole('alert');
+  expect(mockFetch.mock.calls.find(([url, options]) => url === '/media/studio/jobs' && options?.method === 'POST')![1].body).toBe(bytes);
+  expect(localStorage.getItem(key)).toBe(bytes);
 });

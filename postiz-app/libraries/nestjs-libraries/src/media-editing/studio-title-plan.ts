@@ -1,0 +1,75 @@
+import { copyFile, lstat, mkdir, readFile, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { studioFingerprint } from './studio-receipt';
+import { StudioApprovedPlan, StudioRuntime, studioCommand, studioHashFile, studioJson } from './studio-worker';
+import { StudioFraming, validateStudioEvidence } from './studio-evidence';
+
+export async function studioTitleFont(config: StudioRuntime) {
+  const path = join(config.work, 'Body-Bold.ttf'), info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 10 * 1024 * 1024 ||
+      !['00010000', '4f54544f'].includes((await readFile(path)).subarray(0, 4).toString('hex'))) throw Error('Stage the licensed Studio font before direction');
+  return { path, sha256: await studioHashFile(path) };
+}
+export function studioGroundedTitle(e: ReturnType<typeof validateStudioEvidence>, rectangles: any[], framing: StudioFraming) {
+  const end = e.words.findIndex(w => /[.!?]["'”’)]*$/.test(w.text) && !/^(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|[A-Za-z])\.$/i.test(w.text));
+  const words = e.words.slice(0, end + 1), text = words.map(w => w.text).join(' ');
+  if (end < 0 || words.length < 3 || words.length > 9 || text.length > 60 || text.split(/\s+/).length > 9) throw Error('Needs adjustment: opening sentence must contain 3-9 words within 60 characters');
+  const face = { x: framing.x * 1080 - 20, y: framing.y * 1920 - 20,
+    right: (framing.x + framing.width) * 1080 + 20, bottom: (framing.y + framing.height) * 1920 + 20 };
+  const slots: any[] = [];
+  for (const r of rectangles) {
+    const x = Math.ceil(r.x * 1080 + 16), right = Math.floor((r.x + r.width) * 1080 - 16);
+    const y = Math.ceil(r.y * 1920 + 16), bottom = Math.floor((r.y + r.height) * 1920 - 16);
+    for (const b of [{ x, y, right, bottom: Math.min(bottom, face.y) }, { x, y: Math.max(y, face.bottom), right, bottom },
+      { x, y, right: Math.min(right, face.x), bottom }, { x: Math.max(x, face.right), y, right, bottom }]) {
+      const width = Math.min(960, Math.floor(b.right - b.x)), height = Math.min(300, Math.floor(b.bottom - b.y));
+      if (b.y <= 768 && width >= 400 && height >= 268) slots.push({ x: Math.ceil(b.x), y: Math.ceil(b.y), width, height });
+    }
+  }
+  slots.sort((a, b) => b.width * b.height - a.width * a.height || a.y - b.y || a.x - b.x);
+  if (!slots.length || e.totalFrames < 60) throw Error('Needs adjustment: no readable upper title slot');
+  return { version: 1, style: 'block-title-v1', text, wordIds: words.map(w => w.id), from: 0,
+    frames: Math.min(120, e.totalFrames, Math.max(60, Math.ceil(words.at(-1)!.end * 30))), bounds: slots[0] };
+}
+export function studioTitledPlan(plan: StudioApprovedPlan, title: any): StudioApprovedPlan {
+  return { ...plan, manifest: { ...plan.manifest, schemaVersion: 2,
+    project: { ...plan.manifest.project, schemaVersion: 2, profile: 'talking-head-v2', title } } };
+}
+// Existing candidates are immutable custody. A partial/failed probe is retained
+// for verification; recovery never reselects a title or recreates its receipt.
+export async function freezeStudioTitle(config: StudioRuntime, dir: string, identity: unknown, font: { path: string; sha256: string }, build: () => StudioApprovedPlan) {
+  const candidate = join(dir, 'title-candidate'), binding = studioFingerprint(identity);
+  let fresh = false;
+  const intent = join(dir, 'title-candidate-intent.json');
+  try { await writeFile(intent, JSON.stringify({ binding }), { flag: 'wx', mode: 0o600 }); fresh = true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    if ((await studioJson(intent)).binding !== binding) throw Error('Frozen Studio title changed; verification required');
+  }
+  if (fresh) await mkdir(candidate, { mode: 0o700 });
+  let plan: StudioApprovedPlan;
+  if (fresh) {
+    plan = build(); await mkdir(join(candidate, 'public'));
+    const path = join(candidate, 'public/font.ttf'); await copyFile(font.path, path, 1);
+    if (await studioHashFile(path) !== font.sha256) throw Error('Title font changed while staging');
+    plan.manifest.inputs.font = { path, sha256: font.sha256 };
+    await writeFile(join(candidate, 'project.json'), JSON.stringify(plan.manifest.project), { flag: 'wx', mode: 0o600 });
+    await writeFile(join(candidate, 'binding.json'), JSON.stringify({ binding, plan }), { flag: 'wx', mode: 0o600 });
+    await studioCommand(config, 'title-preflight', [candidate, '--runtime', config.file]);
+  } else {
+    const saved = await studioJson(join(candidate, 'binding.json'));
+    plan = saved.plan;
+    if (saved.binding !== binding || studioFingerprint(await studioJson(join(candidate, 'project.json'))) !== studioFingerprint(plan.manifest.project) ||
+        plan.manifest.inputs.font.sha256 !== font.sha256 || await studioHashFile(join(candidate, 'public/font.ttf')) !== font.sha256) throw Error('Frozen Studio title changed; verification required');
+  }
+  await studioCommand(config, 'title-preflight-check', [candidate, '--runtime', config.file]);
+  return { candidate, plan };
+}
+export async function checkStudioTitleFinal(config: StudioRuntime, candidate: string, plan: StudioApprovedPlan) {
+  const file = join(candidate, 'final-project.json');
+  try { await writeFile(file, JSON.stringify(plan.manifest.project), { flag: 'wx', mode: 0o600 }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || studioFingerprint(await studioJson(file)) !== studioFingerprint(plan.manifest.project)) throw Error('Studio final title project changed during recovery');
+  }
+  await studioCommand(config, 'title-preflight-check', [candidate, '--runtime', config.file, '--project', file]);
+}

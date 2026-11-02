@@ -62,7 +62,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
     if (busy) return; setBusy(true); setError('');
     try {
       const body = recover ? pendingRequest : { requestKey: crypto.randomUUID(), sourceMediaId: source.id, brollMediaIds: visuals,
-        destinations: targets, profile: 'easy-graphics-v1', creative: { brief, framing: { ...framing, confirmed: true, stationary: true, singleSpeaker: true } } };
+        destinations: targets, profile: !visuals.length && availability?.sourceOnlyProfile === 'talking-head-v2' ? 'talking-head-v2' : 'easy-graphics-v1', creative: { brief, framing: { ...framing, confirmed: true, stationary: true, singleSpeaker: true } } };
       // Persist identity before dispatch; uncertain response retries the same body.
       localStorage.setItem(receiptKey, JSON.stringify(body)); setPendingRequest(body);
       const r = await fetch('/media/studio/jobs', { method: 'POST', body: JSON.stringify(body) });
