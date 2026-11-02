@@ -38,8 +38,8 @@ export async function studioRuntime(org: string, profile: string = 'easy-graphic
 // Bounded offline child process group. No inherited provider credentials, shell,
 // arbitrary command or browser service. The deployed worker still needs its own
 // memory/disk/network container limits; this supervisor is not a sandbox.
-export async function studioCommand(config: StudioRuntime, kind: 'prepare' | 'validate' | 'render' | 'qa' | 'bindings', args: string[]): Promise<string> {
-  if (!['prepare', 'validate', 'render', 'qa', 'bindings'].includes(kind)) throw new Error('Unknown Studio command');
+export async function studioCommand(config: StudioRuntime, kind: 'prepare' | 'validate' | 'render' | 'qa' | 'bindings' | 'capabilities' | 'title-preflight' | 'title-preflight-check', args: string[]): Promise<string> {
+  if (!['prepare', 'validate', 'render', 'qa', 'bindings', 'capabilities', 'title-preflight', 'title-preflight-check'].includes(kind)) throw new Error('Unknown Studio command');
   if (process.platform !== 'linux') throw new Error('Studio app worker requires Linux acceptance');
   const python = kind === 'prepare' || kind === 'qa';
   const script = kind === 'prepare' ? 'prepare.py' : kind === 'qa' ? 'qa.py' : kind === 'bindings' ? 'receipt-bindings.mjs' : 'run.mjs';
