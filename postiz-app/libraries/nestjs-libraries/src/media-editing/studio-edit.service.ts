@@ -25,18 +25,28 @@ export class StudioEditService {
     if (!isStudioProfile(profile)) throw new Error('Unknown persisted Studio profile');
     return studioRuntime(org, profile);
   }
-  private assertProducerProfile(row: any) {
-    if (row.input?.request?.profile !== 'easy-graphics-v1') throw new ServiceUnavailableException('Studio V2 production is unavailable');
+  private async assertProducerProfile(org: string, row: any) {
+    if (row.input?.request?.profile === 'easy-graphics-v1') return;
+    if (process.env.STUDIO_EDITOR_V2_ENABLED !== 'true' || !this.director) throw new ServiceUnavailableException('Studio V2 production is unavailable');
+    await this.director.v2Ready(await this.runtime(org, row));
   }
   async availability(org: string) {
-    try { await studioRuntime(org); return { enabled: true, scope: 'stationary-single-speaker-portrait-cfr30-v1' }; }
+    try {
+      await studioRuntime(org);
+      let sourceOnlyProfile: 'talking-head-v2' | undefined;
+      if (process.env.STUDIO_EDITOR_V2_ENABLED === 'true' && this.director) {
+        try { await this.director.v2Ready(await studioRuntime(org, 'talking-head-v2')); sourceOnlyProfile = 'talking-head-v2'; } catch {}
+      }
+      return { enabled: true, scope: 'stationary-single-speaker-portrait-cfr30-v1', ...(sourceOnlyProfile ? { sourceOnlyProfile } : {}) };
+    }
     catch { return { enabled: false }; }
   }
   async create(org: string, body: StudioEditRequest) {
     const request = normalizeStudioRequest(body);
-    if (request.profile !== 'easy-graphics-v1') throw new ServiceUnavailableException('Studio V2 creation is unavailable');
+    if (request.profile === 'talking-head-v2' && process.env.STUDIO_EDITOR_V2_ENABLED !== 'true') throw new ServiceUnavailableException('Studio V2 creation is unavailable');
     await studioRuntime(org, request.profile);
     if (!request.creative || !this.cooked || !this.director) throw new BadRequestException('Studio requires a brief and confirmed stationary speaker framing');
+    await this.assertProducerProfile(org, { input: { request } });
     let row = await this.jobs.admit(org, request); await this.assertOwned(org, row);
     if (row.state === 'ADMITTED') {
       row = await this.jobs.claim(org, row.id, row.generation);
@@ -47,7 +57,7 @@ export class StudioEditService {
   }
   async resume(org: string, job: string) {
     const row = await this.jobs.get(org, job); await this.assertOwned(org, row); const config = await this.runtime(org, row);
-    this.assertProducerProfile(row);
+    await this.assertProducerProfile(org, row);
     if (row.state !== 'RUNNING' || !(row.input as any).request.creative) throw new ConflictException('This Studio edit cannot be resumed');
     if (!this.running.has(org + ':' + row.id)) {
       const dir = studioDirectory(config, row); await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -65,7 +75,7 @@ export class StudioEditService {
     this.running.set(key, operation);
   }
   private async produce(org: string, row: any) {
-    this.assertProducerProfile(row);
+    await this.assertProducerProfile(org, row);
     if (!this.cooked || !this.director) throw new ServiceUnavailableException('Studio producer is unavailable');
     const config = await this.runtime(org, row), dir = studioDirectory(config, row);
     await mkdir(dir, { recursive: true, mode: 0o700 }); await this.assertOwned(org, row);

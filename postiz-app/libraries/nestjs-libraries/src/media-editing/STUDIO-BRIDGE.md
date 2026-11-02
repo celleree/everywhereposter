@@ -34,10 +34,12 @@ V1 keeps those exact package/runtime slots. Trusted internal `talking-head-v2`
 jobs use additive `STUDIO_EDITOR_V2_PACKAGE_ROOT` and `STUDIO_EDITOR_V2_RUNTIME`
 with the same private work root; missing/unknown profiles never fall back. Every
 recovery/verification selects the persisted request profile and checks saved worker
-paths against that trusted slot. Public V2 creation is explicitly disabled before
-admission/native/model work; V2 creative production/resume is also blocked until
-producer adoption. Internal authored-plan rendering/verification remains available.
-Availability continues to describe V1 only.
+paths against that trusted slot. V2 creation/resume/production additionally require the default-off
+`STUDIO_EDITOR_V2_ENABLED=true` gate. Before native/text dispatch, its exact profile,
+caption/title-preflight capabilities and explicitly staged licensed font must be
+ready. V1 availability is preserved; `sourceOnlyProfile:talking-head-v2` is added
+only when that V2 readiness passes. New zero-support UI requests may use this
+advertisement; retained requests replay their exact existing body and storage key.
 No configuration is changed by this code. Package render-cache requires its
 existing writable runtime cache arrangement; production packaging is not proven.
 
@@ -102,3 +104,16 @@ tracks. The package performs full validation. Prepare/render/QA receipt envelope
 remain schemaVersion 1 for both profiles, bound to the expected job profile.
 A title is optional forever when reading retained V2 artifacts. V1 identities,
 receipts and recovery are preserved without rewriting or upgrading artifacts.
+
+The V2 producer requires an unchanged full-source word/cut/audio snapshot. Its title
+is the first complete opening sentence (3-9 words, <=60 characters), preserving
+negation/qualifiers and common honorific/initial punctuation. Presentation starts
+at frame 0 for 60-120 frames within the source; this hold makes no semantic claim.
+An upper common safe-zone slot excludes the confirmed padded speaker. Fixed 96px
+title/76px captions and two-line fit are measured by the package before payment.
+The immutable private candidate binds input/evidence/assets/font/geometry before
+the existing single metered direction request. Recovery checks that candidate;
+partial, changed or stale preflight/runtime/font evidence needs verification.
+Final compiled layout is checked by the package against the frozen projection.
+V2 never uses V1 caption-reconstruction replay alternatives. This code changes no
+configuration and does not authorize activation or replace joined acceptance.
