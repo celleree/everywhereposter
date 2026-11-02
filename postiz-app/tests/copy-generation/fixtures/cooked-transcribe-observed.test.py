@@ -340,7 +340,7 @@ class ExtractionEvidence(unittest.TestCase):
             "assert r.returncode==0 and t.bad and len(t.inputs)==0",
             "assert t.finish({})['state']=='unknown'"]
         driver.write_text(chr(10).join(lines))
-        result = subprocess.run([sys.executable, "-I", str(driver), str(MEDIA / "cooked-transcribe-observed.py")],
+        result = subprocess.run([sys.executable, "-I", "-B", str(driver), str(MEDIA / "cooked-transcribe-observed.py")],
                                 capture_output=True, timeout=10)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"", b"sentinel" + bytes([10])))
         trace = O.ExtractionTrace(self.source, self.root / "unused.wav")
