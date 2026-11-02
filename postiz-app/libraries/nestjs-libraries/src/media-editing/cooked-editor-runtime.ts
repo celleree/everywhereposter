@@ -121,7 +121,8 @@ async function validateObservation(workspace: string, sourceSha256: string) {
         !(receipt.extraction.toolVersion === null || text(receipt.extraction.toolVersion)) ||
         !(unknown(wav) || (wav?.state === 'observed' && sha(wav.sha256) && wav.compression === 'NONE' && unknown(wav.origin) &&
           ['sampleRate', 'channels', 'sampleWidthBytes', 'sampleCount'].every(key => Number.isSafeInteger(wav[key]) && wav[key] >= (key === 'sampleCount' ? 0 : 1))))) throw new Error('SHAPE');
-    const v2 = receipt.version === 'alignment-observation-v2', decoders = receipt.decoderArray;
+    const v3 = receipt.version === 'alignment-observation-v3';
+    const v2 = v3 || receipt.version === 'alignment-observation-v2', decoders = receipt.decoderArray;
     let pcmBytes = 0;
     const observedDecoders = v2 && observedOptions && decoders?.state === 'observed' &&
       decoders.basis === 'pre-SDK-VAD-decode-output' && Array.isArray(decoders.calls) &&
@@ -139,6 +140,37 @@ async function validateObservation(workspace: string, sourceSha256: string) {
           d.byteCount <= 16000 * 240 * 4 && pcmBytes <= 64 * MiB && sha(d.bufferSha256) &&
           unknown(d.origin) && unknown(d.resamplingMap);
       });
+    if (v3) {
+      const e = receipt.extraction.evidence;
+      const integer = (v: any) => Number.isSafeInteger(v);
+      const resampler = (v: any) => unknown(v) || (v && ['input', 'output'].every(side =>
+        integer(v[side + 'Rate']) && v[side + 'Rate'] > 0 && v[side + 'Rate'] <= 192000 &&
+        integer(v[side + 'Channels']) && v[side + 'Channels'] > 0 && v[side + 'Channels'] <= 32 &&
+        typeof v[side + 'Format'] === 'string' && /^[a-z0-9_]{1,16}$/.test(v[side + 'Format'])));
+      const command = ['ffmpeg', '-v', 'error', '-y', '-i', 'source', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', 'extractedWav'];
+      if (!unknown(e)) {
+        if (e?.state !== 'observed' || !text(e.toolVersion) || /[\/]/.test(e.toolVersion) || 'ffmpeg version ' + e.toolVersion !== receipt.extraction.toolVersion ||
+            e.commandSha256 !== createHash('sha256').update(JSON.stringify(command)).digest('hex') ||
+            !integer(e.streamIndex) || !observedAudio || !audio.candidates.some((c: any) => c.index === e.streamIndex) ||
+            JSON.stringify(e.encoderTimeBase) !== '[1,16000]' || e.packetBasis !== 'encoded-PCM-at-WAV-muxer' ||
+            !['encoderFirstPTS', 'encoderLastFence', 'encoderSamples', 'encoderPackets'].every(k => integer(e[k])) ||
+            e.encoderSamples <= 0 || e.encoderSamples > 240 * 16000 || e.encoderPackets <= 0 || e.encoderPackets > 8192 ||
+            e.encoderLastFence !== e.encoderFirstPTS + e.encoderSamples || wav?.state !== 'observed' ||
+            e.encoderSamples !== wav.sampleCount || wav.sampleRate !== 16000 || wav.channels !== 1 || wav.sampleWidthBytes !== 2 ||
+            e.timestampOffsetBasis !== 'ffmpeg-debug-off-uninterpreted' || !Array.isArray(e.timestampOffsets) || !e.timestampOffsets.length ||
+            e.timestampOffsets.length > 32 || !e.timestampOffsets.every(integer) ||
+            new Set(e.timestampOffsets).size !== e.timestampOffsets.length || !resampler(e.resampler)) throw new Error('EXTRACTION');
+        const p = e.pcmIdentity;
+        if (!unknown(p) && !(p?.state === 'observed' && p.basis === 'contiguous-identical-PCM' && sha(p.pcmSha256) &&
+            p.sourceFirstFence === 0 && p.wavFirstFence === 0 && p.sourceLastFence === e.encoderSamples && p.wavLastFence === e.encoderSamples &&
+            p.origin?.numerator === 0 && p.origin?.denominator === 1 && p.origin?.basis === 'source-packets-and-extraction-encoder-PTS' &&
+            audio.candidates.length === 1 && audio.selectedStream.index === e.streamIndex &&
+            audio.selectedStream.codec_name === 'pcm_s16le' && audio.selectedStream.sample_rate === '16000' &&
+            audio.selectedStream.channels === 1 && audio.selectedStream.start_pts === 0 && audio.selectedStream.time_base === '1/16000' &&
+            origin?.numerator === 0 && e.encoderFirstPTS === 0 && JSON.stringify(e.timestampOffsets) === '[0]' && unknown(e.resampler) &&
+            wav.sampleRate === 16000 && wav.channels === 1 && wav.sampleWidthBytes === 2)) throw new Error('PCM_IDENTITY');
+      }
+    }
     if (!(v2 ? (unknown(loaded) ? unknown(decoders) : observedDecoders) : unknown(decoders))) throw new Error('DECODER');
     if ((!v2 && receipt.version !== 'alignment-observation-v1') || receipt.status !== 'INCOMPLETE' ||
         receipt.sourceSha256 !== sourceSha256 || receipt.sourceAfterSha256 !== sourceSha256 ||
