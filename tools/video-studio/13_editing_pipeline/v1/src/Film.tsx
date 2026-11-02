@@ -1,3 +1,5 @@
+import {Title} from './Title';
+import {titleForCaption} from '../title-layout.mjs';
 import {EasyGraphics} from './EasyGraphics';
 import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {AbsoluteFill,Audio,Img,OffthreadVideo,Sequence,cancelRender,continueRender,delayRender,getRemotionEnvironment,staticFile,useCurrentFrame,useVideoConfig} from 'remotion';
@@ -46,11 +48,13 @@ export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean}>
  if(!['easy-graphics-v1','talking-head-v2'].includes(p.profile))throw Error('This package renders accessible profiles only; historical effects require their original runtime');
  const rendering=getRemotionEnvironment().isRendering,isPreview=preview&&!rendering,source=assets.get(p.source.assetId);let cursor=0;
  if(rendering&&!hideGraphics)assertSafeZoneRender(safeZones);
- const caption=p.captions.find((c:any,i:number)=>{const [from,end]=captionRanges[i];return frame>=from&&frame<end;});
+ const captionIndex=p.captions.findIndex((c:any,i:number)=>{const [from,end]=captionRanges[i];return frame>=from&&frame<end;});
+ const caption=captionIndex<0?null:p.captions[captionIndex];
  const broll=p.broll.find((b:any)=>frame>=b.from&&frame<b.from+b.frames);
  const wordTexts=caption?.wordIds.map((id:string)=>words.get(id).text);
  const faceAvoid=caption&&!broll?p.speaker.faces.filter((f:any)=>f.t>=words.get(caption.wordIds[0]).start-.5&&f.t<=words.get(caption.wordIds.at(-1)).end+.5).map((f:any)=>({x:f.x-20,y:f.y-20,width:f.width+40,height:f.height+40})):[];
- const avoid=[...faceAvoid,...p.effects.filter((e:any)=>frame>=e.from&&frame<e.from+e.frames).map((e:any)=>e.bounds)];
+ const titleObstacle=caption&&titleForCaption(p.profile==='talking-head-v2'?p.title:null,captionRanges[captionIndex]);
+ const avoid=[...faceAvoid,...(titleObstacle?[titleObstacle]:[]),...p.effects.filter((e:any)=>frame>=e.from&&frame<e.from+e.frames).map((e:any)=>e.bounds)];
  const aware=safeZones.status!=='UNASSESSED';
  if(!aware)throw Error('Accessible profile requires selected safe-zone targets');
  return <AbsoluteFill style={{background:'#101714',fontFamily:'EP Plex',fontWeight:700,color:'#fff'}}><Font/>
@@ -58,6 +62,7 @@ export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean}>
   {!hideGraphics&&p.broll.map((b:any)=>{const a=assets.get(b.assetId);return <Sequence key={b.id} from={b.from} durationInFrames={b.frames}>{a.kind==='video'?<OffthreadVideo muted src={media(a,isPreview)} startFrom={Math.round(b.sourceStart*fps)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>:<Img src={media(a,isPreview)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>}</Sequence>;})}
   <Audio src={staticFile('speech.wav')}/>
   {!hideGraphics&&<div style={{position:'absolute',width:1080,height:1920,transform:`scale(${width/1080},${height/1920})`,transformOrigin:'0 0'}}>
+   {p.profile==='talking-head-v2'&&p.title&&<Sequence from={p.title.from} durationInFrames={p.title.frames}><Title key={JSON.stringify(p.title)} title={p.title}/></Sequence>}
    {p.effects.map((e:any)=><Sequence key={e.id} from={e.from} durationInFrames={e.frames}><Effect key={JSON.stringify([e,safeZones.cells])} event={e} assets={assets} cells={safeZones.cells}/></Sequence>)}
    {caption&&(aware?<SafeCaption key={JSON.stringify([caption.wordIds,wordTexts,safeZones.profiles.map((x:any)=>x.id),avoid])} wordTexts={wordTexts} wordIds={caption.wordIds} cells={safeZones.cells} avoid={avoid} background={broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}/>:<div data-caption={caption.wordIds.join(',')} style={{position:'absolute',left:80,top:1500,width:920,minHeight:180,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',fontSize:76,lineHeight:1.12,letterSpacing:'-.025em',textShadow:'0 3px 12px #000,0 1px 3px #000',WebkitTextStroke:'1px #000',paintOrder:'stroke fill',padding:'12px 18px',boxSizing:'border-box',borderRadius:20,background:broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}}>{wordTexts.join(' ')}</div>)}
   </div>}
