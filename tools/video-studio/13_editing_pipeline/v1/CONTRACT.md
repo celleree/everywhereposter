@@ -6,10 +6,10 @@ and manifest schema 2 / project schema 2 / `talking-head-v2`. Mixed or unknown
 tuples are rejected. V2 requires one source video asset, a single full-source cut,
 30 fps, empty broll/effects and no titles field. An absent title remains valid.
 An optional V2 title is {version:1,text,wordIds,from,frames,bounds,style:'block-title-v1'}.
-It must match 39 contiguous transcript words joined by spaces, at most 60 characters;
-from and frames are output frames, with duration 60120 within the output. Bounds
+It must match 3-9 contiguous transcript words joined by spaces, at most 60 characters;
+from and frames are output frames, with duration 60-120 within the output. Bounds
 use 1080x1920 design coordinates, lie inside selected safe cells, start no lower
-than y=768, and avoid observed faces padded by 20 pixels during the title interval.
+than y=768, and avoid all observed stationary-speaker faces padded by 20 pixels.
 The opaque #101714 block uses white 96px EP Plex, no more than two measured lines;
 unfittable text fails rather than shrinking or dropping words. Caption phrases reserve
 the title box throughout their effective range when they overlap its interval.

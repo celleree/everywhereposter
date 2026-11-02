@@ -6,13 +6,13 @@ const polygon=b=>[[b.x/1080,b.y/1920],[(b.x+b.width)/1080,b.y/1920],[(b.x+b.widt
 export const TITLE_STYLE=Object.freeze({font:'700 96px "EP Plex"',fontSize:96,lineHeight:110,padding:24});
 export function validateTitle(title,p,frames,cells){
  if(!title||typeof title!=='object'||Array.isArray(title)||Object.keys(title).sort().join(',')!=='bounds,frames,from,style,text,version,wordIds'||title.version!==1||title.style!=='block-title-v1')throw Error('Invalid title contract');
- if(!Array.isArray(title.wordIds)||title.wordIds.length<3||title.wordIds.length>9)throw Error('Title needs 3ºw^~)Þw9 contiguous source words');
+ if(!Array.isArray(title.wordIds)||title.wordIds.length<3||title.wordIds.length>9)throw Error('Title needs 3-9 contiguous source words');
  const start=p.words.findIndex(w=>w.id===title.wordIds[0]),slice=p.words.slice(start,start+title.wordIds.length);
  if(start<0||JSON.stringify(slice.map(w=>w.id))!==JSON.stringify(title.wordIds)||title.text!==slice.map(w=>w.text).join(' ')||title.text.length>60)throw Error('Title text must exactly match contiguous source words');
  if(!Number.isInteger(title.from)||!Number.isInteger(title.frames)||title.from<0||title.frames<60||title.frames>120||title.from+title.frames>frames)throw Error('Invalid title interval');
  const b=title.bounds;
  if(!b||Object.keys(b).sort().join(',')!=='height,width,x,y'||!['x','y','width','height'].every(k=>finite(b[k]))||b.x<0||b.y<0||b.y>768||b.width<180||b.height<120||b.width>1080||b.height>600||b.x+b.width>1080||b.y+b.height>1920||!cells.length||!checkContentBounds(polygon(b),cells).valid)throw Error('Unsafe title bounds');
- if(p.speaker.faces.some(f=>f.t*p.canvas.fps>=title.from&&f.t*p.canvas.fps<title.from+title.frames&&overlap(b,{x:f.x-20,y:f.y-20,width:f.width+40,height:f.height+40})))throw Error('Title intersects observed face');
+ if(p.speaker.faces.some(f=>overlap(b,{x:f.x-20,y:f.y-20,width:f.width+40,height:f.height+40})))throw Error('Title intersects observed face');
  return title;
 }
 export function titleForCaption(title,range){
