@@ -14,7 +14,7 @@ const destinations = ['instagram', 'facebook', 'threads', 'tiktok', 'youtube', '
 export function normalizeStudioRequest(body: StudioEditRequest): StudioEditRequest {
   if (!body || Object.keys(body).some(k => !['brollMediaIds', 'destinations', 'profile', 'requestKey', 'sourceMediaId', 'creative'].includes(k)) ||
       typeof body.requestKey !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(body.requestKey) || !id(body.sourceMediaId) || body.profile !== 'easy-graphics-v1' ||
-      !Array.isArray(body.brollMediaIds) || body.brollMediaIds.length < 1 || body.brollMediaIds.length > 8 ||
+      !Array.isArray(body.brollMediaIds) || body.brollMediaIds.length > 8 ||
       body.brollMediaIds.some(asset => !id(asset) || asset === body.sourceMediaId) ||
       new Set(body.brollMediaIds).size !== body.brollMediaIds.length || !Array.isArray(body.destinations) ||
       !body.destinations.length || body.destinations.length > 10 || body.destinations.some(value => !destinations.includes(value)) ||

@@ -51,6 +51,22 @@ it('never accepts model timestamps, coordinates, invented assets or unsupported 
     const f = fixture(); change(f.direction); assert.throws(() => compileStudioPlan(f.job, f.raw, f.assets, f.framing, ['linkedin-organic-v1'], f.bounds, f.direction, f.refs));
   }
 });
+it('compiles a captioned source-only plan without evaluating optional graphic geometry', () => {
+  const f = fixture();
+  const direction = { summary: 'Preserve the source with captions', effects: [], broll: [] };
+  const plan = compileStudioPlan(f.job, f.raw, f.assets.slice(0, 1), f.framing, ['linkedin-organic-v1'],
+    () => { throw Error('No graphic space'); }, direction, f.refs);
+  const p = plan.manifest.project;
+  assert.deepEqual(p.effects, []); assert.deepEqual(p.broll, []);
+  assert.equal(p.assets.length, 1);
+  assert.deepEqual(p.captions.flatMap((c: any) => c.wordIds), p.words.map((w: any) => w.id));
+  assert.deepEqual(p.cuts, [{ in: 0, out: 60, reason: 'Verified Cooked source-frame timeline' },
+    { in: 90, out: 180, reason: 'Verified Cooked source-frame timeline' }]);
+  assert.deepEqual(plan.manifest.inputs.audio.sha256, f.refs.audio.sha256);
+  assert.throws(() => compileStudioPlan(f.job, f.raw, f.assets.slice(0, 1), f.framing,
+    ['linkedin-organic-v1'], f.bounds, { ...direction, broll: f.direction.broll }, f.refs));
+});
+
 it('rejects moving/multiple speaker claims, source drift and unfittable framing without inventing geometry', () => {
   const f = fixture();
   assert.throws(() => compileStudioPlan(f.job, f.raw, f.assets, { ...f.framing, stationary: false } as any, ['linkedin-organic-v1'], f.bounds, f.direction, f.refs));
@@ -144,6 +160,27 @@ it.each(['legacy', 'legacy-policy', 'grouped', 'direction', 'timing', 'groups', 
   }, { run: async (_org: string, key: string, fingerprint: string, _request: any, _allowed: boolean, invoke: any) => {
     if (cached.has(key)) { assert.equal(fingerprint, cached.get(key).fingerprint); return cached.get(key).value; }
     calls++; const value = await invoke({}); cached.set(key, { fingerprint, value }); return value;
+  } });
+  assert.equal(calls, 1);
+});
+
+it('meters source-only direction once and replays the same private plan', async () => {
+  const seen = new Map<string, any>(); let calls = 0;
+  await withProducer(async (f, service, dir, c) => {
+    f.assets.splice(1); f.job.input.request.brollMediaIds = [];
+    f.direction.effects = []; f.direction.broll = [];
+    f.rectangles.splice(0); // Graphic placement is unnecessary for this response.
+    const first = await service.produce(c, f.job, f.raw, f.assets, dir);
+    assert.equal(first.manifest.project.assets.length, 1);
+    assert.deepEqual(first.manifest.project.effects, []);
+    assert.deepEqual(first.manifest.project.broll, []);
+    assert.deepEqual(await service.produce(c, f.job, f.raw, f.assets, dir), first);
+  }, { run: async (_org: string, key: string, fingerprint: string, request: any, allowed: boolean, invoke: any) => {
+    assert.equal(allowed, true);
+    assert.match(request.messages[0].content, /Both arrays may be empty/);
+    assert.deepEqual(JSON.parse(request.messages[1].content).visuals, []);
+    if (seen.has(key)) { assert.equal(seen.get(key).fingerprint, fingerprint); return seen.get(key).value; }
+    calls++; const value = await invoke({}); seen.set(key, { fingerprint, value }); return value;
   } });
   assert.equal(calls, 1);
 });
