@@ -9,7 +9,7 @@ const frontendPort = Number(process.env.BROWSER_FRONTEND_PORT || 4217);
 const apiPort = Number(process.env.BROWSER_API_PORT || 4218);
 if (![frontendPort, apiPort].every(port => Number.isInteger(port) && port > 1024 && port < 65536) || frontendPort === apiPort) throw new Error('Invalid owned fixture ports');
 const origin = `http://127.0.0.1:${frontendPort}`;
-if (['EP_FACEBOOK_BROWSER', 'EP_DISCOVERY_BROWSER', 'EP_VIDEO_EDITOR_BROWSER', 'EP_COOKED_BROWSER', 'EP_WALLET_BROWSER'].filter(key => process.env[key] === '1').length > 1) throw new Error('Select only one isolated browser fixture mode per process');
+if (['EP_FACEBOOK_BROWSER', 'EP_DISCOVERY_BROWSER', 'EP_VIDEO_EDITOR_BROWSER', 'EP_COOKED_BROWSER', 'EP_WALLET_BROWSER', 'EP_STUDIO_BROWSER'].filter(key => process.env[key] === '1').length > 1) throw new Error('Select only one isolated browser fixture mode per process');
 const walletMode = process.env.EP_WALLET_BROWSER === '1';
 const facebook = process.env.EP_FACEBOOK_BROWSER === '1' ? require('./facebook-runtime.cjs')() : undefined;
 const branding = path.join(root, 'apps/frontend/public/branding');
@@ -24,8 +24,9 @@ for (const dir of [root, path.dirname(root), path.join(root, 'apps/frontend')]) 
 }
 const discovery = process.env.EP_DISCOVERY_BROWSER === '1' ? require('./discovery-runtime.cjs')() : undefined;
 const videoEditor = process.env.EP_VIDEO_EDITOR_BROWSER === '1' || process.env.EP_COOKED_BROWSER === '1' ? require('./video-editor-runtime.cjs')({ cooked: process.env.EP_COOKED_BROWSER === '1' }) : undefined;
-const token = videoEditor?.token || 'synthetic-playwright-session';
-const user = { id: 'synthetic-user', orgId: 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: walletMode ? 'LAUNCH_V1' : 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
+const studio = process.env.EP_STUDIO_BROWSER === '1' ? require('./studio-browser-runtime.cjs')() : undefined;
+const token = studio?.token || videoEditor?.token || 'synthetic-playwright-session';
+const user = { id: studio?.user.id || 'synthetic-user', orgId: studio?.user.orgId || 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: walletMode ? 'LAUNCH_V1' : 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
 const posts = Array.from({ length: 18 }, (_, index) => ({ id: `synthetic-post-${index}`, group: `synthetic-group-${index}`, state: 'QUEUE', content: `Synthetic scheduled post ${index + 1}: a long caption for responsive scrolling and reachability checks.`, publishDate: '2035-01-01T18:00:00.000Z', tags: [], intervalInDays: null, integration: { id: 'synthetic-channel', name: 'Synthetic channel', providerIdentifier: 'x', picture: '/icons/platforms/x.png' } }));
 const values = {
   '/user/self': user,
@@ -71,6 +72,7 @@ let stopping = false;
 let createdBranding = false;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${apiPort}`);
+  if (studio && await studio.handle(req, res, url)) return;
   if (discovery && await discovery.handle(req, res, url, token)) return;
   if (videoEditor && await videoEditor.handle(req, res, url, token)) return;
   if (facebook) {
@@ -108,6 +110,7 @@ function startFrontend() {
     BACKEND_INTERNAL_URL: `http://127.0.0.1:${apiPort}`, NEXT_PUBLIC_BACKEND_URL: '/backend-api',
     DISABLE_REGISTRATION: 'true', STORAGE_PROVIDER: 'local',
     NEXT_PUBLIC_GUIDED_COMPOSER_SHELL: 'true',
+    UPLOAD_DIRECTORY: studio ? process.env.UPLOAD_DIRECTORY : undefined,
     NEXT_FONT_GOOGLE_MOCKED_RESPONSES: path.join(__dirname, 'fonts.cjs'),
     NODE_OPTIONS: '--require=' + path.join(__dirname, 'network-guard.cjs'),
   };
@@ -127,8 +130,9 @@ function startFrontend() {
   frontend.on('exit', code => { stopping = true; cleanupEditor(); cleanupBranding(); server.close(); process.exitCode = process.exitCode || code || 0; });
 }
 async function warmRoutes() {
+  await studio?.ready;
   const deadline = Date.now() + 330_000;
-  for (const route of (process.env.EP_TRANSFER_BROWSER === '1' ? ['/auth/login', '/create'] : walletMode ? ['/auth/login', '/billing'] : discovery ? ['/auth/login', '/analytics'] : videoEditor ? ['/auth/login', '/video-editor', '/create'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
+  for (const route of (process.env.EP_TRANSFER_BROWSER === '1' ? ['/auth/login', '/create'] : walletMode ? ['/auth/login', '/billing'] : discovery ? ['/auth/login', '/analytics'] : videoEditor || studio ? ['/auth/login', '/video-editor', '/create'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
     let loaded = false;
     while (!stopping && !loaded && Date.now() < deadline) {
       try {
@@ -155,7 +159,7 @@ function cleanupBranding() {
   }
 }
 let editorCleaned = false;
-function cleanupEditor() { if (videoEditor && !editorCleaned) { try { videoEditor.cleanup(); editorCleaned = true; } catch (error) { console.error(error.message); } } }
+function cleanupEditor() { studio?.cleanup(); if (videoEditor && !editorCleaned) { try { videoEditor.cleanup(); editorCleaned = true; } catch (error) { console.error(error.message); } } }
 function stop() { cleanupEditor(); stopping = true; ready = false; if (reservation.listening) reservation.close(); frontend?.kill('SIGTERM'); cleanupBranding(); server.close(); }
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
