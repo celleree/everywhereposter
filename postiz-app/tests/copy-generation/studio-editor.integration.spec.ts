@@ -10,6 +10,7 @@ import { studioOutputKey } from '../../libraries/nestjs-libraries/src/upload/upl
 const request = () => ({ requestKey: randomUUID(), sourceMediaId: 'source', brollMediaIds: ['broll'], destinations: ['threads'], profile: 'easy-graphics-v1' as const });
 it.each([
   { brollMediaIds: ['broll', 'broll'] }, { sourceMediaId: '../source' }, { brollMediaIds: ['source'] },
+  { brollMediaIds: Array.from({ length: 9 }, (_, i) => 'visual-' + i) }, { brollMediaIds: undefined },
   { destinations: [] }, { destinations: ['unknown'] }, { profile: 'arbitrary-code' }, { command: 'render' },
 ])('rejects unsupported or unbounded Studio input %j', change => {
   expect(() => normalizeStudioRequest({ ...request(), ...change } as any)).toThrow();
@@ -18,6 +19,13 @@ it('normalizes selected identifiers without modifying the caller', () => {
   const input = { ...request(), brollMediaIds: ['z', 'a'], destinations: ['threads', 'facebook'] };
   expect(normalizeStudioRequest(input).brollMediaIds).toEqual(['a', 'z']);
   expect(input.brollMediaIds).toEqual(['z', 'a']);
+});
+it('accepts an explicit empty supporting list without changing identity or other requirements', () => {
+  const input = { ...request(), brollMediaIds: [] };
+  const normalized = normalizeStudioRequest(input);
+  expect(normalized).toEqual(input);
+  expect(normalized.brollMediaIds).not.toBe(input.brollMediaIds);
+  expect(normalizeStudioRequest(normalized)).toEqual(normalized);
 });
 it('does not promote storage after an asset disappears during I/O', async () => {
   const store = jest.fn().mockResolvedValue({ key: 'staged' });
@@ -54,6 +62,18 @@ describeDatabase('Studio jobs on disposable PostgreSQL', () => {
     expect((rows[0].input as any).contentIdentity).toBe('UNVERIFIED_UNTIL_WORKER_HASHES_BYTES');
     await expect(jobs.admit(org, { ...input, destinations: ['facebook'] })).rejects.toBeInstanceOf(ConflictException);
     expect(await db.studioEditJob.count({ where: { organizationId: org } })).toBe(1);
+  });
+  it('admits and replays a source-only request once with only its owned source captured', async () => {
+    const sourceOnly = { ...input, brollMediaIds: [] };
+    const rows = await Promise.all([jobs.admit(org, sourceOnly), jobs.admit(org, sourceOnly)]);
+    expect(rows[0].id).toBe(rows[1].id);
+    expect((rows[0].input as any).request.brollMediaIds).toEqual([]);
+    expect((rows[0].input as any).media.map((m: any) => m.id)).toEqual([input.sourceMediaId]);
+    expect(await db.studioEditJob.count({ where: { organizationId: org } })).toBe(1);
+    await expect(jobs.admit(org, input)).rejects.toBeInstanceOf(ConflictException);
+    await expect(jobs.admit('another-org', { ...sourceOnly, requestKey: randomUUID() })).rejects.toBeInstanceOf(NotFoundException);
+    await db.media.update({ where: { id: input.sourceMediaId }, data: { deletedAt: new Date() } });
+    await expect(jobs.admit(org, { ...sourceOnly, requestKey: randomUUID() })).rejects.toBeInstanceOf(NotFoundException);
   });
   it('rejects cross-organization and soft-deleted B-roll before creating a job', async () => {
     const another = await db.organization.create({ data: { name: 'Different fixture' } });
