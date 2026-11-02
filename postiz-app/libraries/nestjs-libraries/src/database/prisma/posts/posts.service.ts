@@ -6,6 +6,7 @@ import {
 import { FacebookPublishedService } from './facebook-published.service';
 import { PublishingSubmissionService } from './publishing-submission.service';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
+import { PrismaService } from '../prisma.service';
 import { CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
 import dayjs from 'dayjs';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
@@ -91,6 +92,7 @@ export class PostsService {
     private _openaiService: OpenaiService,
     private _temporalService: TemporalService,
     private _refreshIntegrationService: RefreshIntegrationService,
+    private _prisma: PrismaService,
     private _submissions?: PublishingSubmissionService,
     private _facebookPublished?: FacebookPublishedService
   ) {}
@@ -1457,25 +1459,17 @@ export class PostsService {
       }
     }
 
+    if (body.type !== 'update') return this.saveLegacyPosts(orgId, body);
+
     const postList = [];
     for (const post of body.posts) {
-      const previousPost =
-        body.type === 'update'
-          ? await this.loadPublishedUpdateTarget(orgId, post.group)
-          : undefined;
-      const updateProvider = previousPost
-        ? this.getUpdateProvider(previousPost)
-        : undefined;
+      const previousPost = await this.loadPublishedUpdateTarget(orgId, post.group);
+      const updateProvider = this.getUpdateProvider(previousPost);
 
       const messages = (post.value || []).map((p) => p.content);
       const updateContent = !body.shortLink
         ? messages
         : await this._shortLinkService.convertTextToShortLinks(orgId, messages);
-
-      const shouldCreateFreshPostIds =
-        body.type !== 'update'
-          ? await this.shouldCreateFreshPostIds(orgId, post.group)
-          : false;
 
       const postPayload = {
         ...post,
@@ -1483,7 +1477,7 @@ export class PostsService {
           const { id, ...postValue } = p;
           return {
             ...postValue,
-            ...(shouldCreateFreshPostIds ? {} : id ? { id } : {}),
+            ...(id ? { id } : {}),
             content: updateContent[i],
           };
         }),
@@ -1492,7 +1486,7 @@ export class PostsService {
       const { posts } = await this._postRepository.createOrUpdatePost(
         body.type,
         orgId,
-        body.type === 'now' ? dayjs().format('YYYY-MM-DDTHH:mm:00') : body.date,
+        body.date,
         postPayload,
         body.tags,
         body.inter
@@ -1502,21 +1496,7 @@ export class PostsService {
         return [] as any[];
       }
 
-      if (body.type === 'update') {
-        await this.updatePublishedPost(
-          orgId,
-          previousPost!,
-          updateProvider!,
-          posts
-        );
-      } else {
-        this.startWorkflow(
-          postPayload.settings.__type.split('-')[0].toLowerCase(),
-          posts[0].id,
-          orgId,
-          posts[0].state
-        ).catch((err) => {});
-      }
+      await this.updatePublishedPost(orgId, previousPost, updateProvider, posts);
 
       Sentry.metrics.count('post_created', 1);
       postList.push({
@@ -1526,6 +1506,50 @@ export class PostsService {
     }
 
     return postList;
+  }
+
+  private async saveLegacyPosts(orgId: string, body: CreatePostDto) {
+    // Finish external preparation for every destination before writing any rows.
+    const prepared = [];
+    const date = body.type === 'now' ? dayjs().format('YYYY-MM-DDTHH:mm:00') : body.date;
+    for (const post of body.posts) {
+      const messages = post.value.map((value) => value.content);
+      const content = body.shortLink
+        ? await this._shortLinkService.convertTextToShortLinks(orgId, messages)
+        : messages;
+      const freshIds = await this.shouldCreateFreshPostIds(orgId, post.group);
+      prepared.push({
+        payload: {
+          ...post,
+          value: post.value.map(({ id, ...value }, index) => ({
+            ...value,
+            ...(!freshIds && id ? { id } : {}),
+            content: content[index],
+          })),
+        },
+        taskQueue: post.settings.__type.split('-')[0].toLowerCase(),
+      });
+    }
+
+    const saved = await this._prisma.$transaction(async (tx) => {
+      const destinations = [];
+      for (const { payload, taskQueue } of prepared) {
+        const { posts } = await this._postRepository.createOrUpdatePost(
+          body.type, orgId, date, payload, body.tags, body.inter, tx
+        );
+        if (!posts.length) throw new BadRequestException('A post must contain at least one message.');
+        destinations.push({ posts, taskQueue, integration: payload.integration.id });
+      }
+      return destinations;
+    }, { timeout: 15000 });
+
+    // Dispatch failure leaves committed QUEUE roots for the existing bounded
+    // missing-post recovery. Never repeat the database save to retry dispatch.
+    return saved.map(({ posts, taskQueue, integration }) => {
+      this.startWorkflow(taskQueue, posts[0].id, orgId, posts[0].state).catch(() => {});
+      Sentry.metrics.count('post_created', 1);
+      return { postId: posts[0].id, integration };
+    });
   }
 
   private async shouldCreateFreshPostIds(orgId: string, group?: string) {
