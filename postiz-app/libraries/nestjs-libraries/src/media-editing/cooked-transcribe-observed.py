@@ -196,10 +196,11 @@ class ExtractionTrace:
             if not match: self.bad = True
             elif self.bases and tuple(map(int, match.groups())) not in self.bases: self.bad = True
             else: self.bases.add(tuple(map(int, match.groups())))
-        if "encoder -> type:audio " in line:
-            match = re.search(r"pkt_pts:(-?\d+).*?duration:(\d+)", line)
+        if "muxer <- type:audio " in line:
+            match = re.search(r"pkt_pts:(-?\d+).*?duration:(\d+).*?size:(\d+)", line)
             if not match or len(self.outputs) >= 8192: self.bad = True
-            else: self.outputs.append(tuple(map(int, match.groups())))
+            elif int(match[3]) != int(match[2]) * 2: self.bad = True
+            else: self.outputs.append((int(match[1]), int(match[2])))
         if "auto_aresample" in line and " -> " in line:
             match = re.search(r"ch:(\d+) chl:\S+ fmt:(\w+) r:(\d+)Hz -> ch:(\d+) chl:\S+ fmt:(\w+) r:(\d+)Hz", line)
             if not match or self.resamplers: self.bad = True
@@ -250,11 +251,12 @@ class ExtractionTrace:
                 commandSha256=hashlib.sha256(json.dumps(self.expected[:5] + ["source"] + self.expected[6:-1] +
                     ["extractedWav"], separators=(",", ":")).encode()).hexdigest(),
                 encoderFirstPTS=self.outputs[0][0], encoderLastFence=cursor, encoderTimeBase=[1, 16000],
-                encoderSamples=cursor-self.outputs[0][0], encoderPackets=len(self.outputs),
+                encoderSamples=cursor-self.outputs[0][0], encoderPackets=len(self.outputs), packetBasis="encoded-PCM-at-WAV-muxer",
                 timestampOffsets=sorted(set(off for _, _, off in inputs)), timestampOffsetBasis="ffmpeg-debug-off-uninterpreted",
                 resampler=self.resamplers[0] if self.resamplers else unknown("not-reported"),
                 pcmIdentity=unknown("unsupported-source-or-transformation"))
-            if len(result["timestampOffsets"]) > 32 or result["encoderSamples"] != wav["sampleCount"]: raise ValueError("WAV-count")
+            if (len(result["timestampOffsets"]) > 32 or result["encoderSamples"] != wav["sampleCount"] or
+                    [wav[k] for k in ("sampleRate", "channels", "sampleWidthBytes")] != [16000, 1, 2]): raise ValueError("WAV-count")
             try:
                 candidate = audio["selectedStream"]
                 if (candidate.get("codec_name") != "pcm_s16le" or candidate.get("sample_rate") != "16000" or

@@ -230,7 +230,7 @@ describe('private cooked native boundary', () => {
           const command = ['ffmpeg', '-v', 'error', '-y', '-i', 'source', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', 'extractedWav'];
           const e: any = r.extraction.evidence = { state: 'observed', toolVersion: 'fixture', streamIndex: 0,
             commandSha256: createHash('sha256').update(JSON.stringify(command)).digest('hex'), encoderFirstPTS: 0,
-            encoderLastFence: 1600, encoderSamples: 1600, encoderPackets: 2, encoderTimeBase: [1, 16000],
+            encoderLastFence: 1600, encoderSamples: 1600, encoderPackets: 2, packetBasis: 'encoded-PCM-at-WAV-muxer', encoderTimeBase: [1, 16000],
             timestampOffsets: [0], timestampOffsetBasis: 'ffmpeg-debug-off-uninterpreted', resampler: unknown, pcmIdentity: { state: 'observed', basis: 'contiguous-identical-PCM',
               sourceFirstFence: 0, wavFirstFence: 0, sourceLastFence: 1600, wavLastFence: 1600, pcmSha256: 'f'.repeat(64),
               origin: { numerator: 0, denominator: 1, basis: 'source-packets-and-extraction-encoder-PTS' } } };

@@ -152,7 +152,7 @@ async function validateObservation(workspace: string, sourceSha256: string) {
         if (e?.state !== 'observed' || !text(e.toolVersion) || /[\/]/.test(e.toolVersion) || 'ffmpeg version ' + e.toolVersion !== receipt.extraction.toolVersion ||
             e.commandSha256 !== createHash('sha256').update(JSON.stringify(command)).digest('hex') ||
             !integer(e.streamIndex) || !observedAudio || !audio.candidates.some((c: any) => c.index === e.streamIndex) ||
-            JSON.stringify(e.encoderTimeBase) !== '[1,16000]' ||
+            JSON.stringify(e.encoderTimeBase) !== '[1,16000]' || e.packetBasis !== 'encoded-PCM-at-WAV-muxer' ||
             !['encoderFirstPTS', 'encoderLastFence', 'encoderSamples', 'encoderPackets'].every(k => integer(e[k])) ||
             e.encoderSamples <= 0 || e.encoderSamples > 240 * 16000 || e.encoderPackets <= 0 || e.encoderPackets > 8192 ||
             e.encoderLastFence !== e.encoderFirstPTS + e.encoderSamples || wav?.state !== 'observed' ||
