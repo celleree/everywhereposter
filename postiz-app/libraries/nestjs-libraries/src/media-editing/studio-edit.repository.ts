@@ -2,19 +2,19 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../database/prisma/prisma.service';
 import { StudioOutputIntent, StudioOutputReceipt, studioOutputKey } from '../upload/upload.interface';
-import { studioFingerprint } from './studio-receipt';
+import { isStudioProfile, StudioProfile, studioFingerprint } from './studio-receipt';
 import { Prisma } from '@prisma/client';
 import { StudioFraming, validateStudioFraming } from './studio-evidence';
 
 export type StudioEditRequest = { requestKey: string; sourceMediaId: string; brollMediaIds: string[];
-  destinations: string[]; profile: 'easy-graphics-v1'; creative?: { brief: string; framing: StudioFraming } };
+  destinations: string[]; profile: StudioProfile; creative?: { brief: string; framing: StudioFraming } };
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const id = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const destinations = ['instagram', 'facebook', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'reddit', 'dribbble'];
 export function normalizeStudioRequest(body: StudioEditRequest): StudioEditRequest {
   if (!body || Object.keys(body).some(k => !['brollMediaIds', 'destinations', 'profile', 'requestKey', 'sourceMediaId', 'creative'].includes(k)) ||
-      typeof body.requestKey !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(body.requestKey) || !id(body.sourceMediaId) || body.profile !== 'easy-graphics-v1' ||
-      !Array.isArray(body.brollMediaIds) || body.brollMediaIds.length > 8 ||
+      typeof body.requestKey !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(body.requestKey) || !id(body.sourceMediaId) || !isStudioProfile(body.profile) ||
+      !Array.isArray(body.brollMediaIds) || body.brollMediaIds.length > 8 || (body.profile === 'talking-head-v2' && body.brollMediaIds.length !== 0) ||
       body.brollMediaIds.some(asset => !id(asset) || asset === body.sourceMediaId) ||
       new Set(body.brollMediaIds).size !== body.brollMediaIds.length || !Array.isArray(body.destinations) ||
       !body.destinations.length || body.destinations.length > 10 || body.destinations.some(value => !destinations.includes(value)) ||

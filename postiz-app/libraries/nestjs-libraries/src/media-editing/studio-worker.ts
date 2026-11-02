@@ -4,7 +4,7 @@ import { createReadStream } from 'fs';
 import { copyFile, lstat, mkdir, readFile, realpath, writeFile } from 'fs/promises';
 import { isAbsolute, join, resolve, sep } from 'path';
 import { prepareEditorSource } from './video-editor-source';
-import { acceptStudioReceipt, studioFingerprint } from './studio-receipt';
+import { acceptStudioReceipt, isStudioProfile, studioFingerprint } from './studio-receipt';
 
 // Server-only authored input. Never accept manifest paths, executable paths or
 // plans from an HTTP request. Creating this aligned plan is an upstream stage.
@@ -18,9 +18,12 @@ export async function studioJson(file: string, limit = 8 * 1024 * 1024) {
   if (!info.isFile() || info.isSymbolicLink() || info.size > limit) throw new Error('Invalid Studio metadata');
   return JSON.parse(await readFile(file, 'utf8'));
 }
-export async function studioRuntime(org: string): Promise<StudioRuntime> {
+export async function studioRuntime(org: string, profile: string = 'easy-graphics-v1'): Promise<StudioRuntime> {
   if (process.env.STUDIO_EDITOR_ENABLED !== 'true' || !(process.env.STUDIO_EDITOR_ORGANIZATIONS || '').split(',').includes(org)) throw new Error('Studio is unavailable');
-  const root = process.env.STUDIO_EDITOR_PACKAGE_ROOT!, file = process.env.STUDIO_EDITOR_RUNTIME!, work = process.env.STUDIO_EDITOR_WORK_ROOT!;
+  if (!isStudioProfile(profile)) throw new Error('Unknown Studio profile');
+  const root = (profile === 'talking-head-v2' ? process.env.STUDIO_EDITOR_V2_PACKAGE_ROOT : process.env.STUDIO_EDITOR_PACKAGE_ROOT)!;
+  const file = (profile === 'talking-head-v2' ? process.env.STUDIO_EDITOR_V2_RUNTIME : process.env.STUDIO_EDITOR_RUNTIME)!;
+  const work = process.env.STUDIO_EDITOR_WORK_ROOT!;
   if (![root, file, work].every(v => typeof v === 'string' && isAbsolute(v))) throw new Error('Studio runtime is not configured');
   const privateRoot = await realpath(work);
   if (process.env.UPLOAD_DIRECTORY) {
@@ -62,9 +65,22 @@ export function studioDirectory(c: StudioRuntime, job: { id: string; generation:
   if (!/^[0-9a-f-]{36}$/.test(job.id) || !Number.isInteger(job.generation) || job.generation < 1) throw new Error('Invalid worker identity');
   return join(c.work, job.id, 'g' + job.generation);
 }
+// Only legacy V1 fixtures may omit project.schemaVersion. Never reinterpret a
+// stored V1 artifact as V2, or require a title on a previously accepted V2 job.
+function assertStudioVersion(m: any, profile: unknown) {
+  const p = m?.project;
+  const version = profile === 'easy-graphics-v1' ? 1 : profile === 'talking-head-v2' ? 2 : null;
+  if (!version || m?.schemaVersion !== version || p?.profile !== profile ||
+      (p.schemaVersion !== version && !(version === 1 && p.schemaVersion === undefined))) throw new Error('Studio manifest/profile version mismatch');
+  if (version === 2 && (p.canvas?.fps !== 30 || p.assets?.length !== 1 || p.assets[0]?.id !== p.source?.assetId ||
+      p.assets[0]?.kind !== 'video' || p.assets[0]?.fps !== 30 || !Number.isSafeInteger(p.source?.frames) || p.source.frames < 1 ||
+      p.cuts?.length !== 1 || p.cuts[0]?.in !== 0 || p.cuts[0]?.out !== p.source.frames ||
+      !Array.isArray(p.broll) || p.broll.length !== 0 || !Array.isArray(p.effects) || p.effects.length !== 0)) throw new Error('Unsupported talking-head-v2 source or tracks');
+}
 export function assertStudioPlan(job: any, plan: StudioApprovedPlan) {
   const m = plan.manifest, request = job.input.request;
-  if (JSON.stringify(plan).length > 2 * 1024 * 1024 || m?.schemaVersion !== 1 || m.project?.profile !== request.profile ||
+  assertStudioVersion(m, request.profile);
+  if (JSON.stringify(plan).length > 2 * 1024 * 1024 ||
       !['approved-edl', 'cooked'].includes(m.provenance?.origin) || m.provenance?.proxy !== null ||
       m.provenance.originalSourceSha256 !== m.project?.source?.sha256 || !Array.isArray(m.project?.assets) ||
       m.project.assets.length !== Object.keys(plan.assetMediaIds).length ||
@@ -127,10 +143,12 @@ export async function inspectStudioExport(c: StudioRuntime, job: any) {
   const dir = studioDirectory(c, job), project = join(dir, 'project');
   const [render, qa, manifest] = await Promise.all([studioJson(join(project, 'render-receipt.json')),
     studioJson(join(project, 'qa/final-verification.json')), studioJson(join(dir, 'manifest.json'))]);
+  const profile = job.input.request.profile;
+  assertStudioVersion(manifest, profile);
   const current = JSON.parse(await studioCommand(c, 'bindings', [project, c.file]));
   const file = join(project, 'final.mp4'); const sha256 = await studioHashFile(file);
   const accepted = acceptStudioReceipt(render, qa, current, sha256, { projectId: job.id, revision: job.generation,
-    sourceSha256: manifest.project.source.sha256 });
+    sourceSha256: manifest.project.source.sha256, profile });
   return { file, bytes: (await lstat(file)).size, accepted: { ...accepted, safeZoneProfiles: manifest.project.safeZones.profiles } };
 }
 export async function runStudioProject(c: StudioRuntime, job: any, plan: StudioApprovedPlan) {
