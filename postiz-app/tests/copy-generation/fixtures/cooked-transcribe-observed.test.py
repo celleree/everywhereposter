@@ -291,7 +291,7 @@ class ExtractionEvidence(unittest.TestCase):
 
     def test_actual_extraction_equivalence_and_negative_clocks(self):
         zero_hash = None
-        for variant in ("pcm", "shift", "offset", "44100", "48000", "aac", "gap", "multi", "unknown-origin"):
+        for variant in ("pcm", "shift", "offset", "44100", "48000", "384000", "aac", "gap", "multi", "unknown-origin"):
             with self.subTest(variant=variant):
                 if variant != "unknown-origin":
                     self.make_source(rate=int(variant) if variant.isdigit() else 44100 if variant == "aac" else 16000,
@@ -306,6 +306,7 @@ class ExtractionEvidence(unittest.TestCase):
                 receipt = json.loads(self.receipt.read_bytes()); e = receipt["extraction"]["evidence"]
                 self.assertEqual(receipt["status"], "INCOMPLETE")
                 self.assertNotIn(str(self.root), json.dumps(e))
+                if variant == "384000": self.assertEqual(e["state"], "unknown"); continue
                 if variant == "gap":
                     packets = json.loads(O.bounded_command(["ffprobe", "-v", "error", "-select_streams", "a",
                         "-show_packets", "-show_entries", "packet=pts,duration", "-of", "json", str(self.source)]))["packets"]

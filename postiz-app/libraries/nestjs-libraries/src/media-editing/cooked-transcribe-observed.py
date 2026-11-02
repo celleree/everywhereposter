@@ -206,6 +206,10 @@ class ExtractionTrace:
             if not match or self.resamplers: self.bad = True
             else:
                 a, b, c, d, e, f = match.groups()
+                if not (0 < int(a) <= 32 and 0 < int(d) <= 32 and 0 < int(c) <= 192000 and
+                        0 < int(f) <= 192000 and len(b) <= 16 and len(e) <= 16):
+                    self.bad = True
+                    return
                 self.resamplers.append(dict(inputChannels=int(a), inputFormat=b, inputRate=int(c),
                                             outputChannels=int(d), outputFormat=e, outputRate=int(f)))
 
@@ -236,7 +240,8 @@ class ExtractionTrace:
     def finish(self, wav, audio=None):
         try:
             if (self.bad or self.runs != 1 or len(self.streams) != 1 or not self.version or
-                    self.bases != {(1, 16000)} or not self.outputs or len(self.resamplers) > 1):
+                    self.bases != {(1, 16000)} or not self.outputs or len(self.resamplers) > 1 or
+                    not 0 < wav["sampleCount"] <= 240 * 16000):
                 raise ValueError("trace-incomplete")
             selected = self.streams[0]
             if not audio or audio.get("state") != "observed" or not any(c["index"] == selected for c in audio["candidates"]):
