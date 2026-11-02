@@ -1,3 +1,4 @@
+import { timingCapability, capabilityScript, hash, fixture, withProducer, titleCapability, profileCapability, allCapabilities, fullSource, withV2Producer } from './studio-director.fixture';
 import childProcess = require('child_process');
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'crypto';
@@ -11,31 +12,6 @@ import { validateStudioEvidence } from '../../libraries/nestjs-libraries/src/med
 import * as captionPlan from '../../libraries/nestjs-libraries/src/media-editing/studio-caption-plan';
 import { studioFingerprint } from '../../libraries/nestjs-libraries/src/media-editing/studio-receipt';
 
-const timingCapability = { version: 1, field: 'captionTimingPolicy', default: 'legacy-v1', policies: ['legacy-v1', 'trim-trailing-hold-v1'] };
-const capabilityScript = (v: any) => 'process.stdout.write(' + JSON.stringify(JSON.stringify(v)) + ');';
-const hash = (s: string) => createHash('sha256').update(s).digest('hex');
-function fixture(text = 'Build systems with care') {
-  const sha = hash(text), words = text.split(' ').map((text, i) => ({ type: 'word', text, start: [.1, .6, 3.1, 5.1][i], end: [.3, .8, 3.3, 5.3][i] }));
-  const value = (value: any) => ({ value, sha256: hash(JSON.stringify(value)) });
-  const framing = { x: .28, y: .28, width: .44, height: .24, confirmed: true as const, stationary: true as const, singleSpeaker: true as const };
-  const raw: any = { schemaVersion: 1, organizationId: 'owner', mediaId: 'video', jobId: randomUUID(), revision: 0, sourceSha256: sha,
-    fps: 30, totalFrames: 180, width: 360, height: 640, audio: { sha256: hash('aligned-audio'), bytes: 13 }, files: {
-      rawWords: value(words), words: value(words.map(w => ({ ...w, start: w.start < 2 ? w.start : w.start - 1, end: w.end < 2 ? w.end : w.end - 1 }))),
-      decisions: value([{ start: 0, end: 2 }, { start: 3, end: 6 }]), policy: value({ version: 'quiet-block-v1', fps: 30, total: 180, sourceSha256: sha }),
-      report: value({ policy: 'quiet-block-v1', fps: 30, final_s: 5, frames: [[0, 60], [90, 180]] }) } };
-  const assets: any[] = [{ id: 'source', mediaId: 'video', kind: 'video', file: 'assets/source.mp4', sha256: sha, duration: 6, fps: 30,
-    width: 360, height: 640, path: '/private/source.mp4', evidence: 'Synthetic original' },
-    { id: 'visual-1', mediaId: 'still', kind: 'image', file: 'assets/visual-1.png', sha256: hash('still-' + text), width: 360, height: 640, path: '/private/still.png', evidence: 'Synthetic registered still' }];
-  const job: any = { id: randomUUID(), generation: 1, organizationId: 'owner', sourceMediaId: 'video', inputFingerprint: hash('input-' + text), input: { request: {
-    profile: 'easy-graphics-v1', sourceMediaId: 'video', brollMediaIds: ['still'], destinations: ['linkedin'], creative: { brief: 'Illustrate my source concepts', framing } } } };
-  const direction: any = { summary: 'Source-specific concepts for review', effects: [{ kind: 'relationship', anchorWordId: 'w0', labels: [
-    { text: words[0].text, icon: 'document', assetId: '' }, { text: words[1].text, icon: 'product', assetId: '' } ] }],
-    broll: [{ assetId: 'visual-1', anchorWordId: 'w2', reason: 'Creator-selected supporting visual; its semantics require review' }] };
-  const refs: any = { font: { path: '/private/font.ttf', sha256: hash('font') }, audio: { path: '/private/cooked-audio.mp4', sha256: raw.audio.sha256 },
-    decisions: { path: '/private/decisions.json', sha256: hash('decisions') }, captions: { path: '/private/captions.json', sha256: hash('captions') }, receipt: { path: '/private/receipt.json', sha256: hash('receipt') } };
-  const rectangles = [{ x: 112 / 1080, y: 260 / 1920, width: 758 / 1080, height: 1100 / 1920 }], bounds = studioEffectBounds(rectangles, framing);
-  return { raw, assets, job, framing, direction, refs, rectangles, bounds };
-}
 it('compiles two unrelated sources into distinct actual manifests while retaining native words/cuts/audio', () => {
   const plans = ['Build systems with care', 'Record stories for people'].map(source => {
     const f = fixture(source), plan = compileStudioPlan(f.job, f.raw, f.assets, f.framing, ['linkedin-organic-v1'], f.bounds, f.direction, f.refs);
@@ -85,18 +61,6 @@ it('image panels consume registered stills only and preserve chosen labels', () 
   assert.equal(plan.manifest.project.effects[0].type, 'EasyMediaPanels');
   f.assets[1].kind = 'video'; assert.throws(() => compileStudioPlan(f.job, f.raw, f.assets, f.framing, ['linkedin-organic-v1'], f.bounds, f.direction, f.refs));
 });
-async function withProducer(run: (f: ReturnType<typeof fixture>, service: StudioDirectorService, dir: string, config: any) => Promise<void>, metered: any) {
-  const f = fixture(), dir = await mkdtemp(join(tmpdir(), 'studio-director-'));
-  try {
-    await writeFile(join(dir, 'Body-Bold.ttf'), Buffer.from([0, 1, 0, 0, 1])); await writeFile(join(dir, 'cooked-audio.mp4'), 'aligned-audio');
-    for (const name of ['decisions', 'captions', 'receipt']) await writeFile(join(dir, 'cooked-' + name + '.json'), '{}');
-    const service = new StudioDirectorService(metered, { getSubscriptionByOrganizationId: async () => ({ subscriptionTier: 'LAUNCH_V1' }) } as any);
-    (service as any).geometry = async () => ({ ids: ['linkedin-organic-v1'], rectangles: f.rectangles });
-    (service as any).invoke = async () => ({ choices: [{ message: { parsed: f.direction } }] });
-    await writeFile(join(dir, 'run.mjs'), capabilityScript({ captionTiming: timingCapability }));
-    await run(f, service, dir, { work: dir, root: dir, node: process.execPath });
-  } finally { await rm(dir, { recursive: true, force: true }); }
-}
 it('uses one stable metered operation/fingerprint and recovers cached direction without a second provider call', async () => {
   const seen = new Map<string, any>(); let calls = 0, expectedFingerprint = '';
   const metered = { run: async (org: string, key: string, fingerprint: string, request: any, allowed: boolean, invoke: any) => {
@@ -317,31 +281,6 @@ it.each([false, true])('replays a pre-admission settled V1 wallet request with e
   }, { run: async (...args: any[]) => { capture = args; return args[5]({}); } });
 });
 
-const titleCapability = { version: 1, profile: 'talking-head-v2', command: 'title-preflight', checkCommand: 'title-preflight-check', style: 'block-title-v1', fontSize: 96, titleMaxLines: 2, captionMaxLines: 2 };
-const profileCapability = { version: 1, profiles: [{ manifestSchemaVersion: 1, projectSchemaVersion: 1, profile: 'easy-graphics-v1' }, { manifestSchemaVersion: 2, projectSchemaVersion: 2, profile: 'talking-head-v2' }] };
-const allCapabilities = { captionTiming: timingCapability, profiles: profileCapability, titlePreflight: titleCapability };
-function fullSource(f: ReturnType<typeof fixture>, sentence = 'Do not change this.') {
-  f.assets.splice(1); f.job.input.request.brollMediaIds = []; f.job.input.request.profile = 'talking-head-v2';
-  f.direction.effects = []; f.direction.broll = [];
-  Object.assign(f.framing, { x: .4, y: .6, width: .3, height: .2 });
-  const words = sentence.split(' ').map((text, i) => ({ type: 'word', text, start: .1 + i * .2, end: .2 + i * .2 }));
-  f.raw.files.rawWords.value = structuredClone(words); f.raw.files.words.value = structuredClone(words);
-  f.raw.files.decisions.value = [{ start: 0, end: 6 }]; f.raw.files.report.value = { policy: 'quiet-block-v1', fps: 30, final_s: 6, frames: [[0, 180]] };
-}
-async function withV2Producer(run: Parameters<typeof withProducer>[0], metered: any, real = false) {
-  const previous = process.env.STUDIO_EDITOR_V2_ENABLED; process.env.STUDIO_EDITOR_V2_ENABLED = 'true';
-  const command = real ? undefined : jest.spyOn(worker, 'studioCommand').mockImplementation(async (_c, kind, args) => {
-    if (kind === 'capabilities') return JSON.stringify(allCapabilities);
-    if (kind === 'title-preflight') await writeFile(join(args[0], 'title-preflight.json'), '{}', { flag: 'wx' });
-    if (kind === 'title-preflight-check') await readFile(join(args[0], 'title-preflight.json'));
-    return '{}';
-  });
-  try { await withProducer(async (f, service, dir, config) => {
-    fullSource(f); await writeFile(join(dir, 'run.mjs'), capabilityScript(allCapabilities));
-    await run(f, service, dir, config);
-  }, metered); }
-  finally { command?.mockRestore(); if (previous === undefined) delete process.env.STUDIO_EDITOR_V2_ENABLED; else process.env.STUDIO_EDITOR_V2_ENABLED = previous; }
-}
 it.each(['Dr. Ada does not agree.', 'Mr. A. Smith is not ready.', 'I support U.S. tariffs only temporarily.',
   'I trust Acme Inc. only after review.', 'I agree, e.g. only under review.'])('extracts the first complete opening sentence without losing qualifiers: %s', sentence => {
   const f = fixture(); fullSource(f, sentence + ' Another sentence.');
@@ -412,38 +351,6 @@ it('retains a frozen candidate after uncertain payment and rejects missing prefl
     await assert.rejects(readFile(join(candidate, 'project.json')), { code: 'ENOENT' }); expect(run).toHaveBeenCalledTimes(1);
   }, { run });
 });
-const preflightRuntime = process.env.EP_STUDIO_TITLE_PREFLIGHT_RUNTIME;
-(preflightRuntime ? it : it.skip)('real package preflight rejects a no-fit title through the app wrapper before wallet', async () => {
-  const run = jest.fn(), launch = childProcess.spawn; let stderr = '';
-  const spawn = jest.spyOn(childProcess, 'spawn').mockImplementation(((...args: any[]) => {
-    const child = (launch as any)(...args); child.stderr.on('data', (b: Buffer) => { if (stderr.length < 2 * 1024 * 1024) stderr += b.toString(); }); return child;
-  }) as any);
-  try { await withV2Producer(async (f, service, dir, c) => {
-    fullSource(f, 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW is not.');
-    const settings = JSON.parse(await readFile(preflightRuntime!, 'utf8'));
-    c.root = process.env.EP_STUDIO_TITLE_PREFLIGHT_PACKAGE!; c.file = preflightRuntime; c.node = settings.nodeExecutable;
-    await copyFile(process.env.EP_STUDIO_TITLE_PREFLIGHT_FONT!, join(dir, 'Body-Bold.ttf'));
-    delete (service as any).geometry;
-    await assert.rejects(service.produce(c, f.job, f.raw, f.assets, dir), /Studio command failed/);
-    await assert.rejects(readFile(join(dir, 'authored-plan.json')), { code: 'ENOENT' });
-    await assert.rejects(readFile(join(dir, 'title-candidate/title-preflight.json')), { code: 'ENOENT' });
-  }, { run }, true); } finally { spawn.mockRestore(); }
-  assert.match(stderr, /(?:title|caption).*cannot fit|cannot fit.*(?:96px|76px)/i);
-  expect(run).not.toHaveBeenCalled();
-}, 180000);
-(preflightRuntime ? it : it.skip)('real package preflight accepts the frozen title and final compiled layout with mocked paid direction', async () => {
-  const run = jest.fn(async (...args: any[]) => args[5]({}));
-  await withV2Producer(async (f, service, dir, c) => {
-    const settings = JSON.parse(await readFile(preflightRuntime!, 'utf8'));
-    c.root = process.env.EP_STUDIO_TITLE_PREFLIGHT_PACKAGE!; c.file = preflightRuntime; c.node = settings.nodeExecutable;
-    await copyFile(process.env.EP_STUDIO_TITLE_PREFLIGHT_FONT!, join(dir, 'Body-Bold.ttf')); delete (service as any).geometry;
-    const plan = await service.produce(c, f.job, f.raw, f.assets, dir);
-    assert.equal(plan.manifest.project.title.text, 'Do not change this.');
-    assert.equal(JSON.parse(await readFile(join(dir, 'title-candidate/title-preflight.json'), 'utf8')).status, 'PASS');
-    expect(run).toHaveBeenCalledTimes(1);
-  }, { run }, true);
-}, 180000);
-
 it.each(['No complete opening sentence', 'No. Do not change this.', 'One two three four five six seven eight nine ten.'])('never substitutes a prefix or later sentence for an unsupported opening: %s', sentence => {
   const f = fixture(); fullSource(f, sentence);
   assert.throws(() => studioGroundedTitle(validateStudioEvidence(f.raw, { organizationId: 'owner', mediaId: 'video' }), f.rectangles, f.framing), /Needs adjustment/);
