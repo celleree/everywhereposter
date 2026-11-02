@@ -14,7 +14,8 @@ const preflightRuntime = process.env.EP_STUDIO_TITLE_PREFLIGHT_RUNTIME;
     const child = (launch as any)(...args); child.stderr.on('data', (b: Buffer) => { if (stderr.length < 2 * 1024 * 1024) stderr += b.toString(); }); return child;
   }) as any);
   try { await withV2Producer(async (f, service, dir, c) => {
-    fullSource(f, 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW is not.');
+    // This word fits the 76px caption but exceeds the 96px title width.
+    fullSource(f, 'WWWWWWWWW is not.');
     const settings = JSON.parse(await readFile(preflightRuntime!, 'utf8'));
     c.root = process.env.EP_STUDIO_TITLE_PREFLIGHT_PACKAGE!; c.file = preflightRuntime; c.node = settings.nodeExecutable;
     await copyFile(process.env.EP_STUDIO_TITLE_PREFLIGHT_FONT!, join(dir, 'Body-Bold.ttf'));
@@ -23,7 +24,7 @@ const preflightRuntime = process.env.EP_STUDIO_TITLE_PREFLIGHT_RUNTIME;
     await assert.rejects(readFile(join(dir, 'authored-plan.json')), { code: 'ENOENT' });
     await assert.rejects(readFile(join(dir, 'title-candidate/title-preflight.json')), { code: 'ENOENT' });
   }, { run }, true); } finally { spawn.mockRestore(); }
-  assert.match(stderr, /(?:title|caption).*cannot fit|cannot fit.*(?:96px|76px)/i);
+  assert.match(stderr, /Title cannot fit at 96px/i);
   expect(run).not.toHaveBeenCalled();
 }, 180000);
 (preflightRuntime ? it : it.skip)('real package preflight accepts the frozen title and final compiled layout with mocked paid direction', async () => {
