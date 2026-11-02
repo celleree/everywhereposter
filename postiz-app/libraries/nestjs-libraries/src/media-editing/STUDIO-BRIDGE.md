@@ -30,6 +30,14 @@ Operator-only configuration: `STUDIO_EDITOR_ENABLED=true`, comma-separated
 its locked node_modules, exact Node/Python/browser/FFmpeg/FFprobe and lock paths.
 The app work root must retain upstream hashed aligned audio/font/Cooked evidence
 and job directories for later verification/recovery. Do not commit local paths.
+V1 keeps those exact package/runtime slots. Trusted internal `talking-head-v2`
+jobs use additive `STUDIO_EDITOR_V2_PACKAGE_ROOT` and `STUDIO_EDITOR_V2_RUNTIME`
+with the same private work root; missing/unknown profiles never fall back. Every
+recovery/verification selects the persisted request profile and checks saved worker
+paths against that trusted slot. Public V2 creation is explicitly disabled before
+admission/native/model work; V2 creative production/resume is also blocked until
+producer adoption. Internal authored-plan rendering/verification remains available.
+Availability continues to describe V1 only.
 No configuration is changed by this code. Package render-cache requires its
 existing writable runtime cache arrangement; production packaging is not proven.
 
@@ -86,3 +94,11 @@ real creative worker -> receipt acceptance -> preview/listen -> explicit review
 -> one saved Media -> composer. Exercise refresh/repeated approval, response
 loss, source deletion, cancellation/stale generation, tampering and runtime drift.
 Windows sample/receipt checks do not establish this joined journey.
+
+App readers accept only manifest/project/profile tuples (1,1,easy-graphics-v1)
+and (2,2,talking-head-v2); historically accepted V1 fixtures may omit project
+schemaVersion. V2 is source-only, full-source CFR30 without supporting visual
+tracks. The package performs full validation. Prepare/render/QA receipt envelopes
+remain schemaVersion 1 for both profiles, bound to the expected job profile.
+A title is optional forever when reading retained V2 artifacts. V1 identities,
+receipts and recovery are preserved without rewriting or upgrading artifacts.

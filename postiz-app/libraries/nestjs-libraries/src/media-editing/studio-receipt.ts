@@ -5,17 +5,19 @@ export const studioFingerprint = (value: unknown): string => {
     ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;
   return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 };
+export type StudioProfile = 'easy-graphics-v1' | 'talking-head-v2';
+export const isStudioProfile = (profile: unknown): profile is StudioProfile => ['easy-graphics-v1', 'talking-head-v2'].includes(profile as string);
 const hash = (v: unknown) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 
 // Inputs are trusted local worker receipts, never client assertions. The worker
 // recomputes current bindings and hashes the actual final before calling this.
 export function acceptStudioReceipt(render: any, qa: any, current: any, finalHash: string,
-  expected: { projectId: string; revision: number; sourceSha256: string }) {
+  expected: { projectId: string; revision: number; sourceSha256: string; profile?: StudioProfile }) {
   const required = ['projectHash', 'prepareReceiptSha256', 'sourceSha256', 'fontSha256', 'audioSha256',
     'rendererHash', 'runtimeHash', 'runtimeConfigSha256', 'lockfileSha256'];
   const tools = ['nodeExecutable', 'pythonExecutable', 'browserExecutable', 'ffmpegExecutable', 'ffprobeExecutable'];
   if (!current || required.some(k => !hash(current[k])) || tools.some(k => !hash(current.toolHashes?.[k])) ||
-      current.projectId !== expected.projectId || current.revision !== expected.revision || current.profile !== 'easy-graphics-v1' ||
+      current.projectId !== expected.projectId || current.revision !== expected.revision || !isStudioProfile(current.profile) || current.profile !== (expected.profile ?? 'easy-graphics-v1') ||
       current.sourceSha256 !== expected.sourceSha256 || !Object.keys(current.assetHashes || {}).length ||
       Object.values(current.assetHashes).some(v => !hash(v)) || !current.audioTimeline ||
       !['@remotion/bundler', '@remotion/renderer', '@remotion/player', 'remotion'].every(k => current.packages?.[k] === '4.0.530') ||

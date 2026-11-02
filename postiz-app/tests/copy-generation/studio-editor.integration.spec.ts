@@ -27,6 +27,14 @@ it('accepts an explicit empty supporting list without changing identity or other
   expect(normalized.brollMediaIds).not.toBe(input.brollMediaIds);
   expect(normalizeStudioRequest(normalized)).toEqual(normalized);
 });
+it('normalizes only source-only V2 while preserving legacy V1 JSON identity', () => {
+  const v1 = { ...request(), requestKey: 'fixed-request-key', destinations: ['threads', 'facebook'] };
+  expect(JSON.stringify(normalizeStudioRequest(v1))).toBe(JSON.stringify({ requestKey: v1.requestKey, sourceMediaId: 'source',
+    brollMediaIds: ['broll'], destinations: ['facebook', 'threads'], profile: 'easy-graphics-v1' }));
+  const v2 = { ...v1, profile: 'talking-head-v2' as const, brollMediaIds: [] };
+  expect(normalizeStudioRequest(v2)).toEqual({ ...v2, destinations: ['facebook', 'threads'] });
+  expect(() => normalizeStudioRequest({ ...v2, brollMediaIds: ['broll'] })).toThrow();
+});
 it('does not promote storage after an asset disappears during I/O', async () => {
   const store = jest.fn().mockResolvedValue({ key: 'staged' });
   const spy = jest.spyOn(UploadFactory, 'createStorage').mockReturnValue({ storeStudioOutput: store } as any);
@@ -74,6 +82,15 @@ describeDatabase('Studio jobs on disposable PostgreSQL', () => {
     await expect(jobs.admit('another-org', { ...sourceOnly, requestKey: randomUUID() })).rejects.toBeInstanceOf(NotFoundException);
     await db.media.update({ where: { id: input.sourceMediaId }, data: { deletedAt: new Date() } });
     await expect(jobs.admit(org, { ...sourceOnly, requestKey: randomUUID() })).rejects.toBeInstanceOf(NotFoundException);
+  });
+  it('replays internal V2 admission without aliasing V1 or another organization', async () => {
+    const v2 = { ...input, profile: 'talking-head-v2' as const, brollMediaIds: [] };
+    const first = await jobs.admit(org, v2);
+    expect((await jobs.admit(org, v2)).id).toBe(first.id);
+    expect((first.input as any).request.profile).toBe('talking-head-v2');
+    await expect(jobs.admit(org, { ...v2, profile: 'easy-graphics-v1' })).rejects.toBeInstanceOf(ConflictException);
+    await expect(jobs.admit('another-org', v2)).rejects.toBeInstanceOf(NotFoundException);
+    expect(await db.studioEditJob.count({ where: { organizationId: org } })).toBe(1);
   });
   it('rejects cross-organization and soft-deleted B-roll before creating a job', async () => {
     const another = await db.organization.create({ data: { name: 'Different fixture' } });

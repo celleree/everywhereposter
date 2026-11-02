@@ -4,7 +4,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { acceptStudioReceipt, studioFingerprint } from '../../libraries/nestjs-libraries/src/media-editing/studio-receipt';
-import { assertStudioPlan, stageStudioPlan, studioDirectory, studioCommand } from '../../libraries/nestjs-libraries/src/media-editing/studio-worker';
+import { assertStudioPlan, stageStudioPlan, studioDirectory, studioCommand, studioRuntime } from '../../libraries/nestjs-libraries/src/media-editing/studio-worker';
+import * as worker from '../../libraries/nestjs-libraries/src/media-editing/studio-worker';
 import { StudioEditRepository } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.repository';
 import { StudioEditService } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.service';
 import { normalizeStudioRequest } from '../../libraries/nestjs-libraries/src/media-editing/studio-edit.repository';
@@ -212,4 +213,112 @@ it('an uncertain native dispatch can only find the same job rather than create a
     await service.resume('owner', row.id); await (service as any).running.get('owner:' + row.id);
     assert.equal(counts.allows.join(','), 'true,false'); assert.equal(counts.actualNative, 1); assert.equal(counts.render, 1);
   }, false, 'unknown');
+});
+
+function v2PlanFixture() {
+  const f = planFixture(), p: any = f.plan.manifest.project;
+  f.job.input.request.profile = p.profile = 'talking-head-v2'; f.job.input.request.brollMediaIds = [];
+  f.plan.manifest.schemaVersion = p.schemaVersion = 2; f.plan.assetMediaIds = { source: 'video' } as any;
+  p.assets = [{ ...p.assets[0], fps: 30 }]; p.canvas = { fps: 30 }; p.source.frames = 180;
+  p.cuts = [{ in: 0, out: 180 }]; p.broll = []; p.effects = [];
+  return f;
+}
+it('accepts title-absent V2 and rejects mixed tuples, unknown profiles, support assets and partial cuts', () => {
+  const f = v2PlanFixture(); assertStudioPlan(f.job, f.plan);
+  for (const mutate of [(m: any) => m.schemaVersion = 1, (m: any) => m.project.schemaVersion = 1,
+    (m: any) => delete m.project.schemaVersion, (m: any) => m.project.profile = 'easy-graphics-v1',
+    (m: any) => m.project.canvas.fps = 29.97, (m: any) => m.project.assets[0].fps = 60,
+    (m: any) => m.project.cuts[0].in = 1, (m: any) => m.project.cuts[0].out = 179,
+    (m: any) => m.project.effects.push({}), (m: any) => m.project.broll.push({}),
+    (m: any) => m.project.assets.push({ id: 'extra' })]) {
+    const plan = structuredClone(f.plan); mutate(plan.manifest); assert.throws(() => assertStudioPlan(f.job, plan));
+  }
+  assert.throws(() => assertStudioPlan({ ...f.job, input: { ...f.job.input, request: { ...f.job.input.request, profile: 'unknown' } } }, f.plan));
+  const v1 = planFixture(); (v1.plan.manifest.project as any).schemaVersion = 2;
+  assert.throws(() => assertStudioPlan(v1.job, v1.plan));
+});
+it('binds V2 to expected profile while preserving schema 1 receipt envelopes', () => {
+  const f = receipts(), profile = 'talking-head-v2' as const;
+  const bindings = { ...f.bindings, profile }, render = { ...f.render, bindings, profile }, qa = { ...f.qa, bindings, profile };
+  assert.equal(acceptStudioReceipt(render, qa, bindings, h, { ...f.expected, profile }).schemaVersion, 1);
+  assert.throws(() => acceptStudioReceipt(render, qa, bindings, h, f.expected));
+  assert.throws(() => acceptStudioReceipt(f.render, f.qa, f.bindings, h, { ...f.expected, profile }));
+  assert.throws(() => acceptStudioReceipt({ ...render, schemaVersion: 2 }, qa, bindings, h, { ...f.expected, profile }));
+  assert.throws(() => acceptStudioReceipt(render, { ...qa, profile: 'easy-graphics-v1' }, bindings, h, { ...f.expected, profile }));
+});
+async function withRuntimeSlots(test: (root: string, v1: string, v2: string) => Promise<void>) {
+  const root = await mkdtemp(join(tmpdir(), 'studio-slots-'));
+  const settings = { STUDIO_EDITOR_ENABLED: 'true', STUDIO_EDITOR_ORGANIZATIONS: 'owner', STUDIO_EDITOR_WORK_ROOT: root,
+    STUDIO_EDITOR_PACKAGE_ROOT: join(root, 'v1'), STUDIO_EDITOR_RUNTIME: join(root, 'v1.json'),
+    STUDIO_EDITOR_V2_PACKAGE_ROOT: join(root, 'v2'), STUDIO_EDITOR_V2_RUNTIME: join(root, 'v2.json'), UPLOAD_DIRECTORY: '' };
+  const prior = Object.fromEntries(Object.keys(settings).map(k => [k, process.env[k]]));
+  Object.assign(process.env, settings);
+  try {
+    for (const file of [settings.STUDIO_EDITOR_RUNTIME, settings.STUDIO_EDITOR_V2_RUNTIME])
+      await writeFile(file, JSON.stringify({ nodeExecutable: process.execPath, pythonExecutable: process.execPath }));
+    await test(root, settings.STUDIO_EDITOR_PACKAGE_ROOT, settings.STUDIO_EDITOR_V2_PACKAGE_ROOT);
+  } finally {
+    for (const k of Object.keys(settings)) { if (prior[k] === undefined) delete process.env[k]; else process.env[k] = prior[k]; }
+    await rm(root, { recursive: true, force: true });
+  }
+}
+it('keeps runtime slots independent, rejects missing/unknown/foreign selections and advertises only V1', async () => {
+  await withRuntimeSlots(async (_root, v1, v2) => {
+    assert.equal((await studioRuntime('owner')).root, v1);
+    assert.equal((await studioRuntime('owner', 'talking-head-v2')).root, v2);
+    await assert.rejects(studioRuntime('owner', 'unknown')); await assert.rejects(studioRuntime('foreign', 'talking-head-v2'));
+    delete process.env.STUDIO_EDITOR_V2_RUNTIME;
+    await assert.rejects(studioRuntime('owner', 'talking-head-v2')); assert.equal((await studioRuntime('owner')).root, v1);
+    process.env.STUDIO_EDITOR_V2_RUNTIME = join(_root, 'v2.json'); delete process.env.STUDIO_EDITOR_RUNTIME;
+    assert.equal((await studioRuntime('owner', 'talking-head-v2')).root, v2);
+    const service = new StudioEditService({} as any, {} as any);
+    assert.equal((await service.availability('owner')).enabled, false);
+    process.env.STUDIO_EDITOR_ENABLED = 'false'; await assert.rejects(studioRuntime('owner', 'talking-head-v2'));
+  });
+});
+it('blocks public V2 creation before admission, native work or model calls even with a configured slot', async () => {
+  await withRuntimeSlots(async () => {
+    const admit = jest.fn(), native = jest.fn(), direction = jest.fn();
+    const service = new StudioEditService({ admit } as any, {} as any, { studioSource: native } as any, { produce: direction } as any);
+    await assert.rejects(service.create('owner', { requestKey: randomUUID(), sourceMediaId: 'video', brollMediaIds: [],
+      destinations: ['linkedin'], profile: 'talking-head-v2', creative: { brief: 'Grounded source',
+        framing: { x: .28, y: .28, width: .44, height: .24, confirmed: true, stationary: true, singleSpeaker: true } } }), /V2 creation is unavailable/);
+    expect(admit).not.toHaveBeenCalled(); expect(native).not.toHaveBeenCalled(); expect(direction).not.toHaveBeenCalled();
+  });
+});
+it('routes stored V2 recovery, framing and render through its slot and preserves worker equality checks', async () => {
+  await withRuntimeSlots(async (root, _v1, v2) => {
+    const { job } = v2PlanFixture(), row: any = { ...job, sourceMediaId: 'video', state: 'RUNNING', leaseToken: 'lease',
+      input: { ...job.input, media: [{ id: 'video', path: '/video' }], request: { ...job.input.request, creative: {} } } };
+    const service = new StudioEditService({ get: async () => row } as any,
+      { media: { findMany: async () => row.input.media }, studioEditJob: { findMany: async () => [row] } } as any);
+    const runtime = jest.spyOn(worker, 'studioRuntime'), stage = jest.spyOn(worker, 'stageStudioPlan').mockRejectedValue(Error('stop before native dispatch'));
+    try {
+      (service as any).startProducer = () => {};
+      await assert.rejects(service.resume('owner', row.id), /V2 production is unavailable/);
+      await service.framing('owner', 'video');
+      const dir = studioDirectory(await studioRuntime('owner', 'talking-head-v2'), row);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'producer-status.json'), JSON.stringify({ phase: 'NEEDS_VERIFICATION' }));
+      assert.equal((await service.status('owner', row.id) as any).phase, 'NEEDS_VERIFICATION');
+      await assert.rejects(service.renderApproved('owner', row.id, v2PlanFixture().plan), /stop before native dispatch/);
+      assert.equal(stage.mock.calls[0][0].root, v2);
+      row.worker = { root: join(root, 'v1'), file: join(root, 'v1.json'), work: root };
+      await assert.rejects((service as any).verified('owner', row), /worker binding is stale/);
+      row.state = 'TECHNICAL_READY'; row.artifactSha256 = h;
+      await assert.rejects(service.preview('owner', row.id), /needs verification/);
+      await assert.rejects(service.review('owner', row.id, 'reviewer', { generation: 1, sha256: h, reviewed: true }), /needs verification/);
+      row.state = 'RUNNING';
+      const native = jest.fn(), direction = jest.fn();
+      const producer = new StudioEditService({ get: async () => row } as any,
+        { media: { findMany: async () => row.input.media } } as any, { studioSource: native } as any, { produce: direction } as any);
+      await assert.rejects(producer.resume('owner', row.id), /V2 production is unavailable/);
+      (producer as any).startProducer('owner', row); await (producer as any).running.get('owner:' + row.id);
+      expect(native).not.toHaveBeenCalled(); expect(direction).not.toHaveBeenCalled();
+      assert.equal(JSON.parse(await readFile(join(dir, 'producer-status.json'), 'utf8')).phase, 'NEEDS_VERIFICATION');
+      assert.ok(runtime.mock.calls.every(([org, profile]) => org === 'owner' && profile === 'talking-head-v2'));
+      delete row.input.request.profile;
+      await assert.rejects(service.resume('owner', row.id), /Unknown persisted Studio profile/);
+    } finally { stage.mockRestore(); runtime.mockRestore(); }
+  });
 });
