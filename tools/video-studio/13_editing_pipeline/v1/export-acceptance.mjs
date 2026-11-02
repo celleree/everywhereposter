@@ -8,7 +8,7 @@ const hash=async file=>{const h=createHash('sha256');for await(const bytes of cr
 // Preserve the runner's existing source/font fingerprint; full toolchain identity is separate.
 export async function readRendererIdentity(root,fontFile,profile){
  const sources={};
- for(const folder of [root,path.join(root,'src'),...(profile==='easy-graphics-v1'?[]:[path.resolve(root,'../../12_effect_library/v1/src'),path.resolve(root,'../../12_effect_library/v2/src')])]){
+ for(const folder of [root,path.join(root,'src'),...(['easy-graphics-v1','talking-head-v2'].includes(profile)?[]:[path.resolve(root,'../../12_effect_library/v1/src'),path.resolve(root,'../../12_effect_library/v2/src')])]){
   for(const name of (await readdir(folder)).sort())if(/\.(mjs|tsx|ts|py)$/.test(name))sources[path.join(folder,name)]=await hash(path.join(folder,name));
  }
  const rendererHash=createHash('sha256').update(JSON.stringify(sources)).update(await hash(fontFile)).digest('hex');
@@ -25,7 +25,7 @@ export function createExportAcceptance({dir,root,projectHash,rendererHash,profil
    if(current.rendererHash!==rendererHash)return stale;
    const q=JSON.parse(await readFile(path.join(dir,'qa/final-verification.json'),'utf8'));
    const r=JSON.parse(await readFile(path.join(dir,'render-receipt.json'),'utf8'));
-   if(profile==='easy-graphics-v1'){
+   if(['easy-graphics-v1','talking-head-v2'].includes(profile)){
     if(!runtimeFile)return stale;
     const {readBindings}=await import('./receipt-bindings.mjs'),bindings=await readBindings(dir,runtimeFile);
     if(JSON.stringify(r.bindings)!==JSON.stringify(bindings)||JSON.stringify(q.bindings)!==JSON.stringify(bindings))return stale;

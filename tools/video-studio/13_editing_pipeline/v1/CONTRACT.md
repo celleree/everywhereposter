@@ -1,7 +1,11 @@
 # Frozen app/worker contract v1
 
-The input top level is `{schemaVersion:1, project, inputs, provenance}`.
-`project` uses project.mjs schemaVersion 1, plus `profile:easy-graphics-v1`.
+The input top level is `{schemaVersion, project, inputs, provenance}`.
+Accepted tuples are manifest schema 1 / project schema 1 / `easy-graphics-v1`
+and manifest schema 2 / project schema 2 / `talking-head-v2`. Mixed or unknown
+tuples are rejected. V2 requires one source video asset, a single full-source cut,
+30 fps, empty broll/effects and no title or titles field. An absent title remains
+valid; title rendering is not implemented or advertised.
 It includes id/revision, portrait canvas, original source assetId/sha256/frames,
 assets, source-frame cuts, output-clock words, caption wordIds, observed single
 speaker faces (1080x1920 design coordinates), broll/effects, safeZones and director.
@@ -20,7 +24,7 @@ semantic validation of arbitrary native Cooked formats. No proxy accepted yet.
 ## Caption timing capability (opt-in)
 
 `node run.mjs capabilities` prints JSON without project/runtime inputs:
-`{"captionTiming":{"version":1,"field":"captionTimingPolicy","default":"legacy-v1","policies":["legacy-v1","trim-trailing-hold-v1"]}}`.
+`{"captionTiming":{"version":1,"field":"captionTimingPolicy","default":"legacy-v1","policies":["legacy-v1","trim-trailing-hold-v1"]},"profiles":{"version":1,"profiles":[{"manifestSchemaVersion":1,"projectSchemaVersion":1,"profile":"easy-graphics-v1"},{"manifestSchemaVersion":2,"projectSchemaVersion":2,"profile":"talking-head-v2"}]}}`.
 The same frozen capability is exported as `CAPTION_TIMING_CAPABILITY` from
 project.mjs. A producer MUST verify version, field and supported policy in the
 actual target package before emitting `project.captionTimingPolicy`; older

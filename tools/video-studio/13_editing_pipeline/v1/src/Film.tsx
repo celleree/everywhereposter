@@ -43,7 +43,7 @@ function SafeCaption({wordTexts,cells,avoid,wordIds,background}:any){
 function Effect({event,assets,cells}:any){return <EasyGraphics event={event} assets={assets} cells={cells}/>;}
 export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean}>=({project:p,preview=false,hideGraphics=false})=>{
  const{assets,words,safeZones,captionRanges}=useMemo(()=>validateProject(p),[p]),frame=useCurrentFrame(),{fps,width,height}=useVideoConfig();
- if(p.profile!=='easy-graphics-v1')throw Error('This package renders only easy-graphics-v1; historical effects require their original runtime');
+ if(!['easy-graphics-v1','talking-head-v2'].includes(p.profile))throw Error('This package renders accessible profiles only; historical effects require their original runtime');
  const rendering=getRemotionEnvironment().isRendering,isPreview=preview&&!rendering,source=assets.get(p.source.assetId);let cursor=0;
  if(rendering&&!hideGraphics)assertSafeZoneRender(safeZones);
  const caption=p.captions.find((c:any,i:number)=>{const [from,end]=captionRanges[i];return frame>=from&&frame<end;});

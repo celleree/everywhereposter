@@ -38,7 +38,7 @@ test('unknown, malformed and null policies fail validation and projection',()=>{
 });
 test('capability command exposes the versioned discriminator without runtime or project',()=>{
   const actual=JSON.parse(execFileSync(process.execPath,[fileURLToPath(new URL('../run.mjs',import.meta.url)),'capabilities'],{encoding:'utf8'}));
-  assert.deepEqual(actual,{captionTiming:{version:1,field:'captionTimingPolicy',default:'legacy-v1',policies:['legacy-v1',policy]}});
+  assert.deepEqual(actual,{captionTiming:{version:1,field:'captionTimingPolicy',default:'legacy-v1',policies:['legacy-v1',policy]},profiles:{version:1,profiles:[{manifestSchemaVersion:1,projectSchemaVersion:1,profile:'easy-graphics-v1'},{manifestSchemaVersion:2,projectSchemaVersion:2,profile:'talking-head-v2'}]}});
   assert.deepEqual(actual.captionTiming,CAPTION_TIMING_CAPABILITY);
 });
 test('policy is a cache dependency even when effective ranges match',()=>{
