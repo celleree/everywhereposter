@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './fixture.mjs';
 import {validateProject} from '../project.mjs';
-import {layoutInputHash,preflightFrames} from '../title-preflight.mjs';
+import {layoutInputHash,preflightFrames,withPreflightBrowser} from '../title-preflight.mjs';
 const make=()=>{
  const p=fixture();p.schemaVersion=2;p.profile='talking-head-v2';p.canvas={width:1080,height:1920,fps:30};p.source.frames=900;p.assets=p.assets.slice(0,1);p.cuts=[{in:0,out:900,reason:'whole'}];p.broll=[];p.effects=[];
  p.words.forEach((w,i)=>{w.start=1+i;w.end=1.4+i;w.text=['Yes','Go','Now','Next'][i];});p.speaker.faces=[{t:0,x:300,y:700,width:400,height:400}];
@@ -28,6 +28,51 @@ test('more than 128 distinct visible states fails before rendering',()=>{
  const p=make();p.words=Array.from({length:129},(_,i)=>({id:'w'+i,text:'Word',start:i*.2,end:i*.2+.1}));p.captions=p.words.map(w=>({wordIds:[w.id]}));
  p.title.wordIds=['w0','w1','w2'];p.title.text='Word Word Word';
  assert.throws(()=>preflightFrames(p),/128/);
+});
+
+test('primary rejection survives page/browser cleanup failures without unhandled rejections',async()=>{
+ const unhandled=[],listener=error=>unhandled.push(error);process.on('unhandledRejection',listener);
+ try{
+  for(const mode of ['sync','async','pending']){
+   const primary=Error('Title cannot fit at 96px'),cleanup=Error('Target.closeTarget'),events=[];
+   let rejectClose,calls=0;
+   const page={close(){calls++;events.push('page-close');if(mode==='sync')throw cleanup;if(mode==='async')return Promise.reject(cleanup);return new Promise((_,reject)=>{rejectClose=reject;});}};
+   const close=page.close,browser={async newPage(){return page;},close(){events.push('browser-close');throw Error('browser cleanup');}},create=browser.newPage;
+   await assert.rejects(withPreflightBrowser(browser,async b=>{
+    const p=await b.newPage();assert.equal(p.close(),p.close());throw primary;
+   },10),error=>error===primary);
+   if(rejectClose)rejectClose(cleanup); // Late native rejection is still consumed.
+   await new Promise(setImmediate);
+   assert.equal(calls,1);assert.deepEqual(events,['page-close','browser-close']);
+   assert.equal(page.close,close);assert.equal(browser.newPage,create);
+  }
+  assert.deepEqual(unhandled,[]);
+ }finally{process.off('unhandledRejection',listener);}
+});
+test('cleanup-only synchronous/asynchronous failures reject instead of allowing success',async()=>{
+ for(const target of ['page','browser'])for(const mode of ['sync','async']){
+  const cleanup=Error(target+' cleanup'),events=[];
+  const fail=()=>{if(mode==='sync')throw cleanup;return Promise.reject(cleanup);};
+  const page={close(){events.push('page-close');return target==='page'?fail():Promise.resolve();}};
+  const browser={async newPage(){return page;},close(){events.push('browser-close');return target==='browser'?fail():Promise.resolve();}};
+  let sealed=false;
+  await assert.rejects(withPreflightBrowser(browser,async b=>{void(await b.newPage()).close();return 'rendered';}).then(()=>{sealed=true;}),error=>error===cleanup);
+  assert.equal(sealed,false);assert.deepEqual(events,['page-close','browser-close']);
+ }
+});
+test('clean cleanup drains before browser shutdown and preserves the render result',async()=>{
+ const events=[],result={rendered:true};
+ const page={async close(){await new Promise(setImmediate);events.push('page-closed');}};
+ const browser={async newPage(){return page;},async close(){events.push('browser-closed');}};
+ assert.equal(await withPreflightBrowser(browser,async b=>{void(await b.newPage()).close();return result;}),result);
+ assert.deepEqual(events,['page-closed','browser-closed']);
+});
+test('stalled cleanup fails closed and cannot leave a late unhandled rejection',async()=>{
+ let rejectClose,closed=false,sealed=false;
+ const browser={async newPage(){return{close(){return new Promise((_,reject)=>{rejectClose=reject;});}};},async close(){closed=true;}};
+ await assert.rejects(withPreflightBrowser(browser,async b=>{void(await b.newPage()).close();},10).then(()=>{sealed=true;}),/page cleanup timed out/);
+ rejectClose(Error('late cleanup'));await new Promise(setImmediate);
+ assert.equal(closed,true);assert.equal(sealed,false);
 });
 
 test('real-font probe and read-only check bind layout, font, runtime, and complete frames',{skip:!process.env.EP_PREFLIGHT_TEST_RUNTIME&&!process.env.EP_PREFLIGHT_TEST_FONT,timeout:120000},async t=>{

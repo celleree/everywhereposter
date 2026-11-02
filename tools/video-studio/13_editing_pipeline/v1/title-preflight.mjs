@@ -49,6 +49,44 @@ export async function checkTitlePreflight({dir,root,runtimeFile,projectFile=path
  if(JSON.stringify(stable(saved))!==JSON.stringify(stable(receipt)))throw Error('Title preflight receipt missing, incomplete or stale');
  return saved;
 }
+// Remotion starts page cleanup without awaiting it after a render error.
+// Return consumed close promises to the SDK, drain them while Chrome is alive,
+// and propagate cleanup-only failures before any PASS receipt can be written.
+export async function withPreflightBrowser(browser,render,cleanupTimeoutMs=5000){
+ const pending=new Set(),errors=[],restores=[];
+ let failed=false,primary,result;
+ const originalNewPage=browser.newPage,owned=Object.hasOwn(browser,'newPage');
+ try{
+  browser.newPage=async(...args)=>{
+   const page=await originalNewPage.apply(browser,args),close=page.close,ownedClose=Object.hasOwn(page,'close');
+   let closing;
+   page.close=(...options)=>{
+    if(!closing){
+     let timer;
+     const operation=Promise.resolve().then(()=>close.apply(page,options));
+     closing=Promise.race([operation,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Title preflight page cleanup timed out')),cleanupTimeoutMs);})])
+      .catch(error=>{errors.push(error);})
+      .finally(()=>{clearTimeout(timer);pending.delete(closing);});
+     pending.add(closing);
+    }
+    return closing;
+   };
+   restores.push(()=>{if(ownedClose)page.close=close;else delete page.close;});
+   return page;
+  };
+  result=await render(browser);
+ }catch(error){failed=true;primary=error;}
+ finally{
+  // Includes synchronous throws, asynchronous rejections and duplicate closes.
+  while(pending.size)await Promise.all([...pending]);
+  try{await browser.close({silent:true});}catch(error){errors.push(error);}
+  for(const restore of restores.reverse())restore();
+  if(owned)browser.newPage=originalNewPage;else delete browser.newPage;
+ }
+ if(failed)throw primary;
+ if(errors.length)throw errors[0];
+ return result;
+}
 export async function runTitlePreflight({dir,root,runtimeFile}){
  const projectFile=path.join(dir,'project.json'),receiptFile=path.join(dir,'title-preflight.json');
  try{await lstat(receiptFile);throw Error('Title preflight receipt already exists');}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -60,11 +98,10 @@ export async function runTitlePreflight({dir,root,runtimeFile}){
   if(await hash(path.join(publicDir,'font.ttf'))!==initial.fontSha256)throw Error('Preflight font changed while staging');
   const serveUrl=await bundle({webpackOverride:c=>({...c,resolve:{...c.resolve,modules:[initial.runtime.nodeModulesRoot,'node_modules']}}),entryPoint:path.join(root,'src/render.tsx'),publicDir,outDir:path.join(temp,'bundle'),enableCaching:true});
   const browser=await openBrowser('chrome',{browserExecutable:initial.runtime.browserExecutable});
-  let failed=false;
-  try{
+  await withPreflightBrowser(browser,async()=>{
    const inputProps={project:initial.p,layoutOnly:true},composition=await selectComposition({serveUrl,id:'DirectedEdit',inputProps,browserExecutable:initial.runtime.browserExecutable,puppeteerInstance:browser});
    for(const frame of initial.receipt.expectedCheckedFrames)await renderStill({serveUrl,composition,inputProps,frame,output:path.join(temp,'frame-'+frame+'.png'),imageFormat:'png',browserExecutable:initial.runtime.browserExecutable,puppeteerInstance:browser,overwrite:false});
-  }catch(error){failed=true;throw error;}finally{try{await browser.close({silent:true});}catch(error){if(!failed)throw error;}}
+  });
   const final=await current({dir,root,runtimeFile,projectFile});
   if(JSON.stringify(stable(final.receipt))!==JSON.stringify(stable(initial.receipt)))throw Error('Preflight inputs changed during rendering');
   await writeFile(receiptFile,JSON.stringify(initial.receipt,null,2)+'\n',{flag:'wx'});
