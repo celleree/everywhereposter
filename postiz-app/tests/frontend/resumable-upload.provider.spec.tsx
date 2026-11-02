@@ -164,3 +164,31 @@ it('automatically clears fresh success after ten seconds, preserving keyboard fo
     returned.unmount();
   } finally { jest.useRealTimers(); }
 });
+
+
+it('preserves keyboard focus when media is attached and clears the row after focus moves', async () => {
+  localStorage.clear();
+  jest.useFakeTimers();
+  try {
+    const session = { id: 'focused-attachment', originalName: 'focus.mp4', byteSize: 10, status: 'COMPLETE', parts: [], manifest: [], media: { id: 'focused-media' }, completedAt: new Date().toISOString() };
+    const fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions: [session] }) });
+    (useFetch as jest.Mock).mockReturnValue(fetch);
+    const { UploadTransfers, useDismissAttachedTransfers } = require('../../apps/frontend/src/components/media/resumable-upload.provider');
+    function Composer({ attached }: { attached: boolean }) {
+      useDismissAttachedTransfers(attached ? [{ id: 'focused-media' }] : []);
+      return <><button>Continue</button><UploadTransfers /></>;
+    }
+    const view = render(<ResumableUploadProvider><Composer attached={false} /></ResumableUploadProvider>);
+    await act(async () => {});
+    // Protect focus before a timer sweep or attachment effect can remove the row.
+    const dismiss = view.getByRole('button', { name: 'Dismiss transfer' });
+    dismiss.focus();
+    view.rerender(<ResumableUploadProvider><Composer attached /></ResumableUploadProvider>);
+    expect(view.getByText('focus.mp4')).toBeTruthy();
+    expect(document.activeElement).toBe(dismiss);
+    view.getByRole('button', { name: 'Continue' }).focus();
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(view.queryByText('focus.mp4')).toBeNull();
+    view.unmount();
+  } finally { jest.useRealTimers(); }
+});

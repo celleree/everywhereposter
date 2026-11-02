@@ -83,6 +83,8 @@ export function useDismissAttachedTransfers(media: { id: string }[]) {
   useEffect(() => {
     const protectedIds = new Set(view?.busy.current);
     for (const id of Object.keys(view?.errors || {})) if (view?.errors[id]) protectedIds.add(id);
+    const focusedId = document.activeElement?.closest('[data-transfer-id]')?.getAttribute('data-transfer-id');
+    if (focusedId) protectedIds.add(focusedId);
     transfers?.dismissAttached(new Set(media.map(item => item.id)), protectedIds);
   }, [transfers, view?.items, view?.pending, view?.errors, media]);
 }
