@@ -128,7 +128,7 @@ function startFrontend() {
 }
 async function warmRoutes() {
   const deadline = Date.now() + 330_000;
-  for (const route of (walletMode ? ['/auth/login', '/billing'] : discovery ? ['/auth/login', '/analytics'] : videoEditor ? ['/auth/login', '/video-editor', '/create'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
+  for (const route of (process.env.EP_TRANSFER_BROWSER === '1' ? ['/auth/login', '/create'] : walletMode ? ['/auth/login', '/billing'] : discovery ? ['/auth/login', '/analytics'] : videoEditor ? ['/auth/login', '/video-editor', '/create'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
     let loaded = false;
     while (!stopping && !loaded && Date.now() < deadline) {
       try {

@@ -83,6 +83,8 @@ export function useDismissAttachedTransfers(media: { id: string }[]) {
   useEffect(() => {
     const protectedIds = new Set(view?.busy.current);
     for (const id of Object.keys(view?.errors || {})) if (view?.errors[id]) protectedIds.add(id);
+    const focusedId = document.activeElement?.closest('[data-transfer-id]')?.getAttribute('data-transfer-id');
+    if (focusedId) protectedIds.add(focusedId);
     transfers?.dismissAttached(new Set(media.map(item => item.id)), protectedIds);
   }, [transfers, view?.items, view?.pending, view?.errors, media]);
 }
@@ -91,11 +93,25 @@ export function useDismissAttachedTransfers(media: { id: string }[]) {
 export function UploadTransfers() {
   const transfers = useResumableTransfers();
   const view = useContext(TransferViewContext);
+  useEffect(() => {
+    if (!transfers || !view) return;
+    const clearCompleted = () => {
+      const protectedIds = new Set(view.busy.current);
+      for (const id of Object.keys(view.errors)) if (view.errors[id]) protectedIds.add(id);
+      // Never remove the row containing a keyboard user's current control.
+      const focusedId = document.activeElement?.closest('[data-transfer-id]')?.getAttribute('data-transfer-id');
+      if (focusedId) protectedIds.add(focusedId);
+      transfers.dismissCompleted(protectedIds);
+    };
+    clearCompleted();
+    const interval = setInterval(clearCompleted, 1_000);
+    return () => clearInterval(interval);
+  }, [transfers, view]);
   if (!transfers || !view || !view.items.length) return null;
   const { items, optIntoQuickUpload, errors, pending, busy, action } = view;
   return <section aria-label="Video transfers" className="mt-[16px] min-w-0 text-newTextColor">
       {items.some(item => item.state === 'Uploading') && <div className="text-[12px] hidden mobile:block"><p>Keep this browser open and on screen while uploading.</p><p>You can browse other pages in this app while the upload continues.</p></div>}
-      {items.map(item => <div key={item.id} className="mt-[8px] border-t border-newBorder pt-[8px]">
+      {items.map(item => <div key={item.id} data-transfer-id={item.id} className="mt-[8px] border-t border-newBorder pt-[8px]">
         {errors[item.id] && !(errors[item.id]?.cancellation && item.state === 'Transfer complete') && <p role="alert">{errors[item.id]?.message}</p>}
         <p className="break-all text-[13px] font-[600]">{item.name}</p>
         <p role="status" className="text-[12px]">{item.state}</p>

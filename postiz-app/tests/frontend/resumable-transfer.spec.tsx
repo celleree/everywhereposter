@@ -318,3 +318,80 @@ it('restores polling and publishing receipts after a later explicit Quick Upload
   expect(changed.mock.calls.at(-1)[0][0].session.quickIntent.status).toBe('COMPLETE');
   expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
 });
+
+
+it('clears eight old success receipts without hiding active, failed or uncertain work or mutating saved media', async () => {
+  const savedMedia = Array.from({ length: 8 }, (_, i) => ({ id: `saved-${i}`, path: `/uploads/videos/${i}.mp4` }));
+  const complete = { originalName: 'old.mp4', byteSize: 10, parts: [], manifest: [], status: 'COMPLETE', completedAt: new Date(0).toISOString() };
+  const sessions: any[] = savedMedia.map((media, i) => ({ ...complete, id: `old-${i}`, media }));
+  for (const status of ['UPLOADING', 'FINALIZING', 'FAILED']) sessions.push({ ...complete, id: status, status });
+  sessions.push({ ...complete, id: 'missing-receipt' });
+  for (const status of ['PUBLISHING', 'COMPLETE', 'FAILED']) sessions.push({ ...complete, id: `quick-${status}`, media: { id: `quick-${status}` },
+    quickIntent: { id: status, status, results: [{ integrationId: 'x', name: 'X', state: 'Failed' }] } });
+  for (const id of ['error', 'quickError', 'quickRequested', 'busy']) sessions.push({ ...complete, id, media: { id } });
+  const changed = jest.fn();
+  const fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions }) });
+  const transfers = new ResumableTransfers(fetch, changed, 'old-org');
+  await transfers.refresh();
+  const items = (transfers as any).items;
+  items.get('error').error = 'Check saved outcome';
+  items.get('quickError').quickError = 'Consent unknown';
+  items.get('quickRequested').quickRequested = true;
+  transfers.pause('UPLOADING');
+  transfers.dismissCompleted(new Set(['busy']));
+  const remaining = changed.mock.calls.at(-1)[0];
+  expect(remaining.map(item => item.id)).toEqual(sessions.slice(8).map(item => item.id));
+  expect(remaining.find(item => item.id === 'UPLOADING').state).toBe('Paused');
+  expect(savedMedia.map(media => media.path)).toEqual(Array.from({ length: 8 }, (_, i) => `/uploads/videos/${i}.mp4`));
+  await transfers.refresh();
+  const restored = new ResumableTransfers(fetch, changed, 'old-org');
+  await restored.refresh();
+  expect(changed.mock.calls.at(-1)[0].map(item => item.id)).toEqual(sessions.slice(8).map(item => item.id));
+  expect(fetch.mock.calls.every(([url, options]) => url === '/media/uploads' && !options?.method)).toBe(true);
+});
+
+it.each([undefined, 'invalid', new Date(Date.now() + 86_400_000).toISOString()])('gives fresh or legacy completion a full display period without resetting on polling (%s)', async completedAt => {
+  jest.useFakeTimers();
+  try {
+    const changed = jest.fn();
+    const session = { id: 'fresh', originalName: 'fresh.mp4', byteSize: 10, parts: [], manifest: [], status: 'COMPLETE', media: { id: 'fresh-media' }, completedAt };
+    const fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions: [session] }) });
+    const transfers = new ResumableTransfers(fetch, changed, 'fresh-org');
+    await transfers.refresh();
+    jest.advanceTimersByTime(9_999);
+    await transfers.refresh();
+    transfers.dismissCompleted();
+    expect(changed.mock.calls.at(-1)[0]).toHaveLength(1);
+    jest.advanceTimersByTime(1);
+    transfers.dismissCompleted();
+    expect(changed.mock.calls.at(-1)[0]).toEqual([]);
+    await transfers.refresh();
+    expect(changed.mock.calls.at(-1)[0]).toEqual([]);
+  } finally { jest.useRealTimers(); }
+});
+
+
+it.each(['timer', 'attachment'])('restores external Quick Upload after %s dismissal but honors manual dismissal', async method => {
+  const session: any = { id: 'external', originalName: 'external.mp4', byteSize: 10, parts: [], manifest: [], status: 'COMPLETE', media: { id: 'media' }, completedAt: new Date(0).toISOString() };
+  const changed = jest.fn();
+  const fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions: [session] }) });
+  const first = new ResumableTransfers(fetch, changed, 'external-org');
+  await first.refresh();
+  if (method === 'timer') first.dismissCompleted(); else first.dismissAttached(new Set(['media']));
+  expect(changed.mock.calls.at(-1)[0]).toEqual([]);
+  session.quickIntent = { id: 'intent', status: 'PROCESSING', results: [] };
+  const returned = new ResumableTransfers(fetch, changed, 'external-org');
+  await returned.refresh();
+  expect(changed.mock.calls.at(-1)[0][0].session.quickIntent.status).toBe('PROCESSING');
+  session.quickIntent.status = 'COMPLETE'; await returned.refresh(); returned.dismiss('external');
+  const again = new ResumableTransfers(fetch, changed, 'external-org'); await again.refresh();
+  expect(changed.mock.calls.at(-1)[0]).toEqual([]);
+});
+
+it('gives an upload completed locally the full display time when the client clock is ahead', async () => {
+  const f = fixture(); await f.transfers.start(file(4));
+  await waitFor(() => expect(f.transfers.canDismiss(current(f))).toBe(true));
+  current(f).session.completedAt = new Date(Date.now() - 60_000).toISOString();
+  f.transfers.dismissCompleted();
+  expect(current(f).state).toBe('Transfer complete');
+});
