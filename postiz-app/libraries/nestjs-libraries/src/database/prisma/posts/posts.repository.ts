@@ -496,6 +496,15 @@ export class PostsRepository {
       where: {
         id,
         state: { not: 'DELETED_REMOTE' },
+        // Nullable fields need explicit null branches: SQL <> does not match NULL.
+        OR: [
+          { state: { not: 'PUBLISHED' } },
+          { releaseId: null },
+          { releaseId: { not: postId } },
+          { releaseURL: null },
+          { releaseURL: { not: releaseURL } },
+          { remoteDeletedAt: { not: null } },
+        ],
       },
       data: {
         state: 'PUBLISHED',
