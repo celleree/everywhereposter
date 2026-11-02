@@ -8,15 +8,22 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {validateProject,chunkContent,assertPreparedProject,CAPTION_TIMING_CAPABILITY} from './project.mjs';
+import {validateProject,chunkContent,assertPreparedProject,CAPTION_TIMING_CAPABILITY,PROFILE_CAPABILITY} from './project.mjs';
 import {readRendererIdentity,createExportAcceptance} from './export-acceptance.mjs';
 import {runtimeIdentity} from './runtime.mjs';
 import {readBindings} from './receipt-bindings.mjs';
+import {TITLE_PREFLIGHT_CAPABILITY,runTitlePreflight,checkTitlePreflight} from './title-preflight.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url)),command=process.argv[2],dir=path.resolve(process.argv[3]??'projects/talking-head-v1');
-if(command==='capabilities'){console.log(JSON.stringify({captionTiming:CAPTION_TIMING_CAPABILITY}));process.exit(0);}
+if(command==='capabilities'){console.log(JSON.stringify({captionTiming:CAPTION_TIMING_CAPABILITY,profiles:PROFILE_CAPABILITY,titlePreflight:TITLE_PREFLIGHT_CAPABILITY}));process.exit(0);}
 const runtimeAt=process.argv.indexOf('--runtime');
 if(runtimeAt<0||!process.argv[runtimeAt+1])throw Error('Explicit --runtime config required');
 const runtimeFile=path.resolve(process.argv[runtimeAt+1]);
+if(['title-preflight','title-preflight-check'].includes(command)){
+ const projectAt=process.argv.indexOf('--project');
+ if(projectAt>=0&&(command!=='title-preflight-check'||!process.argv[projectAt+1]))throw Error('Only title-preflight-check accepts --project');
+ const options={dir,root,runtimeFile,...(projectAt>=0?{projectFile:path.resolve(process.argv[projectAt+1])}:{})};
+ console.log(JSON.stringify(await (command==='title-preflight'?runTitlePreflight(options):checkTitlePreflight(options))));process.exit(0);
+}
 const {runtime,runtimeHash,runtimeConfigSha256,toolHashes}=await runtimeIdentity(runtimeFile,root);
 const browserExecutable=runtime.browserExecutable;
 if(!path.isAbsolute(browserExecutable))throw Error('Absolute browser path required');

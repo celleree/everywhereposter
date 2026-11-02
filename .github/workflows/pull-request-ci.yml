@@ -494,15 +494,6 @@ jobs:
           python3 -m venv --copies "$STUDIO_VENV"
           "$STUDIO_VENV/bin/python" -m pip install --disable-pip-version-check -r requirements.txt
           npm ci --ignore-scripts --no-audit --no-fund
-          node --test --test-reporter=tap tests/*.test.mjs 2>&1 | tee "$STUDIO_EVIDENCE/tests.tap"
-          "$STUDIO_VENV/bin/python" - <<'PY'
-          import os, re
-          from pathlib import Path
-          text = (Path(os.environ['STUDIO_EVIDENCE']) / 'tests.tap').read_text()
-          for name, value in {'tests': 98, 'pass': 98, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}.items():
-              assert re.findall(r'^# ' + name + r' (\d+)\s*$', text, re.M) == [str(value)], name
-          print('PASS: all 98 Studio tests executed without skips')
-          PY
           node --input-type=module - <<'JS'
           import fs from 'node:fs';
           import path from 'node:path';
@@ -537,6 +528,17 @@ jobs:
             ffmpeg: execFileSync(runtime.ffmpegExecutable, ['-version'], {encoding: 'utf8'}).split('\n')[0]
           }, null, 2));
           JS
+          export EP_PREFLIGHT_TEST_RUNTIME="$STUDIO_EVIDENCE/runtime.json"
+          export EP_PREFLIGHT_TEST_FONT="$(cat "$STUDIO_EVIDENCE/font-path.txt")"
+          node --test --test-reporter=tap tests/*.test.mjs 2>&1 | tee "$STUDIO_EVIDENCE/tests.tap"
+          "$STUDIO_VENV/bin/python" - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = (Path(os.environ['STUDIO_EVIDENCE']) / 'tests.tap').read_text()
+          for name, value in {'tests': 111, 'pass': 111, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}.items():
+              assert re.findall(r'^# ' + name + r' (\d+)\s*$', text, re.M) == [str(value)], name
+          print('PASS: all 111 Studio tests executed without skips')
+          PY
           font="$(cat "$STUDIO_EVIDENCE/font-path.txt")"
           node make-synthetic-fixtures.mjs "$STUDIO_EVIDENCE/runtime.json" "$font" "$STUDIO_EVIDENCE/fixtures"
           for index in 1 2; do

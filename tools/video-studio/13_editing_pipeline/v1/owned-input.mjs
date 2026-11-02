@@ -1,7 +1,7 @@
 import {fileURLToPath} from 'node:url';
 import {readFile,realpath,lstat,mkdir,copyFile,writeFile} from 'node:fs/promises';
 import path from 'node:path';import {execFileSync} from 'node:child_process';
-import {validateProject,audioTimeline} from './project.mjs';
+import {validateProject,audioTimeline,PROFILE_CAPABILITY} from './project.mjs';
 import {hash,json,loadRuntime} from './runtime.mjs';
 export {hash} from './runtime.mjs';
 export async function verified(file,expected){
@@ -17,9 +17,13 @@ export function checkMedia(a,meta,p){
   if(a.id===p.source.assetId&&(Math.abs(fps-p.canvas.fps)>.001||Number(v.nb_frames)!==p.source.frames))throw Error('Original source must retain its declared frame clock/count');
  }else if(!['png','mjpeg','webp','bmp','tiff'].includes(v.codec_name))throw Error('Use a registered still image, not an animated/video panel');
 }
+export function validateOwnedTuple(m){
+ if(!PROFILE_CAPABILITY.profiles.some(x=>x.manifestSchemaVersion===m.schemaVersion&&x.projectSchemaVersion===m.project?.schemaVersion&&x.profile===m.project?.profile))throw Error('Invalid owned-input manifest');
+}
 export async function prepareOwned(manifestFile,out,runtimeFile){
  const m=await json(manifestFile),runtime=await loadRuntime(runtimeFile,path.dirname(fileURLToPath(import.meta.url))),p=m.project;
- if(m.schemaVersion!==1||p?.profile!=='easy-graphics-v1'||!['approved-edl','cooked'].includes(m.provenance?.origin))throw Error('Invalid owned-input manifest');
+ validateOwnedTuple(m);
+ if(!['approved-edl','cooked'].includes(m.provenance?.origin))throw Error('Invalid owned-input manifest');
  if(m.provenance.originalSourceSha256!==p.source?.sha256)throw Error('Original source provenance mismatch');
  if(m.provenance.origin==='cooked'){
   if(m.provenance.cooked?.sourceSha256!==p.source.sha256)throw Error('Cooked provenance source mismatch');
