@@ -11,7 +11,19 @@ export async function studioTitleFont(config: StudioRuntime) {
   return { path, sha256: await studioHashFile(path) };
 }
 export function studioGroundedTitle(e: ReturnType<typeof validateStudioEvidence>, rectangles: any[], framing: StudioFraming) {
-  const end = e.words.findIndex(w => /[.!?]["'”’)]*$/.test(w.text) && !/^(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|[A-Za-z])\.$/i.test(w.text));
+  const end = e.words.findIndex((w, i) => {
+    const token = w.text.replace(/["'”’)}\]]+$/, '');
+    if (!/[.!?]$/.test(token)) return false;
+    if (/[!?]$/.test(token)) return true;
+    if (/^(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|[A-Za-z])\.$/i.test(token)) return false;
+    const next = e.words[i + 1]?.text.replace(/^["'“‘(]+/, '') ?? '';
+    if (/^(?:[A-Za-z]\.){2,}$/.test(token) || /^(?:Inc|Ltd|Corp|Co|vs|etc)\.$/i.test(token)) {
+      if (/^[a-z]/.test(next)) return false;
+      throw Error('Needs adjustment: ambiguous opening abbreviation');
+    }
+    if (/^[a-z0-9]/.test(next)) throw Error('Needs adjustment: ambiguous opening sentence boundary');
+    return true;
+  });
   const words = e.words.slice(0, end + 1), text = words.map(w => w.text).join(' ');
   if (end < 0 || words.length < 3 || words.length > 9 || text.length > 60 || text.split(/\s+/).length > 9) throw Error('Needs adjustment: opening sentence must contain 3-9 words within 60 characters');
   const face = { x: framing.x * 1080 - 20, y: framing.y * 1920 - 20,

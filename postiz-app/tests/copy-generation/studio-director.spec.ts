@@ -342,10 +342,19 @@ async function withV2Producer(run: Parameters<typeof withProducer>[0], metered: 
   }, metered); }
   finally { command?.mockRestore(); if (previous === undefined) delete process.env.STUDIO_EDITOR_V2_ENABLED; else process.env.STUDIO_EDITOR_V2_ENABLED = previous; }
 }
-it.each(['Dr. Ada does not agree.', 'Mr. A. Smith is not ready.'])('extracts the first complete opening sentence without losing qualifiers: %s', sentence => {
+it.each(['Dr. Ada does not agree.', 'Mr. A. Smith is not ready.', 'I support U.S. tariffs only temporarily.',
+  'I trust Acme Inc. only after review.', 'I agree, e.g. only under review.'])('extracts the first complete opening sentence without losing qualifiers: %s', sentence => {
   const f = fixture(); fullSource(f, sentence + ' Another sentence.');
   const title = studioGroundedTitle(validateStudioEvidence(f.raw, { organizationId: 'owner', mediaId: 'video' }), f.rectangles, f.framing);
   assert.equal(title.text, sentence); assert.equal(title.from, 0); assert.equal(title.frames, 60);
+});
+it.each(['I support U.S. Tariffs only temporarily.', 'I trust Acme Inc.', 'Your videos improve. only with review.'])('rejects ambiguous title boundaries before wallet: %s', async sentence => {
+  const run = jest.fn();
+  await withV2Producer(async (f, service, dir, c) => {
+    fullSource(f, sentence);
+    await assert.rejects(service.produce(c, f.job, f.raw, f.assets, dir), /Needs adjustment/);
+  }, { run });
+  expect(run).not.toHaveBeenCalled();
 });
 it('freezes V2 title and layout before one metered direction and reuses exact candidate bytes', async () => {
   const cached = new Map<string, any>(); let calls = 0;
