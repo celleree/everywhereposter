@@ -14,7 +14,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
   const directory = useMediaDirectory();
   const [selected, select] = useState(''), [reviewed, confirm] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [source, setSource] = useState<any>(), [visuals, setVisuals] = useState<string[]>([]), [targets, setTargets] = useState(['instagram']);
-  const [brief, setBrief] = useState('Keep my words and use clear source-led graphics.');
+  const [brief, setBrief] = useState('Keep my words and make a clear captioned talking-head draft.');
   const [framing, setFraming] = useState<any>({ x: .28, y: .28, width: .44, height: .24 }), [framingConfirmed, setFramingConfirmed] = useState(false);
   const [adjusting, setAdjusting] = useState(false), [pendingRequest, setPendingRequest] = useState<any>();
   const drag = useRef<{ x: number; y: number } | undefined>(undefined), receiptKey = 'everywhereposter:studio-request:v1:' + scope;
