@@ -219,16 +219,29 @@ export class QuickUploadService {
     await this.reconcile(intentId);
   }
   async reconcile(intentId: string): Promise<boolean> {
-    const intent = await this.db.quickUploadIntent.findUnique({ where: { id: intentId } });
-    if (!intent || terminal.includes(intent.status)) return true;
-    const ledger = await this.posts.reconcileSubmission(intent.organizationId, `quick_${intentId}`);
-    const names = new Map((intent.destinations as unknown as Destination[]).map(value => [value.id, value.name]));
-    const results = (intent.results as unknown as Result[]).filter(value => value.state === 'Skipped');
-    for (const destination of ledger.destinations) results.push({ integrationId: destination.integrationId, name: names.get(destination.integrationId) || destination.integrationId, postId: destination.postId,
-      state: destination.providerState === 'IN_FLIGHT' ? 'Publishing' : destination.state === 'published' ? 'Published' : ['uncertain', 'failed', 'failed-before-provider', 'unavailable', 'reconnect-required'].includes(destination.state) ? 'Failed' : 'Publishing',
-      ...(destination.state === 'uncertain' && destination.providerState !== 'IN_FLIGHT' ? { reason: 'Publishing outcome is uncertain. It will not be retried automatically.' } : {}) });
-    const done = !results.some(value => value.state === 'Publishing');
-    await this.db.quickUploadIntent.update({ where: { id: intentId }, data: { results: results as any, status: done ? 'COMPLETE' : 'PUBLISHING' } });
-    return done;
+    // One fresh retry after a lost snapshot race; later workflow ticks keep observing.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const intent = await this.db.quickUploadIntent.findUnique({ where: { id: intentId } });
+      if (!intent || terminal.includes(intent.status)) return true;
+      const ledger = await this.posts.reconcileSubmission(intent.organizationId, `quick_${intentId}`);
+      const names = new Map((intent.destinations as unknown as Destination[]).map(value => [value.id, value.name]));
+      const results = (intent.results as unknown as Result[]).filter(value => value.state === 'Skipped');
+      const destinations = [...ledger.destinations].sort((a, b) => a.integrationId < b.integrationId ? -1 : a.integrationId > b.integrationId ? 1 : 0);
+      for (const destination of destinations) results.push({ integrationId: destination.integrationId, name: names.get(destination.integrationId) || destination.integrationId, postId: destination.postId,
+        state: destination.providerState === 'IN_FLIGHT' ? 'Publishing' : destination.state === 'published' ? 'Published' : ['uncertain', 'failed', 'failed-before-provider', 'unavailable', 'reconnect-required'].includes(destination.state) ? 'Failed' : 'Publishing',
+        ...(destination.state === 'uncertain' && destination.providerState !== 'IN_FLIGHT' ? { reason: 'Publishing outcome is uncertain. It will not be retried automatically.' } : {}) });
+      const done = !results.some(value => value.state === 'Publishing');
+      const status = done ? 'COMPLETE' : 'PUBLISHING';
+      if (intent.status === status && isDeepStrictEqual(intent.results, results)) return done;
+      const changed = await this.db.quickUploadIntent.updateMany({
+        where: { id: intentId, organizationId: intent.organizationId,
+          status: { equals: intent.status, notIn: terminal },
+          results: { equals: intent.results as Prisma.InputJsonValue } },
+        data: { results: results as any, status },
+      });
+      if (changed.count === 1) return done;
+    }
+    const latest = await this.db.quickUploadIntent.findUnique({ where: { id: intentId } });
+    return !latest || terminal.includes(latest.status);
   }
 }
