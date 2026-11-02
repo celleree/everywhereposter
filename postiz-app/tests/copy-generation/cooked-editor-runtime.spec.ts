@@ -199,6 +199,58 @@ describe('private cooked native boundary', () => {
       else { expect(result.message).toBe('OBSERVATION_PROTOCOL_FAILURE'); expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']); }
       await runtime.cleanup(result.jobId, 'o');
     });
+  it.each(['valid', 'unknown', 'v1', 'version', 'call', 'cross-call', 'model', 'input', 'rate', 'dtype', 'shape',
+    'count', 'bytes', 'bounds', 'digest', 'implementation', 'sdk', 'code', 'path', 'origin', 'mapping', 'missing'])(
+    'validates versioned per-call decoded buffers: %s', async variant => {
+      const bind = (value: any) => { const canonicalUTF8 = JSON.stringify(value); return { canonicalUTF8,
+        byteCount: Buffer.byteLength(canonicalUTF8), sha256: createHash('sha256').update(canonicalUTF8).digest('hex') }; };
+      const runtime = new CookedEditorRuntime(config, async c => {
+        await runner(c); if (c.stage !== 'transcribe') return;
+        const path = join(c.workspace, 'edit/alignment-observation.json'), r = JSON.parse(await readFile(path, 'utf8'));
+        const unknown = { state: 'unknown', reason: 'unobserved' }, files = { ...r.configuredModel.files, 'model.bin': 'a'.repeat(64) };
+        const m = { id: 'model-1', constructorCodeSha256: 'b'.repeat(64), filesBefore: files, filesAfter: { ...files },
+          requested: bind({}), sdkVersion: bind('1.2.1'), actualSettings: unknown };
+        const calls = [1, 2].map(id => ({ id, modelId: m.id, explicit: bind({ clip_timestamps: id === 1 ? '0' : [0.02, 0.08] }),
+          defaulted: bind({}), returned: bind({}) }));
+        r.version = 'alignment-observation-v2';
+        r.configuredModel.actualLoadedModel = { state: 'observed', models: [m] };
+        r.effectiveOptions = { state: 'observed', basis: 'transcribe-API-calls', calls,
+          byteCount: [m.requested, m.sdkVersion, ...calls.flatMap(v => [v.explicit, v.defaulted, v.returned])].reduce((n, b) => n + b.byteCount, 0) };
+        r.extraction.wav = { state: 'observed', sha256: 'c'.repeat(64), sampleRate: 16000, channels: 1,
+          sampleWidthBytes: 2, sampleCount: 1600, compression: 'NONE', origin: unknown };
+        const d: any = { state: 'observed', callId: 1, modelId: m.id, inputWavSha256: r.extraction.wav.sha256,
+          sampleRate: 16000, dtype: '<f4', shape: [1600], sampleCount: 1600, byteCount: 6400, bufferSha256: 'd'.repeat(64),
+          implementation: 'faster_whisper.audio.decode_audio', codeSha256: 'e'.repeat(64), sdkVersion: '1.2.1',
+          avVersion: '16.0.0', numpyVersion: '2.3.3', origin: unknown, resamplingMap: unknown };
+        r.decoderArray = { state: 'observed', basis: 'pre-SDK-VAD-decode-output', calls: [d, { ...d, callId: 2 }] };
+        if (variant === 'unknown') r.decoderArray.calls[0] = unknown;
+        if (variant === 'v1') r.version = 'alignment-observation-v1';
+        if (variant === 'version') r.version = 'alignment-observation-v3';
+        if (variant === 'call') d.callId = 2;
+        if (variant === 'cross-call') r.decoderArray.calls.reverse();
+        if (variant === 'model') d.modelId = 'model-2';
+        if (variant === 'input') d.inputWavSha256 = '0'.repeat(64);
+        if (variant === 'rate') d.sampleRate = 0;
+        if (variant === 'dtype') d.dtype = '<f8';
+        if (variant === 'shape') d.shape = [800, 2];
+        if (variant === 'count') d.sampleCount++;
+        if (variant === 'bytes') d.byteCount++;
+        if (variant === 'bounds') { d.sampleCount = 16000 * 240 + 1; d.shape = [d.sampleCount]; d.byteCount = d.sampleCount * 4; }
+        if (variant === 'digest') d.bufferSha256 = 'invalid';
+        if (variant === 'implementation') d.implementation = 'other.decode';
+        if (variant === 'sdk') d.sdkVersion = 'other';
+        if (variant === 'code') d.codeSha256 = null;
+        if (variant === 'path') d.avVersion = '/private/path';
+        if (variant === 'origin') d.origin = 0;
+        if (variant === 'mapping') d.resamplingMap = { numerator: 1, denominator: 1 };
+        if (variant === 'missing') r.decoderArray.calls.pop();
+        await writeFile(path, JSON.stringify(r));
+      });
+      const result = await runtime.run(input).catch(e => e);
+      if (['valid', 'unknown'].includes(variant)) expect(calls.some(c => c.stage === 'render')).toBe(true);
+      else { expect(result.message).toBe('OBSERVATION_PROTOCOL_FAILURE'); expect(calls.map(c => c.stage)).toEqual(['prepare_boundaries', 'transcribe']); }
+      await runtime.cleanup(result.jobId, 'o');
+    });
   it('fails closed for unsupported metadata, missing files, symlinks, nonprivate roots and unsafe limits', async () => {
     const runtime = new CookedEditorRuntime(config, runner);
     for (const metadata of [{ ...input.metadata, fps: 31 }, { ...input.metadata, width: 1920, height: 1080 }, { ...input.metadata, durationMs: 240001 }, { ...input.metadata, alignedTimestamps: false }]) {

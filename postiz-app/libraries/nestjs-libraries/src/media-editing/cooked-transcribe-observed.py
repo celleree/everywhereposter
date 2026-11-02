@@ -18,6 +18,7 @@ import wave
 PIN = "bce911c1d0652f30b64fd5283cc4aa9fa92811c9"
 SCRIPT_SHA = "9964a0bb316e75d666cce6b2f7ebe7d5414b6e3d293c38c8cd22d77e5dd2102e"
 MAX = 256 * 1024
+MAX_PCM = 16000 * 240 * 4
 MODEL_FILES = ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt")
 
 
@@ -167,6 +168,7 @@ class NativeObserver:
     def __init__(self):
         self.models, self.calls, self.restores, self.checks = [], [], [], []
         self.used, self.failed = 0, False
+        self.wav_path, self.wav_sha, self.decoders, self.pcm_bytes = None, None, [], 0
 
     def capture(self, value, *, returned_options=False):
         result = binding(value, returned_options=returned_options)
@@ -177,6 +179,92 @@ class NativeObserver:
 
     def degrade(self):
         self.failed = True
+
+    def wav_digest(self, path):
+        with open(path, "rb", opener=lambda p, f: os.open(p, f | os.O_NOFOLLOW | os.O_NONBLOCK)) as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_PCM:
+                raise ValueError("input-limit")
+            h, count = hashlib.sha256(), 0
+            while chunk := stream.read(min(1024 * 1024, MAX_PCM + 1 - count)):
+                count += len(chunk)
+                if count > MAX_PCM:
+                    raise ValueError("input-limit")
+                h.update(chunk)
+            after = os.fstat(stream.fileno())
+            if count != before.st_size or any(getattr(before, k) != getattr(after, k) for k in
+                    ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")):
+                raise ValueError("input-mutated")
+            return h.hexdigest()
+
+    def decoded_call(self, original, call, package, input_audio, *args, **kwargs):
+        # The pinned SDK decodes eagerly in transcribe's globals. Never wrap or
+        # consume its lazy segments, patch installed files, or retry inference.
+        observation = unknown("decoder-not-intercepted")
+        namespace = getattr(getattr(original, "__func__", original), "__globals__", {})
+        decoder = namespace.get("decode_audio")
+        restored, count = False, 0
+        def decoded(*positional, **keywords):
+            nonlocal observation, count
+            count += 1
+            before = None
+            try:
+                bound = inspect.signature(decoder).bind(*positional, **keywords)
+                bound.apply_defaults()
+                audio = bound.arguments["input_file"]
+                if (type(audio) is not str or type(input_audio) is not str or audio != input_audio or self.wav_path is None or
+                        Path(audio) != self.wav_path or Path(audio).stat().st_size > MAX_PCM):
+                    raise ValueError("unbound-input")
+                before = self.wav_digest(audio)
+                if before != self.wav_sha:
+                    raise ValueError("input-mutated")
+            except Exception:
+                before = None
+            result = decoder(*positional, **keywords)  # Native decoder errors propagate exactly once.
+            try:
+                if count != 1:
+                    raise ValueError("multiple-decodes")
+                np = sys.modules.get("numpy")
+                rate = bound.arguments["sampling_rate"]
+                if (before is None or self.wav_digest(audio) != before or
+                        decoder.__module__ != "faster_whisper.audio" or
+                        type(rate) is not int or not 0 < rate <= 192000 or bound.arguments["split_stereo"] is not False or
+                        np is None or type(result) is not np.ndarray or result.dtype.str != "<f4" or
+                        result.ndim != 1 or not result.flags.c_contiguous or not 0 < result.nbytes <= MAX_PCM or
+                        self.pcm_bytes + result.nbytes > 64 * 1024 * 1024):
+                    raise ValueError("unsupported-or-unbound-decoder-buffer")
+                self.pcm_bytes += result.nbytes
+                # memoryview avoids a PCM copy. Bound every hashed window and the aggregate.
+                view, h = memoryview(result).cast("B"), hashlib.sha256()
+                for start in range(0, len(view), 1024 * 1024):
+                    h.update(view[start:start + 1024 * 1024])
+                observation = {"state": "observed", "callId": call["id"], "modelId": call["modelId"],
+                    "inputWavSha256": before, "sampleRate": rate, "dtype": result.dtype.str,
+                    "shape": list(result.shape), "sampleCount": result.size, "byteCount": result.nbytes,
+                    "bufferSha256": h.hexdigest(), "implementation": "faster_whisper.audio.decode_audio",
+                    "codeSha256": digest(inspect.getfile(decoder)), "sdkVersion": package.__version__,
+                    "avVersion": sys.modules["av"].__version__, "numpyVersion": np.__version__,
+                    "origin": unknown("SDK-discards-frame-PTS"), "resamplingMap": unknown("mapping-not-observed")}
+            except Exception:
+                observation = unknown("decoder-input-buffer-or-instrumentation-uncertain")
+            return result
+        try:
+            if call is not None and callable(decoder):
+                namespace["decode_audio"] = decoded
+                restored = True
+        except Exception:
+            observation = unknown("decoder-instrumentation-unavailable")
+        try:
+            return original(*args, **kwargs)
+        finally:
+            if restored:
+                namespace["decode_audio"] = decoder
+            try:
+                if observation.get("state") == "observed" and self.wav_digest(self.wav_path) != observation["inputWavSha256"]:
+                    raise ValueError("input-mutated-after-decode")
+            except Exception:
+                observation = unknown("decoder-input-mutated-or-unavailable")
+            self.decoders.append(observation)
 
     def constructor(self, original, package, *args, **kwargs):
         entry = None
@@ -203,11 +291,12 @@ class NativeObserver:
             original_call = instance.transcribe
             signature = inspect.signature(original_call)
             def transcribe(*positional, **keywords):
-                call = None
+                call, input_audio = None, None
                 try:
                     if self.failed or len(self.calls) >= 64:
                         raise ValueError("call-limit")
                     bound = signature.bind(*positional, **keywords)
+                    input_audio = bound.arguments.get("audio")
                     explicit = {k: v for k, v in bound.arguments.items() if k != "audio"}
                     bound.apply_defaults()
                     defaulted = {k: v for k, v in bound.arguments.items() if k != "audio" and k not in explicit}
@@ -215,7 +304,7 @@ class NativeObserver:
                             "explicit": self.capture(explicit), "defaulted": self.capture(defaulted)}
                 except Exception:
                     self.degrade()
-                result = original_call(*positional, **keywords)  # Exact tuple/generator/info; no consumption or adapter.
+                result = self.decoded_call(original_call, call, package, input_audio, *positional, **keywords)  # Exact native result.
                 try:
                     if call is None:
                         raise ValueError("call-observation-unavailable")
@@ -287,6 +376,7 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
     source, raw = Path(args[0]), Path(args[1])
     before, source_probe = digest(source), probe(source)
     wavs = []
+    observer = NativeObserver()
     # Restore the same sibling-import context installed by the original launcher.
     sys.path.insert(0, str(script.parent))
     sys.argv = [str(script), *args]
@@ -301,6 +391,7 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
             raise RuntimeError("OBSERVATION_PROTOCOL_FAILURE:EXTRA_EXTRACTION")
         try:
             dst = positional[1] if len(positional) > 1 else keywords["dst"]
+            observer.wav_path = Path(dst)
             with wave.open(str(dst), "rb") as wav:
                 wavs.append({"state": "observed", "sha256": digest(dst),
                     "sampleRate": wav.getframerate(), "channels": wav.getnchannels(),
@@ -308,9 +399,10 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
                     "compression": wav.getcomptype(), "origin": unknown("decoder-delay-trim-unobserved")})
         except (OSError, ValueError, EOFError, wave.Error):
             wavs.append(unknown("extracted-WAV-header-unavailable"))
+        if wavs[0].get("state") == "observed":
+            observer.wav_sha = wavs[0]["sha256"]
         return result
 
-    observer = NativeObserver()
     native = actual["run_whisper"]
     actual["run_whisper"] = lambda *a, **k: observer.run(native, actual, *a, **k)
     actual["extract_audio"] = observed_extract
@@ -331,7 +423,7 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
         version = bounded_command(["ffmpeg", "-version"]).decode("utf-8").splitlines()[0]
     except (OSError, ValueError, UnicodeError, IndexError):
         version = None
-    receipt = {"version": "alignment-observation-v1", "status": "INCOMPLETE",
+    receipt = {"version": "alignment-observation-v2", "status": "INCOMPLETE",
         "sourceSha256": before, "sourceAfterSha256": after, "rawAlignmentBytesSha256": digest(raw),
         "upstream": {"commit": PIN, "transcribeSha256": expected_sha}, "sourceAudio": source_probe,
         "configuredModel": {"basis": "configured-file-hashes-only", "files": files,
@@ -339,7 +431,9 @@ def observe(script, args, expected_sha=SCRIPT_SHA):
         "extraction": {"requested": {"sampleRate": 16000, "channels": 1, "codec": "pcm_s16le"},
                        "toolVersion": version, "wav": wavs[0] if wavs
                        else unknown("no-extraction-observed-cache-reuse-possible")},
-        "decoderArray": unknown("decoder-not-observed"), "effectiveOptions": options,
+        "decoderArray": {"state": "observed", "basis": "pre-SDK-VAD-decode-output", "calls": observer.decoders}
+            if options.get("state") == "observed" else unknown("native-calls-unavailable"),
+        "effectiveOptions": options,
         "quietBlockVAD": unknown("separate-waveform-not-observed"), "outputPCM": unknown("output-not-observed")}
     data = (json.dumps(receipt, separators=(",", ":"), allow_nan=False) + "\n").encode()
     if len(data) > MAX:
