@@ -120,6 +120,8 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
     separatePosts: jest.fn(),
   };
 
+  const transaction = {};
+  const prisma = { $transaction: jest.fn(async (work: any) => work(transaction)) };
   const workflowStart = jest.fn();
   const getRawClient = jest.fn(() => ({
     workflow: {
@@ -145,6 +147,9 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
     refreshIntegrationService,
     getRawClient,
     workflowStart,
+    prisma,
+    transaction,
+    shortLinkService,
     service: new PostsService(
       postRepository as any,
       integrationManager as any,
@@ -153,7 +158,8 @@ const createService = (providerOverrides: Record<string, any> = {}) => {
       shortLinkService as any,
       openaiService as any,
       temporalService as any,
-      refreshIntegrationService as any
+      refreshIntegrationService as any,
+      prisma as any
     ),
   };
 };
@@ -343,7 +349,8 @@ describe('PostsService published post management', () => {
       expect.any(String),
       expect.any(Object),
       [],
-      undefined
+      undefined,
+      expect.any(Object)
     );
 
     await Promise.resolve();
@@ -402,7 +409,8 @@ describe('PostsService published post management', () => {
       futureDate,
       expect.any(Object),
       [],
-      undefined
+      undefined,
+      expect.any(Object)
     );
   });
 
@@ -715,7 +723,8 @@ describe('PostsService published post management', () => {
         ],
       }),
       [],
-      undefined
+      undefined,
+      expect.any(Object)
     );
   });
 
