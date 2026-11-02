@@ -1,11 +1,13 @@
 import { test, expect, openApp, mobileProject, capture } from './fixtures';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { Page } from '@playwright/test';
 
 // Bootstrap readiness must belong to this reload and this fixture's durable choice.
 // Product assertions retain their normal budget after the matching data arrives.
-async function reloadQuickUpload(page: Page, phase: string, timeout = 60_000) {
+const quickReadiness = (token: string, session: any) => JSON.stringify([token, session?.id, session?.status, session?.quickIntent?.id, session?.quickIntent?.status]);
+async function reloadQuickUpload(page: Page, phase: string, token: string, timeout = 60_000) {
   let navigation: ReturnType<Page['reload']>;
   const restored = page.waitForResponse(async response => {
     const request = response.request();
@@ -14,9 +16,8 @@ async function reloadQuickUpload(page: Page, phase: string, timeout = 60_000) {
     const document = await navigation;
     if (!document || request.timing().startTime < document.request().timing().startTime) return false;
     if (!response.ok()) throw Error('Restored uploads failed: HTTP ' + response.status());
-    const value = await response.json();
-    return value.sessions?.some((session: any) => session.id === 'quick-session' && session.status === 'COMPLETE' &&
-      session.quickIntent?.id === 'quick-intent' && session.quickIntent.status === phase) === true;
+    return response.headers()['x-ep-quick-readiness'] === quickReadiness(token,
+      { id: 'quick-session', status: 'COMPLETE', quickIntent: { id: 'quick-intent', status: phase } });
   }, { timeout });
   navigation = page.reload();
   await Promise.all([navigation, restored]);
@@ -92,10 +93,15 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   const bytes = Buffer.concat([readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')), Buffer.alloc(17 * 1024 * 1024)]);
   let session: any, release: () => void, held = false, continueTransfer = false;
   const hold = new Promise<void>(resolve => { release = resolve; });
-  let intent: any;
+  let intent: any; const token = randomUUID();
   await page.route('**/backend-api/media/uploads**', async route => {
     const req = route.request(), pathname = new URL(req.url()).pathname;
-    if (pathname === '/backend-api/media/uploads' && req.method() === 'GET') return route.fulfill({ json: { durableQuickUploadEnabled: true, sessions: session ? [session] : [] } });
+    if (pathname === '/backend-api/media/uploads' && req.method() === 'GET') {
+      // Bind the marker and JSON to one payload snapshot; no second CDP body read.
+      const value = session && structuredClone(session);
+      return route.fulfill({ headers: { 'x-ep-quick-readiness': quickReadiness(token, value) },
+        json: { durableQuickUploadEnabled: true, sessions: value ? [value] : [] } });
+    }
     if (pathname === '/backend-api/media/uploads' && req.method() === 'POST') { session = { ...req.postDataJSON(), id: 'quick-session', status: 'UPLOADING', parts: [] }; return route.fulfill({ json: session }); }
     if (pathname.endsWith('/quick-upload')) {
       expect(session.status).toBe('UPLOADING'); expect(req.postDataJSON().confirmNoIndividualReview).toBe(true);
@@ -128,35 +134,40 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   await expect(page).toHaveURL(/settings/); await expect(tray).toHaveCount(0); continueTransfer = true; release!();
   await page.goBack();
   await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
-  intent.status = 'PUBLISHING'; session.quickIntent = intent; await reloadQuickUpload(page, 'PUBLISHING');
+  intent.status = 'PUBLISHING'; session.quickIntent = intent; await reloadQuickUpload(page, 'PUBLISHING', token);
   await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Publishing');
-  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }, { integrationId: 'failed-x', name: 'X account', state: 'Failed', reason: 'Synthetic rejection' }]; session.quickIntent = intent; await reloadQuickUpload(page, 'COMPLETE');
+  intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }, { integrationId: 'failed-x', name: 'X account', state: 'Failed', reason: 'Synthetic rejection' }]; session.quickIntent = intent; await reloadQuickUpload(page, 'COMPLETE', token);
   await expect(tray.getByText('Fixture account: Published')).toBeVisible();
   await expect(tray.getByText('X account: Failed — Synthetic rejection')).toBeVisible();
 });
 
 test('Resumable upload: reload readiness rejects unrelated identities, wrong phases and HTTP errors', async ({ page }) => {
   let status = 200, reads = 0;
-  let restored: any;
+  const token = randomUUID(); let responseToken = token, restored: any;
   await page.route('**/upload-readiness-fixture', route => route.fulfill({
     contentType: 'text/html', body: '<script>fetch("/backend-api/media/uploads")</script>',
   }));
-  await page.route('**/backend-api/media/uploads', route => { reads++; return route.fulfill({ status, json: { sessions: [restored] } }); });
+  await page.route('**/backend-api/media/uploads', route => {
+    reads++; const value = structuredClone(restored);
+    return route.fulfill({ status, headers: { 'x-ep-quick-readiness': quickReadiness(responseToken, value) }, json: { sessions: [value] } });
+  });
   const expected = { id: 'quick-session', status: 'COMPLETE', quickIntent: { id: 'quick-intent', status: 'PUBLISHING' } };
   restored = expected;
   await page.goto('/upload-readiness-fixture');
-  await reloadQuickUpload(page, 'PUBLISHING', 5000);
+  await reloadQuickUpload(page, 'PUBLISHING', token, 5000);
   for (const value of [
     { ...expected, id: 'unrelated-session' },
     { ...expected, quickIntent: { ...expected.quickIntent, id: 'unrelated-intent' } },
     { ...expected, quickIntent: { ...expected.quickIntent, status: 'WAITING' } },
   ]) {
     restored = value; const before = reads;
-    await expect(reloadQuickUpload(page, 'PUBLISHING', 500)).rejects.toThrow(/Timeout/);
+    await expect(reloadQuickUpload(page, 'PUBLISHING', token, 500)).rejects.toThrow(/Timeout/);
     expect(reads).toBe(before + 1);
   }
-  restored = expected; status = 503;
-  await expect(reloadQuickUpload(page, 'PUBLISHING', 5000)).rejects.toThrow(/Restored uploads failed: HTTP 503/);
+  restored = expected; responseToken = 'unrelated-test';
+  await expect(reloadQuickUpload(page, 'PUBLISHING', token, 500)).rejects.toThrow(/Timeout/);
+  responseToken = token; status = 503;
+  await expect(reloadQuickUpload(page, 'PUBLISHING', token, 5000)).rejects.toThrow(/Restored uploads failed: HTTP 503/);
 });
 
 test('Resumable upload: restored completed transfers stay inline and do not cover the phone picker', async ({ page }, info) => {
