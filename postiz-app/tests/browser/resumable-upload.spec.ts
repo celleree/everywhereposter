@@ -113,6 +113,8 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
 });
 
 test('Resumable upload: restored completed transfers stay inline and do not cover the phone picker', async ({ page }, info) => {
+  // Test layout before the 10s completion expiry, independently of cold hydration.
+  await page.clock.setFixedTime(Date.now());
   // Account for the viewport consumed by phone browser controls.
   await page.setViewportSize({ width: 390, height: 580 });
   await page.route('**/backend-api/media/uploads**', route => route.fulfill({ json: { sessions: [0, 1].map(index => ({
