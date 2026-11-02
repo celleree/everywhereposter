@@ -5,7 +5,7 @@ import { mkdir, rmdir, writeFile } from 'fs/promises';
 import { PrismaService } from '../database/prisma/prisma.service';
 import { UploadFactory } from '../upload/upload.factory';
 import { StudioEditRepository, StudioEditRequest, normalizeStudioRequest } from './studio-edit.repository';
-import { studioFingerprint } from './studio-receipt';
+import { isStudioProfile, studioFingerprint } from './studio-receipt';
 import { StudioApprovedPlan, inspectStudioExport, runStudioProject, stageStudioPlan, studioDirectory, studioHashFile, studioJson, studioRuntime } from './studio-worker';
 import { CookedReviewService } from './cooked-review.service';
 import { StudioDirectorService } from './studio-director.service';
@@ -20,13 +20,22 @@ export class StudioEditService {
   constructor(private readonly jobs: StudioEditRepository, private readonly db: PrismaService,
     private readonly cooked?: CookedReviewService, private readonly director?: StudioDirectorService) {}
   admit(org: string, body: StudioEditRequest) { return this.jobs.admit(org, body); }
+  private runtime(org: string, row: any) {
+    const profile = row.input?.request?.profile;
+    if (!isStudioProfile(profile)) throw new Error('Unknown persisted Studio profile');
+    return studioRuntime(org, profile);
+  }
+  private assertProducerProfile(row: any) {
+    if (row.input?.request?.profile !== 'easy-graphics-v1') throw new ServiceUnavailableException('Studio V2 production is unavailable');
+  }
   async availability(org: string) {
     try { await studioRuntime(org); return { enabled: true, scope: 'stationary-single-speaker-portrait-cfr30-v1' }; }
     catch { return { enabled: false }; }
   }
   async create(org: string, body: StudioEditRequest) {
-    await studioRuntime(org);
     const request = normalizeStudioRequest(body);
+    if (request.profile !== 'easy-graphics-v1') throw new ServiceUnavailableException('Studio V2 creation is unavailable');
+    await studioRuntime(org, request.profile);
     if (!request.creative || !this.cooked || !this.director) throw new BadRequestException('Studio requires a brief and confirmed stationary speaker framing');
     let row = await this.jobs.admit(org, request); await this.assertOwned(org, row);
     if (row.state === 'ADMITTED') {
@@ -37,7 +46,8 @@ export class StudioEditService {
     return { id: row.id, generation: row.generation, state: row.state };
   }
   async resume(org: string, job: string) {
-    const row = await this.jobs.get(org, job); await this.assertOwned(org, row); const config = await studioRuntime(org);
+    const row = await this.jobs.get(org, job); await this.assertOwned(org, row); const config = await this.runtime(org, row);
+    this.assertProducerProfile(row);
     if (row.state !== 'RUNNING' || !(row.input as any).request.creative) throw new ConflictException('This Studio edit cannot be resumed');
     if (!this.running.has(org + ':' + row.id)) {
       const dir = studioDirectory(config, row); await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -50,13 +60,14 @@ export class StudioEditService {
     if (this.running.has(key)) return;
     const operation = this.produce(org, row).catch(async error => {
       // No raw provider/native errors, transcripts or paths in the public ledger.
-      try { const c = await studioRuntime(org); await writeFile(join(studioDirectory(c, row), 'producer-status.json'), JSON.stringify({ phase: error?.studioNotAdmitted === true ? 'WAITING_FOR_WORKER' : 'NEEDS_VERIFICATION' })); } catch {}
+      try { const c = await this.runtime(org, row); await writeFile(join(studioDirectory(c, row), 'producer-status.json'), JSON.stringify({ phase: error?.studioNotAdmitted === true ? 'WAITING_FOR_WORKER' : 'NEEDS_VERIFICATION' })); } catch {}
     }).finally(() => this.running.delete(key));
     this.running.set(key, operation);
   }
   private async produce(org: string, row: any) {
+    this.assertProducerProfile(row);
     if (!this.cooked || !this.director) throw new ServiceUnavailableException('Studio producer is unavailable');
-    const config = await studioRuntime(org), dir = studioDirectory(config, row);
+    const config = await this.runtime(org, row), dir = studioDirectory(config, row);
     await mkdir(dir, { recursive: true, mode: 0o700 }); await this.assertOwned(org, row);
     let raw: any;
     try { raw = await studioJson(join(dir, 'evidence.json')); }
@@ -99,7 +110,7 @@ export class StudioEditService {
     const candidates = await this.db.studioEditJob.findMany({ where: { organizationId: org, sourceMediaId: media, state: 'REVIEWED' }, orderBy: { createdAt: 'desc' }, take: 5 });
     for (const row of candidates) {
       try {
-        await this.assertOwned(org, row); const c = await studioRuntime(org);
+        await this.assertOwned(org, row); const c = await this.runtime(org, row);
         const evidence = validateStudioEvidence(await studioJson(join(studioDirectory(c, row), 'evidence.json')), { organizationId: org, mediaId: media });
         const framing = (row.input as any).request.creative?.framing;
         if (framing) return { framing: { ...framing, sourceSha256: evidence.sourceSha256 } };
@@ -126,8 +137,8 @@ export class StudioEditService {
     return this.jobs.recordStored(intent, lease, receipt);
   }
   async renderApproved(org: string, job: string, plan: StudioApprovedPlan) {
-    const config = await studioRuntime(org);
     let row = await this.jobs.get(org, job); await this.assertOwned(org, row);
+    const config = await this.runtime(org, row);
     if (row.state === 'ADMITTED') row = await this.jobs.claim(org, job, row.generation);
     if (!row.leaseToken || row.state === 'CANCELLED') throw new ConflictException('Studio job is not runnable');
     const staged = await stageStudioPlan(config, row, plan);
@@ -145,7 +156,7 @@ export class StudioEditService {
   }
   private async verified(org: string, row: any) {
     await this.assertOwned(org, row);
-    const config = await studioRuntime(org), worker = row.worker;
+    const config = await this.runtime(org, row), worker = row.worker;
     if (!worker || worker.root !== config.root || worker.file !== config.file || worker.work !== config.work ||
         await studioHashFile(join(studioDirectory(config, row), 'manifest.json')) !== worker.manifestHash) throw new Error('Studio worker binding is stale');
     const result = await inspectStudioExport(config, row);
@@ -164,7 +175,7 @@ export class StudioEditService {
     const response = { id: row.id, sourceMediaId: row.sourceMediaId, generation: row.generation, state: row.state,
       technicalStatus: 'NOT_VERIFIED', creativeApproval: row.reviewedAt ? 'APPROVED' : 'PENDING' };
     if (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state)) {
-      try { const c = await studioRuntime(org), progress = await studioJson(join(studioDirectory(c, row), 'producer-status.json'), 4096);
+      try { const c = await this.runtime(org, row), progress = await studioJson(join(studioDirectory(c, row), 'producer-status.json'), 4096);
         if (progress.phase === 'NEEDS_VERIFICATION') return { ...response, phase: 'NEEDS_VERIFICATION', message: 'This edit needs verification or adjustment. No automatic paid retry will run. Your original is unchanged.' };
         if (progress.phase === 'WAITING_FOR_WORKER') return { ...response, phase: 'WAITING_FOR_WORKER', message: 'The native editor was busy, restarting or not ready. No new job was admitted. Resume when it is available; your original is unchanged.' };
       } catch {}
