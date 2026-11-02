@@ -12,7 +12,7 @@ const v2=()=>{
 };
 test('profile capability is explicit and caption timing capability is unchanged',()=>{
  const result=JSON.parse(execFileSync(process.execPath,['run.mjs','capabilities'],{cwd:new URL('..',import.meta.url)}));
- assert.deepEqual(result,{captionTiming:{version:1,field:'captionTimingPolicy',default:'legacy-v1',policies:['legacy-v1','trim-trailing-hold-v1']},profiles:{version:1,profiles:[{manifestSchemaVersion:1,projectSchemaVersion:1,profile:'easy-graphics-v1'},{manifestSchemaVersion:2,projectSchemaVersion:2,profile:'talking-head-v2'}]}});
+ assert.deepEqual(result,{captionTiming:{version:1,field:'captionTimingPolicy',default:'legacy-v1',policies:['legacy-v1','trim-trailing-hold-v1']},profiles:{version:1,profiles:[{manifestSchemaVersion:1,projectSchemaVersion:1,profile:'easy-graphics-v1'},{manifestSchemaVersion:2,projectSchemaVersion:2,profile:'talking-head-v2'}]},titlePreflight:{version:1,profile:'talking-head-v2',command:'title-preflight',checkCommand:'title-preflight-check',style:'block-title-v1',fontSize:96,titleMaxLines:2,captionMaxLines:2}});
  assert.deepEqual(result.captionTiming,CAPTION_TIMING_CAPABILITY);assert.deepEqual(result.profiles,PROFILE_CAPABILITY);
 });
 test('V1 and V2 project identities validate with their matching profiles',()=>{

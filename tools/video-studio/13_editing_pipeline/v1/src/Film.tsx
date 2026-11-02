@@ -9,7 +9,7 @@ export function Font(){const[h]=useState(()=>delayRender('Local editorial font')
 const media=(a:any,preview:boolean)=>staticFile(preview&&a.previewFile?a.previewFile:a.file);
 // Shared by Player and export. Captions are static within each original word group:
 // one measured layout therefore covers every output frame, without changing timing.
-function SafeCaption({wordTexts,cells,avoid,wordIds,background}:any){
+function SafeCaption({wordTexts,cells,avoid,wordIds,background,maxLines}:any){
  const [layout,setLayout]=useState<any>(null),svg=useRef<SVGSVGElement>(null);
  const [handle]=useState(()=>delayRender('Measure caption safe-zone layout'));
  const released=useRef(false);
@@ -23,7 +23,9 @@ function SafeCaption({wordTexts,cells,avoid,wordIds,background}:any){
    if(!context)throw Error('Caption font measurement unavailable');
    context.font=CAPTION_STYLE.font;context.fontKerning='normal';
    const measure=(text:string)=>{const m=context.measureText(text);return{width:m.width,left:m.actualBoundingBoxLeft,right:m.actualBoundingBoxRight,ascent:m.actualBoundingBoxAscent,descent:m.actualBoundingBoxDescent};};
-   setLayout(planCaption(wordTexts,cells,measure,avoid));
+   const planned=planCaption(wordTexts,cells,measure,avoid);
+   if(maxLines&&planned.lines.length>maxLines)throw Error('Caption exceeds two measured lines');
+   setLayout(planned);
   }).catch(error=>{if(active)cancelRender(error);});
   return()=>{active=false;release();};
  },[]);
@@ -43,7 +45,7 @@ function SafeCaption({wordTexts,cells,avoid,wordIds,background}:any){
  </div>;
 }
 function Effect({event,assets,cells}:any){return <EasyGraphics event={event} assets={assets} cells={cells}/>;}
-export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean}>=({project:p,preview=false,hideGraphics=false})=>{
+export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean;layoutOnly?:boolean}>=({project:p,preview=false,hideGraphics=false,layoutOnly=false})=>{
  const{assets,words,safeZones,captionRanges}=useMemo(()=>validateProject(p),[p]),frame=useCurrentFrame(),{fps,width,height}=useVideoConfig();
  if(!['easy-graphics-v1','talking-head-v2'].includes(p.profile))throw Error('This package renders accessible profiles only; historical effects require their original runtime');
  const rendering=getRemotionEnvironment().isRendering,isPreview=preview&&!rendering,source=assets.get(p.source.assetId);let cursor=0;
@@ -58,13 +60,13 @@ export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean}>
  const aware=safeZones.status!=='UNASSESSED';
  if(!aware)throw Error('Accessible profile requires selected safe-zone targets');
  return <AbsoluteFill style={{background:'#101714',fontFamily:'EP Plex',fontWeight:700,color:'#fff'}}><Font/>
-  {p.cuts.map((c:any,i:number)=>{const from=cursor;cursor+=c.out-c.in;return <Sequence key={i} from={from} durationInFrames={c.out-c.in}><OffthreadVideo muted src={media(source,isPreview)} startFrom={c.in} endAt={c.out} style={{width:'100%',height:'100%',objectFit:'cover'}}/></Sequence>;})}
-  {!hideGraphics&&p.broll.map((b:any)=>{const a=assets.get(b.assetId);return <Sequence key={b.id} from={b.from} durationInFrames={b.frames}>{a.kind==='video'?<OffthreadVideo muted src={media(a,isPreview)} startFrom={Math.round(b.sourceStart*fps)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>:<Img src={media(a,isPreview)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>}</Sequence>;})}
-  <Audio src={staticFile('speech.wav')}/>
+  {!layoutOnly&&p.cuts.map((c:any,i:number)=>{const from=cursor;cursor+=c.out-c.in;return <Sequence key={i} from={from} durationInFrames={c.out-c.in}><OffthreadVideo muted src={media(source,isPreview)} startFrom={c.in} endAt={c.out} style={{width:'100%',height:'100%',objectFit:'cover'}}/></Sequence>;})}
+  {!layoutOnly&&!hideGraphics&&p.broll.map((b:any)=>{const a=assets.get(b.assetId);return <Sequence key={b.id} from={b.from} durationInFrames={b.frames}>{a.kind==='video'?<OffthreadVideo muted src={media(a,isPreview)} startFrom={Math.round(b.sourceStart*fps)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>:<Img src={media(a,isPreview)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>}</Sequence>;})}
+  {!layoutOnly&&<Audio src={staticFile('speech.wav')}/>}
   {!hideGraphics&&<div style={{position:'absolute',width:1080,height:1920,transform:`scale(${width/1080},${height/1920})`,transformOrigin:'0 0'}}>
    {p.profile==='talking-head-v2'&&p.title&&<Sequence from={p.title.from} durationInFrames={p.title.frames}><Title key={JSON.stringify(p.title)} title={p.title}/></Sequence>}
    {p.effects.map((e:any)=><Sequence key={e.id} from={e.from} durationInFrames={e.frames}><Effect key={JSON.stringify([e,safeZones.cells])} event={e} assets={assets} cells={safeZones.cells}/></Sequence>)}
-   {caption&&(aware?<SafeCaption key={JSON.stringify([caption.wordIds,wordTexts,safeZones.profiles.map((x:any)=>x.id),avoid])} wordTexts={wordTexts} wordIds={caption.wordIds} cells={safeZones.cells} avoid={avoid} background={broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}/>:<div data-caption={caption.wordIds.join(',')} style={{position:'absolute',left:80,top:1500,width:920,minHeight:180,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',fontSize:76,lineHeight:1.12,letterSpacing:'-.025em',textShadow:'0 3px 12px #000,0 1px 3px #000',WebkitTextStroke:'1px #000',paintOrder:'stroke fill',padding:'12px 18px',boxSizing:'border-box',borderRadius:20,background:broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}}>{wordTexts.join(' ')}</div>)}
+   {caption&&(aware?<SafeCaption key={JSON.stringify([caption.wordIds,wordTexts,safeZones.profiles.map((x:any)=>x.id),avoid])} wordTexts={wordTexts} wordIds={caption.wordIds} maxLines={p.profile==='talking-head-v2'?2:undefined} cells={safeZones.cells} avoid={avoid} background={broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}/>:<div data-caption={caption.wordIds.join(',')} style={{position:'absolute',left:80,top:1500,width:920,minHeight:180,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',fontSize:76,lineHeight:1.12,letterSpacing:'-.025em',textShadow:'0 3px 12px #000,0 1px 3px #000',WebkitTextStroke:'1px #000',paintOrder:'stroke fill',padding:'12px 18px',boxSizing:'border-box',borderRadius:20,background:broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}}>{wordTexts.join(' ')}</div>)}
   </div>}
   {isPreview&&!hideGraphics&&<div data-safe-zone-status={safeZones.status} role="status" style={{position:'absolute',top:8,left:8,right:8,font:'12px system-ui',color:'#fff',textShadow:'0 1px 3px #000',pointerEvents:'none'}}>
    {!aware?'UNASSESSED: legacy layout has no destination profiles.':<>Caption targets: {safeZones.profiles.map((x:any)=>`${x.platform} (${x.confidence})`).join(', ')}. {safeZones.findings.some((x:any)=>x.severity==='error')?'Critical content needs verification; protected export is blocked. ':''}{safeZones.findings.some((x:any)=>x.code.startsWith('FOCAL_')&&x.severity==='warning')?'Focal/action framing needs review. ':''}Profile conformance does not guarantee every platform UI.</>}

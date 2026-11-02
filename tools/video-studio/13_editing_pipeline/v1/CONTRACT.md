@@ -113,3 +113,27 @@ Persistence may retain additional IDs/locations outside these worker receipts.
 The app owns project authorization, immutable object versions and storage receipt
 binding. A technical-ready download does not authorize publication. No callback,
 network service, database write or app route is implemented by this package.
+
+## Title layout preflight
+
+`node run.mjs title-preflight CANDIDATE --runtime RUNTIME.json` reads bounded
+`project.json` and `public/font.ttf` from CANDIDATE, validates a titled V2
+1080x1920/30fps full-source project of at most 1800 frames, then renders distinct
+caption/title states with the same font and Film components, without source video
+or audio. Every caption group must be visible and at most 128 states may be
+checked. V2 captions and titles must each fit at most two measured lines.
+A successful probe exclusively writes `title-preflight.json` only after all
+states and bindings have been rechecked. Existing receipts are never overwritten.
+
+`node run.mjs title-preflight-check CANDIDATE --runtime RUNTIME.json [--project FINAL.json]`
+performs no render or write. It requires the full current receipt, frame coverage,
+font, renderer and runtime bindings to match. The optional server-owned final
+project is compared using the same exported `layoutInputHash` projection:
+schema/profile, canvas, source identity/count, cut bounds, ordered words and
+caption IDs, resolved timing policy, faces, safe zones and title. Project ID,
+revision, direction notes and cut reasons are excluded. The hash is SHA-256 of
+the UTF-8 domain tag `EP_TITLE_LAYOUT_INPUT_V1\n` followed by recursively
+key-sorted compact JSON. This is a layout fit and custody check, not a quality
+or speech judgment; a valid title-free V2 project does not qualify for this probe.
+The capability command advertises `titlePreflight` version 1 with profile,
+commands, style, 96px font size and both two-line limits.
