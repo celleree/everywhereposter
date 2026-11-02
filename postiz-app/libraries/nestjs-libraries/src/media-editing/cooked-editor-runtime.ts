@@ -121,11 +121,30 @@ async function validateObservation(workspace: string, sourceSha256: string) {
         !(receipt.extraction.toolVersion === null || text(receipt.extraction.toolVersion)) ||
         !(unknown(wav) || (wav?.state === 'observed' && sha(wav.sha256) && wav.compression === 'NONE' && unknown(wav.origin) &&
           ['sampleRate', 'channels', 'sampleWidthBytes', 'sampleCount'].every(key => Number.isSafeInteger(wav[key]) && wav[key] >= (key === 'sampleCount' ? 0 : 1))))) throw new Error('SHAPE');
-    if (receipt.version !== 'alignment-observation-v1' || receipt.status !== 'INCOMPLETE' ||
+    const v2 = receipt.version === 'alignment-observation-v2', decoders = receipt.decoderArray;
+    let pcmBytes = 0;
+    const observedDecoders = v2 && observedOptions && decoders?.state === 'observed' &&
+      decoders.basis === 'pre-SDK-VAD-decode-output' && Array.isArray(decoders.calls) &&
+      decoders.calls.length === options.calls.length && decoders.calls.every((d: any, i: number) => {
+        if (unknown(d)) return true;
+        pcmBytes += d?.byteCount;
+        return d?.state === 'observed' && d.callId === options.calls[i].id && d.modelId === options.calls[i].modelId &&
+          wav?.state === 'observed' && d.inputWavSha256 === wav.sha256 &&
+          d.implementation === 'faster_whisper.audio.decode_audio' && sha(d.codeSha256) &&
+          ['sdkVersion', 'avVersion', 'numpyVersion'].every(key => text(d[key]) && !/[\/]/.test(d[key])) &&
+          d.sdkVersion === JSON.parse(loaded.models.find((m: any) => m.id === d.modelId).sdkVersion.canonicalUTF8) &&
+          Number.isSafeInteger(d.sampleRate) && d.sampleRate > 0 && d.sampleRate <= 192000 && d.dtype === '<f4' &&
+          Array.isArray(d.shape) && d.shape.length === 1 && d.shape[0] === d.sampleCount &&
+          Number.isSafeInteger(d.sampleCount) && d.sampleCount > 0 && d.byteCount === d.sampleCount * 4 &&
+          d.byteCount <= 16000 * 240 * 4 && pcmBytes <= 64 * MiB && sha(d.bufferSha256) &&
+          unknown(d.origin) && unknown(d.resamplingMap);
+      });
+    if (!(v2 ? (unknown(loaded) ? unknown(decoders) : observedDecoders) : unknown(decoders))) throw new Error('DECODER');
+    if ((!v2 && receipt.version !== 'alignment-observation-v1') || receipt.status !== 'INCOMPLETE' ||
         receipt.sourceSha256 !== sourceSha256 || receipt.sourceAfterSha256 !== sourceSha256 ||
         receipt.upstream?.commit !== 'bce911c1d0652f30b64fd5283cc4aa9fa92811c9' ||
         receipt.upstream?.transcribeSha256 !== '9964a0bb316e75d666cce6b2f7ebe7d5414b6e3d293c38c8cd22d77e5dd2102e' ||
-        !['decoderArray', 'quietBlockVAD', 'outputPCM'].every(key =>
+        !['quietBlockVAD', 'outputPCM'].every(key =>
           unknown(receipt[key])) ||
         await digest(join(workspace, 'source.mp4')) !== sourceSha256) throw new Error('BINDING');
     const raw = join(workspace, 'edit/words.raw.json');

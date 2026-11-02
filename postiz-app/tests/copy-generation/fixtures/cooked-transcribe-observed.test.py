@@ -120,6 +120,8 @@ class Observation(unittest.TestCase):
         self.assertEqual([e[0] for e in self.events()], ["main"])
         r = json.loads(self.receipt.read_bytes())
         self.assertEqual(r["status"], "INCOMPLETE")
+        self.assertEqual(r["version"], "alignment-observation-v2")
+        self.assertEqual(r["decoderArray"]["state"], "unknown")
         self.assertEqual(r["extraction"]["wav"]["state"], "unknown")
         self.assertEqual(json.loads(self.raw.read_bytes()), [{"text": "cached"}])
 
@@ -443,6 +445,85 @@ class NativeCapture(unittest.TestCase):
         self.assertIn(b"OBSERVATION_PROTOCOL_FAILURE:CONFIGURED_MODEL", result.stderr)
         self.assertEqual(self.raw.read_bytes(), raw)
         self.assertFalse(self.receipt.exists())
+
+    @unittest.skipUnless(os.environ.get("COOKED_ACTUAL_SDK_VAD") == "1", "opt-in installed decoder, no model/inference")
+    def test_z_actual_decoded_buffer_call_binding_and_bounds(self):
+        import numpy as np
+        import faster_whisper as sdk
+        from faster_whisper.audio import decode_audio
+        from types import SimpleNamespace as N
+        with patch.dict(os.environ, self.env):
+            wav = self.root / "extracted.wav"
+            subprocess.run(["ffmpeg", "-v", "error", "-i", str(self.source), "-ac", "1",
+                            "-ar", "16000", "-c:a", "pcm_s16le", str(wav)], check=True)
+            import wave
+            with wave.open(str(wav)) as f:
+                expected = np.frombuffer(f.readframes(f.getnframes()), dtype="<i2").astype(np.float32) / 32768
+            expected_hash = hashlib.sha256(memoryview(expected).cast("B")).hexdigest()
+            attempts, results = [], []
+            class Model:
+                def __init__(self, *args): pass
+                def transcribe(self, audio, clip_timestamps="0"):
+                    global decode_audio
+                    attempts.append(clip_timestamps)
+                    value = decode_audio(str(wav) if mode == "call-input" else audio)
+                    if mode == "decode-error": raise RuntimeError("native after decoder")
+                    if mode == "mutation": wav.write_bytes(wav.read_bytes() + b"changed")
+                    if mode == "multiple":
+                        decode_audio(audio); decode_audio(audio)
+                    result = (iter([value]), N(language="en")); results.append(result)
+                    return result
+            # Model uses the real installed decoder through the same global lookup as the SDK.
+            for mode in ("valid", "call-input", "input-changed", "mutation", "multiple", "unsupported", "strided", "shape", "empty", "tuple", "bounds", "budget", "decode-error", "decoder-error"):
+                with self.subTest(mode=mode):
+                    observer = O.NativeObserver()
+                    observer.wav_path, observer.wav_sha = wav, O.digest(wav)
+                    if mode == "input-changed": wav.write_bytes(wav.read_bytes() + b"before")
+                    if mode == "budget": observer.pcm_bytes = 64 * 1024 * 1024
+                    if mode == "bounds": replacement = np.empty(O.MAX_PCM // 4 + 1, dtype=np.float32)
+                    elif mode == "unsupported": replacement = expected.astype(np.float64)
+                    elif mode == "strided": replacement = expected[::2]
+                    elif mode == "shape": replacement = expected.reshape(2, -1)
+                    elif mode == "empty": replacement = expected[:0]
+                    elif mode == "tuple": replacement = (expected, expected)
+                    else: replacement = None
+                    real = decode_audio
+                    def alternate(*a, **k):
+                        if mode == "decoder-error": raise RuntimeError("native decoder")
+                        return replacement
+                    alternate.__module__ = "faster_whisper.audio"
+                    alternate.__signature__ = O.inspect.signature(real)
+                    with patch.dict(Model.transcribe.__globals__, {"decode_audio": alternate if replacement is not None or mode == "decoder-error" else real}):
+                        original_decoder = Model.transcribe.__globals__["decode_audio"]
+                        instance = observer.constructor(Model, sdk, self.env["AI_EDITOR_WHISPER_MODEL"])
+                        try:
+                            for clip in ("0", [0.02, 0.08]):
+                                if mode in ("decode-error", "decoder-error"):
+                                    with self.assertRaisesRegex(RuntimeError, "native after decoder" if mode == "decode-error" else "native decoder"):
+                                        instance.transcribe(str(wav), clip_timestamps=clip)
+                                    self.assertIs(Model.transcribe.__globals__["decode_audio"], original_decoder)
+                                    break
+                                result = instance.transcribe(str(self.source) if mode == "call-input" else str(wav), clip_timestamps=clip)
+                                self.assertIs(result, results[-1])
+                                if mode == "valid": np.testing.assert_array_equal(next(result[0]), expected)
+                                self.assertIs(Model.transcribe.__globals__["decode_audio"], original_decoder)
+                        finally:
+                            for restore in reversed(observer.restores): restore()
+                    self.assertIs(Model.transcribe.__globals__.get("decode_audio"), None)
+                    if mode == "valid":
+                        self.assertEqual([d["callId"] for d in observer.decoders], [1, 2])
+                        for d in observer.decoders:
+                            self.assertEqual((d["modelId"], d["inputWavSha256"]), ("model-1", observer.wav_sha))
+                            self.assertEqual((d["sampleRate"], d["shape"], d["sampleCount"], d["dtype"]),
+                                             (16000, [1600], 1600, "<f4"))
+                            self.assertEqual((d["bufferSha256"], d["byteCount"]), (expected_hash, 6400))
+                            self.assertEqual(d["codeSha256"], O.digest(O.inspect.getfile(real)))
+                            self.assertEqual(d["origin"]["state"], "unknown")
+                            self.assertEqual(d["resamplingMap"]["state"], "unknown")
+                        self.assertNotIn(str(self.root), json.dumps(observer.decoders))
+                        self.assertEqual(attempts[:2], ["0", [0.02, 0.08]])
+                    elif mode not in ("decode-error", "decoder-error"):
+                        self.assertTrue(all(d["state"] == "unknown" for d in observer.decoders))
 
     @unittest.skipUnless(os.environ.get("COOKED_ACTUAL_SDK_VAD") == "1", "opt-in installed SDK, no model/inference")
     def test_z_installed_sdk_vad_without_model_or_inference(self):
