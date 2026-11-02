@@ -1,7 +1,20 @@
 # Frozen app/worker contract v1
 
-The input top level is `{schemaVersion:1, project, inputs, provenance}`.
-`project` uses project.mjs schemaVersion 1, plus `profile:easy-graphics-v1`.
+The input top level is `{schemaVersion, project, inputs, provenance}`.
+Accepted tuples are manifest schema 1 / project schema 1 / `easy-graphics-v1`
+and manifest schema 2 / project schema 2 / `talking-head-v2`. Mixed or unknown
+tuples are rejected. V2 requires one source video asset, a single full-source cut,
+30 fps, empty broll/effects and no titles field. An absent title remains valid.
+An optional V2 title is {version:1,text,wordIds,from,frames,bounds,style:'block-title-v1'}.
+It must match 3-9 contiguous transcript words joined by spaces, at most 60 characters;
+from and frames are output frames, with duration 60-120 within the output. Bounds
+use 1080x1920 design coordinates, lie inside selected safe cells, start no lower
+than y=768, and avoid all observed stationary-speaker faces padded by 20 pixels.
+The opaque #101714 block uses white 96px EP Plex, no more than two measured lines;
+unfittable text fails rather than shrinking or dropping words. Caption phrases reserve
+the title box throughout their effective range when they overlap its interval.
+QA masks the validated active box in both upper-picture samples and still checks
+uncovered picture. This core is not a producer capability advertisement.
 It includes id/revision, portrait canvas, original source assetId/sha256/frames,
 assets, source-frame cuts, output-clock words, caption wordIds, observed single
 speaker faces (1080x1920 design coordinates), broll/effects, safeZones and director.
@@ -20,7 +33,7 @@ semantic validation of arbitrary native Cooked formats. No proxy accepted yet.
 ## Caption timing capability (opt-in)
 
 `node run.mjs capabilities` prints JSON without project/runtime inputs:
-`{"captionTiming":{"version":1,"field":"captionTimingPolicy","default":"legacy-v1","policies":["legacy-v1","trim-trailing-hold-v1"]}}`.
+`{"captionTiming":{"version":1,"field":"captionTimingPolicy","default":"legacy-v1","policies":["legacy-v1","trim-trailing-hold-v1"]},"profiles":{"version":1,"profiles":[{"manifestSchemaVersion":1,"projectSchemaVersion":1,"profile":"easy-graphics-v1"},{"manifestSchemaVersion":2,"projectSchemaVersion":2,"profile":"talking-head-v2"}]}}`.
 The same frozen capability is exported as `CAPTION_TIMING_CAPABILITY` from
 project.mjs. A producer MUST verify version, field and supported policy in the
 actual target package before emitting `project.captionTimingPolicy`; older
@@ -100,3 +113,27 @@ Persistence may retain additional IDs/locations outside these worker receipts.
 The app owns project authorization, immutable object versions and storage receipt
 binding. A technical-ready download does not authorize publication. No callback,
 network service, database write or app route is implemented by this package.
+
+## Title layout preflight
+
+`node run.mjs title-preflight CANDIDATE --runtime RUNTIME.json` reads bounded
+`project.json` and `public/font.ttf` from CANDIDATE, validates a titled V2
+1080x1920/30fps full-source project of at most 1800 frames, then renders distinct
+caption/title states with the same font and Film components, without source video
+or audio. Every caption group must be visible and at most 128 states may be
+checked. V2 captions and titles must each fit at most two measured lines.
+A successful probe exclusively writes `title-preflight.json` only after all
+states and bindings have been rechecked. Existing receipts are never overwritten.
+
+`node run.mjs title-preflight-check CANDIDATE --runtime RUNTIME.json [--project FINAL.json]`
+performs no render or write. It requires the full current receipt, frame coverage,
+font, renderer and runtime bindings to match. The optional server-owned final
+project is compared using the same exported `layoutInputHash` projection:
+schema/profile, canvas, source identity/count, cut bounds, ordered words and
+caption IDs, resolved timing policy, faces, safe zones and title. Project ID,
+revision, direction notes and cut reasons are excluded. The hash is SHA-256 of
+the UTF-8 domain tag `EP_TITLE_LAYOUT_INPUT_V1\n` followed by recursively
+key-sorted compact JSON. This is a layout fit and custody check, not a quality
+or speech judgment; a valid title-free V2 project does not qualify for this probe.
+The capability command advertises `titlePreflight` version 1 with profile,
+commands, style, 96px font size and both two-line limits.

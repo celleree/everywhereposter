@@ -1,6 +1,11 @@
+import {validateTitle,titleForCaption} from './title-layout.mjs';
 import {EASY_PROFILE,EASY_EFFECTS,validateEasyEffect} from './effect-content-bounds.mjs';
 // JSON is the boundary between the AI director, Cooked, preview and export.
 import {assessSafeZones,safeZoneCacheContent} from './safe-zones.mjs';
+export const PROFILE_CAPABILITY=Object.freeze({version:1,profiles:Object.freeze([
+  Object.freeze({manifestSchemaVersion:1,projectSchemaVersion:1,profile:'easy-graphics-v1'}),
+  Object.freeze({manifestSchemaVersion:2,projectSchemaVersion:2,profile:'talking-head-v2'}),
+])});
 export const EFFECTS = ['CinematicGrade','PersonPopOut','ImageCollage','ChatDrop','ShoulderZoom','AppleKeyCards','DynamicChecklist','MatchCut','VelocityLineGraph','IrisEffect','ProductDemo','FreebieDoc','ZoomThroughCut','CursorTracker','PixelatedCloseUp'];
 export const frameCount = p => p.cuts.reduce((n,c)=>n+c.out-c.in,0);
 export const audioTimeline = p => ({sourceSha256:p.source.sha256,fps:p.canvas.fps,cuts:p.cuts.map(c=>[c.in,c.out])});
@@ -45,10 +50,10 @@ export function chunkContent(p,first,last){
   const captions=p.captions.flatMap((c,i)=>{const [from,end]=ranges[i];return from<=last&&end>first?[{...c,frameRange:ranges[i],words:c.wordIds.map(id=>words.get(id))}]:[];});
   const active=events=>events.filter(e=>e.from<=last&&e.from+e.frames>first);
   // Editorial notes/revision labels do not change pixels; timed decisions do.
-  return {first,last,captionTimingPolicy:captionTimingPolicy(p),canvas:p.canvas,profile:p.profile,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};
+  return {...(p.profile==='talking-head-v2'&&p.title?{title:p.title.from<=last&&p.title.from+p.title.frames>first?p.title:null,titleCaptionObstacles:captions.map(c=>titleForCaption(p.title,c.frameRange))}:{}),first,last,captionTimingPolicy:captionTimingPolicy(p),canvas:p.canvas,profile:p.profile,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};
 }
 export function validateProject(p){
-  if(!p||p.schemaVersion!==1||!text(p.id,80)||!integer(p.revision,1,10000))fail('Unsupported project identity/version');
+  if(!p||!((p.schemaVersion===1&&(p.profile===undefined||p.profile===EASY_PROFILE))||(p.schemaVersion===2&&p.profile==='talking-head-v2'))||!text(p.id,80)||!integer(p.revision,1,10000))fail('Unsupported project identity/version');
   captionTimingPolicy(p);
   if(!p.canvas||!integer(p.canvas.width,320,3840)||!integer(p.canvas.height,320,3840)||p.canvas.width%2||p.canvas.height%2||!integer(p.canvas.fps,24,60)||Math.abs(p.canvas.width/p.canvas.height-9/16)>.001)fail('Expected an even-sized portrait canvas');
   if(!p.source||!integer(p.source.frames,1,60*60*30)||!/^[a-f0-9]{64}$/.test(p.source.sha256)||!text(p.source.assetId,80))fail('Invalid source provenance');
@@ -65,7 +70,7 @@ export function validateProject(p){
   if(!Array.isArray(p.cuts)||!p.cuts.length||p.cuts.length>1000)fail('Missing bounded cuts');
   let previous=0;
   for(const c of p.cuts){if(!integer(c.in,previous,p.source.frames-1)||!integer(c.out,c.in+1,p.source.frames)||!text(c.reason))fail('Cuts must preserve source order and bounds');previous=c.out;}
-  if(p.profile!==undefined&&p.profile!==EASY_PROFILE)fail('Unsupported effect profile');
+  if(p.profile==='talking-head-v2'&&(p.canvas.fps!==30||p.assets.length!==1||assets.get(p.source.assetId)?.kind!=='video'||p.cuts.length!==1||p.cuts[0].in!==0||p.cuts[0].out!==p.source.frames||p.broll?.length!==0||p.effects?.length!==0||Object.hasOwn(p,'titles')))fail('Unsupported talking-head-v2 tracks or source');
   const frames=frameCount(p),seconds=frames/p.canvas.fps;
   if(!Array.isArray(p.words)||!p.words.length||p.words.length>20000)fail('Missing aligned transcript');
   const words=new Map();let wordStart=-1;
@@ -110,5 +115,7 @@ export function validateProject(p){
   if(p.profile===EASY_PROFILE)for(let i=0;i<p.effects.length;i++)for(const b of p.effects.slice(i+1)){const a=p.effects[i];if(a.from<b.from+b.frames&&a.from+a.frames>b.from&&overlaps(a.bounds,b.bounds))fail('Overlapping accessible effect regions');}
   if(!p.director||!text(p.director.summary,3000)||!Array.isArray(p.director.decisions))fail('Missing AI direction record');
   for(const cue of p.instructions?.requiredCues??[]){if(!text(cue.id,80)||!(p.profile===EASY_PROFILE?EASY_EFFECTS:EFFECTS).includes(cue.effect)||p.effects.filter(e=>e.directiveId===cue.id&&e.type===cue.effect).length!==1)fail('An explicit script effect cue was lost');}
-  return {frames,seconds,assets,words,captionRanges:captionFrameRanges(p,words),safeZones:assessSafeZones(p,frames)};
+  const safeZones=assessSafeZones(p,frames);
+  if(Object.hasOwn(p,'title')){if(p.profile!=='talking-head-v2')fail('Title requires talking-head-v2');validateTitle(p.title,p,frames,safeZones.cells);}
+  return {frames,seconds,assets,words,captionRanges:captionFrameRanges(p,words),safeZones};
 }

@@ -41,9 +41,21 @@ def main():
    if offset<=frame<offset+cut['out']-cut['in']:original=cut['in']+frame-offset;break
    offset+=cut['out']-cut['in']
   w=p['canvas']['width'];h=p['canvas']['height'];half=(h//4)*2
-  filt=f'[0:v]crop=iw:{half}:0:0,format=yuv420p,setpts=PTS-STARTPTS[x];[1:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},crop=iw:{half}:0:0,format=yuv420p,setpts=PTS-STARTPTS[y];[x][y]ssim'
+  mask=''
+  title=p.get('title') if p.get('profile')=='talking-head-v2' else None
+  if title and title['from']<=frame<title['from']+title['frames']:
+   b=title['bounds']
+   # Outward rounding masks identical output-space pixels in both images.
+   import math
+   left=max(0,math.floor(b['x']*w/1080));top=max(0,math.floor(b['y']*h/1920))
+   right=min(w,math.ceil((b['x']+b['width'])*w/1080));bottom=min(half,math.ceil((b['y']+b['height'])*h/1920))
+   if bottom>top:
+    assert (right-left)*(bottom-top)<w*half*.5,'Insufficient uncovered upper picture'
+    mask=f',drawbox=x={left}:y={top}:w={right-left}:h={bottom-top}:color=black:t=fill'
+  filt=f'[0:v]crop=iw:{half}:0:0{mask},format=yuv420p,setpts=PTS-STARTPTS[x];[1:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},crop=iw:{half}:0:0{mask},format=yuv420p,setpts=PTS-STARTPTS[y];[x][y]ssim'
   result=subprocess.run([ffmpeg,'-hide_banner','-ss',str(frame/fps),'-i',str(final),'-ss',str(original/fps),'-i',source['originalPath'],'-filter_complex',filt,'-frames:v','1','-an','-f','null','-'],capture_output=True,text=True,check=True)
   found=re.findall(r'All:([0-9.]+)',result.stderr);assert found,result.stderr[-800:];value=float(found[-1]);assert value>.95,(frame,value);quality.append({'outputFrame':frame,'sourceFrame':original,'upperPictureSSIM':value})
+ if p.get('profile')=='talking-head-v2' and p.get('title'):assert quality,'No uncovered picture samples checked'
  assert bindings()==bound and sha(final)==rendered['sha256'],'Inputs or output changed during QA'
  result={'schemaVersion':1,'status':'PASS','acceptance':'TECHNICAL_PASS_CREATIVE_REVIEW_REQUIRED','bindings':bound,'projectId':p['id'],'revision':p['revision'],'profile':p['profile'],'file':str(final),'sha256':rendered['sha256'],'projectSha256':bound['projectHash'],'rendererHash':bound['rendererHash'],'frames':frames,'durationSeconds':expected,'resolution':[v['width'],v['height']],'fps':fps,'fullDecode':'PASS','audioLagMs':lag/8,'audioCorrelation':corr,'audioWindows':windows,'sourcePreserved':True,'sampledUnchangedPicture':quality,'creativeApproval':'PENDING','continuousHumanListening':'NOT_CLAIMED','limitations':['Observed single speaker; no automatic face tracking','Only selected safe-zone profiles are assessed; focal coverage warnings still require review','Caption/effect ink measured during rendering; no claim of platform UI invariance','Same-clock originals only; preview proxies are rejected','Cooked provenance records verified upstream files; this adapter does not run Cooked']}
  (root/'qa/final-verification.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps({'status':'PASS','sha256':result['sha256'],'frames':frames,'audioLagMs':lag/8,'audioCorrelation':corr,'unchangedPictureSamples':len(quality)}))
