@@ -106,7 +106,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
     {availability?.enabled && <div>
       <h2>Create a Studio edit</h2>
       <p>{approvedStyle ? 'White captions, a rounded headline and quiet-pause cuts.' : 'Previous Studio editor.'} Beta: one stationary speaker, portrait CFR30 original, up to60seconds/100MB and720x1280. Initial direction uses prepaid AI credits; review the result before saving or posting. Moving/multiple speakers need adjustment; there is no automatic tracking or retake detection.</p>
-      {availability.editorStyle !== 'accepted-caption-b-top-rounded-v1' && <p role="status">Your approved style is unavailable. The previous editor and saved results remain available.</p>}
+      {availability.editorStyle !== 'accepted-caption-b-top-rounded-v1' && <p>Your approved style is unavailable. The previous editor and saved results remain available.</p>}
       <button disabled={busy} onClick={() => choose(true)}>Upload or choose source</button>
       {!approvedStyle && <button disabled={busy || !source} onClick={() => choose(false)}>Choose optional supporting visuals ({visuals.length}/8)</button>}
       {!approvedStyle && visuals.length > 0 && <button disabled={busy} onClick={() => setVisuals([])}>Clear supporting visuals</button>}
