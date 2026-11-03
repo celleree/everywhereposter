@@ -87,6 +87,10 @@ export function validateProject(p){
   if(!Array.isArray(p.words)||!p.words.length||p.words.length>20000)fail('Missing aligned transcript');
   const words=new Map();let wordStart=-1;
   for(const w of p.words){if(!text(w.id,80)||words.has(w.id)||!text(w.text,100)||!number(w.start,0,seconds)||!number(w.end,w.start,seconds+.05)||w.start<wordStart)fail('Invalid transcript clock');words.set(w.id,w);wordStart=w.start;}
+  if(p.editorStyle===ACCEPTED_STYLE)for(const w of p.words){
+    const span=p.cuts[w.sourceSpan],offset=p.cuts.slice(0,w.sourceSpan).reduce((n,c)=>n+c.out-c.in,0)-span?.in;
+    if(!integer(w.sourceSpan,0,p.cuts.length-1)||w.frameOffset!==offset||!number(w.sourceStart,span.in/30,span.out/30)||!number(w.sourceEnd,w.sourceStart,span.out/30)||Math.abs(w.start-(w.sourceStart+offset/30))>1e-9||Math.abs(w.end-(w.sourceEnd+offset/30))>1e-9)fail('Approved captions require their exact source time and frame map');
+  }
   if(!Array.isArray(p.captions)||!p.captions.length)fail('Missing captions');
   const captionIds=p.captions.flatMap(c=>c.wordIds);
   if(JSON.stringify(captionIds)!==JSON.stringify(p.words.map(w=>w.id)))fail('Captions must preserve every word once and in order');

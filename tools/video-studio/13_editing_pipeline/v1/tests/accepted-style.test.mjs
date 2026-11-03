@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ACCEPTED_STYLE,roundCaptionFrame,acceptedCaptionRanges,groupAcceptedCaptions,acceptedCaptionLayout,acceptedHeadlineLayout} from '../accepted-style.mjs';
 import {validateProject,chunkContent} from '../project.mjs';
-import {layoutInputHash} from '../title-preflight.mjs';
+import {layoutInputHash,preflightFrames} from '../title-preflight.mjs';
 import {fixture} from './fixture.mjs';
 import {readFileSync} from 'node:fs';
 import {fontCoversText} from '../font-coverage.mjs';
@@ -17,6 +17,7 @@ test('accepted groups preserve IDs and split at width, count, punctuation, gaps 
  assert.deepEqual(groupAcceptedCaptions(words,[180],measure),[{wordIds:['source-0','source-1']},{wordIds:['source-2','source-3','source-4']},{wordIds:['source-5','source-6']}]);
  const pair=[{id:'a',text:'same',start:.1,end:.2},{id:'b',text:'same',start:.39,end:.5}];
  assert.equal(groupAcceptedCaptions(pair,[180],measure).length,1);
+ assert.equal(groupAcceptedCaptions([{id:'a',text:'same',start:.5,end:.6},{id:'b',text:'same',start:.79,end:.9}],[180],measure).length,1);
  pair[1].start=.391;assert.equal(groupAcceptedCaptions(pair,[180],measure).length,2);
  pair[1].start=.4;assert.equal(groupAcceptedCaptions(pair,[12,180],measure).length,2);
  assert.equal(groupAcceptedCaptions(words,[180],text=>text.length*60).every(g=>g.wordIds.length===1),true);
@@ -25,6 +26,10 @@ test('accepted groups preserve IDs and split at width, count, punctuation, gaps 
 test('accepted display tails stop at next phrase or output end without karaoke states',()=>{
  const p={cuts:[{in:0,out:60}],words:[{id:'a',start:.15,end:.35},{id:'b',start:.45,end:.6}],captions:[{wordIds:['a']},{wordIds:['b']}]};
  assert.deepEqual(acceptedCaptionRanges(p),[[5,14],[14,23]]);
+ const decimalTail={cuts:p.cuts,words:[{id:'x',start:.2,end:.47}],captions:[{wordIds:['x']}]};
+ assert.deepEqual(acceptedCaptionRanges(decimalTail),[[6,20]]);
+ Object.assign(decimalTail.words[0],{start:.3-.1,end:.57-.1,sourceStart:.3,sourceEnd:.57,frameOffset:-3,sourceSpan:0});
+ assert.deepEqual(acceptedCaptionRanges(decimalTail),[[6,20]]);
  p.words[1].end=2;assert.deepEqual(acceptedCaptionRanges(p)[1],[14,60]);
 });
 test('headline uses ink centered at 360/228 and rejects overflow instead of fitting by shrink',()=>{
@@ -48,10 +53,13 @@ test('approved style admits source cuts while legacy V2 still rejects them; styl
  const p=fixture();Object.assign(p,{schemaVersion:2,profile:'talking-head-v2',editorStyle:ACCEPTED_STYLE,canvas:{width:1080,height:1920,fps:30},assets:p.assets.slice(0,1),broll:[],effects:[],safeZones:{version:1,profiles:['instagram-approved-editor-v1']}});
  p.title={version:1,style:ACCEPTED_STYLE,text:'Example',wordIds:[],from:0,frames:135,bounds:{x:108,y:276,width:720,height:132}};
  p.source.frames=180;p.source.audioSampleFrames=180*1600;p.audioSampleFrames=150*1600;p.assets[0].width=360;p.assets[0].height=640;p.assets[0].duration=6;p.cuts=[{in:0,out:60,reason:'First'},{in:90,out:180,reason:'Second'}];
- p.words=[{id:'w0',text:'One',start:.1,end:.3},{id:'w1',text:'Two',start:2.5,end:2.7}];p.captions=p.words.map(w=>({wordIds:[w.id]}));
+ p.words=[{id:'w0',text:'One',start:.1,end:.3,sourceStart:.1,sourceEnd:.3,frameOffset:0,sourceSpan:0},{id:'w1',text:'Two',start:2.5,end:2.7,sourceStart:3.5,sourceEnd:3.7,frameOffset:-30,sourceSpan:1}];p.captions=p.words.map(w=>({wordIds:[w.id]}));
  p.speaker.faces=p.speaker.faces.slice(0,1);p.speaker.faces[0].t=1;validateProject(p);
  const key=JSON.stringify(chunkContent(p,0,149));delete p.editorStyle;assert.throws(()=>validateProject(p),/tracks or source/);
  p.editorStyle=ACCEPTED_STYLE;assert.equal(JSON.stringify(chunkContent(p,0,149)),key);
  const before=layoutInputHash(p);p.source.originalFrames=p.source.frames-1;assert.notEqual(layoutInputHash(p),before);
+ const mapped=layoutInputHash(p);p.words[1].sourceEnd=3.700000000001;assert.notEqual(layoutInputHash(p),mapped);p.words[1].sourceEnd=3.7;
+ delete p.source.originalFrames;p.source.frames=1800;p.source.audioSampleFrames=p.audioSampleFrames=1800*1600;p.assets[0].duration=60;p.cuts=[{in:0,out:1800,reason:'Full source'}];
+ p.words=Array.from({length:140},(_,i)=>({id:'w'+i,text:'Word',start:.1+i*.4,end:.2+i*.4,sourceStart:.1+i*.4,sourceEnd:.2+i*.4,frameOffset:0,sourceSpan:0}));p.captions=p.words.map(w=>({wordIds:[w.id]}));assert.ok(preflightFrames(p).length>=140);
  p.editorStyle='unrecognized';assert.throws(()=>validateProject(p),/style/);
 });

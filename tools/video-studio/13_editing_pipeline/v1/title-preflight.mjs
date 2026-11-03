@@ -12,7 +12,7 @@ import {ACCEPTED_STYLE,ACCEPTED_FONTS} from './accepted-style.mjs';
 export const TITLE_PREFLIGHT_CAPABILITY=Object.freeze({version:1,profile:'talking-head-v2',command:'title-preflight',checkCommand:'title-preflight-check',style:'block-title-v1',fontSize:96,titleMaxLines:2,captionMaxLines:2});
 const stable=value=>Array.isArray(value)?value.map(stable):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,stable(value[k])])):value;
 export function layoutProjection(p){
- return {...(p.editorStyle?{editorStyle:p.editorStyle}:{}),schemaVersion:p.schemaVersion,profile:p.profile,canvas:p.canvas,source:{assetId:p.source.assetId,sha256:p.source.sha256,frames:p.source.frames,...(p.source.originalFrames?{originalFrames:p.source.originalFrames}:{})},cuts:p.cuts.map(({in:i,out})=>({in:i,out})),words:p.words.map(({id,text,start,end})=>({id,text,start,end})),captions:p.captions.map(({wordIds})=>({wordIds})),captionTimingPolicy:captionTimingPolicy(p),speakerFaces:p.speaker.faces.map(({t,x,y,width,height})=>({t,x,y,width,height})),safeZones:p.safeZones,title:p.title};
+ return {...(p.editorStyle?{editorStyle:p.editorStyle}:{}),schemaVersion:p.schemaVersion,profile:p.profile,canvas:p.canvas,source:{assetId:p.source.assetId,sha256:p.source.sha256,frames:p.source.frames,...(p.source.originalFrames?{originalFrames:p.source.originalFrames}:{})},cuts:p.cuts.map(({in:i,out})=>({in:i,out})),words:p.words.map(w=>({id:w.id,text:w.text,start:w.start,end:w.end,...(p.editorStyle===ACCEPTED_STYLE?{sourceStart:w.sourceStart,sourceEnd:w.sourceEnd,sourceSpan:w.sourceSpan,frameOffset:w.frameOffset}:{})})),captions:p.captions.map(({wordIds})=>({wordIds})),captionTimingPolicy:captionTimingPolicy(p),speakerFaces:p.speaker.faces.map(({t,x,y,width,height})=>({t,x,y,width,height})),safeZones:p.safeZones,title:p.title};
 }
 export function layoutInputHash(p){return createHash('sha256').update('EP_TITLE_LAYOUT_INPUT_V1\n').update(JSON.stringify(stable(layoutProjection(p)))).digest('hex');}
 export function preflightFrames(p){
@@ -25,7 +25,7 @@ export function preflightFrames(p){
   const title=frame>=p.title.from&&frame<p.title.from+p.title.frames;
   if(index<0&&!title)continue;
   const key=index+':'+title;
-  if(!seen.has(key)){seen.add(key);frames.push(frame);if(frames.length>128)throw Error('Title preflight exceeds 128 layout states');}
+  if(!seen.has(key)){seen.add(key);frames.push(frame);const limit=p.editorStyle===ACCEPTED_STYLE?256:128;if(frames.length>limit)throw Error('Title preflight exceeds '+limit+' layout states');}
  }
  if(visible.size!==p.captions.length)throw Error('Every caption group must have visible frames');
  return frames;

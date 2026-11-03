@@ -19,11 +19,13 @@ function evidence(total = 180, spans = [[.8, 1.2], [3.5, 4]]) {
 it('maps quiet cuts on source frames and restores every original ID and timestamp', () => {
   const raw = evidence(), edited = acceptedTimeline(raw, { organizationId: 'org', mediaId: 'source' }, 180 * 1600);
   assert.deepEqual(edited.cuts.map(c => [c.in, c.out]), [[0, 60], [90, 180]]);
+  assert.equal(edited.words[1].sourceStart, 3.5); assert.equal(edited.words[1].sourceEnd, 4); assert.equal(edited.words[1].frameOffset, -30); assert.equal(edited.words[1].sourceSpan, 1);
   assert.equal(edited.frames, 150); assert.equal(edited.audioSamples, 150 * 1600);
-  assert.deepEqual(edited.words, [{ id: 'w0', text: 'word0', start: .8, end: 1.2 }, { id: 'w1', text: 'word1', start: 2.5, end: 3 }]);
+  const presentation = (words: typeof edited.words) => words.map(({ sourceStart, sourceEnd, frameOffset, sourceSpan, ...w }) => w);
+  assert.deepEqual(presentation(edited.words), [{ id: 'w0', text: 'word0', start: .8, end: 1.2 }, { id: 'w1', text: 'word1', start: 2.5, end: 3 }]);
   const restored = acceptedTimeline(raw, { organizationId: 'org', mediaId: 'source' }, 180 * 1600, true);
   assert.deepEqual(restored.cuts.map(c => [c.in, c.out]), [[0, 180]]);
-  assert.equal(restored.audioSamples, 180 * 1600); assert.deepEqual(restored.words.map(({ id, ...w }) => w), raw.files.rawWords.value.map(({ type, ...w }) => w));
+  assert.equal(restored.audioSamples, 180 * 1600); assert.deepEqual(presentation(restored.words).map(({ id, ...w }) => w), raw.files.rawWords.value.map(({ type, ...w }) => w));
   assert.deepEqual(restored.words.map(w => w.id), edited.words.map(w => w.id));
 });
 it('vetoes cuts touching speech, keeps adjacent endpoints and rejects malformed gaps', () => {

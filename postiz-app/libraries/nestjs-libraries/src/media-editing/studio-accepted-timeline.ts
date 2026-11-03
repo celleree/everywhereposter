@@ -37,8 +37,9 @@ export function acceptedTimeline(raw: any, expected: { organizationId: string; m
   if (cursor < totalFrames) cuts.push({ in: cursor, out: totalFrames, reason: restore ? 'All original source frames restored' : 'Verified quiet gap; every source word retained' });
   const projected = words.map(w => {
     let output = 0;
-    for (const cut of cuts) {
-      if (w.start >= cut.in / 30 && w.end <= cut.out / 30) return { ...w, start: w.start + (output - cut.in) / 30, end: w.end + (output - cut.in) / 30 };
+    for (const [sourceSpan, cut] of cuts.entries()) {
+      if (w.start >= cut.in / 30 && w.end <= cut.out / 30) return { ...w, start: w.start + (output - cut.in) / 30, end: w.end + (output - cut.in) / 30,
+        sourceStart: w.start, sourceEnd: w.end, frameOffset: output - cut.in, sourceSpan };
       if (w.start < cut.out / 30 && w.end > cut.in / 30) throw Error('A cut intersects a source word');
       output += cut.out - cut.in;
     }

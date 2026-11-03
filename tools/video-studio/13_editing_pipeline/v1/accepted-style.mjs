@@ -1,26 +1,27 @@
 // Frozen user-selected design, expressed at the 720x1280 reference size.
+import {decimal,add,subtract,compare,mappedTime,frame} from './decimal-clock.mjs';
 export const ACCEPTED_STYLE='accepted-caption-b-top-rounded-v1';
 export const ACCEPTED_FONTS=Object.freeze({caption:{file:'LiberationSans-Bold.ttf',sha256:'3973aa5054fb467dd5627245d3dc82e37bf16fe075756156a570455871351582'},headline:{file:'TikTokSans36pt-Bold.ttf',sha256:'f6da258a8664b99d1a5a071cc7aebedd06e4acae6e97b8f18df7af640089636f'}});
 export const ACCEPTED_EDITOR_CAPABILITY=Object.freeze({version:1,style:ACCEPTED_STYLE,profile:'talking-head-v2',captionPlanCommand:'accepted-captions',fonts:ACCEPTED_FONTS});
 export function roundCaptionFrame(seconds){
  if(!Number.isFinite(seconds)||seconds<0)throw Error('Invalid caption endpoint');
- const [coefficient,exponent='0']=String(seconds).toLowerCase().split('e'),parts=coefficient.split('.');
- let numerator=BigInt(parts.join(''))*30n,denominator=1n;
- const places=(parts[1]?.length??0)-Number(exponent);
- if(places>0)denominator=10n**BigInt(places);else numerator*=10n**BigInt(-places);
- return Number((numerator*2n+denominator)/(denominator*2n));
+ return frame(decimal(seconds));
 }
 export function acceptedCaptionRanges(p){
- const words=new Map(p.words.map(w=>[w.id,w])),duration=p.cuts.reduce((n,c)=>n+c.out-c.in,0)/30;
- return p.captions.map((c,i)=>[roundCaptionFrame(words.get(c.wordIds[0]).start),roundCaptionFrame(Math.min(words.get(c.wordIds.at(-1)).end+.18,i+1<p.captions.length?words.get(p.captions[i+1].wordIds[0]).start:duration,duration))]);
+ const words=new Map(p.words.map(w=>[w.id,w])),duration={n:BigInt(p.cuts.reduce((n,c)=>n+c.out-c.in,0)),d:30n};
+ return p.captions.map((c,i)=>{
+  const ends=[add(mappedTime(words.get(c.wordIds.at(-1)),true),decimal(.18)),duration];
+  if(i+1<p.captions.length)ends.push(mappedTime(words.get(p.captions[i+1].wordIds[0])));
+  return [frame(mappedTime(words.get(c.wordIds[0]))),frame(ends.reduce((a,b)=>compare(a,b)<0n?a:b))];
+ });
 }
 export function groupAcceptedCaptions(words,keptFrameEnds,measure){
  const groups=[];let current=[],span=-1;
  const flush=()=>{if(current.length)groups.push({wordIds:current.map(w=>w.id)});current=[];};
  for(const word of words){
-  const width=measure(word.text),nextSpan=keptFrameEnds.findIndex(end=>word.start<end/30);
+  const width=measure(word.text),nextSpan=word.sourceSpan??keptFrameEnds.findIndex(end=>compare(mappedTime(word),{n:BigInt(end),d:30n})<0n);
   if(!Number.isFinite(width)||width<=0||width>360)throw Error('Caption word exceeds the approved width. Edit the transcript and retry.');
-  if(current.length&&(current.length===3||nextSpan!==span||word.start-current.at(-1).end>.19||measure([...current,word].map(w=>w.text).join(' '))>360))flush();
+  if(current.length&&(current.length===3||nextSpan!==span||compare(subtract(mappedTime(word),mappedTime(current.at(-1),true)),decimal(.19))>0n||measure([...current,word].map(w=>w.text).join(' '))>360))flush();
   span=nextSpan;current.push(word);if(/[.,!?]$/.test(word.text))flush();
  }
  flush();return groups;

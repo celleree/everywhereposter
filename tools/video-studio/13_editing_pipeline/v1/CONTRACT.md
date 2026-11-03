@@ -122,7 +122,7 @@ network service, database write or app route is implemented by this package.
 `project.json` and `public/font.ttf` from CANDIDATE, validates a titled V2
 1080x1920/30fps full-source project of at most 1800 frames, then renders distinct
 caption/title states with the same font and Film components, without source video
-or audio. Every caption group must be visible and at most 128 states may be
+or audio. Every caption group must be visible and at most 128 legacy states (256 for the approved style) may be
 checked. V2 captions and titles must each fit at most two measured lines.
 A successful probe exclusively writes `title-preflight.json` only after all
 states and bindings have been rechecked. Existing receipts are never overwritten.
@@ -156,6 +156,9 @@ Actual union ink is centered at x=360; the reference em origin is converted to
 a browser baseline using the actual font ascent. The complete caption guard
 fits [72,704,552,832]. Phrases end at the minimum of final word end+0.18s,
 next phrase start and output duration, quantized with decimal round-half-up.
+Accepted words retain sourceStart/sourceEnd, sourceSpan and integer frameOffset;
+tail addition, gap comparison and output projection use rational source times
+through the final rounding step. These fields also enter the frozen layout hash.
 There is no active-word highlighting, shrinking, clipping or text rewriting.
 
 The headline uses TikTokSans36pt-Bold.ttf at 42px. Actual glyph ink is centered
