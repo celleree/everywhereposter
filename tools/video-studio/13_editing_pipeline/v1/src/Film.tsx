@@ -1,8 +1,10 @@
 import {Title} from './Title';
+import {AcceptedOverlay} from './AcceptedOverlay';
+import {ACCEPTED_STYLE} from '../accepted-style.mjs';
 import {titleForCaption} from '../title-layout.mjs';
 import {EasyGraphics} from './EasyGraphics';
 import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
-import {AbsoluteFill,Audio,Img,OffthreadVideo,Sequence,cancelRender,continueRender,delayRender,getRemotionEnvironment,staticFile,useCurrentFrame,useVideoConfig} from 'remotion';
+import {AbsoluteFill,Audio,Freeze,Img,OffthreadVideo,Sequence,cancelRender,continueRender,delayRender,getRemotionEnvironment,staticFile,useCurrentFrame,useVideoConfig} from 'remotion';
 import {validateProject} from '../project.mjs';
 import {assertMeasuredCaption,assertSafeZoneRender,CAPTION_STYLE,planCaption} from '../safe-zones.mjs';
 export function Font(){const[h]=useState(()=>delayRender('Local editorial font'));useEffect(()=>{document.fonts.load('700 72px "EP Plex"').then(f=>{if(!f.length)throw Error('Missing local font');continueRender(h);}).catch(cancelRender);},[h]);return <style>{`@font-face{font-family:'EP Plex';src:url('${staticFile('font.ttf')}');font-weight:700;font-display:block}`}</style>;}
@@ -45,7 +47,7 @@ function SafeCaption({wordTexts,cells,avoid,wordIds,background,maxLines}:any){
  </div>;
 }
 function Effect({event,assets,cells}:any){return <EasyGraphics event={event} assets={assets} cells={cells}/>;}
-export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean;layoutOnly?:boolean}>=({project:p,preview=false,hideGraphics=false,layoutOnly=false})=>{
+export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean;layoutOnly?:boolean;captionPlanOnly?:boolean}>=({project:p,preview=false,hideGraphics=false,layoutOnly=false,captionPlanOnly=false})=>{
  const{assets,words,safeZones,captionRanges}=useMemo(()=>validateProject(p),[p]),frame=useCurrentFrame(),{fps,width,height}=useVideoConfig();
  if(!['easy-graphics-v1','talking-head-v2'].includes(p.profile))throw Error('This package renders accessible profiles only; historical effects require their original runtime');
  const rendering=getRemotionEnvironment().isRendering,isPreview=preview&&!rendering,source=assets.get(p.source.assetId);let cursor=0;
@@ -60,13 +62,14 @@ export const Film:React.FC<{project:any;preview?:boolean;hideGraphics?:boolean;l
  const aware=safeZones.status!=='UNASSESSED';
  if(!aware)throw Error('Accessible profile requires selected safe-zone targets');
  return <AbsoluteFill style={{background:'#101714',fontFamily:'EP Plex',fontWeight:700,color:'#fff'}}><Font/>
-  {!layoutOnly&&p.cuts.map((c:any,i:number)=>{const from=cursor;cursor+=c.out-c.in;return <Sequence key={i} from={from} durationInFrames={c.out-c.in}><OffthreadVideo muted src={media(source,isPreview)} startFrom={c.in} endAt={c.out} style={{width:'100%',height:'100%',objectFit:'cover'}}/></Sequence>;})}
+  {!layoutOnly&&p.cuts.map((c:any,i:number)=>{const from=cursor;cursor+=c.out-c.in;const original=p.source.originalFrames??p.source.frames,frames=Math.max(0,Math.min(c.out,original)-c.in);return <React.Fragment key={i}>{frames>0&&<Sequence from={from} durationInFrames={frames}><OffthreadVideo muted src={media(source,isPreview)} startFrom={c.in} endAt={Math.min(c.out,original)} style={{width:'100%',height:'100%',objectFit:'cover'}}/></Sequence>}{c.out>original&&<Sequence from={from+frames} durationInFrames={c.out-Math.max(c.in,original)}><Freeze frame={0}><OffthreadVideo muted src={media(source,isPreview)} startFrom={original-1} endAt={original} style={{width:'100%',height:'100%',objectFit:'cover'}}/></Freeze></Sequence>}</React.Fragment>;})}
   {!layoutOnly&&!hideGraphics&&p.broll.map((b:any)=>{const a=assets.get(b.assetId);return <Sequence key={b.id} from={b.from} durationInFrames={b.frames}>{a.kind==='video'?<OffthreadVideo muted src={media(a,isPreview)} startFrom={Math.round(b.sourceStart*fps)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>:<Img src={media(a,isPreview)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>}</Sequence>;})}
   {!layoutOnly&&<Audio src={staticFile('speech.wav')}/>}
   {!hideGraphics&&<div style={{position:'absolute',width:1080,height:1920,transform:`scale(${width/1080},${height/1920})`,transformOrigin:'0 0'}}>
-   {p.profile==='talking-head-v2'&&p.title&&<Sequence from={p.title.from} durationInFrames={p.title.frames}><Title key={JSON.stringify(p.title)} title={p.title}/></Sequence>}
+   {p.editorStyle===ACCEPTED_STYLE&&<AcceptedOverlay key={JSON.stringify([caption?.wordIds,frame<p.title.frames,captionPlanOnly])} project={p} caption={caption} title={frame<p.title.frames?p.title:null} cells={safeZones.cells} planOnly={captionPlanOnly}/>}
+   {p.editorStyle!==ACCEPTED_STYLE&&p.profile==='talking-head-v2'&&p.title&&<Sequence from={p.title.from} durationInFrames={p.title.frames}><Title key={JSON.stringify(p.title)} title={p.title}/></Sequence>}
    {p.effects.map((e:any)=><Sequence key={e.id} from={e.from} durationInFrames={e.frames}><Effect key={JSON.stringify([e,safeZones.cells])} event={e} assets={assets} cells={safeZones.cells}/></Sequence>)}
-   {caption&&(aware?<SafeCaption key={JSON.stringify([caption.wordIds,wordTexts,safeZones.profiles.map((x:any)=>x.id),avoid])} wordTexts={wordTexts} wordIds={caption.wordIds} maxLines={p.profile==='talking-head-v2'?2:undefined} cells={safeZones.cells} avoid={avoid} background={broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}/>:<div data-caption={caption.wordIds.join(',')} style={{position:'absolute',left:80,top:1500,width:920,minHeight:180,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',fontSize:76,lineHeight:1.12,letterSpacing:'-.025em',textShadow:'0 3px 12px #000,0 1px 3px #000',WebkitTextStroke:'1px #000',paintOrder:'stroke fill',padding:'12px 18px',boxSizing:'border-box',borderRadius:20,background:broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}}>{wordTexts.join(' ')}</div>)}
+   {p.editorStyle!==ACCEPTED_STYLE&&caption&&(aware?<SafeCaption key={JSON.stringify([caption.wordIds,wordTexts,safeZones.profiles.map((x:any)=>x.id),avoid])} wordTexts={wordTexts} wordIds={caption.wordIds} maxLines={p.profile==='talking-head-v2'?2:undefined} cells={safeZones.cells} avoid={avoid} background={broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}/>:<div data-caption={caption.wordIds.join(',')} style={{position:'absolute',left:80,top:1500,width:920,minHeight:180,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',fontSize:76,lineHeight:1.12,letterSpacing:'-.025em',textShadow:'0 3px 12px #000,0 1px 3px #000',WebkitTextStroke:'1px #000',paintOrder:'stroke fill',padding:'12px 18px',boxSizing:'border-box',borderRadius:20,background:broll?'#06131095':'linear-gradient(90deg,transparent,#06131065,transparent)'}}>{wordTexts.join(' ')}</div>)}
   </div>}
   {isPreview&&!hideGraphics&&<div data-safe-zone-status={safeZones.status} role="status" style={{position:'absolute',top:8,left:8,right:8,font:'12px system-ui',color:'#fff',textShadow:'0 1px 3px #000',pointerEvents:'none'}}>
    {!aware?'UNASSESSED: legacy layout has no destination profiles.':<>Caption targets: {safeZones.profiles.map((x:any)=>`${x.platform} (${x.confidence})`).join(', ')}. {safeZones.findings.some((x:any)=>x.severity==='error')?'Critical content needs verification; protected export is blocked. ':''}{safeZones.findings.some((x:any)=>x.code.startsWith('FOCAL_')&&x.severity==='warning')?'Focal/action framing needs review. ':''}Profile conformance does not guarantee every platform UI.</>}

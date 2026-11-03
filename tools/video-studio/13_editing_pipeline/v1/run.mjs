@@ -12,12 +12,14 @@ import {validateProject,chunkContent,assertPreparedProject,CAPTION_TIMING_CAPABI
 import {readRendererIdentity,createExportAcceptance} from './export-acceptance.mjs';
 import {runtimeIdentity} from './runtime.mjs';
 import {readBindings} from './receipt-bindings.mjs';
-import {TITLE_PREFLIGHT_CAPABILITY,runTitlePreflight,checkTitlePreflight} from './title-preflight.mjs';
+import {TITLE_PREFLIGHT_CAPABILITY,runTitlePreflight,checkTitlePreflight,measureAcceptedCaptions} from './title-preflight.mjs';
+import {ACCEPTED_EDITOR_CAPABILITY} from './accepted-style.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url)),command=process.argv[2],dir=path.resolve(process.argv[3]??'projects/talking-head-v1');
-if(command==='capabilities'){console.log(JSON.stringify({captionTiming:CAPTION_TIMING_CAPABILITY,profiles:PROFILE_CAPABILITY,titlePreflight:TITLE_PREFLIGHT_CAPABILITY}));process.exit(0);}
+if(command==='capabilities'){console.log(JSON.stringify({captionTiming:CAPTION_TIMING_CAPABILITY,profiles:PROFILE_CAPABILITY,titlePreflight:TITLE_PREFLIGHT_CAPABILITY,acceptedEditor:ACCEPTED_EDITOR_CAPABILITY}));process.exit(0);}
 const runtimeAt=process.argv.indexOf('--runtime');
 if(runtimeAt<0||!process.argv[runtimeAt+1])throw Error('Explicit --runtime config required');
 const runtimeFile=path.resolve(process.argv[runtimeAt+1]);
+if(command==='accepted-captions'){console.log(JSON.stringify(await measureAcceptedCaptions({dir,root,runtimeFile})));process.exit(0);}
 if(['title-preflight','title-preflight-check'].includes(command)){
  const projectAt=process.argv.indexOf('--project');
  if(projectAt>=0&&(command!=='title-preflight-check'||!process.argv[projectAt+1]))throw Error('Only title-preflight-check accepts --project');
@@ -50,7 +52,7 @@ if(command==='serve'){
   const u=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
   if(u==='/'){res.writeHead(200,{'content-type':'text/html','cache-control':'no-store'}).end(html);return;}
   if(u==='/status.json'){res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'}).end(JSON.stringify({...await acceptedFinal(),projectHash}));return;}
-  const publicFiles=new Set(['font.ttf','logo.png','speech.wav',...p.assets.flatMap(a=>[a.file,a.previewFile].filter(Boolean))]);
+  const publicFiles=new Set(['font.ttf','headline-font.ttf','logo.png','speech.wav',...p.assets.flatMap(a=>[a.file,a.previewFile].filter(Boolean))]);
   const rel=u.slice(1);let file;
   if(rel==='app.js')file=path.join(web,rel);else if(rel==='project.json'){if(await hash(path.join(dir,rel))!==projectHash){res.writeHead(409).end();return;}file=path.join(dir,rel);}else if(rel==='final.mp4'){if(!(await acceptedFinal()).ready){res.writeHead(409).end('Export is stale or needs verification');return;}file=path.join(dir,rel);}else if(publicFiles.has(rel))file=path.join(dir,'public',rel);else{res.writeHead(404).end();return;}
   const s=await stat(file),ext=path.extname(file),types={'.js':'text/javascript','.json':'application/json','.mp4':'video/mp4','.wav':'audio/wav','.png':'image/png','.jpg':'image/jpeg','.ttf':'font/ttf'};

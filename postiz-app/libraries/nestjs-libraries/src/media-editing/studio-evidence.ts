@@ -26,7 +26,7 @@ function words(raw: any, ceiling: number) {
     previous = w.start; return { text: text.trim(), start: w.start, end: w.end };
   });
 }
-export function validateStudioEvidence(v: any, expected: { organizationId: string; mediaId: string; sourceSha256?: string }) {
+export function validateStudioEvidence(v: any, expected: { organizationId: string; mediaId: string; sourceSha256?: string }, stableIds = false) {
   if (!v || v.schemaVersion !== 1 || v.organizationId !== expected.organizationId || v.mediaId !== expected.mediaId ||
       !/^[a-f0-9-]{36}$/.test(v.jobId || '') || !Number.isSafeInteger(v.revision) || v.revision < 0 ||
       !validStudioHash(v.sourceSha256) || expected.sourceSha256 && v.sourceSha256 !== expected.sourceSha256 ||
@@ -49,12 +49,12 @@ export function validateStudioEvidence(v: any, expected: { organizationId: strin
   if (!finite(report.final_s) || Math.abs(report.final_s - outputFrames / 30) > .001) fail();
   const rawWords = words(v.files.rawWords.value, v.totalFrames / 30), outputWords = words(v.files.words.value, outputFrames / 30);
   const retained: { id: string; text: string; start: number; end: number }[] = [];
-  for (const w of rawWords) {
+  for (const [ordinal, w] of rawWords.entries()) {
     let cursor = 0, included = false;
     for (const cut of cuts) {
       const start = cut.in / 30, end = cut.out / 30;
       if (w.start >= start - .00001 && w.end <= end + .00001) {
-        retained.push({ id: 'w' + retained.length, text: w.text, start: cursor + w.start - start, end: cursor + w.end - start }); included = true; break;
+        retained.push({ id: 'w' + (stableIds ? ordinal : retained.length), text: w.text, start: cursor + w.start - start, end: cursor + w.end - start }); included = true; break;
       }
       // Whole-word preservation: refuse a native cut that intersects speech.
       if (w.start < end && w.end > start) fail();
@@ -67,5 +67,5 @@ export function validateStudioEvidence(v: any, expected: { organizationId: strin
   // Keep the native output timestamps, not rounded or model-reconstructed ones.
   return { sourceSha256: v.sourceSha256 as string, revision: v.revision as number, frames: outputFrames,
     totalFrames: v.totalFrames as number, fps: 30 as const, width: v.width as number, height: v.height as number, cuts,
-    words: outputWords.map((w, i) => ({ id: 'w' + i, ...w })), audio: v.audio as { sha256: string; bytes: number } };
+    words: outputWords.map((w, i) => ({ id: retained[i].id, ...w })), sourceWords: rawWords.map((w, i) => ({ id: 'w' + i, ...w })), audio: v.audio as { sha256: string; bytes: number } };
 }

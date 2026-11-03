@@ -3,6 +3,17 @@ import { join } from 'path';
 import { studioFingerprint } from './studio-receipt';
 import { StudioApprovedPlan, StudioRuntime, studioCommand, studioHashFile, studioJson } from './studio-worker';
 import { StudioFraming, validateStudioEvidence } from './studio-evidence';
+import { ACCEPTED_EDITOR_STYLE, ACCEPTED_FONT_HASHES } from './studio-accepted-timeline';
+
+export async function studioAcceptedFonts(config: StudioRuntime) {
+  const fonts = { caption: { path: join(config.root, 'fonts/LiberationSans-Bold.ttf'), sha256: ACCEPTED_FONT_HASHES.caption },
+    headline: { path: join(config.root, 'fonts/TikTokSans36pt-Bold.ttf'), sha256: ACCEPTED_FONT_HASHES.headline } };
+  for (const font of Object.values(fonts)) {
+    const info = await lstat(font.path);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024 || await studioHashFile(font.path) !== font.sha256) throw Error('Stage the exact approved licensed fonts before creating this edit');
+  }
+  return fonts;
+}
 
 export async function studioTitleFont(config: StudioRuntime) {
   const path = join(config.work, 'Body-Bold.ttf'), info = await lstat(path);
@@ -10,7 +21,7 @@ export async function studioTitleFont(config: StudioRuntime) {
       !['00010000', '4f54544f'].includes((await readFile(path)).subarray(0, 4).toString('hex'))) throw Error('Stage the licensed Studio font before direction');
   return { path, sha256: await studioHashFile(path) };
 }
-export function studioGroundedTitle(e: ReturnType<typeof validateStudioEvidence>, rectangles: any[], framing: StudioFraming) {
+function studioOpeningWords(e: ReturnType<typeof validateStudioEvidence>) {
   const end = e.words.findIndex((w, i) => {
     const token = w.text.replace(/["'”’)}\]]+$/, '');
     if (!/[.!?]$/.test(token)) return false;
@@ -26,6 +37,16 @@ export function studioGroundedTitle(e: ReturnType<typeof validateStudioEvidence>
   });
   const words = e.words.slice(0, end + 1), text = words.map(w => w.text).join(' ');
   if (end < 0 || words.length < 3 || words.length > 9 || text.length > 60 || text.split(/\s+/).length > 9) throw Error('Needs adjustment: opening sentence must contain 3-9 words within 60 characters');
+  return { words, text };
+}
+export function studioAcceptedTitle(e: ReturnType<typeof validateStudioEvidence>, headline?: string) {
+  const selected = headline === undefined ? studioOpeningWords(e) : { text: headline, words: [] };
+  if (!selected.text.trim() || selected.text.length > 60 || /[\u0000-\u001f]/.test(selected.text)) throw Error('Needs adjustment: enter a shorter single-line headline');
+  return { version: 1, style: ACCEPTED_EDITOR_STYLE, text: selected.text, wordIds: selected.words.map(w => w.id), from: 0,
+    frames: Math.min(135, e.frames), bounds: { x: 108, y: 276, width: 720, height: 132 } };
+}
+export function studioGroundedTitle(e: ReturnType<typeof validateStudioEvidence>, rectangles: any[], framing: StudioFraming) {
+  const { words, text } = studioOpeningWords(e);
   const face = { x: framing.x * 1080 - 20, y: framing.y * 1920 - 20,
     right: (framing.x + framing.width) * 1080 + 20, bottom: (framing.y + framing.height) * 1920 + 20 };
   const slots: any[] = [];
@@ -65,7 +86,20 @@ export async function freezeStudioTitle(config: StudioRuntime, dir: string, iden
     const path = join(candidate, 'public/font.ttf'); await copyFile(font.path, path, 1);
     if (await studioHashFile(path) !== font.sha256) throw Error('Title font changed while staging');
     plan.manifest.inputs.font = { path, sha256: font.sha256 };
-    await writeFile(join(candidate, 'project.json'), JSON.stringify(plan.manifest.project), { flag: 'wx', mode: 0o600 });
+    if (plan.manifest.project.editorStyle === ACCEPTED_EDITOR_STYLE) {
+      const headline = (await studioAcceptedFonts(config)).headline, headlinePath = join(candidate, 'public/headline-font.ttf');
+      await copyFile(headline.path, headlinePath, 1);
+      if (await studioHashFile(headlinePath) !== headline.sha256) throw Error('Headline font changed while staging');
+      plan.manifest.inputs.headlineFont = { path: headlinePath, sha256: headline.sha256 };
+      await writeFile(join(candidate, 'project.json'), JSON.stringify(plan.manifest.project), { flag: 'wx', mode: 0o600 });
+      const captions = JSON.parse(await studioCommand(config, 'accepted-captions', [candidate, '--runtime', config.file]));
+      if (!Array.isArray(captions) || studioFingerprint(captions.flatMap(c => c.wordIds)) !== studioFingerprint(plan.manifest.project.words.map((w: any) => w.id))) throw Error('Measured captions changed word identity');
+      plan.manifest.project.captions = captions;
+      // The provisional singleton project is private planner input, never an
+      // accepted render. Freeze the measured project before title preflight.
+      await writeFile(join(candidate, 'project.json'), JSON.stringify(plan.manifest.project), { mode: 0o600 });
+    }
+    else await writeFile(join(candidate, 'project.json'), JSON.stringify(plan.manifest.project), { flag: 'wx', mode: 0o600 });
     await writeFile(join(candidate, 'binding.json'), JSON.stringify({ binding, plan }), { flag: 'wx', mode: 0o600 });
     await studioCommand(config, 'title-preflight', [candidate, '--runtime', config.file]);
   } else {

@@ -1,4 +1,5 @@
 import {validateTitle,titleForCaption} from './title-layout.mjs';
+import {ACCEPTED_STYLE,acceptedCaptionRanges} from './accepted-style.mjs';
 import {EASY_PROFILE,EASY_EFFECTS,validateEasyEffect} from './effect-content-bounds.mjs';
 // JSON is the boundary between the AI director, Cooked, preview and export.
 import {assessSafeZones,safeZoneCacheContent} from './safe-zones.mjs';
@@ -22,6 +23,7 @@ export function captionTimingPolicy(p){
   return policy;
 }
 export function captionFrameRanges(p,words=new Map(p.words.map(w=>[w.id,w]))){
+  if(p.editorStyle===ACCEPTED_STYLE)return acceptedCaptionRanges(p);
   const policy=captionTimingPolicy(p),fps=p.canvas.fps,lastEnd=p.words.at(-1).end;
   return p.captions.map((c,i)=>{
     const [from,end]=captionFrameRange(c,words,fps,lastEnd),next=p.captions[i+1];
@@ -50,11 +52,14 @@ export function chunkContent(p,first,last){
   const captions=p.captions.flatMap((c,i)=>{const [from,end]=ranges[i];return from<=last&&end>first?[{...c,frameRange:ranges[i],words:c.wordIds.map(id=>words.get(id))}]:[];});
   const active=events=>events.filter(e=>e.from<=last&&e.from+e.frames>first);
   // Editorial notes/revision labels do not change pixels; timed decisions do.
-  return {...(p.profile==='talking-head-v2'&&p.title?{title:p.title.from<=last&&p.title.from+p.title.frames>first?p.title:null,titleCaptionObstacles:captions.map(c=>titleForCaption(p.title,c.frameRange))}:{}),first,last,captionTimingPolicy:captionTimingPolicy(p),canvas:p.canvas,profile:p.profile,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};
+  return {...(p.editorStyle?{editorStyle:p.editorStyle}:{}),...(p.profile==='talking-head-v2'&&p.title?{title:p.title.from<=last&&p.title.from+p.title.frames>first?p.title:null,titleCaptionObstacles:captions.map(c=>titleForCaption(p.title,c.frameRange))}:{}),first,last,captionTimingPolicy:captionTimingPolicy(p),canvas:p.canvas,profile:p.profile,source:p.source,assets:p.assets.map(({originalPath,previewFile,...a})=>a),cuts,captions,broll:active(p.broll),effects:active(p.effects),safeZones:safeZoneCacheContent(p)};
 }
 export function validateProject(p){
   if(!p||!((p.schemaVersion===1&&(p.profile===undefined||p.profile===EASY_PROFILE))||(p.schemaVersion===2&&p.profile==='talking-head-v2'))||!text(p.id,80)||!integer(p.revision,1,10000))fail('Unsupported project identity/version');
   captionTimingPolicy(p);
+  if(p.editorStyle!==undefined&&(p.editorStyle!==ACCEPTED_STYLE||p.profile!=='talking-head-v2'))fail('Unknown editor style');
+  if(p.editorStyle===ACCEPTED_STYLE&&!p.title)fail('Approved style requires a headline');
+  if(p.editorStyle===ACCEPTED_STYLE&&(!Array.isArray(p.safeZones?.profiles)||!p.safeZones.profiles.length||p.safeZones.profiles.some(id=>!['instagram-approved-editor-v1','tiktok-approved-editor-v1'].includes(id))))fail('Approved style requires its explicitly selected reference guards');
   if(!p.canvas||!integer(p.canvas.width,320,3840)||!integer(p.canvas.height,320,3840)||p.canvas.width%2||p.canvas.height%2||!integer(p.canvas.fps,24,60)||Math.abs(p.canvas.width/p.canvas.height-9/16)>.001)fail('Expected an even-sized portrait canvas');
   if(!p.source||!integer(p.source.frames,1,60*60*30)||!/^[a-f0-9]{64}$/.test(p.source.sha256)||!text(p.source.assetId,80))fail('Invalid source provenance');
   if(!Array.isArray(p.assets)||!p.assets.length||p.assets.length>100)fail('Invalid asset inventory');
@@ -70,7 +75,14 @@ export function validateProject(p){
   if(!Array.isArray(p.cuts)||!p.cuts.length||p.cuts.length>1000)fail('Missing bounded cuts');
   let previous=0;
   for(const c of p.cuts){if(!integer(c.in,previous,p.source.frames-1)||!integer(c.out,c.in+1,p.source.frames)||!text(c.reason))fail('Cuts must preserve source order and bounds');previous=c.out;}
-  if(p.profile==='talking-head-v2'&&(p.canvas.fps!==30||p.assets.length!==1||assets.get(p.source.assetId)?.kind!=='video'||p.cuts.length!==1||p.cuts[0].in!==0||p.cuts[0].out!==p.source.frames||p.broll?.length!==0||p.effects?.length!==0||Object.hasOwn(p,'titles')))fail('Unsupported talking-head-v2 tracks or source');
+  if(p.profile==='talking-head-v2'&&(p.canvas.fps!==30||p.assets.length!==1||assets.get(p.source.assetId)?.kind!=='video'||p.editorStyle!==ACCEPTED_STYLE&&(p.cuts.length!==1||p.cuts[0].in!==0||p.cuts[0].out!==p.source.frames)||p.broll?.length!==0||p.effects?.length!==0||Object.hasOwn(p,'titles')))fail('Unsupported talking-head-v2 tracks or source');
+  if(p.source.originalFrames!==undefined&&(p.editorStyle!==ACCEPTED_STYLE||!integer(p.source.originalFrames,1,p.source.frames)||p.source.frames-p.source.originalFrames>1))fail('Invalid final held frame');
+  if(p.editorStyle===ACCEPTED_STYLE){
+    const source=assets.get(p.source.assetId),samples=p.source.audioSampleFrames;
+    if(p.canvas.width*16!==p.canvas.height*9||source.width*16!==source.height*9||p.source.frames>1801||!integer(samples,1,p.source.frames*1600)||
+       p.source.originalFrames!==undefined&&(p.source.frames!==p.source.originalFrames+1||samples<=p.source.originalFrames*1600)||
+       p.cuts[0].in!==0||p.cuts.at(-1).out!==p.source.frames||p.audioSampleFrames!==p.cuts.reduce((n,c)=>n+Math.max(0,Math.min(samples,c.out*1600)-c.in*1600),0))fail('Approved source must preserve its full frame and sample endpoints without reframing');
+  }
   const frames=frameCount(p),seconds=frames/p.canvas.fps;
   if(!Array.isArray(p.words)||!p.words.length||p.words.length>20000)fail('Missing aligned transcript');
   const words=new Map();let wordStart=-1;
@@ -79,6 +91,7 @@ export function validateProject(p){
   const captionIds=p.captions.flatMap(c=>c.wordIds);
   if(JSON.stringify(captionIds)!==JSON.stringify(p.words.map(w=>w.id)))fail('Captions must preserve every word once and in order');
   for(const c of p.captions)if(!Array.isArray(c.wordIds)||!c.wordIds.length||c.wordIds.length>8||c.wordIds.some(id=>!words.has(id)))fail('Invalid caption group');
+  if(p.editorStyle===ACCEPTED_STYLE&&p.captions.some(c=>c.wordIds.length>3))fail('Approved captions allow at most three words');
   if(!p.speaker||p.speaker.count!==1||!Array.isArray(p.speaker.faces)||!p.speaker.faces.length)fail('This pilot requires observed single-speaker framing');
   for(const f of p.speaker.faces)if(!number(f.t,0,seconds+.5)||!['x','y','width','height'].every(k=>number(f[k],0,1920)))fail('Invalid face observation');
   if(!Array.isArray(p.broll)||p.broll.length>100||!Array.isArray(p.effects)||p.effects.length>100)fail('Invalid visual tracks');

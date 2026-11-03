@@ -11,6 +11,8 @@ export async function readRendererIdentity(root,fontFile,profile){
  for(const folder of [root,path.join(root,'src'),...(['easy-graphics-v1','talking-head-v2'].includes(profile)?[]:[path.resolve(root,'../../12_effect_library/v1/src'),path.resolve(root,'../../12_effect_library/v2/src')])]){
   for(const name of (await readdir(folder)).sort())if(/\.(mjs|tsx|ts|py)$/.test(name))sources[path.join(folder,name)]=await hash(path.join(folder,name));
  }
+ const headline=path.join(path.dirname(fontFile),'headline-font.ttf');
+ try{sources[headline]=await hash(headline);}catch(e){if(e.code!=='ENOENT')throw e;}
  const rendererHash=createHash('sha256').update(JSON.stringify(sources)).update(await hash(fontFile)).digest('hex');
  return {sources,rendererHash};
 }

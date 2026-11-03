@@ -38,8 +38,8 @@ export async function studioRuntime(org: string, profile: string = 'easy-graphic
 // Bounded offline child process group. No inherited provider credentials, shell,
 // arbitrary command or browser service. The deployed worker still needs its own
 // memory/disk/network container limits; this supervisor is not a sandbox.
-export async function studioCommand(config: StudioRuntime, kind: 'prepare' | 'validate' | 'render' | 'qa' | 'bindings' | 'capabilities' | 'title-preflight' | 'title-preflight-check', args: string[]): Promise<string> {
-  if (!['prepare', 'validate', 'render', 'qa', 'bindings', 'capabilities', 'title-preflight', 'title-preflight-check'].includes(kind)) throw new Error('Unknown Studio command');
+export async function studioCommand(config: StudioRuntime, kind: 'prepare' | 'validate' | 'render' | 'qa' | 'bindings' | 'capabilities' | 'title-preflight' | 'title-preflight-check' | 'accepted-captions', args: string[]): Promise<string> {
+  if (!['prepare', 'validate', 'render', 'qa', 'bindings', 'capabilities', 'title-preflight', 'title-preflight-check', 'accepted-captions'].includes(kind)) throw new Error('Unknown Studio command');
   if (process.platform !== 'linux') throw new Error('Studio app worker requires Linux acceptance');
   const python = kind === 'prepare' || kind === 'qa';
   const script = kind === 'prepare' ? 'prepare.py' : kind === 'qa' ? 'qa.py' : kind === 'bindings' ? 'receipt-bindings.mjs' : 'run.mjs';
@@ -74,7 +74,7 @@ function assertStudioVersion(m: any, profile: unknown) {
       (p.schemaVersion !== version && !(version === 1 && p.schemaVersion === undefined))) throw new Error('Studio manifest/profile version mismatch');
   if (version === 2 && (p.canvas?.fps !== 30 || p.assets?.length !== 1 || p.assets[0]?.id !== p.source?.assetId ||
       p.assets[0]?.kind !== 'video' || p.assets[0]?.fps !== 30 || !Number.isSafeInteger(p.source?.frames) || p.source.frames < 1 ||
-      p.cuts?.length !== 1 || p.cuts[0]?.in !== 0 || p.cuts[0]?.out !== p.source.frames ||
+      p.editorStyle !== 'accepted-caption-b-top-rounded-v1' && (p.cuts?.length !== 1 || p.cuts[0]?.in !== 0 || p.cuts[0]?.out !== p.source.frames) ||
       !Array.isArray(p.broll) || p.broll.length !== 0 || !Array.isArray(p.effects) || p.effects.length !== 0)) throw new Error('Unsupported talking-head-v2 source or tracks');
 }
 export function assertStudioPlan(job: any, plan: StudioApprovedPlan) {
@@ -122,7 +122,7 @@ export async function stageStudioPlan(c: StudioRuntime, job: any, plan: StudioAp
   // Audio/font/Cooked evidence are trusted upstream worker artifacts. Paths are
   // restricted to this explicit work root, not arbitrary client filesystem paths.
   const root = await realpath(c.work) + sep;
-  const refs = [manifest.inputs?.audio, manifest.inputs?.font,
+  const refs = [manifest.inputs?.audio, manifest.inputs?.font, ...(manifest.inputs?.headlineFont ? [manifest.inputs.headlineFont] : []),
     ...(manifest.provenance.origin === 'cooked' ? ['decisions', 'captions', 'receipt'].map(k => manifest.provenance.cooked?.[k]) : [])];
   for (let i = 0; i < refs.length; i++) {
     const ref = refs[i];
