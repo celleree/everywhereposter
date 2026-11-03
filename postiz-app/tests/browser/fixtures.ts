@@ -9,7 +9,7 @@ const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }
 const sourceHash = createHash('sha256').update(['apps/frontend/src/components/billing/ai-wallet.component.tsx', 'tests/browser/prepaid-wallet.spec.ts', 'apps/frontend/src/components/video-editor/cooked-review.workspace.tsx', 'libraries/nestjs-libraries/src/media-editing/cooked-review-html.ts', 'tests/browser/cooked-review.mobile.spec.ts', 'tests/browser/assets/cooked-review.html.gz', 'apps/frontend/src/app/(app)/(site)/video-editor/page.tsx', 'apps/frontend/src/components/video-editor/video-editor.workspace.tsx', 'apps/frontend/src/components/video-editor/video-editor.module.css', 'tests/browser/video-editor.spec.ts', 'playwright.config.ts', 'tests/browser/business-discovery.spec.ts', 'tests/browser/discovery-runtime.cjs', 'apps/frontend/src/components/platform-analytics/business.discovery.tsx', 'libraries/nestjs-libraries/src/analytics/business-discovery.service.ts', 'apps/backend/src/api/routes/analytics.controller.ts', 'tests/browser/runtime.cjs', 'tests/browser/network-guard.cjs', 'tests/browser/fonts.cjs', 'tests/browser/fixtures.ts', 'tests/browser/ui.spec.ts', 'tests/browser/picker-regressions.spec.ts', 'tests/browser/settings-analytics.spec.ts', 'apps/frontend/src/components/layout/settings.component.tsx', 'apps/frontend/src/components/public-api/public.component.tsx', 'apps/frontend/src/components/settings/shortlink-preference.component.tsx', 'apps/frontend/src/components/layout/top.menu.tsx', 'apps/frontend/src/components/platform-analytics/platform.analytics.tsx', 'apps/frontend/src/components/platform-analytics/render.analytics.tsx', 'apps/frontend/src/components/analytics/chart-social.tsx', 'libraries/react-shared-libraries/src/helpers/video.frame.tsx', 'tests/browser/assets/synthetic-picker.mp4', 'apps/frontend/src/components/launches/launches.component.tsx', 'apps/frontend/src/components/layout/new-modal.tsx', 'apps/frontend/src/components/media/media.component.tsx', 'apps/frontend/src/components/new-launch/manage.modal.tsx', 'apps/frontend/src/app/mobile-ui.scss', 'libraries/react-shared-libraries/src/helpers/video.or.image.tsx', 'tests/browser/facebook-management.spec.ts', 'tests/browser/facebook-runtime.cjs', 'apps/frontend/src/components/new-launch/facebook.published.management.tsx', 'libraries/nestjs-libraries/src/database/prisma/posts/facebook-published.service.ts'].map(file => file + '\n' + createHash('sha256').update(readFileSync(path.resolve(file))).digest('hex')).join('\n')).digest('hex');
 
 export const test = base.extend<{ authenticated: void; diagnostics: void }>({
-  authenticated: [async ({ context }, use, info) => {
+  authenticated: [async ({ context }, use) => {
     await context.addCookies([{ name: 'auth', value: 'synthetic-playwright-session', url: browserOrigin }]);
     await context.route('**/*', async route => {
       const url = new URL(route.request().url());
@@ -17,18 +17,7 @@ export const test = base.extend<{ authenticated: void; diagnostics: void }>({
       if (url.pathname.startsWith('/backend-api/') && route.request().method() !== 'GET') {
         return route.fulfill({ status: 405, contentType: 'application/json', body: '{"message":"Fixture mutations disabled"}' });
       }
-      const traceNavigation = info.title.startsWith('Resumable upload: persisted Quick Upload choice before completion survives navigation and return') && url.pathname === '/settings';
-      const continuedAt = Date.now();
-      const recordContinuation = (event: string) => {
-        if (traceNavigation) console.log('EP_QUICK_UPLOAD_ROUTE ' + JSON.stringify({
-          scenario: info.title.endsWith('(released-chunk control)') ? 'released-chunk-control' : 'held-chunk-original',
-          event, wallTimeMs: Date.now(), elapsedMs: Date.now() - continuedAt,
-          path: url.pathname, rsc: url.searchParams.has('_rsc'), navigation: route.request().isNavigationRequest(),
-        }));
-      };
-      recordContinuation('route-continue-entry');
-      try { await route.continue(); }
-      finally { recordContinuation('route-continue-exit'); }
+      await route.continue();
     });
     await use();
   }, { auto: true }],
