@@ -168,7 +168,7 @@ const Accept: FC<{ resolve: (res: boolean) => void }> = ({ resolve }) => {
     </div>
   );
 };
-const Info: FC<{
+export const Info: FC<{
   proceed: (feedback: string) => void;
 }> = (props) => {
   const [feedback, setFeedback] = useState('');
@@ -186,14 +186,14 @@ const Info: FC<{
     <div className="relative flex gap-[20px] flex-col flex-1 rounded-[4px]">
       <div>
         {t(
-          'would_you_mind_shortly_tell_us_what_we_could_have_done_better',
-          'Would you mind shortly tell us what we could have done better?'
+          'billing_optional_feedback_prompt',
+          'What could we have done better? Feedback is optional.'
         )}
       </div>
       <div>
         <Textarea
           className="bg-newBgColorInner"
-          label={'Feedback'}
+          label={'Feedback (optional)'}
           name="feedback"
           disableForm={true}
           value={feedback}
@@ -201,10 +201,8 @@ const Info: FC<{
         />
       </div>
       <div>
-        <Button disabled={feedback.length < 20} onClick={cancel}>
-          {feedback.length < 20
-            ? t('please_add_at_least', 'Please add at least 20 chars')
-            : t('cancel_subscription', 'Cancel Subscription')}
+        <Button onClick={cancel}>
+          {t('cancel_subscription', 'Cancel Subscription')}
         </Button>
       </div>
     </div>
@@ -566,10 +564,7 @@ export const MainBillingComponent: FC<{
           )}{' '}
           {newDayjs(subscription.cancelAt).local().format('D MMM, YYYY')}
           <br />
-          {t(
-            'you_will_never_be_charged_again',
-            'You will never be charged again'
-          )}
+          {t('billing_renewal_canceled', 'Automatic renewal is canceled. Any amounts already due remain payable.')}
         </div>
       )}
       <FAQComponent />
