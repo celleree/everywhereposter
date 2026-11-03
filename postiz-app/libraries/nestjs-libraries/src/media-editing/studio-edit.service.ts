@@ -218,7 +218,7 @@ export class StudioEditService {
     try { await this.verified(org, row); }
     catch { return { ...response, technicalStatus: 'STALE_NEEDS_VERIFICATION' }; }
     const input = row.input as any;
-    const approved = input.request.creative?.editorStyle === ACCEPTED_EDITOR_STYLE;
+    const approved = input?.request?.creative?.editorStyle === ACCEPTED_EDITOR_STYLE;
     const authored = approved ? await studioJson(join(studioDirectory(await this.runtime(org, row), row), 'authored-plan.json')) : undefined;
     return { ...response, technicalStatus: 'PASS', sha256: row.artifactSha256, preview: true,
       ...(approved ? { headline: authored.manifest.project.title.text, editRequest: input.request, revisionUsesPaidCredits: false } : {}),
