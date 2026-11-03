@@ -167,12 +167,18 @@ async function persistedQuickUploadNavigation(page: Page, info: TestInfo, releas
     return route.fulfill({ json: session });
   });
   await page.route('**/backend-api/integrations/list', route => route.fulfill({ json: { integrations: [{ id: 'fixture', name: 'Fixture account', identifier: 'x', type: 'social', editor: 'normal', additionalSettings: '[]', time: [] }] } }));
-  // Finish cold development hydration before holding an upload across navigation.
+  // Keep the warmed Settings modules in this client runtime before holding an upload.
   diagnostic.mark('warm-settings');
   await openApp(page, '/settings');
   await expect(page.getByRole('heading', { name: 'Global Settings', exact: true })).toBeVisible();
   diagnostic.mark('warm-media');
-  await openApp(page, '/media');
+  const mediaNavigation = mobileProject(info)
+    ? page.getByRole('navigation', { name: 'Mobile navigation' })
+    : page.locator('#left-menu');
+  await mediaNavigation.getByRole('link', { name: 'Media', exact: true }).click();
+  await expect(page).toHaveURL(/\/media(?:\?|$)/);
+  await expect(page.locator('.mobile-app-shell')).toBeVisible();
+  await expect(page.locator('input[type=file]').first()).toBeAttached();
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('region', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);
   await tray.getByRole('button', { name: 'Quick Upload without individual review' }).click();
