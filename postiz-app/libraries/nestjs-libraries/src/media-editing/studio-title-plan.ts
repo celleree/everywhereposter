@@ -5,6 +5,12 @@ import { StudioApprovedPlan, StudioRuntime, studioCommand, studioHashFile, studi
 import { StudioFraming, validateStudioEvidence } from './studio-evidence';
 import { ACCEPTED_EDITOR_STYLE, ACCEPTED_FONT_HASHES } from './studio-accepted-timeline';
 
+// Public status uses only this marker, never native errors or transcript text.
+export class StudioTextLayoutError extends Error {
+  readonly studioTextLayout = true;
+  constructor() { super('Approved text layout could not be verified'); }
+}
+
 export async function studioAcceptedFonts(config: StudioRuntime) {
   const fonts = { caption: { path: join(config.root, 'fonts/LiberationSans-Bold.ttf'), sha256: ACCEPTED_FONT_HASHES.caption },
     headline: { path: join(config.root, 'fonts/TikTokSans36pt-Bold.ttf'), sha256: ACCEPTED_FONT_HASHES.headline } };
@@ -40,10 +46,12 @@ function studioOpeningWords(e: ReturnType<typeof validateStudioEvidence>) {
   return { words, text };
 }
 export function studioAcceptedTitle(e: ReturnType<typeof validateStudioEvidence>, headline?: string) {
-  const selected = headline === undefined ? studioOpeningWords(e) : { text: headline, words: [] };
-  if (!selected.text.trim() || selected.text.length > 60 || /[\u0000-\u001f]/.test(selected.text)) throw Error('Needs adjustment: enter a shorter single-line headline');
-  return { version: 1, style: ACCEPTED_EDITOR_STYLE, text: selected.text, wordIds: selected.words.map(w => w.id), from: 0,
-    frames: Math.min(135, e.frames), bounds: { x: 108, y: 276, width: 720, height: 132 } };
+  try {
+    const selected = headline === undefined ? studioOpeningWords(e) : { text: headline, words: [] };
+    if (!selected.text.trim() || selected.text.length > 60 || /[\u0000-\u001f]/.test(selected.text)) throw new StudioTextLayoutError();
+    return { version: 1, style: ACCEPTED_EDITOR_STYLE, text: selected.text, wordIds: selected.words.map(w => w.id), from: 0,
+      frames: Math.min(135, e.frames), bounds: { x: 108, y: 276, width: 720, height: 132 } };
+  } catch { throw new StudioTextLayoutError(); }
 }
 export function studioGroundedTitle(e: ReturnType<typeof validateStudioEvidence>, rectangles: any[], framing: StudioFraming) {
   const { words, text } = studioOpeningWords(e);
@@ -81,6 +89,13 @@ export async function freezeStudioTitle(config: StudioRuntime, dir: string, iden
   }
   if (fresh) await mkdir(candidate, { mode: 0o700 });
   let plan: StudioApprovedPlan;
+  const layoutCommand = async (kind: 'accepted-captions' | 'title-preflight' | 'title-preflight-check') => {
+    try { return await studioCommand(config, kind, [candidate, '--runtime', config.file]); }
+    catch (error) {
+      if (plan.manifest.project.editorStyle === ACCEPTED_EDITOR_STYLE) throw new StudioTextLayoutError();
+      throw error;
+    }
+  };
   if (fresh) {
     plan = build(); await mkdir(join(candidate, 'public'));
     const path = join(candidate, 'public/font.ttf'); await copyFile(font.path, path, 1);
@@ -92,7 +107,7 @@ export async function freezeStudioTitle(config: StudioRuntime, dir: string, iden
       if (await studioHashFile(headlinePath) !== headline.sha256) throw Error('Headline font changed while staging');
       plan.manifest.inputs.headlineFont = { path: headlinePath, sha256: headline.sha256 };
       await writeFile(join(candidate, 'project.json'), JSON.stringify(plan.manifest.project), { flag: 'wx', mode: 0o600 });
-      const captions = JSON.parse(await studioCommand(config, 'accepted-captions', [candidate, '--runtime', config.file]));
+      const captions = JSON.parse(await layoutCommand('accepted-captions'));
       if (!Array.isArray(captions) || studioFingerprint(captions.flatMap(c => c.wordIds)) !== studioFingerprint(plan.manifest.project.words.map((w: any) => w.id))) throw Error('Measured captions changed word identity');
       plan.manifest.project.captions = captions;
       // The provisional singleton project is private planner input, never an
@@ -101,14 +116,14 @@ export async function freezeStudioTitle(config: StudioRuntime, dir: string, iden
     }
     else await writeFile(join(candidate, 'project.json'), JSON.stringify(plan.manifest.project), { flag: 'wx', mode: 0o600 });
     await writeFile(join(candidate, 'binding.json'), JSON.stringify({ binding, plan }), { flag: 'wx', mode: 0o600 });
-    await studioCommand(config, 'title-preflight', [candidate, '--runtime', config.file]);
+    await layoutCommand('title-preflight');
   } else {
     const saved = await studioJson(join(candidate, 'binding.json'));
     plan = saved.plan;
     if (saved.binding !== binding || studioFingerprint(await studioJson(join(candidate, 'project.json'))) !== studioFingerprint(plan.manifest.project) ||
         plan.manifest.inputs.font.sha256 !== font.sha256 || await studioHashFile(join(candidate, 'public/font.ttf')) !== font.sha256) throw Error('Frozen Studio title changed; verification required');
   }
-  await studioCommand(config, 'title-preflight-check', [candidate, '--runtime', config.file]);
+  await layoutCommand('title-preflight-check');
   return { candidate, plan };
 }
 export async function checkStudioTitleFinal(config: StudioRuntime, candidate: string, plan: StudioApprovedPlan) {

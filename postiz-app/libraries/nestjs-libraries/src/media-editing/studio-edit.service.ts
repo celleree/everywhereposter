@@ -77,7 +77,8 @@ export class StudioEditService {
     if (row.input?.request?.creative?.editorStyle === ACCEPTED_EDITOR_STYLE && this.running.size) throw new ServiceUnavailableException('Studio is busy. Recover this same request and resume it when the current edit completes.');
     const operation = this.produce(org, row).catch(async error => {
       // No raw provider/native errors, transcripts or paths in the public ledger.
-      try { const c = await this.runtime(org, row); await writeFile(join(studioDirectory(c, row), 'producer-status.json'), JSON.stringify({ phase: error?.studioNotAdmitted === true ? 'WAITING_FOR_WORKER' : 'NEEDS_VERIFICATION' })); } catch {}
+      const phase = error?.studioNotAdmitted === true ? 'WAITING_FOR_WORKER' : error?.studioTextLayout === true && row.input?.request?.creative?.editorStyle === ACCEPTED_EDITOR_STYLE ? 'NEEDS_TEXT_ADJUSTMENT' : 'NEEDS_VERIFICATION';
+      try { const c = await this.runtime(org, row); await writeFile(join(studioDirectory(c, row), 'producer-status.json'), JSON.stringify({ phase })); } catch {}
     }).finally(() => this.running.delete(key));
     this.running.set(key, operation);
   }
@@ -208,6 +209,7 @@ export class StudioEditService {
       technicalStatus: 'NOT_VERIFIED', creativeApproval: row.reviewedAt ? 'APPROVED' : 'PENDING' };
     if (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state)) {
       try { const c = await this.runtime(org, row), progress = await studioJson(join(studioDirectory(c, row), 'producer-status.json'), 4096);
+        if (progress.phase === 'NEEDS_TEXT_ADJUSTMENT') return { ...response, phase: 'NEEDS_TEXT_ADJUSTMENT', message: 'Text layout could not be verified. For a headline revision, select the previous verified result and enter a shorter headline. For a new edit, shorten the headline or choose another source above, then use Start another edit. No automatic paid retry will run. Your original is unchanged.' };
         if (progress.phase === 'NEEDS_VERIFICATION') return { ...response, phase: 'NEEDS_VERIFICATION', message: 'This edit needs verification or adjustment. No automatic paid retry will run. Your original is unchanged.' };
         if (progress.phase === 'WAITING_FOR_WORKER') return { ...response, phase: 'WAITING_FOR_WORKER', message: 'The native editor was busy, restarting or not ready. No new job was admitted. Resume when it is available; your original is unchanged.' };
       } catch {}
