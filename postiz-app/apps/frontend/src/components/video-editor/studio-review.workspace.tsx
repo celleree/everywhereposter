@@ -66,6 +66,9 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
     try {
       const body = recover ? pendingRequest : revision || (approvedStyle ? { requestKey: crypto.randomUUID(), sourceMediaId: source.id, brollMediaIds: [],
         destinations: targets, profile: 'talking-head-v2', creative: { brief, editorStyle: availability.editorStyle, ...(headline.trim() ? { headline: headline.trim() } : {}), framing: { ...framing, confirmed: true, stationary: true, singleSpeaker: true } } } : { requestKey: crypto.randomUUID(), sourceMediaId: source.id, brollMediaIds: visuals, destinations: targets, profile: !visuals.length && availability?.sourceOnlyProfile === 'talking-head-v2' ? 'talking-head-v2' : 'easy-graphics-v1', creative: { brief, framing: { ...framing, confirmed: true, stationary: true, singleSpeaker: true } } });
+      if (body?.creative?.editorStyle === 'accepted-caption-b-top-rounded-v1' && typeof body.creative.headline === 'string' && body.creative.headline.length > 60) {
+        throw Error('Shorten the headline to 60 characters or fewer, then try again.');
+      }
       // Persist identity before dispatch; uncertain response retries the same body.
       localStorage.setItem(receiptKey, JSON.stringify(body)); setPendingRequest(body);
       const r = await fetch('/media/studio/jobs', { method: 'POST', body: JSON.stringify(body) });
@@ -129,8 +132,8 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
         <label><input type="checkbox" checked={framingConfirmed} onChange={e => setFramingConfirmed(e.target.checked)} />I checked that this outlined area contains one stationary speaker throughout the clip.</label>
       </>}
       <label>Direction <textarea maxLength={1000} value={brief} disabled={busy} onChange={e => setBrief(e.target.value)} /></label>
-      {approvedStyle && <><label>Headline (optional) <input maxLength={60} value={headline} disabled={busy} onChange={e => setHeadline(e.target.value)} placeholder="Leave blank to use your opening sentence" /></label>
-      <p>Headlines must fit one line. A headline that does not fit needs a shorter version; it will not be shrunk or rewritten.</p></>}
+      {approvedStyle && <><label>Headline (optional) <input value={headline} disabled={busy} onChange={e => setHeadline(e.target.value)} placeholder="Leave blank to use your opening sentence" /></label>
+      <p>Headlines must fit one line and be 60 characters or fewer. A headline that does not fit needs a shorter version; it will not be shrunk or rewritten.</p></>}
       <fieldset><legend>Framing destinations</legend>{(approvedStyle ? ['instagram', 'tiktok'] : ['instagram', 'facebook', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'reddit', 'dribbble']).map(p =>
         <label key={p}><input type="checkbox" checked={targets.includes(p)} disabled={busy} onChange={e => setTargets(v => e.target.checked ? [...v, p] : v.filter(x => x !== p))} />{p}</label>)}</fieldset>
       <button disabled={busy || !!pendingRequest || !source || !targets.length || !framingConfirmed || framing.width < .05 || framing.height < .05 || !brief.trim()} onClick={() => void submit()}>Create Studio edit (uses AI credits)</button>
@@ -147,7 +150,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
       <p>Technical checks passed. Watch and listen before saving. Your original is unchanged.</p>
       <video controls playsInline preload="metadata" aria-label="Studio video to review" src={data.preview} style={{ maxWidth: '100%', maxHeight: 600 }} />
       {data.editRequest && <div>
-        <label>Edit headline <input maxLength={60} value={revisionHeadline} disabled={busy} onChange={e => setRevisionHeadline(e.target.value)} /></label>
+        <label>Edit headline <input value={revisionHeadline} disabled={busy} onChange={e => setRevisionHeadline(e.target.value)} /></label>
         <button disabled={busy || !revisionHeadline.trim()} onClick={() => void submit(false, { ...data.editRequest, requestKey: crypto.randomUUID(), sourceEvidenceJobId: id, creative: { ...data.editRequest.creative, headline: revisionHeadline.trim() } })}>Apply headline as a new revision</button>
         <button disabled={busy || data.editRequest.creative.restoreCuts === true} onClick={() => void submit(false, { ...data.editRequest, requestKey: crypto.randomUUID(), sourceEvidenceJobId: id, creative: { ...data.editRequest.creative, headline: data.headline, restoreCuts: true } })}>Restore all cuts</button>
         <p>These revisions reuse your transcript without an AI charge. Restoring cuts brings back the full source timing and audio. Previous results remain available above.</p>
