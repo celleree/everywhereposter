@@ -16,6 +16,13 @@ import {
   minifyPostsList,
 } from '@gitroom/helpers/utils/posts.list.minify';
 
+jest.mock('@gitroom/frontend/components/layout/user.context', () => ({
+  useUser: () => ({ id: 'user', orgId: 'org' }),
+}));
+jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
+  useT: () => (_key: string, fallback: string) => fallback,
+}));
+
 const mockFetch = jest.fn();
 const mockSetCookie = jest.fn();
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
@@ -35,6 +42,7 @@ jest.mock('@gitroom/frontend/components/layout/set.timezone', () => {
 });
 jest.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
+  usePathname: () => window.location.pathname,
 }));
 
 const post = (
