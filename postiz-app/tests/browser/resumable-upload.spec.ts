@@ -2,7 +2,7 @@ import { test, expect, openApp, mobileProject, capture } from './fixtures';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Page } from '@playwright/test';
+import type { Frame, Page, Request, Response, TestInfo } from '@playwright/test';
 
 // Bootstrap readiness must belong to this reload and this fixture's durable choice.
 // Product assertions retain their normal budget after the matching data arrives.
@@ -88,12 +88,59 @@ test('Resumable upload: navigation, browser return and safe completion', async (
   expect(session.status).toBe('COMPLETE');
 });
 
-test('Resumable upload: persisted Quick Upload choice before completion survives navigation and return', async ({ page }, info) => {
+async function observeQuickUploadNavigation(page: Page, scenario: string) {
+  let active = true, phase = 'bootstrap';
+  const started = Date.now(), pending = new Map<Request, object>();
+  const log = (event: string, detail: object = {}) => {
+    if (active) console.log('EP_QUICK_UPLOAD_NAV ' + JSON.stringify({ scenario, phase, elapsedMs: Date.now() - started, event, ...detail }));
+  };
+  const describe = (request: Request) => {
+    const url = new URL(request.url());
+    if (!['/settings', '/media'].includes(url.pathname) && !url.pathname.startsWith('/backend-api/media/uploads')) return;
+    return { path: url.pathname, rsc: url.searchParams.has('_rsc'), method: request.method(), resourceType: request.resourceType(), navigation: request.isNavigationRequest() };
+  };
+  const requested = (request: Request) => { const detail = describe(request); if (detail) { pending.set(request, detail); log('request', detail); } };
+  const responded = (response: Response) => {
+    const detail = pending.get(response.request());
+    if (!detail) return;
+    log('response', { ...detail, status: response.status(), contentType: response.headers()['content-type'] });
+    void response.finished().then(() => log('response-finished', { ...detail, completed: true }), error => log('response-finished-error', { ...detail, message: String(error).slice(0, 300) }));
+  };
+  const finished = (request: Request) => { const detail = pending.get(request); if (detail) log('request-finished', detail); pending.delete(request); };
+  const failed = (request: Request) => { const detail = pending.get(request); if (detail) log('request-failed', { ...detail, error: request.failure()?.errorText }); pending.delete(request); };
+  const navigated = (frame: Frame) => { if (frame === page.mainFrame()) log('main-frame-url', { path: new URL(frame.url()).pathname }); };
+  const pageError = (error: Error) => log('page-error', { message: error.message.slice(0, 500) });
+  page.on('request', requested); page.on('response', responded); page.on('requestfinished', finished); page.on('requestfailed', failed);
+  page.on('framenavigated', navigated); page.on('pageerror', pageError);
+  // Observe Chromium dialogs without adding a Playwright dialog listener, which
+  // would change its default handling and could itself block navigation.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Page.enable');
+  cdp.on('Page.javascriptDialogOpening', event => log('dialog-opening', { type: event.type, message: event.message.slice(0, 300) }));
+  cdp.on('Page.javascriptDialogClosed', event => log('dialog-closed', { accepted: event.result }));
+  return {
+    mark: (name: string, detail: object = {}) => { phase = name; log('checkpoint', detail); },
+    snapshot: async (name: string) => {
+      try { log(name, { ...await page.evaluate(() => ({ path: location.pathname, readyState: document.readyState, moreExpanded: document.querySelector('[data-mobile-more-trigger]')?.getAttribute('aria-expanded'), settingsLinks: Array.from(document.querySelectorAll('nav[aria-label="More navigation"] a')).map(node => node.getAttribute('href')) })), pending: [...pending.values()] }); }
+      catch (error) { log(name, { unavailable: String(error).slice(0, 300), pending: [...pending.values()] }); }
+    },
+    stop: async () => {
+      active = false;
+      page.off('request', requested); page.off('response', responded); page.off('requestfinished', finished); page.off('requestfailed', failed);
+      page.off('framenavigated', navigated); page.off('pageerror', pageError);
+      await cdp.detach().catch(() => {});
+    },
+  };
+}
+
+async function persistedQuickUploadNavigation(page: Page, info: TestInfo, releaseBeforeNavigation: boolean) {
   test.skip(info.project.name.includes('webkit'), 'WebKit request interception does not expose Blob chunk bodies; Chromium covers the transfer protocol.');
   const bytes = Buffer.concat([readFileSync(path.resolve('tests/browser/assets/synthetic-picker.mp4')), Buffer.alloc(17 * 1024 * 1024)]);
   let session: any, release: () => void, held = false, continueTransfer = false;
   const hold = new Promise<void>(resolve => { release = resolve; });
   let intent: any; const token = randomUUID();
+  const diagnostic = await observeQuickUploadNavigation(page, releaseBeforeNavigation ? 'released-chunk-control' : 'held-chunk-original');
+  try {
   await page.route('**/backend-api/media/uploads**', async route => {
     const req = route.request(), pathname = new URL(req.url()).pathname;
     if (pathname === '/backend-api/media/uploads' && req.method() === 'GET') {
@@ -119,19 +166,30 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   });
   await page.route('**/backend-api/integrations/list', route => route.fulfill({ json: { integrations: [{ id: 'fixture', name: 'Fixture account', identifier: 'x', type: 'social', editor: 'normal', additionalSettings: '[]', time: [] }] } }));
   // Finish cold development hydration before holding an upload across navigation.
+  diagnostic.mark('warm-settings');
   await openApp(page, '/settings');
   await expect(page.getByRole('heading', { name: 'Global Settings', exact: true })).toBeVisible();
+  diagnostic.mark('warm-media');
   await openApp(page, '/media');
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('region', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);
   await tray.getByRole('button', { name: 'Quick Upload without individual review' }).click();
   await expect(tray.getByRole('status').filter({ hasText: 'Quick Upload:' })).toContainText('Uploading'); expect(intent.id).toBe('quick-intent');
   await expect(tray.getByText('Safe to leave.', { exact: false })).toHaveCount(0);
+  diagnostic.mark('choice-saved', { uploadState: session.status, intentState: intent.status });
+  if (releaseBeforeNavigation) {
+    continueTransfer = true; release!();
+    await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
+  }
+  diagnostic.mark('navigate-settings', { chunkHeld: !continueTransfer, uploadState: session.status });
+  await diagnostic.snapshot('before-settings-click');
   if (mobileProject(info)) {
     await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name: 'More', exact: true }).click();
     await page.getByRole('navigation', { name: 'More navigation' }).getByRole('link', { name: 'Settings', exact: true }).click();
   } else await page.locator('#left-menu').getByRole('link', { name: 'Settings', exact: true }).click();
+  await diagnostic.snapshot('settings-click-complete');
   await expect(page).toHaveURL(/settings/); await expect(tray).toHaveCount(0); continueTransfer = true; release!();
+  diagnostic.mark('settings-url-passed');
   await page.goBack();
   await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');
   intent.status = 'PUBLISHING'; session.quickIntent = intent; await reloadQuickUpload(page, 'PUBLISHING', token);
@@ -139,7 +197,17 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
   intent.status = 'COMPLETE'; intent.results = [{ integrationId: 'fixture', name: 'Fixture account', state: 'Published' }, { integrationId: 'failed-x', name: 'X account', state: 'Failed', reason: 'Synthetic rejection' }]; session.quickIntent = intent; await reloadQuickUpload(page, 'COMPLETE', token);
   await expect(tray.getByText('Fixture account: Published')).toBeVisible();
   await expect(tray.getByText('X account: Failed — Synthetic rejection')).toBeVisible();
-});
+  } finally {
+    await diagnostic.snapshot('test-end');
+    continueTransfer = true; release!();
+    await diagnostic.stop();
+  }
+}
+
+for (const releaseBeforeNavigation of [false, true]) {
+  test('Resumable upload: persisted Quick Upload choice before completion survives navigation and return' + (releaseBeforeNavigation ? ' (released-chunk control)' : ''),
+    async ({ page }, info) => persistedQuickUploadNavigation(page, info, releaseBeforeNavigation));
+}
 
 test('Resumable upload: reload readiness rejects unrelated identities, wrong phases and HTTP errors', async ({ page }) => {
   let status = 200, reads = 0;

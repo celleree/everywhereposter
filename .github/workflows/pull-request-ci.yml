@@ -78,6 +78,73 @@ jobs:
           bash scripts/agents/test-codex-task.sh
           bash scripts/agents/test-codex-issue-queue.sh
 
+  quick-upload-navigation-diagnostics:
+    name: Quick Upload navigation diagnostics
+    needs: [resolve-revisions, repository-guard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      publication-fixtures:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: isolated
+          POSTGRES_PASSWORD: isolated
+          POSTGRES_DB: isolated
+        ports:
+          - 55462:5432
+        options: >-
+          --health-cmd "pg_isready -U isolated -d isolated"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
+      EP_SUBMISSION_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
+      EP_FACEBOOK_BROWSER: '1'
+    defaults:
+      run:
+        working-directory: postiz-app
+    steps:
+      - name: Check out the same trusted revision as full CI
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-revisions.outputs.checkout_ref }}
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.1
+          run_install: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+          cache-dependency-path: postiz-app/pnpm-lock.yaml
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare the isolated fixture schema
+        run: |
+          test "$DATABASE_URL" = 'postgresql://isolated:isolated@127.0.0.1:55462/isolated'
+          pnpm exec prisma migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma
+      - name: Install the same Chromium and fixture font as full CI
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          if [ ! -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ]; then
+            sudo apt-get install -y fonts-dejavu-core
+          fi
+      - name: Compare held and released chunks with existing navigation assertions
+        run: |
+          pnpm exec playwright test tests/browser/resumable-upload.spec.ts --project=phone-chromium --grep='Resumable upload: persisted Quick Upload choice before completion survives navigation and return' --global-timeout=600000
+      - name: Preserve targeted diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-upload-navigation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            postiz-app/browser-results
+            postiz-app/browser-report
+          if-no-files-found: ignore
+          retention-days: 7
+
   quality:
     name: Type checks and stable unit tests
     needs: resolve-revisions
