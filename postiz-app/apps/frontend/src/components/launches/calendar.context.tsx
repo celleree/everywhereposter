@@ -57,6 +57,13 @@ export const isHistoricalCalendarPost = (post?: Partial<CalendarPost> | null) =>
 
 let calendarMutationVersion = 0;
 
+type CalendarReadSnapshot = {
+  posts: CalendarPost[];
+  comments?: Array<{ date: string; total: number }>;
+  total?: number;
+  rescheduleVersion: number;
+};
+
 type RescheduleAction = 'schedule' | 'update' | 'cancel';
 type Reschedule = {
   date?: string;
@@ -97,7 +104,7 @@ export const CalendarContext = createContext({
     _date: dayjs.Dayjs,
     _confirm?: () => Promise<RescheduleAction>
   ) => {},
-  isRescheduling: (_id: string) => false,
+  isRescheduling: (_id: string): boolean => false,
   // List view specific
   listPosts: [] as CalendarPost[],
   listPage: 0,
@@ -226,7 +233,7 @@ const CalendarProvider: FC<{
   // Each read keeps its start generation: an older cache or in-flight read must
   // not replace a newer optimistic date. Fresh reads remain authoritative.
   const loadPosts = useCallback(
-    async (url: string, list = false) => {
+    async (url: string, list = false): Promise<CalendarReadSnapshot> => {
       const readVersion = version.current;
       const pathname = window.location.pathname;
       let data;
@@ -254,12 +261,12 @@ const CalendarProvider: FC<{
           }
         }
       }
-      return { ...data, rescheduleVersion: readVersion };
+      return { ...data, posts: data.posts, rescheduleVersion: readVersion };
     },
     [fetch, updateReschedule]
   );
   const overlay = useCallback(
-    (data: any): CalendarPost[] =>
+    (data?: CalendarReadSnapshot): CalendarPost[] =>
       (data?.posts || []).map((post: CalendarPost) => {
         const operation = reschedules[post.id];
         return operation?.date &&
