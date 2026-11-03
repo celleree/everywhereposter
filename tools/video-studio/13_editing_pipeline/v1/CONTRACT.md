@@ -187,5 +187,6 @@ and `restoreCuts`. An owned `sourceEvidenceJobId` reuses the original transcript
 and prior direction for a separate, uncharged local revision. Restoring all cuts
 restores every original word time and PCM sample, preserving earlier results.
 No production activation, listening, real-footage acceptance or cross-engine
-pixel equivalence is established by contract/unit tests. The exact caption font
-and matching-font visual acceptance are outstanding prerequisites.
+pixel equivalence is established by contract/unit tests. Both exact fonts are
+included with verified provenance. Matching-font visual acceptance against the
+private GDI references and real-footage app acceptance remain release gates.

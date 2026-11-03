@@ -19,7 +19,11 @@ if(command==='capabilities'){console.log(JSON.stringify({captionTiming:CAPTION_T
 const runtimeAt=process.argv.indexOf('--runtime');
 if(runtimeAt<0||!process.argv[runtimeAt+1])throw Error('Explicit --runtime config required');
 const runtimeFile=path.resolve(process.argv[runtimeAt+1]);
-if(command==='accepted-captions'){console.log(JSON.stringify(await measureAcceptedCaptions({dir,root,runtimeFile})));process.exit(0);}
+if(command==='accepted-captions'){
+ // This CLI is a JSON boundary; browser diagnostics belong on stderr.
+ const output=console.log.bind(console);console.log=console.error.bind(console);
+ output(JSON.stringify(await measureAcceptedCaptions({dir,root,runtimeFile})));process.exit(0);
+}
 if(['title-preflight','title-preflight-check'].includes(command)){
  const projectAt=process.argv.indexOf('--project');
  if(projectAt>=0&&(command!=='title-preflight-check'||!process.argv[projectAt+1]))throw Error('Only title-preflight-check accepts --project');

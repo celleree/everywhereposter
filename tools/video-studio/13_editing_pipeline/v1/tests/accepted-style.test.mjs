@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ACCEPTED_STYLE,roundCaptionFrame,acceptedCaptionRanges,groupAcceptedCaptions,acceptedCaptionLayout,acceptedHeadlineLayout} from '../accepted-style.mjs';
+import {ACCEPTED_STYLE,ACCEPTED_FONTS,roundCaptionFrame,acceptedCaptionRanges,groupAcceptedCaptions,acceptedCaptionLayout,acceptedHeadlineLayout} from '../accepted-style.mjs';
 import {validateProject,chunkContent} from '../project.mjs';
 import {layoutInputHash,preflightFrames} from '../title-preflight.mjs';
 import {fixture} from './fixture.mjs';
@@ -62,4 +62,25 @@ test('approved style admits source cuts while legacy V2 still rejects them; styl
  delete p.source.originalFrames;p.source.frames=1800;p.source.audioSampleFrames=p.audioSampleFrames=1800*1600;p.assets[0].duration=60;p.cuts=[{in:0,out:1800,reason:'Full source'}];
  p.words=Array.from({length:140},(_,i)=>({id:'w'+i,text:'Word',start:.1+i*.4,end:.2+i*.4,sourceStart:.1+i*.4,sourceEnd:.2+i*.4,frameOffset:0,sourceSpan:0}));p.captions=p.words.map(w=>({wordIds:[w.id]}));assert.ok(preflightFrames(p).length>=140);
  p.editorStyle='unrecognized';assert.throws(()=>validateProject(p),/style/);
+});
+test('exact approved fonts plan and verify browser layout; overflow and fallback fail closed',{skip:!process.env.EP_PREFLIGHT_TEST_RUNTIME,timeout:180000},async t=>{
+ const {mkdtemp,mkdir,readFile,writeFile,copyFile,access,rm}=await import('node:fs/promises');
+ const {default:path}=await import('node:path'),{default:os}=await import('node:os');
+ const {execFile}=await import('node:child_process'),{promisify}=await import('node:util');
+ const root=new URL('..',import.meta.url),dir=await mkdtemp(path.join(os.tmpdir(),'ep-accepted-layout-')),runtime=process.env.EP_PREFLIGHT_TEST_RUNTIME,run=promisify(execFile);
+ t.after(()=>rm(dir,{recursive:true,force:true}));
+ const p=fixture();Object.assign(p,{schemaVersion:2,profile:'talking-head-v2',editorStyle:ACCEPTED_STYLE,canvas:{width:1080,height:1920,fps:30},assets:p.assets.slice(0,1),broll:[],effects:[],safeZones:{version:1,profiles:['instagram-approved-editor-v1']}});
+ p.title={version:1,style:ACCEPTED_STYLE,text:'My voice.',wordIds:[],from:0,frames:135,bounds:{x:108,y:276,width:720,height:132}};
+ p.source.frames=180;p.source.audioSampleFrames=180*1600;p.audioSampleFrames=150*1600;p.assets[0].width=360;p.assets[0].height=640;p.assets[0].duration=6;p.cuts=[{in:0,out:60,reason:'First'},{in:90,out:180,reason:'Second'}];
+ p.words=['Keep','my','voice.','This','fits.'].map((text,i)=>{const start=i<3?.1+i*.2:2.5+(i-3)*.2,offset=i<3?0:-30;return{id:'w'+i,text,start,end:start+.15,sourceStart:start-offset/30,sourceEnd:start+.15-offset/30,frameOffset:offset,sourceSpan:i<3?0:1};});
+ p.captions=p.words.map(w=>({wordIds:[w.id]}));p.speaker.faces=p.speaker.faces.slice(0,1);p.speaker.faces[0].t=1;validateProject(p);
+ async function candidate(name,project){const d=path.join(dir,name);await mkdir(path.join(d,'public'),{recursive:true});await writeFile(path.join(d,'project.json'),JSON.stringify(project));for(const [kind,name]of [['caption','font.ttf'],['headline','headline-font.ttf']])await copyFile(new URL('../fonts/'+ACCEPTED_FONTS[kind].file,import.meta.url),path.join(d,'public',name));return d;}
+ const command=(name,d)=>run(process.execPath,['run.mjs',name,d,'--runtime',runtime],{cwd:root,timeout:150000,maxBuffer:2*1024*1024});
+ const d=await candidate('valid',p),planned=await command('accepted-captions',d);assert.doesNotThrow(()=>JSON.parse(planned.stdout),planned.stdout);const groups=JSON.parse(planned.stdout);
+ assert.deepEqual(groups,[{wordIds:['w0','w1','w2']},{wordIds:['w3','w4']}]);p.captions=groups;await writeFile(path.join(d,'project.json'),JSON.stringify(p));
+ await command('title-preflight',d);await command('title-preflight-check',d);
+ const receipt=JSON.parse(await readFile(path.join(d,'title-preflight.json'),'utf8'));assert.equal(receipt.fontSha256,ACCEPTED_FONTS.caption.sha256);assert.equal(receipt.headlineFontSha256,ACCEPTED_FONTS.headline.sha256);assert.deepEqual(receipt.expectedCheckedFrames,preflightFrames(p));
+ const wide=structuredClone(p);wide.title.text='W'.repeat(25);const bad=await candidate('wide-headline',wide);await assert.rejects(command('title-preflight',bad));await assert.rejects(access(path.join(bad,'title-preflight.json')));
+ const word=structuredClone(p);word.words[0].text='W'.repeat(45);await assert.rejects(command('accepted-captions',await candidate('wide-word',word)));
+ await copyFile(new URL('../fonts/TikTokSans36pt-Bold.ttf',import.meta.url),path.join(d,'public/font.ttf'));await assert.rejects(command('accepted-captions',d),/font mismatch/i);
 });
