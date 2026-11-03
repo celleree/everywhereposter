@@ -92,22 +92,22 @@ async function observeQuickUploadNavigation(page: Page, scenario: string) {
   let active = true, phase = 'bootstrap';
   const started = Date.now(), pending = new Map<Request, object>();
   const log = (event: string, detail: object = {}) => {
-    if (active) console.log('EP_QUICK_UPLOAD_NAV ' + JSON.stringify({ scenario, phase, elapsedMs: Date.now() - started, event, ...detail }));
+    if (active) console.log('EP_QUICK_UPLOAD_NAV ' + JSON.stringify({ scenario, phase, wallTimeMs: Date.now(), elapsedMs: Date.now() - started, event, ...detail }));
   };
   const describe = (request: Request) => {
     const url = new URL(request.url());
-    if (!['/settings', '/media'].includes(url.pathname) && !url.pathname.startsWith('/backend-api/media/uploads')) return;
+    if (!['/settings', '/media'].includes(url.pathname) && !url.pathname.startsWith('/backend-api/media/uploads') && !url.pathname.startsWith('/_next/static/')) return;
     return { path: url.pathname, rsc: url.searchParams.has('_rsc'), method: request.method(), resourceType: request.resourceType(), navigation: request.isNavigationRequest() };
   };
-  const requested = (request: Request) => { const detail = describe(request); if (detail) { pending.set(request, detail); log('request', detail); } };
+  const requested = (request: Request) => { const detail = describe(request); if (detail) { pending.set(request, detail); log('request', { ...detail, timing: request.timing() }); } };
   const responded = (response: Response) => {
     const detail = pending.get(response.request());
     if (!detail) return;
     log('response', { ...detail, status: response.status(), contentType: response.headers()['content-type'] });
     void response.finished().then(() => log('response-finished', { ...detail, completed: true }), error => log('response-finished-error', { ...detail, message: String(error).slice(0, 300) }));
   };
-  const finished = (request: Request) => { const detail = pending.get(request); if (detail) log('request-finished', detail); pending.delete(request); };
-  const failed = (request: Request) => { const detail = pending.get(request); if (detail) log('request-failed', { ...detail, error: request.failure()?.errorText }); pending.delete(request); };
+  const finished = (request: Request) => { const detail = pending.get(request); if (detail) log('request-finished', { ...detail, timing: request.timing() }); pending.delete(request); };
+  const failed = (request: Request) => { const detail = pending.get(request); if (detail) log('request-failed', { ...detail, error: request.failure()?.errorText, timing: request.timing() }); pending.delete(request); };
   const navigated = (frame: Frame) => { if (frame === page.mainFrame()) log('main-frame-url', { path: new URL(frame.url()).pathname }); };
   const pageError = (error: Error) => log('page-error', { message: error.message.slice(0, 500) });
   page.on('request', requested); page.on('response', responded); page.on('requestfinished', finished); page.on('requestfailed', failed);
@@ -116,6 +116,8 @@ async function observeQuickUploadNavigation(page: Page, scenario: string) {
   // would change its default handling and could itself block navigation.
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Page.enable');
+  cdp.on('Page.domContentEventFired', event => log('document-domcontentloaded', { browserTimestamp: event.timestamp }));
+  cdp.on('Page.loadEventFired', event => log('document-load', { browserTimestamp: event.timestamp }));
   cdp.on('Page.javascriptDialogOpening', event => log('dialog-opening', { type: event.type, message: event.message.slice(0, 300) }));
   cdp.on('Page.javascriptDialogClosed', event => log('dialog-closed', { accepted: event.result }));
   return {
