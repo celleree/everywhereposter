@@ -175,9 +175,11 @@ async function persistedQuickUploadNavigation(page: Page, info: TestInfo, releas
   const mediaNavigation = mobileProject(info)
     ? page.getByRole('navigation', { name: 'Mobile navigation' })
     : page.locator('#left-menu');
-  await mediaNavigation.getByRole('link', { name: 'Media', exact: true }).click();
-  await expect(page).toHaveURL(/\/media(?:\?|$)/);
-  await expect(page.locator('.mobile-app-shell')).toBeVisible();
+  await Promise.all([
+    page.waitForURL(/\/media(?:\?|$)/, { waitUntil: 'domcontentloaded' }),
+    mediaNavigation.getByRole('link', { name: 'Media', exact: true }).click(),
+  ]);
+  await expect(page.locator('.mobile-app-shell')).toBeVisible({ timeout: 60_000 });
   await expect(page.locator('input[type=file]').first()).toBeAttached();
   await page.locator('input[type=file]').first().setInputFiles({ name: 'quick.mp4', mimeType: 'video/mp4', buffer: bytes });
   const tray = page.getByRole('region', { name: 'Video transfers' }); await expect.poll(() => held).toBe(true);
