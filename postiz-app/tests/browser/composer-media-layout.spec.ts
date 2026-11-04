@@ -4,6 +4,9 @@ import path from 'node:path';
 
 for (const [width, height] of [[180, 320], [320, 180], [240, 300], [240, 240]]) {
   test(`Resumable upload: full-frame ${width}x${height} preview clears only attached transfer`, async ({ page }, info) => {
+    // Freeze Date only so attachment, not the 10s receipt expiry, clears the tray.
+    // Real timers and video playback keep running through composer bootstrap.
+    await page.clock.setFixedTime(new Date());
     const videoBytes = readFileSync(path.resolve(`tests/browser/assets/composer-${width}x${height}.mp4`));
     const media = { id: 'layout-video', name: 'server-session.mp4', originalName: 'Original phone video.mp4',
       path: '/audit-fixtures/layout-video.mp4', type: 'video', transcriptionStatus: 'READY' };

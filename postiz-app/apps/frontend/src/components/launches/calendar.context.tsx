@@ -9,19 +9,22 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import dayjs from 'dayjs';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { Post, Integration, Tags } from '@prisma/client';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import weekOfYear from 'dayjs/plugin/weekOfYear';
 import { extend } from 'dayjs';
 import useCookie from 'react-use-cookie';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
-import { timer } from '@gitroom/helpers/utils/timer';
+import { useUser } from '@gitroom/frontend/components/layout/user.context';
+import { useToaster } from '@gitroom/react/toaster/toaster';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { expandPostsList, expandPosts } from '@gitroom/helpers/utils/posts.list.minify';
 import {
   CALENDAR_SHOW_IMPORTED_POSTS_EVENT,
@@ -52,6 +55,22 @@ export const isHistoricalCalendarPost = (post?: Partial<CalendarPost> | null) =>
   post?.isHistoricalImport === true ||
   post?.readOnly === true;
 
+let calendarMutationVersion = 0;
+
+type CalendarReadSnapshot = {
+  posts: CalendarPost[];
+  comments?: Array<{ date: string; total: number }>;
+  total?: number;
+  rescheduleVersion: number;
+};
+
+type RescheduleAction = 'schedule' | 'update' | 'cancel';
+type Reschedule = {
+  date?: string;
+  version?: number;
+  phase: 'confirming' | 'saving' | 'reconciling' | 'saved' | 'unknown';
+};
+
 export const CalendarContext = createContext({
   startDate: newDayjs().startOf('isoWeek').format('YYYY-MM-DD'),
   endDate: newDayjs().endOf('isoWeek').format('YYYY-MM-DD'),
@@ -80,9 +99,12 @@ export const CalendarContext = createContext({
   }) => {
     /** empty **/
   },
-  changeDate: (id: string, date: dayjs.Dayjs) => {
-    /** empty **/
-  },
+  reschedulePost: async (
+    _post: CalendarPost,
+    _date: dayjs.Dayjs,
+    _confirm?: () => Promise<RescheduleAction>
+  ) => {},
+  isRescheduling: (_id: string): boolean => false,
   // List view specific
   listPosts: [] as CalendarPost[],
   listPage: 0,
@@ -167,9 +189,98 @@ function getDateRange(display: string, referenceDate?: string) {
 export const CalendarWeekProvider: FC<{
   children: ReactNode;
   integrations: Integrations[];
-}> = ({ children, integrations }) => {
+}> = (props) => {
+  const user = useUser();
+  const pathname = usePathname();
+  return (
+    <CalendarProvider
+      key={`${user?.id}:${user?.orgId}:${pathname}`}
+      {...props}
+      userId={user?.id}
+      orgId={user?.orgId}
+    />
+  );
+};
+
+const CalendarProvider: FC<{
+  children: ReactNode;
+  integrations: Integrations[];
+  userId?: string;
+  orgId?: string;
+}> = ({ children, integrations, userId, orgId }) => {
   const fetch = useFetch();
-  const [internalData, setInternalData] = useState([] as any[]);
+  const toaster = useToaster();
+  const t = useT();
+  const mounted = useRef(true);
+  const version = useRef(calendarMutationVersion);
+  const operations = useRef<Record<string, Reschedule>>({});
+  const reads = useRef({ succeeded: 0, failed: 0 });
+  const [reschedules, setReschedules] = useState<Record<string, Reschedule>>(
+    {}
+  );
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const updateReschedule = useCallback((id: string, operation?: Reschedule) => {
+    if (!mounted.current) return;
+    if (operation) operations.current[id] = operation;
+    else delete operations.current[id];
+    setReschedules({ ...operations.current });
+  }, []);
+  // Each read keeps its start generation: an older cache or in-flight read must
+  // not replace a newer optimistic date. Fresh reads remain authoritative.
+  const loadPosts = useCallback(
+    async (url: string, list = false): Promise<CalendarReadSnapshot> => {
+      const readVersion = version.current;
+      const pathname = window.location.pathname;
+      let data;
+      try {
+        const response = await fetch(url);
+        if (!response.ok)
+          throw new Error(
+            list ? 'Unable to load scheduled posts' : 'Unable to load posts'
+          );
+        data = list
+          ? expandPostsList(await response.json())
+          : expandPosts(await response.json());
+        reads.current.succeeded++;
+      } catch (error) {
+        reads.current.failed++;
+        throw error;
+      }
+      if (mounted.current && window.location.pathname === pathname) {
+        for (const [id, operation] of Object.entries(operations.current)) {
+          if (
+            operation.phase === 'unknown' &&
+            operation.version! <= readVersion
+          ) {
+            updateReschedule(id, { ...operation, phase: 'saved' });
+          }
+        }
+      }
+      return { ...data, posts: data.posts, rescheduleVersion: readVersion };
+    },
+    [fetch, updateReschedule]
+  );
+  const overlay = useCallback(
+    (data?: CalendarReadSnapshot): CalendarPost[] =>
+      (data?.posts || []).map((post: CalendarPost) => {
+        const operation = reschedules[post.id];
+        return operation?.date &&
+          (operation.version === undefined ||
+            (data?.rescheduleVersion ?? -1) < operation.version)
+          ? { ...post, publishDate: dayjs.utc(operation.date).toDate() }
+          : post;
+      }),
+    [reschedules]
+  );
+  const isRescheduling = useCallback((id: string) => {
+    const operation = operations.current[id];
+    return !!operation && operation.phase !== 'saved';
+  }, []);
   const [trendings] = useState<string[]>([]);
   const searchParams = useSearchParams();
   const [displaySaved, setDisplaySaved] = useCookie('calendar-display', 'week');
@@ -229,9 +340,8 @@ export const CalendarWeekProvider: FC<{
       endDate: newDayjs(filters.endDate).endOf('day').utc().format(),
     }).toString();
 
-    const data = await (await fetch(`/posts?${modifiedParams}`)).json();
-    return expandPosts(data);
-  }, [filters, params]);
+    return loadPosts(`/posts?${modifiedParams}`);
+  }, [filters, params, loadPosts]);
 
   // List view data fetcher
   const listParams = useMemo(() => {
@@ -243,9 +353,8 @@ export const CalendarWeekProvider: FC<{
   }, [listPage, filters.customer]);
 
   const loadListData = useCallback(async () => {
-    const response = await fetch(`/posts/list?${listParams}`);
-    return expandPostsList(await response.json());
-  }, [listParams]);
+    return loadPosts(`/posts/list?${listParams}`, true);
+  }, [listParams, loadPosts]);
 
   const mobileAllParams = useMemo(() => {
     const month = newDayjs(mobileMonth);
@@ -268,16 +377,12 @@ export const CalendarWeekProvider: FC<{
   );
 
   const loadMobileAll = useCallback(async () => {
-    const response = await fetch(`/posts?${mobileAllParams}`);
-    if (!response.ok) throw new Error('Unable to load posts');
-    return expandPosts(await response.json());
-  }, [fetch, mobileAllParams]);
+    return loadPosts(`/posts?${mobileAllParams}`);
+  }, [loadPosts, mobileAllParams]);
 
   const loadScheduled = useCallback(async () => {
-    const response = await fetch(`/posts/list?${scheduledParams}`);
-    if (!response.ok) throw new Error('Unable to load scheduled posts');
-    return expandPostsList(await response.json());
-  }, [fetch, scheduledParams]);
+    return loadPosts(`/posts/list?${scheduledParams}`, true);
+  }, [loadPosts, scheduledParams]);
 
   // SWR for calendar view
   const {
@@ -285,7 +390,9 @@ export const CalendarWeekProvider: FC<{
     isLoading: calendarIsLoading,
     mutate: mutateCalendar,
   } = useSWR(
-    isMobile === false && filters.display !== 'list' ? `/posts-${params}` : null,
+    userId && orgId && isMobile === false && filters.display !== 'list'
+      ? ['calendar-posts', userId, orgId, params]
+      : null,
     loadData,
     {
       refreshInterval: 3600000,
@@ -301,7 +408,9 @@ export const CalendarWeekProvider: FC<{
     isLoading: listIsLoading,
     mutate: mutateList,
   } = useSWR(
-    isMobile === false && filters.display === 'list' ? `/posts-list-${listParams}` : null,
+    userId && orgId && isMobile === false && filters.display === 'list'
+      ? ['calendar-list', userId, orgId, listParams]
+      : null,
     loadListData,
     {
       refreshInterval: 3600000,
@@ -317,7 +426,9 @@ export const CalendarWeekProvider: FC<{
     error: mobileAllError,
     mutate: mutateMobileAll,
   } = useSWR(
-    isMobile && mobileTab === 'all' ? `mobile-all-${mobileAllParams}` : null,
+    userId && orgId && isMobile && mobileTab === 'all'
+      ? ['calendar-mobile-all', userId, orgId, mobileAllParams]
+      : null,
     loadMobileAll,
     { revalidateOnFocus: false }
   );
@@ -327,8 +438,8 @@ export const CalendarWeekProvider: FC<{
     error: scheduledError,
     mutate: mutateScheduled,
   } = useSWR(
-    isMobile && mobileTab === 'scheduled'
-      ? `mobile-scheduled-${scheduledParams}`
+    userId && orgId && isMobile && mobileTab === 'scheduled'
+      ? ['calendar-mobile-scheduled', userId, orgId, scheduledParams]
       : null,
     loadScheduled,
     { revalidateOnFocus: false }
@@ -339,17 +450,30 @@ export const CalendarWeekProvider: FC<{
   }, []);
 
   const setList = useCallback(async () => {
-    return (await fetch('/sets')).json();
-  }, []);
+    const response = await fetch('/sets');
+    if (!response.ok) throw new Error('Unable to load sets');
+    const rows = await response.json();
+    if (
+      !Array.isArray(rows) ||
+      rows.some((row) => row?.organizationId !== orgId)
+    ) {
+      throw new Error('Unable to load sets');
+    }
+    return rows;
+  }, [fetch, orgId]);
 
-  const { data: sets, mutate } = useSWR('sets', setList, {
-    revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    revalidateIfStale: false,
-    revalidateOnMount: true,
-    refreshWhenHidden: false,
-    refreshWhenOffline: false,
-  });
+  const { data: sets } = useSWR(
+    userId && orgId ? ['sets', userId, orgId] : null,
+    setList,
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+      revalidateOnMount: true,
+      refreshWhenHidden: false,
+      refreshWhenOffline: false,
+    }
+  );
   const { data: sign } = useSWR('default-sign', defaultSign, {
     revalidateOnFocus: false,
     revalidateOnReconnect: false,
@@ -368,7 +492,6 @@ export const CalendarWeekProvider: FC<{
     }) => {
       setDisplaySaved(newFilters.display);
       setFilters(newFilters);
-      setInternalData([]);
 
       // Reset page when switching to list view
       if (newFilters.display === 'list') {
@@ -433,23 +556,26 @@ export const CalendarWeekProvider: FC<{
   }, []);
 
   const posts = useMemo(() => {
-    const allPosts = calendarData?.posts || [];
+    const allPosts = overlay(calendarData);
 
     if (showImportedPostsInCalendar) {
       return allPosts;
     }
 
-    return allPosts.filter((post: CalendarPost) => !isHistoricalCalendarPost(post));
-  }, [calendarData?.posts, showImportedPostsInCalendar]);
+    return allPosts.filter(
+      (post: CalendarPost) => !isHistoricalCalendarPost(post)
+    );
+  }, [calendarData, showImportedPostsInCalendar, overlay]);
   const mobileAllPosts = useMemo(() => {
-    const allPosts = mobileAllData?.posts || [];
+    const allPosts = overlay(mobileAllData);
     return showImportedPostsInCalendar
       ? allPosts
-      : allPosts.filter((post: CalendarPost) => !isHistoricalCalendarPost(post));
-  }, [mobileAllData?.posts, showImportedPostsInCalendar]);
-  const mobilePosts = mobileTab === 'scheduled'
-    ? scheduledData?.posts || []
-    : mobileAllPosts;
+      : allPosts.filter(
+          (post: CalendarPost) => !isHistoricalCalendarPost(post)
+        );
+  }, [mobileAllData, showImportedPostsInCalendar, overlay]);
+  const mobilePosts =
+    mobileTab === 'scheduled' ? overlay(scheduledData) : mobileAllPosts;
   const mobileTotalPages = Math.ceil((scheduledData?.total || 0) / 100);
 
   useEffect(() => {
@@ -466,40 +592,146 @@ export const CalendarWeekProvider: FC<{
   const comments = useMemo(() => calendarData?.comments || [], [calendarData?.comments]);
 
   // List view data
-  const listPosts = useMemo(() => listData?.posts || [], [listData?.posts]);
+  const listPosts = useMemo(() => overlay(listData), [listData, overlay]);
   const listTotal = listData?.total || 0;
   const listTotalPages = Math.ceil(listTotal / 100);
 
-  const changeDate = useCallback(
-    (id: string, date: dayjs.Dayjs) => {
-      setInternalData((d) =>
-        d.map((post: Post) => {
-          if (post.id === id) {
-            return {
-              ...post,
-              publishDate: date.utc().format('YYYY-MM-DDTHH:mm:ss'),
-            };
-          }
-          return post;
-        })
-      );
-    },
-    [posts, internalData]
-  );
-
-  useEffect(() => {
-    if (posts) {
-      setInternalData(posts);
-    }
-  }, [posts]);
-
-  // Combined reload function that handles both calendar and list views
-  const reloadCalendarView = useCallback(() => {
-    void mutateCalendar();
-    void mutateList();
-    void mutateMobileAll();
-    void mutateScheduled();
+  const reconcile = useCallback(async () => {
+    const before = { ...reads.current };
+    const results = await Promise.allSettled([
+      mutateCalendar(),
+      mutateList(),
+      mutateMobileAll(),
+      mutateScheduled(),
+    ]);
+    // SWR revalidation can resolve with cached data after a fetcher error.
+    return (
+      reads.current.succeeded > before.succeeded &&
+      reads.current.failed === before.failed &&
+      results.every((result) => result.status === 'fulfilled')
+    );
   }, [mutateCalendar, mutateList, mutateMobileAll, mutateScheduled]);
+
+  const reloadCalendarView = useCallback(() => {
+    void reconcile();
+  }, [reconcile]);
+
+  const reschedulePost = useCallback(
+    async (
+      post: CalendarPost,
+      date: dayjs.Dayjs,
+      confirm?: () => Promise<RescheduleAction>
+    ) => {
+      if (
+        !userId ||
+        !orgId ||
+        !mounted.current ||
+        isRescheduling(post.id) ||
+        isHistoricalCalendarPost(post) ||
+        post.state === 'DELETED_REMOTE'
+      )
+        return;
+      // Acquire before opening a dialog or awaiting anything (same-tick drops).
+      const previous = operations.current[post.id];
+      updateReschedule(post.id, { ...previous, phase: 'confirming' });
+      const location = window.location.href;
+      const pathname = window.location.pathname;
+      const active = () =>
+        mounted.current && window.location.pathname === pathname;
+      const current = () =>
+        mounted.current && window.location.href === location;
+      let action: RescheduleAction;
+      try {
+        action = confirm ? await confirm() : 'schedule';
+      } catch {
+        action = 'cancel';
+      }
+      if (!current() || action === 'cancel') {
+        updateReschedule(post.id, previous);
+        return;
+      }
+      const optimistic = !post.intervalInDays
+        ? date.utc().format('YYYY-MM-DDTHH:mm:ss')
+        : undefined;
+      updateReschedule(post.id, { phase: 'saving', date: optimistic });
+      let response: Response;
+      try {
+        response = await fetch(`/posts/${post.id}/date`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            date: date.utc().format('YYYY-MM-DDTHH:mm:ss'),
+            action,
+          }),
+        });
+      } catch {
+        if (!active()) return;
+        updateReschedule(post.id, {
+          phase: 'unknown',
+          date: optimistic,
+          version: (version.current = ++calendarMutationVersion),
+        });
+        const refreshed = await reconcile();
+        if (current())
+          toaster.show(
+            refreshed
+              ? t(
+                  'reschedule_unconfirmed_refreshed',
+                  'The save could not be confirmed. The calendar has been refreshed; check the date before trying again.'
+                )
+              : t(
+                  'reschedule_unconfirmed',
+                  'The save could not be confirmed. Refresh the calendar to check the date before trying again.'
+                ),
+            'warning'
+          );
+        return;
+      }
+      if (!active()) return;
+      if (!response.ok) {
+        updateReschedule(post.id, previous);
+        if (current())
+          toaster.show(
+            t(
+              'reschedule_failed',
+              'The schedule could not be saved. The previous date has been restored.'
+            ),
+            'warning'
+          );
+        return;
+      }
+      updateReschedule(post.id, {
+        phase: 'reconciling',
+        date: optimistic,
+        version: (version.current = ++calendarMutationVersion),
+      });
+      const refreshed = await reconcile();
+      if (!active()) return;
+      updateReschedule(post.id, {
+        ...operations.current[post.id],
+        phase: 'saved',
+      });
+      if (current())
+        toaster.show(
+          refreshed
+            ? t('reschedule_saved', 'Schedule saved.')
+            : t(
+                'reschedule_saved_refresh_failed',
+                'Schedule saved, but the calendar could not be refreshed. Refresh to check the latest posts.'
+              ),
+          refreshed ? 'success' : 'warning'
+        );
+    },
+    [
+      userId,
+      orgId,
+      isRescheduling,
+      updateReschedule,
+      fetch,
+      reconcile,
+      toaster,
+      t,
+    ]
+  );
 
   // Determine loading state based on current view
   const loading = filters.display === 'list' ? listIsLoading : calendarIsLoading;
@@ -510,11 +742,12 @@ export const CalendarWeekProvider: FC<{
         trendings,
         reloadCalendarView,
         ...filters,
-        posts: calendarIsLoading ? [] : internalData,
+        posts: calendarIsLoading ? [] : posts,
         loading,
         integrations,
         setFilters: setFiltersWrapper,
-        changeDate,
+        reschedulePost,
+        isRescheduling,
         comments,
         sets: sets || [],
         signature: sign,
@@ -539,6 +772,27 @@ export const CalendarWeekProvider: FC<{
         retryMobile,
       }}
     >
+      {Object.values(reschedules).some(
+        (operation) => operation.phase !== 'saved'
+      ) && (
+        <div role="status" className="p-2 text-sm">
+          {Object.values(reschedules).some(
+            (operation) => operation.phase === 'unknown'
+          )
+            ? t(
+                'reschedule_check_needed',
+                'Schedule unconfirmed. Refresh to check the latest date.'
+              )
+            : t('reschedule_pending', 'Updating schedule…')}
+          <button
+            type="button"
+            onClick={reloadCalendarView}
+            className="ms-2 underline"
+          >
+            {t('refresh', 'Refresh')}
+          </button>
+        </div>
+      )}
       {children}
     </CalendarContext.Provider>
   );
