@@ -17,6 +17,7 @@ import type { Redis } from 'ioredis';
 import type { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { createPublishingConfirmation, readPublishingConfirmation, previewHash } from './oauth-publishing-confirmation';
+import { BadBody, RefreshToken } from '../integrations/social.abstract';
 
 // Reviewed publishing-option methods only; new legacy tools are never inherited.
 const optionMethods: Record<string, string[]> = {
@@ -28,6 +29,37 @@ const optionMethods: Record<string, string[]> = {
   skool: ['groups', 'label'], whop: ['companies', 'experiences'], mewe: ['groups'],
   tiktok: ['creatorInfo'],
 };
+// Only fixed messages for reviewed provider codes may cross the OAuth boundary.
+const tiktokOptionMessages = new Map([
+  ['access_token_invalid', 'TikTok rejected the access token; verify token expiry and refresh status.'],
+  ['scope_not_authorized', 'TikTok requires the video.publish grant; verify app approval and account permissions.'],
+  ['scope_permission_missed', 'TikTok reported missing permissions; verify app approval and account permissions.'],
+  ['rate_limit_exceeded', 'TikTok rate limited the creator-info request; wait before trying again.'],
+  ['spam_risk_too_many_posts', 'TikTok reported that this creator reached the daily posting limit.'],
+  ['spam_risk_user_banned_from_posting', 'TikTok reported that this creator is restricted from posting.'],
+  ['reached_active_user_cap', 'TikTok reported that this app reached its daily active-publishing-user limit.'],
+]);
+const tiktokOptionError = (code?: unknown) => {
+  const message = typeof code === 'string' ? tiktokOptionMessages.get(code) : undefined;
+  return new Error(message
+    ? `Unable to load TikTok publishing options (${code}). ${message}`
+    : 'Unable to load TikTok publishing options (cause_unavailable). The cause could not be determined; inspect sanitized provider diagnostics.');
+};
+function tiktokOptionFailure(error: unknown) {
+  if (error instanceof BadBody || error instanceof RefreshToken) {
+    const json = (error.details?.[0] as { json?: unknown })?.json;
+    if (typeof json === 'string' && json.length <= 16000) {
+      try { return tiktokOptionError(JSON.parse(json)?.error?.code); } catch {}
+    }
+  }
+  return tiktokOptionError();
+}
+const tiktokCreatorSettings = z.object({
+  creator_nickname: z.string().refine((value) => !!value.trim()),
+  privacy_level_options: z.array(z.enum(['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'])).min(1),
+  comment_disabled: z.boolean(), duet_disabled: z.boolean(), stitch_disabled: z.boolean(),
+  max_video_post_duration_sec: z.number().finite().min(1),
+});
 const id = z.string().min(1).max(100);
 const settings = z.record(z.string().max(100), z.unknown()).refine(
   (value) => JSON.stringify(value).length <= 16000 &&
@@ -154,15 +186,19 @@ export function createOAuthPublishingTools(deps: Dependencies) {
         const { integration, provider } = await account(integrationId);
         if (!optionMethods[provider.identifier]?.includes(methodName)) throw new Error('Publishing option unavailable');
         if (Object.entries(data).some(([k, v]) => !['word', 'subreddit', 'id'].includes(k) || (typeof v !== 'string' || !/^[\w /-]*$/.test(v)))) throw new Error('Invalid option query');
+        if (provider.identifier === 'tiktok' && methodName === 'creatorInfo') {
+          let result: any;
+          try { result = await (provider as any).creatorInfo(integration.token, data, integration.internalId, integration); }
+          catch (error) { throw tiktokOptionFailure(error); }
+          // TikTok also returns quota/restriction errors with HTTP 200.
+          if (result?.error?.code !== 'ok') throw tiktokOptionError(result?.error?.code);
+          const parsed = tiktokCreatorSettings.safeParse(result?.data);
+          if (!parsed.success) throw new Error('Unable to load TikTok publishing options (invalid_creator_info). TikTok returned incomplete or invalid creator settings.');
+          const { creator_nickname: name, ...creator } = parsed.data;
+          return { creator: { name, ...creator } };
+        }
         try {
           const result = await (provider as any)[methodName](integration.token, data, integration.internalId, integration);
-          if (methodName === 'creatorInfo') {
-            const p = result?.data;
-            if (!p?.creator_nickname || !Array.isArray(p.privacy_level_options)) throw new Error();
-            return { creator: { name: p.creator_nickname, privacy_level_options: p.privacy_level_options,
-              comment_disabled: p.comment_disabled, duet_disabled: p.duet_disabled,
-              stitch_disabled: p.stitch_disabled, max_video_post_duration_sec: p.max_video_post_duration_sec } };
-          }
           // Providers are not permitted to return arbitrary credentials or records through OAuth.
           const project = (p: any): any => Object.fromEntries(['id', 'name', 'title', 'label', 'value', 'username', 'subreddit', 'allow', 'is_flair_required', 'flairs']
             .filter((key) => p?.[key] !== undefined).map((key) => [key, key === 'flairs' ? p[key].map(project) : p[key]]));
