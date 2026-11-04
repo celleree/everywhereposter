@@ -51,6 +51,55 @@ Future long-form-to-short-form or advanced AI video workflows must not be presen
 - Do not claim guaranteed virality, revenue, follower growth, reach, or engagement.
 - Do not change pricing, billing behavior, public product promises, or launch eligibility based only on stale docs or inference.
 
+
+## Launch billing policy
+
+The launch billing model is intentionally simple: one paid plan, unlimited distribution where the destination platform/API does not charge for posting, and AI usage billed separately.
+
+### Subscription
+
+- One launch plan only.
+- Price: **$9/month** or **$90/year**.
+- No permanent free plan.
+- New users receive a **7-day trial**.
+- A payment card is required to start the trial.
+- At the end of the trial, the selected monthly or yearly subscription starts automatically unless the user cancels beforehand.
+- Connected social accounts are **unlimited**.
+- Posting and scheduling are **unlimited wherever the underlying platform/API does not charge EverywherePoster to post**.
+- If a destination platform or API introduces a direct posting cost, that cost is outside the unlimited-posting promise and must be deliberately defined before it is passed through or otherwise charged.
+
+### AI billing
+
+AI usage is separate from the subscription price. Users choose one of two paths:
+
+1. Use an EverywherePoster prepaid AI balance.
+2. Connect their own OpenAI API key.
+
+At launch, bring-your-own-key support is **OpenAI only**.
+
+For the prepaid path:
+
+- AI is charged at **pass-through cost with no intended markup**.
+- Pass-through cost means the actual costs EverywherePoster incurs to fulfill the AI request, including provider API charges plus directly attributable compute/server, storage, energy, and payment-processing costs.
+- Supported prepaid top-ups are **$5, $10, $25, and $50**.
+- When the prepaid AI balance is insufficient, AI generation stops until the user adds more balance.
+- Running out of AI balance does not by itself disable normal publishing or scheduling.
+- Users can review AI usage and remaining balance in billing/settings; this information should be available without being made unnecessarily prominent throughout the product.
+- Optional auto-reload may be offered, but it is **off by default**.
+- Unused prepaid AI balance does not expire while the account remains active.
+- If the account is permanently closed, refund the unused prepaid AI balance, excluding amounts already consumed.
+
+Users who connect their own OpenAI API key are billed for model usage by OpenAI under their own provider account rather than through the EverywherePoster prepaid AI balance.
+
+### Subscription lifecycle
+
+- If a subscription payment fails, allow a **3-day grace period** with automatic payment retries.
+- If payment still fails after the grace period, pause paid/publishing features while preserving the user's account and data.
+- Cancelling a subscription stops future renewal; access continues through the end of the period already paid for.
+- There is only one launch plan, so upgrades and downgrades do not currently apply.
+- If plan tiers are introduced later, upgrades should take effect immediately and downgrades should also take effect immediately unless a later explicit product decision replaces this rule.
+
+
 ## Target users
 
 Primary users can include founders, creators, agencies, content teams, operators, local businesses, personal brands, streamers, and businesses that want more consistent multi-platform distribution without rebuilding every post manually.
