@@ -110,6 +110,150 @@ Reason: [one sentence]
 
 Do not include raw command logs unless they explain a failure, long diffs unless requested, private chain-of-thought, or a play-by-play transcript.
 
+## Automated baton protocol
+
+Use this section when the human wants to act only as a relay between a long-running Codex root session and ChatGPT. The human should not need to rewrite or interpret the handoff.
+
+Codex should continue autonomously through normal reversible branch-local work and emit one of the exact baton types below only when ChatGPT or human action is genuinely required.
+
+### Codex -> ChatGPT: merge gate
+
+When a PR is fully ready to merge, Codex returns:
+
+```text
+BATON: MERGE_GATE
+REPO: celleree/everywhereposter
+PR: #[number]
+HEAD_SHA: [exact reviewed PR HEAD]
+BASE_SHA: [current base/main SHA]
+PHASE: [phase/subphase]
+SCOPE: [one sentence]
+CI: PASS | FAIL
+INDEPENDENT_REVIEW: PASS | NOT_REQUIRED | FAIL
+MEASURED_RESULT: [concise measured result or N/A]
+KNOWN_RISKS: [concise risk or NONE]
+NEXT_AFTER_MERGE: [one concrete action]
+REQUEST: Verify live GitHub state independently and merge only if HEAD, CI, review, and scope still match. Then return a CONTINUE_AFTER_MERGE baton.
+```
+
+Do not ask ChatGPT to trust the handoff. ChatGPT must independently verify live PR HEAD, diff/scope, CI, and required review before merging.
+
+### ChatGPT -> Codex: continue after merge
+
+After ChatGPT independently verifies and merges the PR, ChatGPT returns:
+
+```text
+BATON: CONTINUE_AFTER_MERGE
+REPO: celleree/everywhereposter
+PR: #[number]
+MERGE_SHA: [verified main merge SHA]
+RESULT: MERGED_AND_VERIFIED
+INSTRUCTION: Verify live main, update durable checkpoint only if project state materially changed, clean completed worktree if safe, select the next highest-priority nonblocked bounded task from the active roadmap, and continue autonomously until the next genuine human/ChatGPT gate.
+```
+
+The human should paste this message unchanged into the original Codex root session.
+
+### Codex -> ChatGPT: decision gate
+
+When Codex reaches a decision that repository rules require ChatGPT/human review for, return:
+
+```text
+BATON: DECISION_GATE
+REPO: celleree/everywhereposter
+PHASE: [phase/subphase]
+DECISION: [single decision needed]
+WHY_BLOCKED: [one concise sentence]
+OPTIONS:
+A. [option + consequence]
+B. [option + consequence]
+RECOMMENDATION: [A/B + concise reason]
+CURRENT_STATE: [branch/PR/HEAD if relevant]
+REQUEST: Resolve only this decision and return a CONTINUE_DECISION baton.
+```
+
+Do not continue implementation past the blocked contract until the decision is returned.
+
+### ChatGPT -> Codex: decision continuation
+
+```text
+BATON: CONTINUE_DECISION
+REPO: celleree/everywhereposter
+DECISION: [approved decision]
+CONSTRAINTS: [any explicit constraints or NONE]
+INSTRUCTION: Continue the existing bounded task from the current live state. Do not widen scope. Reverify any assumptions affected by this decision and continue autonomously until the next genuine gate.
+```
+
+### Codex -> ChatGPT: production gate
+
+When a production deployment or rollback is actually ready and repository prerequisites are satisfied, return:
+
+```text
+BATON: PRODUCTION_GATE
+REPO: celleree/everywhereposter
+ACTION: DEPLOY | ROLLBACK
+TARGET_SHA: [exact full main SHA]
+IMAGE: [exact full-SHA image reference]
+PR_OR_PHASE: [source PR/phase]
+CI: PASS
+INDEPENDENT_REVIEW: PASS
+PREDEPLOY_CHECKS: PASS
+CHANGE_SUMMARY: [one sentence]
+ROLLBACK_PLAN: [concise]
+KNOWN_RISKS: [concise risk or NONE]
+REQUEST: Independently verify release prerequisites and request explicit human production approval. Do not deploy without that approval.
+```
+
+ChatGPT must not convert a merge approval into production approval. Production approval remains separate.
+
+### ChatGPT -> Codex: production authorization
+
+Only after explicit human production approval and independent verification:
+
+```text
+BATON: CONTINUE_PRODUCTION
+REPO: celleree/everywhereposter
+ACTION: DEPLOY | ROLLBACK
+TARGET_SHA: [exact approved full SHA]
+APPROVAL: EXPLICIT_HUMAN_APPROVAL_CONFIRMED
+INSTRUCTION: Execute only the approved production action using the repository operating manual, verify the exact result, record required release/deployment evidence, and stop immediately on any safety check failure.
+```
+
+### Codex -> ChatGPT: blocker
+
+For a genuine external or tooling blocker that Codex cannot resolve safely:
+
+```text
+BATON: BLOCKED
+REPO: celleree/everywhereposter
+PHASE: [phase/subphase]
+CURRENT_STATE: [branch/PR/HEAD]
+BLOCKER: [precise blocker]
+ATTEMPTS: [brief evidence-based attempts; no raw logs]
+NEEDED: [specific action/access/information]
+SAFE_PARALLEL_WORK_AVAILABLE: YES | NO
+NEXT_IF_RESOLVED: [one action]
+```
+
+### ChatGPT -> Codex: blocker resolved
+
+```text
+BATON: CONTINUE_AFTER_BLOCKER
+REPO: celleree/everywhereposter
+RESOLUTION: [what changed or became available]
+INSTRUCTION: Reverify the blocker is actually resolved from live state, then resume the existing roadmap/task autonomously. Do not assume stale branch, PR, CI, or production state.
+```
+
+### Relay rules
+
+- The human should copy each baton unchanged between ChatGPT and the long-running Codex root session.
+- Do not include large logs, diffs, roadmap text, or source-of-truth documents in a baton; use repository pointers instead.
+- Codex should not emit a baton for ordinary planning, implementation, tests, CI monitoring, repair, PR creation, or exact-SHA review when those actions are already authorized by the active roadmap.
+- ChatGPT should independently verify live GitHub state before performing any merge or approving the next irreversible/high-risk action.
+- After a successful merge, Codex should continue to the next bounded roadmap task without asking the human what to do next.
+- A changed PR HEAD invalidates a baton tied to an older reviewed HEAD.
+- Keep the same Codex root session across multiple batons until context quality degrades; use fresh sessions for independent reviewers.
+- Never run more than one local Ollama/GPU worker concurrently; safe parallelism should use cloud workers for the additional lane.
+
 ## ChatGPT-managed implementation cycle
 
 For bounded implementation work coordinated manually between ChatGPT and Codex, default to checkpoints instead of one large prompt:
