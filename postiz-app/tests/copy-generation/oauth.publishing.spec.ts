@@ -3,6 +3,7 @@ jest.mock('@mastra/core/tools', () => ({ createTool: (definition: unknown) => de
 import { createOAuthPublishingTools } from '../../libraries/nestjs-libraries/src/chat/oauth-publishing.tools';
 import { socialIntegrationList } from '../../libraries/nestjs-libraries/src/integrations/integration.manager';
 import { runWithContext } from '../../libraries/nestjs-libraries/src/chat/async.storage';
+import { BadBody, RefreshToken } from '../../libraries/nestjs-libraries/src/integrations/social.abstract';
 
 const input = () => ({ type: 'now', date: '2030-01-01T12:00:00Z', posts: [
   { integrationId: 'account', content: '<p>Hello</p>', mediaIds: ['media'], settings: {} },
@@ -228,6 +229,104 @@ describe('restricted OAuth publishing', () => {
       expect(lookup).toHaveBeenCalledWith('secret', { word: 'test' }, 'actor', integration);
       await expect(call('lemmy_communities', { integrationId: 'account', word: '' }, ['accounts:read'])).rejects.toThrow('scope');
     } finally { lookup.mockRestore(); }
+  });
+
+  describe('TikTok creator options', () => {
+    const args = { integrationId: 'account', methodName: 'creatorInfo', data: {} };
+    const creator = { creator_nickname: 'Test creator', privacy_level_options: ['SELF_ONLY'],
+      comment_disabled: false, duet_disabled: true, stitch_disabled: true, max_video_post_duration_sec: 180 };
+    const secret = 'synthetic-upstream-secret';
+    let lookup: jest.SpyInstance;
+    let network: jest.SpyInstance;
+    beforeEach(() => {
+      deps.integrations.getIntegrationById.mockResolvedValue({ id: 'account', providerIdentifier: 'tiktok', token: secret });
+      const provider: any = socialIntegrationList.find((p) => p.identifier === 'tiktok');
+      lookup = jest.spyOn(provider, 'creatorInfo').mockResolvedValue({ data: creator, error: { code: 'ok' } });
+      network = jest.spyOn(global, 'fetch').mockRejectedValue(new Error('Unexpected network request'));
+    });
+    afterEach(() => {
+      expect(network).not.toHaveBeenCalled();
+      expect(deps.posts.createPost).not.toHaveBeenCalled();
+      expect(deps.redis.set).not.toHaveBeenCalled();
+      lookup.mockRestore(); network.mockRestore();
+    });
+    it('projects only validated creator settings and never adds a retry', async () => {
+      lookup.mockResolvedValue({ data: { ...creator, token: secret, creator_avatar_url: secret }, error: { code: 'ok', message: secret } });
+      const { creator_nickname: name, ...settings } = creator;
+      expect(await call('triggerTool', args)).toEqual({ creator: { name, ...settings } });
+      expect(lookup).toHaveBeenCalledTimes(1);
+    });
+    it.each([
+      ['access_token_invalid', 'token expiry'], ['scope_not_authorized', 'video.publish'],
+      ['scope_permission_missed', 'missing permissions'], ['rate_limit_exceeded', 'wait'],
+      ['spam_risk_too_many_posts', 'daily posting limit'], ['spam_risk_user_banned_from_posting', 'restricted'],
+      ['reached_active_user_cap', 'app reached'],
+    ])('diagnoses %s from returned and thrown provider envelopes without raw details', async (code, hint) => {
+      const response = { data: creator, error: { code, message: secret, log_id: secret }, token: secret };
+      for (const error of [null, new BadBody('tiktok', JSON.stringify(response), secret, secret),
+        new RefreshToken('tiktok', JSON.stringify(response), secret, secret)]) {
+        lookup.mockClear();
+        if (error) lookup.mockRejectedValue(error); else lookup.mockResolvedValue(response);
+        const failure = await call('triggerTool', args).catch((value: Error) => value);
+        expect(failure).toBeInstanceOf(Error);
+        expect(failure.message).toContain(`(${code})`);
+        expect(failure.message).toContain(hint);
+        expect(failure.message).not.toContain(secret);
+        expect(failure.cause).toBeUndefined();
+        expect(JSON.stringify(failure)).not.toContain(secret);
+        expect(lookup).toHaveBeenCalledTimes(1);
+      }
+    });
+    it.each([
+      new TypeError(`Network failure ${secret}`), new SyntaxError(secret),
+      new BadBody('tiktok', 'not JSON ' + secret, secret, secret),
+      new RefreshToken('tiktok', '{}', secret, secret),
+      new BadBody('tiktok', JSON.stringify({ error: { code: secret } }), secret, secret),
+      new BadBody('tiktok', JSON.stringify({ error: { code: 'scope_not_authorized' }, padding: secret.repeat(2000) }), secret),
+      { details: [{ json: JSON.stringify({ error: { code: 'access_token_invalid' } }) }], message: secret },
+    ])('uses a neutral, secret-free fallback for unavailable evidence %#', async (error) => {
+      lookup.mockRejectedValue(error);
+      const failure = await call('triggerTool', args).catch((value: Error) => value);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toContain('(cause_unavailable)');
+      expect(failure.message).not.toMatch(/synthetic-upstream-secret|reconnect|re-authenticate/);
+      expect(lookup).toHaveBeenCalledTimes(1);
+    });
+    it.each([
+      { creator_nickname: { token: secret } }, { creator_nickname: ' ' },
+      { privacy_level_options: [{ token: secret }] }, { privacy_level_options: [secret] },
+      { privacy_level_options: [] }, { comment_disabled: secret }, { duet_disabled: undefined },
+      { stitch_disabled: { token: secret } }, { max_video_post_duration_sec: Infinity },
+      { max_video_post_duration_sec: 0 },
+    ])('rejects invalid or secret-bearing creator settings %#', async (change) => {
+      lookup.mockResolvedValue({ data: { ...creator, ...change }, error: { code: 'ok' } });
+      await expect(call('triggerTool', args)).rejects.toThrow('(invalid_creator_info)');
+      expect(lookup).toHaveBeenCalledTimes(1);
+    });
+    it.each([null, {}, { data: creator }, { data: creator, error: { code: secret } },
+      { data: null, error: { code: 'ok' } }])('fails safely for incomplete or unrecognized envelopes %#', async (response) => {
+      lookup.mockResolvedValue(response);
+      const failure = await call('triggerTool', args).catch((value: Error) => value);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).not.toContain(secret);
+      expect(lookup).toHaveBeenCalledTimes(1);
+    });
+    it('keeps scope, account-state and method guards ahead of the provider', async () => {
+      await expect(call('triggerTool', args, ['accounts:read'])).rejects.toThrow('scope');
+      await expect(call('triggerTool', { ...args, methodName: 'post' })).rejects.toThrow('unavailable');
+      deps.integrations.getIntegrationById.mockResolvedValue({ providerIdentifier: 'tiktok', refreshNeeded: true });
+      await expect(call('triggerTool', args)).rejects.toThrow('Account unavailable');
+      expect(lookup).not.toHaveBeenCalled();
+    });
+    it('preserves the existing generic error for other providers', async () => {
+      deps.integrations.getIntegrationById.mockResolvedValue({ providerIdentifier: 'pinterest', token: secret });
+      const provider: any = socialIntegrationList.find((p) => p.identifier === 'pinterest');
+      const boards = jest.spyOn(provider, 'boards').mockRejectedValue(new Error(secret));
+      try {
+        await expect(call('triggerTool', { ...args, methodName: 'boards' })).rejects.toThrow('Unable to load publishing options; check the account connection');
+      } finally { boards.mockRestore(); }
+      expect(lookup).not.toHaveBeenCalled();
+    });
   });
 
 });
