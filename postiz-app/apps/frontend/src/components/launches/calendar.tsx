@@ -129,7 +129,7 @@ const usePostActions = (onMutate?: () => void) => {
   const fetch = useFetch();
   const modal = useModals();
   const toaster = useToaster();
-  const { integrations, reloadCalendarView } = useCalendar();
+  const { integrations, reloadCalendarView, isRescheduling } = useCalendar();
 
   const mutate = useCallback(() => {
     reloadCalendarView();
@@ -138,6 +138,7 @@ const usePostActions = (onMutate?: () => void) => {
 
   const editPost = useCallback(
     (loadPost: any, isDuplicate?: boolean) => async () => {
+      if (isRescheduling(loadPost.id)) return;
       const post = {
         ...loadPost,
         publishDate: loadPost.actualDate || loadPost.publishDate,
@@ -150,6 +151,7 @@ const usePostActions = (onMutate?: () => void) => {
       const publishDate = dayjs
         .utc(date || data.posts[0].publishDate)
         .local();
+      if (isRescheduling(loadPost.id)) return;
       const ExistingData = !isDuplicate
         ? ExistingDataContextProvider
         : Fragment;
@@ -200,7 +202,7 @@ const usePostActions = (onMutate?: () => void) => {
         title: ``,
       });
     },
-    [integrations, fetch, modal, mutate]
+    [integrations, fetch, modal, mutate, isRescheduling]
   );
 
   const copyDebugJson = useCallback(
@@ -829,7 +831,7 @@ export const CalendarColumn: FC<{
   const {
     integrations,
     posts,
-    changeDate,
+    reschedulePost,
     display,
     reloadCalendarView,
     sets,
@@ -901,96 +903,77 @@ export const CalendarColumn: FC<{
   }, []);
   const [{ canDrop }, drop] = useDrop(() => ({
     accept: 'post',
-    drop: async (item: any) => {
+    drop: (item: any) => {
       if (isBeforeNow) return;
 
       // Find the post to check its state
       const post = posts.find((p) => p.id === item.id);
-      if (post && isHistoricalCalendarPost(post)) {
+      if (!post || isHistoricalCalendarPost(post)) {
         return;
       }
 
-      let action: 'schedule' | 'update' = 'schedule';
-
-      // Check if post is already published or queued in the past
-      if (
-        post &&
-        (post.state === 'PUBLISHED' ||
-          (post.state === 'QUEUE' && dayjs().isAfter(dayjs.utc(post.publishDate))))
-      ) {
-        const whatToDo = await new Promise<'schedule' | 'update' | 'cancel'>(
-          (resolve) => {
-            modal.openModal({
-              title: t('what_do_you_want_to_do', 'What do you want to do?'),
-              children: (
-                <div className="flex flex-col">
-                  <div className="text-[20px] mb-[20px]">
-                    {t(
-                      'post_already_published_drag',
-                      'This post was already published, what do you want to do?'
-                    )}
-                  </div>
-                  <div className="flex w-full gap-[10px]">
-                    <div className="flex-1 flex">
-                      <Button
-                        type="button"
-                        className="flex-1"
-                        onClick={() => {
-                          modal.closeAll();
-                          resolve('update');
-                        }}
-                      >
-                        {t('just_update_post_details', 'Just update the post details')}
-                      </Button>
+      void reschedulePost(post, getDate, async () => {
+        // Check if post is already published or queued in the past
+        if (
+          post &&
+          (post.state === 'PUBLISHED' ||
+            (post.state === 'QUEUE' && dayjs().isAfter(dayjs.utc(post.publishDate))))
+        ) {
+          const whatToDo = await new Promise<'schedule' | 'update' | 'cancel'>(
+            (resolve) => {
+              modal.openModal({
+                title: t('what_do_you_want_to_do', 'What do you want to do?'),
+                children: (
+                  <div className="flex flex-col">
+                    <div className="text-[20px] mb-[20px]">
+                      {t(
+                        'post_already_published_drag',
+                        'This post was already published, what do you want to do?'
+                      )}
                     </div>
-                    <div className="flex-1 flex">
-                      <Button
-                        type="button"
-                        className="flex-1"
-                        onClick={() => {
-                          modal.closeAll();
-                          resolve('schedule');
-                        }}
-                      >
-                        {t('reschedule_post', 'Reschedule the post')}
-                      </Button>
+                    <div className="flex w-full gap-[10px]">
+                      <div className="flex-1 flex">
+                        <Button
+                          type="button"
+                          className="flex-1"
+                          onClick={() => {
+                            resolve('update');
+                            modal.closeAll();
+                          }}
+                        >
+                          {t('just_update_post_details', 'Just update the post details')}
+                        </Button>
+                      </div>
+                      <div className="flex-1 flex">
+                        <Button
+                          type="button"
+                          className="flex-1"
+                          onClick={() => {
+                            resolve('schedule');
+                            modal.closeAll();
+                          }}
+                        >
+                          {t('reschedule_post', 'Reschedule the post')}
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ),
-              onClose: () => resolve('cancel'),
-            });
-          }
-        );
+                ),
+                onClose: () => resolve('cancel'),
+              });
+            }
+          );
 
-        if (whatToDo === 'cancel') {
-          return;
+          return whatToDo;
         }
-        action = whatToDo;
-      }
 
-      if (!item.interval) {
-        changeDate(item.id, getDate);
-      }
-      const { status } = await fetch(`/posts/${item.id}/date`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          date: getDate.utc().format('YYYY-MM-DDTHH:mm:ss'),
-          action,
-        }),
+        return 'schedule';
       });
-      if (status !== 500) {
-        if (item.interval || action === 'schedule') {
-          reloadCalendarView();
-          return;
-        }
-        return;
-      }
     },
     collect: (monitor) => ({
       canDrop: isBeforeNow ? false : !!monitor.canDrop() && !!monitor.isOver(),
     }),
-  }), [posts]);
+  }), [posts, getDate, isBeforeNow, modal, reschedulePost, t]);
 
   const addModal = useCallback(async () => {
     const set: any = !sets.length
@@ -1078,6 +1061,7 @@ export const CalendarColumn: FC<{
           : 'border border-newTextColor/5 rounded-[8px]'
       )}
       ref={drop as any}
+      data-calendar-slot={getDate.utc().format('YYYY-MM-DDTHH:mm:ss')}
     >
       {display === 'month' && (
         <div className={clsx('pt-[6px] text-[14px]')}>{getDate.date()}</div>
@@ -1249,6 +1233,8 @@ const CalendarItem: FC<{
     missingRelease,
   } = props;
   const { disableXAnalytics } = useVariables();
+  const { isRescheduling } = useCalendar();
+  const pending = isRescheduling(post.id);
   const isHistoricalPost = isHistoricalCalendarPost(post);
   const isRemoteDeleted = post.state === 'DELETED_REMOTE';
   const preview = useCallback(() => {
@@ -1257,7 +1243,7 @@ const CalendarItem: FC<{
   const [{ opacity }, dragRef] = useDrag(
     () => ({
       type: 'post',
-      canDrag: !isHistoricalPost && !isBeforeNow && !isRemoteDeleted,
+      canDrag: !pending && !isHistoricalPost && !isBeforeNow && !isRemoteDeleted,
       item: {
         id: post.id,
         interval: !!post.intervalInDays,
@@ -1267,12 +1253,14 @@ const CalendarItem: FC<{
         opacity: monitor.isDragging() ? 0 : 1,
       }),
     }),
-    [date, isBeforeNow, isHistoricalPost, isRemoteDeleted, post.id, post.intervalInDays]
+    [date, pending, isBeforeNow, isHistoricalPost, isRemoteDeleted, post.id, post.intervalInDays]
   );
   return (
     <div
       // @ts-ignore
       ref={dragRef}
+      data-calendar-post-id={post.id}
+      aria-busy={pending}
       className={clsx(
         'w-full flex h-full flex-1 flex-col group',
         'relative',
@@ -1394,7 +1382,8 @@ const CalendarItem: FC<{
         )}
       </div>
       <div
-        onClick={openDetails}
+        onClick={pending ? undefined : openDetails}
+        aria-disabled={pending}
         className={clsx(
           'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor cursor-pointer',
           'relative',
