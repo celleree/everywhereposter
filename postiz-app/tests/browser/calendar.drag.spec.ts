@@ -241,7 +241,7 @@ test('Scheduled: desktop drag saves once and reconciles an authoritative date', 
     await drag(card(page), slot(page, '09'));
     await inSlot(page, '09', true);
     await expect(pending(page)).toBeVisible();
-    expect(fixture.writes).toEqual([
+    await expect.poll(() => fixture.writes).toEqual([
       { date: requestedDate, action: 'schedule' },
     ]);
     await drag(card(page), slot(page, '12'));
@@ -264,6 +264,7 @@ test('Scheduled: desktop drag saves once and reconciles an authoritative date', 
       page.getByText('Schedule saved.', { exact: true })
     ).toBeVisible();
     await expect(pending(page)).toHaveCount(0);
+    expect(fixture.writes).toHaveLength(1);
     await evidence(page, info, fixture, 'saved-and-reconciled');
   } finally {
     fixture.releaseAll();
@@ -345,6 +346,7 @@ test('Scheduled: desktop drag unknown result reconciles without claiming save or
         { exact: true }
       )
     ).toHaveCount(0);
+    expect(fixture.writes).toHaveLength(1);
     await evidence(page, info, fixture, 'unknown-authoritative-reconciliation');
   } finally {
     fixture.releaseAll();

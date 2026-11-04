@@ -15,7 +15,7 @@ pnpm exec node tests/browser/runtime.cjs
 
 The suite creates disposable authenticated browser contexts at `http://127.0.0.1:4217`. Do not add fixture cookies to an existing browser profile: localhost cookies are shared across ports. Inspect the captured screenshots, HTML report, and failure traces using `pnpm exec playwright show-trace <trace.zip>`. The standalone runtime command is for test debugging; stop it before running the suite, which owns both ports and refuses to reuse an existing server.
 
-The test-only server binds 127.0.0.1:4217 (real frontend) and :4218 (synthetic API). It reserves both ports and waits for Next's listener before authenticated warm-up of login, Media, Scheduled, Create and Settings; existing servers and environment files cause refusal. It uses no database, media volume, real account, email, billing, social provider, migration or worker. An explicit synthetic cookie is accepted only by the disposable fixture API; production authentication code is unchanged. The fixture API rejects all mutations. Picker tests additionally fulfill one exact synthetic video transcription request inside their own browser routing; that response never reaches the API or a real service. Other browser mutations stay blocked. Automated Playwright contexts block external browser requests. An ordinary interactive browser does not have that routing guard. The frontend server environment is allowlisted; TCP connections are restricted to the two owned ports, with local Unix IPC allowed for Next workers.
+The test-only server binds 127.0.0.1:4217 (real frontend) and :4218 (synthetic API). It reserves both ports and waits for Next's listener before authenticated warm-up of login, Media, Scheduled, Create and Settings; existing servers and environment files cause refusal. It uses no database, media volume, real account, email, billing, social provider, migration or worker. An explicit synthetic cookie is accepted only by the disposable fixture API; production authentication code is unchanged. The default fixture API rejects mutations; dedicated fixture modes have their separately scoped adapters. Picker tests additionally fulfill one exact synthetic video transcription request inside their own browser routing; that response never reaches the API or a real service. Calendar drag tests also fulfill a single pinned synthetic date mutation and its calendar reads inside the browser. All unmatched browser mutations stay blocked. Automated Playwright contexts block external browser requests. An ordinary interactive browser does not have that routing guard. The frontend server environment is allowlisted; TCP connections are restricted to the two owned ports, with local Unix IPC allowed for Next workers.
 
 For accurate logos the runtime temporarily links the checkout's committed `site/branding` assets into the frontend's public directory, then removes only that exact task-created symlink at shutdown. No original branding or media is copied or changed.
 
@@ -32,6 +32,14 @@ Automatic video playback is suppressed in the standalone Upload composer preview
 
 Cold development route compilation/hydration is handled as test bootstrap: the runtime prewarms the Settings route used by More, and `openApp` permits up to 60 seconds for the app shell. Product-state and interaction assertions retain the 15-second expect timeout, with zero retries. This is a development readiness budget, not a production performance claim.
 
+
+## Desktop calendar drag acceptance
+
+`calendar.drag.spec.ts` uses the existing `Scheduled:` CI filter and explicitly overrides the browser context to desktop Chromium at 1440x900, UTC, DPR 1, with touch disabled. Each case records the effective viewport, user agent, timezone and touch settings; the inherited project label alone is not desktop evidence. The browser clock is fixed while timers remain real. Native `locator.dragTo()` operates on the actual connected calendar cards and slots.
+
+Only the owned-origin date PUT for one fixed synthetic post and its January 2035 calendar GET feed receive browser-local responses. Unmatched requests fall back to the default guards. The tests separately require direct API PUT and unmatched browser mutation requests to return 405. They cover delayed success and duplicate prevention, authoritative GET reconciliation, entity-only rollback after 400/500, uncertain response loss, and a saved write followed by refresh failure. Gates are released in `finally` blocks.
+
+These are full-frontend interactions with synthetic responses, not real API, provider or production-write acceptance. They do not expose or establish a normal Sets route.
 
 ## Business Discovery
 
