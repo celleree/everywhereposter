@@ -441,19 +441,25 @@ jobs:
             sudo apt-get install -y fonts-dejavu-core
           fi
 
+      - name: Test browser artifact configuration
+        run: node --test tests/browser/artifact-paths.test.cjs
+
       - name: Run offline Chromium regression smoke
         env:
+          BROWSER_SUITE: smoke
           EP_FACEBOOK_BROWSER: '1'
           EP_SUBMISSION_TEST_DATABASE_URL: postgresql://isolated:isolated@127.0.0.1:55462/isolated
         run: pnpm run test:browser:ci
 
       - name: Test isolated prepaid wallet presentation
         env:
+          BROWSER_SUITE: wallet
           EP_WALLET_BROWSER: '1'
         run: pnpm exec playwright test prepaid-wallet.spec.ts --project=phone-chromium
 
       - name: Run isolated Business Discovery Chromium regressions
         env:
+          BROWSER_SUITE: discovery
           EP_DISCOVERY_BROWSER: '1'
           BROWSER_FRONTEND_PORT: '4417'
           BROWSER_API_PORT: '4418'
