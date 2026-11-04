@@ -109,8 +109,9 @@ async function installResponses(page: Page) {
         url.pathname === '/backend-api/posts' &&
         url.searchParams.get('display') === 'month' &&
         url.searchParams.get('customer') === '' &&
-        url.searchParams.get('startDate') === '2035-01-01T00:00:00Z' &&
-        url.searchParams.get('endDate') === '2035-01-31T23:59:59Z'
+        // Calendar's localizedFormat plugin emits UTC as +00:00 by default.
+        url.searchParams.get('startDate') === '2035-01-01T00:00:00+00:00' &&
+        url.searchParams.get('endDate') === '2035-01-31T23:59:59+00:00'
       ) {
         fixture.reads++;
         fixture.events.push({
