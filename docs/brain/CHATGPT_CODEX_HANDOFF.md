@@ -110,6 +110,8 @@ Reason: [one sentence]
 
 Do not include raw command logs unless they explain a failure, long diffs unless requested, private chain-of-thought, or a play-by-play transcript.
 
+For UI changes, fill the PR's conditional `UI evidence` field with the tested HEAD, scenario, viewport, artifact, and limitations. Reuse the existing guarded actual-frontend fixture for the changed journey. State which boundaries are synthetic; fixture evidence does not establish real-backend persistence, provider behavior, physical-device acceptance, or production verification.
+
 ## ChatGPT-managed implementation cycle
 
 For bounded implementation work coordinated manually between ChatGPT and Codex, default to checkpoints instead of one large prompt:
