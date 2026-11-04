@@ -37,8 +37,9 @@ const members = [
   { userId: uuid(15), org: launchOrg, role: 'ADMIN', disabled: false },
 ];
 // Seeded receiver responses prove repeated reads and tenant selection, not
-// persistence or rendering in the separate Python/PGlite Creator Audit service.
+// the result schema, persistence or rendering of the Python/PGlite audit service.
 const reports = new Map([[orgA, 'Saved fixture report A'], [orgB, 'Saved fixture report B']]);
+const resultsPath = '/api/me/reels/FIXTURE_REPORT/results';
 const secret = 'synthetic-private-receiver-secret-'.repeat(3);
 const originalEnv = process.env;
 const nativeFetch = global.fetch;
@@ -72,7 +73,7 @@ beforeAll(async () => {
         claims.writable !== (member.role === 'ADMIN') || req.headers.cookie || req.headers.auth) throw new Error('Invalid synthetic receiver assertion');
       receiverCalls.push(claims);
       const report = reports.get(claims.org);
-      if (!report || !['/audit', '/api/me'].includes(req.url!)) { res.writeHead(404); return res.end(); }
+      if (!report || !['/audit', resultsPath].includes(req.url!)) { res.writeHead(404); return res.end(); }
       res.writeHead(200, { 'Content-Type': req.url === '/audit' ? 'text/html' : 'application/json' });
       res.end(req.url === '/audit' ? `<html><body>${report}</body></html>` : JSON.stringify({ organization: claims.org, report }));
     } catch (error) {
@@ -143,11 +144,11 @@ it.each(['cookie', 'header'])('opens and rereads tenant-specific reports with re
       const document = await request('/audit', headers);
       expect(document.status).toBe(200); expect(document.headers.get('cache-control')).toBe('no-store');
       expect(await document.text()).toBe(`<html><body>${reports.get(member.org)}</body></html>`);
-      const api = await request('/api/me', headers);
+      const api = await request(resultsPath, headers);
       expect(api.status).toBe(200); expect(await api.json()).toEqual({ organization: member.org, report: reports.get(member.org) });
       expect(receiverCalls.slice(-2)).toEqual([
         expect.objectContaining({ sub: member.userId, org: member.org, path: '/audit', writable: member.role === 'ADMIN' }),
-        expect.objectContaining({ sub: member.userId, org: member.org, path: '/api/me', writable: member.role === 'ADMIN' }),
+        expect.objectContaining({ sub: member.userId, org: member.org, path: resultsPath, writable: member.role === 'ADMIN' }),
       ]);
     }
   }
@@ -160,7 +161,7 @@ it('selects the authenticated document organization and denies a stale API pin b
   expect(document.status).toBe(200); expect(await document.text()).toContain(reports.get(orgA));
   expect(receiverCalls).toHaveLength(1); expect(receiverCalls[0].org).toBe(orgA);
   receiverCalls.length = 0;
-  expect((await request('/api/me', headers)).status).toBe(409);
+  expect((await request(resultsPath, headers)).status).toBe(409);
   expect(receiverCalls).toHaveLength(0);
 });
 
@@ -186,7 +187,7 @@ it.each([['true', 402], ['false', 403]])('denies USER writes with billing=%s bef
 it.each(['true', 'false'])('preserves Launch AI denial and configuration-only status with billing=%s', async billing => {
   process.env.BILLING_ENABLED = billing;
   const headers = { ...credentials(members[4].userId), 'x-audit-organization': launchOrg };
-  for (const path of ['/audit', '/api/me']) expect((await request(path, headers)).status).toBe(402);
+  for (const path of ['/audit', resultsPath]) expect((await request(path, headers)).status).toBe(402);
   const status = await request('/status', headers);
   expect(status.status).toBe(200); expect(await status.json()).toEqual({ enabled: true });
   expect(receiverCalls).toHaveLength(0);
