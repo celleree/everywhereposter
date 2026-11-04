@@ -67,7 +67,7 @@ function persist(store, type, key, value) {
     assert(encode(previous) === encode(value), 'Conflicting duplicate');
     return { status: 'duplicate' };
   }
-  assert(fs.readdirSync(store).length < 1000, 'Store capacity exceeded');
+  assert(fs.readdirSync(store).filter(name => name !== '.lock').length < 1000, 'Store capacity exceeded');
   const file = path.join(store, `${type}-${key}.json`);
   // Exclusive creation: collisions fail closed, with no overwrite.
   const temporary = path.join(store, '.lock', 'value');
