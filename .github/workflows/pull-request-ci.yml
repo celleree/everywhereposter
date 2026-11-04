@@ -465,6 +465,28 @@ jobs:
           BROWSER_API_PORT: '4418'
         run: pnpm exec playwright test tests/browser/business-discovery.spec.ts --project=phone-chromium --global-timeout=900000
 
+      - name: Verify browser evidence coexists before upload
+        run: |
+          node <<'JS'
+          const fs = require('node:fs'), assert = require('node:assert/strict'), crypto = require('node:crypto'), path = require('node:path');
+          const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+          const suites = ['smoke', 'wallet', 'discovery'].map(suite => {
+            const results = `browser-results/${suite}/results.json`, html = `browser-report/${suite}/index.html`;
+            const json = fs.readFileSync(results), report = fs.readFileSync(html), { stats, config } = JSON.parse(json);
+            assert.ok(config.projects.length > 0 && config.projects.every(p => path.resolve(p.outputDir) === path.resolve(`browser-results/${suite}`)), `${suite}: mismatched output directory`);
+            assert.ok(Number.isInteger(stats.expected) && stats.expected > 0, `${suite}: no passing tests`);
+            assert.equal(stats.unexpected, 0, `${suite}: unexpected failures`);
+            assert.equal(stats.flaky, 0, `${suite}: retried tests`);
+            assert.ok(report.length > 0, `${suite}: empty HTML report`);
+            return { suite, results, resultsSha256: hash(json), html, htmlSha256: hash(report), stats };
+          });
+          const manifest = { head: process.env.ACCEPTANCE_HEAD_SHA, checkout: process.env.ACCEPTANCE_CHECKOUT_SHA, suites };
+          assert.match(manifest.head, /^[a-f0-9]{40}$/);
+          assert.match(manifest.checkout, /^[a-f0-9]{40}$/);
+          fs.writeFileSync('browser-results/evidence-manifest.json', JSON.stringify(manifest, null, 2));
+          console.log('BROWSER_EVIDENCE ' + JSON.stringify(manifest));
+          JS
+
       - name: Upload offline browser diagnostics
         if: always()
         uses: actions/upload-artifact@v4
