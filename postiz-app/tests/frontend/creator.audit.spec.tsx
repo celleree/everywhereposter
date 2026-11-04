@@ -69,6 +69,22 @@ it('lists only Instagram connections and starts with the selected id and organiz
   await screen.findByRole('button', { name: 'Audit running…' });
 });
 
+it('preserves native connection selection across theme changes without starting an audit', async () => {
+  mockEnabled = true; mockBackend = '/backend-api'; mockIntegrations = [goodInstagram];
+  const view = render(<div className="light"><CreatorAudit /></div>);
+  await screen.findByRole('option', { name: 'Creator account' });
+  const select = screen.getByRole('combobox', { name: 'Instagram connection' }) as HTMLSelectElement;
+  expect((screen.getByRole('button', { name: 'Start audit' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(select, { target: { value: 'ig-1' } });
+  for (const theme of ['dark', 'light']) {
+    view.rerender(<div className={theme}><CreatorAudit /></div>);
+    expect(screen.getByRole('combobox', { name: 'Instagram connection' })).toBe(select);
+    expect(select.value).toBe('ig-1');
+    expect((screen.getByRole('button', { name: 'Start audit' }) as HTMLButtonElement).disabled).toBe(false);
+  }
+  expect(mockFetch.mock.calls.some(([path, options]) => path === '/creator-audit/connected' || options?.method === 'POST')).toBe(false);
+});
+
 it('offers add or reconnect navigation when the only Instagram connection needs attention', async () => {
   mockEnabled = true; mockBackend = '/backend-api';
   mockIntegrations = [{ ...goodInstagram, disabled: true }];

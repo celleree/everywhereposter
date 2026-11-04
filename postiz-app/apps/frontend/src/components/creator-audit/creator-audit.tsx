@@ -239,16 +239,17 @@ export function CreatorAudit() {
               </div>
             ) : (
               <div className="mt-3 flex flex-wrap items-center gap-3">
-                <label>
+                <label className="flex min-w-0 max-w-full flex-col gap-2">
                   Instagram connection{' '}
                   <select
                     aria-label="Instagram connection"
+                    className="min-h-[44px] w-full min-w-0 rounded-[8px] border border-newTableBorder bg-newBgColorInner px-3 text-textColor [color-scheme:light] dark:[color-scheme:dark] focus-visible:outline focus-visible:outline-2"
                     value={selectedIntegration}
                     onChange={(event) => setSelectedIntegration(event.target.value)}
                   >
-                    <option value="">Choose a connection</option>
+                    <option className="bg-newBgColorInner text-textColor" value="">Choose a connection</option>
                     {readyIntegrations.map((integration) => (
-                      <option key={integration.id} value={integration.id}>{integration.name}</option>
+                      <option className="bg-newBgColorInner text-textColor" key={integration.id} value={integration.id}>{integration.name}</option>
                     ))}
                   </select>
                 </label>
