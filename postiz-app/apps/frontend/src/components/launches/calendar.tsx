@@ -1061,6 +1061,7 @@ export const CalendarColumn: FC<{
           : 'border border-newTextColor/5 rounded-[8px]'
       )}
       ref={drop as any}
+      data-calendar-slot={getDate.utc().format('YYYY-MM-DDTHH:mm:ss')}
     >
       {display === 'month' && (
         <div className={clsx('pt-[6px] text-[14px]')}>{getDate.date()}</div>
@@ -1258,6 +1259,7 @@ const CalendarItem: FC<{
     <div
       // @ts-ignore
       ref={dragRef}
+      data-calendar-post-id={post.id}
       aria-busy={pending}
       className={clsx(
         'w-full flex h-full flex-1 flex-col group',
