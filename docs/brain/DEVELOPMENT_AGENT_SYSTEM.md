@@ -194,6 +194,8 @@ Use `docs/brain/` for durable product and engineering memory that cannot be bett
 
 ## Memory Update Protocol
 
+For measured EverywherePoster coding improvements, use the [private development-learning pilot](../../scripts/agents/development-learning.md) to record task evidence, freeze a human-reviewed proposal and collect prospective validation. Keep task receipts and inputs outside Git; the pilot does not establish effectiveness or change existing gates.
+
 After a merged, rejected, or reverted PR, first ask whether the learning belongs in a test/eval, deterministic guard, reusable helper, or code/config contract. Only then propose a brain entry when documentation is the best durable home.
 
 Possible brain destinations:

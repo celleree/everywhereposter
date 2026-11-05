@@ -143,3 +143,5 @@ run_case private-credentials review PRIVATE 1
 run_case unknown-visibility review INTERNAL 1
 [[ $(grep -Fc 'github.triggering_actor == github.repository_owner' "$ROOT/.github/workflows/codex-development-agents.yml") == 2 ]]
 echo 'PASS agent repository, role, credential and rerun guards'
+
+node --test "$ROOT/scripts/agents/development-learning.test.mjs"
