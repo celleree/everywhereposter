@@ -20,20 +20,22 @@ function fixture(t) {
   const proposal = { version: 1, id: 'proposal', kind: 'synthetic', classId: 'workflow', checkId: 'unit',
     summary: 'Add a regression guard', enforcement: 'regression_test', baselineIds: ['baseline'], candidateIds: ['future', 'future-two'] };
   const store = path.join(dir, 'store');
-  return { dir, store, receipt, proposal, invoke: (command, value) => run(command, store, value) };
+  return { dir, store, receipt, proposal, invoke: (command, value) => run(command, store, value),
+    report: (reportToken, receiptTokens = []) => run('report', store, { version: 1, reportToken, receiptTokens }) };
 }
 
 test('record/propose/report closes a measured loop without activating a proposal', t => {
   const f = fixture(t);
   assert.equal(f.invoke('record', f.receipt).status, 'recorded');
-  assert.equal(f.invoke('record', Object.fromEntries(Object.entries(f.receipt).reverse())).status, 'duplicate');
+  assert.deepEqual(f.invoke('record', Object.fromEntries(Object.entries(f.receipt).reverse())), { status: 'duplicate' });
   const { status, reportToken } = f.invoke('propose', f.proposal);
   assert.equal(status, 'recorded');
   assert.match(reportToken, /^proposal:[a-f0-9]{64}$/);
-  f.invoke('record', { ...f.receipt, id: 'future', outcome: 'failed', durationMs: 12, repairCount: null });
-  f.invoke('record', { ...f.receipt, id: 'future-two', outcome: 'unknown', durationMs: null, repairCount: null });
+  const first = f.invoke('record', { ...f.receipt, id: 'future', outcome: 'failed', durationMs: 12, repairCount: null });
+  const second = f.invoke('record', { ...f.receipt, id: 'future-two', outcome: 'unknown', durationMs: null, repairCount: null });
+  assert.match(first.receiptToken, /^future:[a-f0-9]{64}$/);
   assert.deepEqual(f.invoke('propose', f.proposal), { status: 'duplicate' });
-  const report = f.invoke('report', reportToken);
+  const report = f.report(reportToken, [first.receiptToken, second.receiptToken]);
   assert.equal(report.status, 'needs_human_review');
   assert.equal(report.effectiveness, 'not_established');
   assert.equal(report.outcomeTrust, 'operator_attested');
@@ -69,7 +71,7 @@ test('prospective cohorts reject retrospective IDs, mixed classes, sources and r
     assert.throws(() => f.invoke('record', { ...f.receipt, id: 'future', ...patch }), /mismatch/);
   }
   assert.throws(() => f.invoke('propose', { ...f.proposal, summary: 'changed' }), /duplicate/);
-  assert.equal(f.invoke('report', reportToken).pending, 2);
+  assert.equal(f.report(reportToken).pending, 2);
 });
 
 test('bound supporting receipts and fail closed on concurrent access', t => {
@@ -80,9 +82,9 @@ test('bound supporting receipts and fail closed on concurrent access', t => {
   const value = JSON.parse(fs.readFileSync(file));
   value.outcome = 'failed';
   fs.writeFileSync(file, JSON.stringify(value));
-  assert.throws(() => f.invoke('report', reportToken), /changed/);
+  assert.throws(() => f.report(reportToken), /changed/);
   fs.mkdirSync(path.join(f.store, '.lock'));
-  assert.throws(() => f.invoke('report', reportToken));
+  assert.throws(() => f.report(reportToken));
 });
 
 test('retained creation token rejects edited cohorts, status, support and fields', t => {
@@ -93,16 +95,16 @@ test('retained creation token rejects edited cohorts, status, support and fields
   const file = path.join(f.store, 'proposal-proposal.json');
   const original = JSON.parse(fs.readFileSync(file));
   for (const token of [undefined, 'proposal', reportToken + ':extra', 'proposal:not-a-hash']) {
-    assert.throws(() => f.invoke('report', token), /token/);
+    assert.throws(() => f.report(token), /token/);
   }
   for (const patch of [{ candidateIds: ['old'] }, { status: 'approved' }, { support: [] }, { extra: 'PRIVATE_SENTINEL' }]) {
     fs.writeFileSync(file, JSON.stringify({ ...original, ...patch }));
-    assert.throws(() => f.invoke('report', reportToken), /integrity/);
+    assert.throws(() => f.report(reportToken));
   }
   const altered = JSON.stringify({ ...original, status: 'approved' }) + '\n';
   fs.writeFileSync(file, altered);
   const forged = 'proposal:' + createHash('sha256').update(altered).digest('hex');
-  assert.throws(() => f.invoke('report', forged), /stored proposal state/);
+  assert.throws(() => f.report(forged), /stored proposal state/);
 });
 
 test('editing then replaying a proposal never issues a replacement creation token', t => {
@@ -115,8 +117,76 @@ test('editing then replaying a proposal never issues a replacement creation toke
   value.candidateIds = ['old'];
   fs.writeFileSync(file, JSON.stringify(value));
   assert.deepEqual(f.invoke('propose', { ...f.proposal, candidateIds: ['old'] }), { status: 'duplicate' });
-  assert.throws(() => f.invoke('report', reportToken), /integrity/);
+  assert.throws(() => f.report(reportToken), /integrity/);
   assert.throws(() => f.invoke('propose', { ...f.proposal, id: 'new', candidateIds: ['old'] }), /already recorded/);
+});
+
+test('every used stored receipt is fully validated before it can affect counts', t => {
+  const f = fixture(t);
+  f.invoke('record', f.receipt);
+  const { reportToken } = f.invoke('propose', f.proposal);
+  const { receiptToken } = f.invoke('record', { ...f.receipt, id: 'future' });
+  const file = path.join(f.store, 'receipt-future.json');
+  const original = JSON.parse(fs.readFileSync(file));
+  const patches = [{ version: 2 }, { id: 'other' }, { outcome: undefined }, { head: 'short' },
+    { durationMs: -1 }, { repairCount: 'zero' }, { evidence: { sha256: 'bad' } },
+    { evidence: { ...original.evidence, path: '/not-stored' } }, { outcomeTrust: 'verified' }, { extra: 'PRIVATE_SENTINEL' }];
+  for (const value of [{ kind: 'synthetic', classId: 'workflow', checkId: 'unit' }, ...patches.map(patch => ({ ...original, ...patch }))]) {
+    fs.writeFileSync(file, JSON.stringify(value));
+    assert.throws(() => f.report(reportToken, [receiptToken]));
+  }
+  fs.writeFileSync(file, JSON.stringify(original));
+  const baseline = path.join(f.store, 'receipt-baseline.json');
+  const altered = { ...JSON.parse(fs.readFileSync(baseline)), id: 'other' };
+  fs.writeFileSync(baseline, JSON.stringify(altered));
+  assert.throws(() => f.invoke('record', f.receipt), /identity/);
+  assert.throws(() => f.invoke('propose', { ...f.proposal, id: 'new', candidateIds: ['new-task'] }), /identity/);
+  assert.throws(() => f.report(reportToken, [receiptToken]), /identity/);
+  assert.equal(JSON.parse(fs.readFileSync(baseline)).id, 'other');
+});
+
+test('candidate anchors reject valid-schema edits and cannot be recovered through replay', t => {
+  const f = fixture(t);
+  f.invoke('record', f.receipt);
+  const { reportToken } = f.invoke('propose', f.proposal);
+  assert.equal(f.report(reportToken).pending, 2);
+  const { receiptToken } = f.invoke('record', { ...f.receipt, id: 'future' });
+  assert.equal(f.report(reportToken, [receiptToken]).pending, 1);
+  for (const tokens of [[], [receiptToken, receiptToken], [receiptToken, 'future:' + '0'.repeat(64)],
+    ['future:' + '0'.repeat(64)], [receiptToken, 'foreign:' + '0'.repeat(64)],
+    [receiptToken, 'future-two:' + '0'.repeat(64)], ['malformed']]) {
+    assert.throws(() => f.report(reportToken, tokens));
+  }
+  for (const input of [undefined, reportToken, { version: 2, reportToken, receiptTokens: [] },
+    { version: 1, reportToken, receiptTokens: null }, { version: 1, reportToken, receiptTokens: [], extra: true },
+    { version: 1, reportToken, receiptTokens: Array(51).fill(receiptToken) }]) {
+    assert.throws(() => f.invoke('report', input));
+  }
+  const file = path.join(f.store, 'receipt-future.json');
+  const original = JSON.parse(fs.readFileSync(file));
+  for (const patch of [{ outcome: 'failed' }, { head: 'b'.repeat(40) }, { durationMs: 12 },
+    { repairCount: 2 }, { evidence: { sha256: '0'.repeat(64) } }]) {
+    fs.writeFileSync(file, JSON.stringify({ ...original, ...patch }));
+    assert.throws(() => f.report(reportToken, [receiptToken]), /Candidate receipt integrity/);
+  }
+  fs.writeFileSync(file, JSON.stringify({ ...original, outcome: 'failed' }));
+  assert.deepEqual(f.invoke('record', { ...f.receipt, id: 'future', outcome: 'failed' }), { status: 'duplicate' });
+  assert.throws(() => f.report(reportToken, [receiptToken]), /Candidate receipt integrity/);
+});
+
+test('CLI report reads an external manifest and emits only aggregate results', t => {
+  const f = fixture(t);
+  f.invoke('record', f.receipt);
+  const { reportToken } = f.invoke('propose', f.proposal);
+  const { receiptToken } = f.invoke('record', { ...f.receipt, id: 'future' });
+  const input = path.join(f.dir, 'report.json');
+  fs.writeFileSync(input, JSON.stringify({ version: 1, reportToken, receiptTokens: [receiptToken] }));
+  const child = spawnSync(process.execPath, [cli, 'report', f.store, input], { encoding: 'utf8' });
+  assert.equal(child.status, 0);
+  const report = JSON.parse(child.stdout);
+  assert.equal(report.candidate.recorded, 1); assert.equal(report.pending, 1);
+  assert.equal(report.status, 'needs_human_review');
+  assert(!child.stdout.includes(reportToken) && !child.stdout.includes(receiptToken) && !child.stdout.includes(f.dir));
 });
 
 test('rejects Git storage, permissive storage and symlinks', t => {

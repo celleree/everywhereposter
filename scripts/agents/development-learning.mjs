@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const LIMIT = 65536;
+const RECEIPT_FIELDS = ['version', 'id', 'kind', 'classId', 'checkId', 'head', 'outcome', 'durationMs', 'repairCount', 'evidence'];
 const PROPOSAL_FIELDS = ['version', 'id', 'kind', 'classId', 'checkId', 'summary', 'enforcement', 'baselineIds', 'candidateIds'];
 const id = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value);
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -49,17 +50,18 @@ function privateStore(store) {
 }
 
 function load(store, type, key) {
-  assert(id(key), 'Invalid ID');
+  assert(['receipt', 'proposal'].includes(type) && id(key), 'Invalid entry identity');
   const file = path.join(store, `${type}-${key}.json`);
   if (!fs.existsSync(file)) return null;
   const stat = fs.lstatSync(file);
   assert(!stat.isSymbolicLink() && (stat.mode & 0o077) === 0, 'Evidence must be private');
-  return JSON.parse(read(file));
+  const value = JSON.parse(read(file));
+  return type === 'receipt' ? storedReceipt(value, key) : storedProposal(value, key);
 }
 
 function proposals(store) {
   return fs.readdirSync(store).filter(name => name.startsWith('proposal-'))
-    .map(name => storedProposal(load(store, 'proposal', name.slice(9, -5)), name.slice(9, -5)));
+    .map(name => load(store, 'proposal', name.slice(9, -5)));
 }
 
 function persist(store, type, key, value) {
@@ -76,22 +78,34 @@ function persist(store, type, key, value) {
     fs.writeFileSync(temporary, encode(value), { flag: 'wx', mode: 0o600 });
     fs.linkSync(temporary, file);
   } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
-  return { status: 'recorded' };
+  const tokenField = type === 'receipt' ? 'receiptToken' : 'reportToken';
+  return { status: 'recorded', [tokenField]: `${key}:${digest(encode(value))}` };
 }
 
 function matches(receipt, proposal) {
   return ['kind', 'classId', 'checkId'].every(key => receipt[key] === proposal[key]);
 }
 
-function record(store, input) {
-  exact(input, ['version', 'id', 'kind', 'classId', 'checkId', 'head', 'outcome', 'durationMs', 'repairCount', 'evidence']);
+function validateReceipt(input, stored = false) {
+  exact(input, stored ? [...RECEIPT_FIELDS, 'outcomeTrust'] : RECEIPT_FIELDS);
   assert(input.version === 1 && id(input.id) && id(input.classId) && id(input.checkId), 'Invalid receipt identity');
   assert(['real', 'synthetic'].includes(input.kind) && ['passed', 'failed', 'unknown'].includes(input.outcome), 'Invalid receipt classification');
   assert(typeof input.head === 'string' && /^[a-f0-9]{40}$/.test(input.head), 'Full commit SHA required');
   assert(metric(input.durationMs) && metric(input.repairCount), 'Invalid metrics');
-  exact(input.evidence, ['path', 'sha256']);
-  assert(typeof input.evidence.path === 'string' && path.isAbsolute(input.evidence.path)
-    && /^[a-f0-9]{64}$/.test(input.evidence.sha256), 'Invalid evidence');
+  exact(input.evidence, stored ? ['sha256'] : ['path', 'sha256']);
+  assert(typeof input.evidence.sha256 === 'string' && /^[a-f0-9]{64}$/.test(input.evidence.sha256), 'Invalid evidence');
+  if (stored) assert(input.outcomeTrust === 'operator_attested', 'Invalid receipt trust');
+  else assert(typeof input.evidence.path === 'string' && path.isAbsolute(input.evidence.path), 'Invalid evidence path');
+}
+
+function storedReceipt(value, key) {
+  validateReceipt(value, true);
+  assert(value.id === key, 'Stored receipt identity mismatch');
+  return value;
+}
+
+function record(store, input) {
+  validateReceipt(input);
   assert(digest(read(input.evidence.path, 10 * 1024 * 1024)) === input.evidence.sha256, 'Evidence digest mismatch');
   const value = { ...input, evidence: { sha256: input.evidence.sha256 }, outcomeTrust: 'operator_attested' };
   for (const proposal of proposals(store)) {
@@ -134,17 +148,12 @@ function propose(store, input) {
   });
   const value = { ...input, support, status: 'needs_human_review' };
   const previous = load(store, 'proposal', input.id);
-  if (previous) {
-    storedProposal(previous, input.id);
-    return persist(store, 'proposal', input.id, value);
-  }
+  if (previous) return persist(store, 'proposal', input.id, value);
   assert(input.candidateIds.every(key => !load(store, 'receipt', key)), 'Prospective tasks already recorded');
   for (const proposal of proposals(store)) {
     assert(input.candidateIds.every(key => !proposal.candidateIds.includes(key)), 'Prospective task already reserved');
   }
-  const result = persist(store, 'proposal', input.id, value);
-  return result.status === 'recorded'
-    ? { ...result, reportToken: `${input.id}:${digest(encode(value))}` } : result;
+  return persist(store, 'proposal', input.id, value);
 }
 
 function aggregate(receipts) {
@@ -159,21 +168,35 @@ function aggregate(receipts) {
   return result;
 }
 
-function report(store, token) {
+function parseToken(token) {
   const parts = typeof token === 'string' ? token.split(':') : [];
-  assert(parts.length === 2 && id(parts[0]) && /^[a-f0-9]{64}$/.test(parts[1]), 'Original report token required');
-  const [key, expected] = parts;
+  assert(parts.length === 2 && id(parts[0]) && /^[a-f0-9]{64}$/.test(parts[1]), 'Original creation token required');
+  return parts;
+}
+
+function report(store, input) {
+  exact(input, ['version', 'reportToken', 'receiptTokens']);
+  assert(input.version === 1 && Array.isArray(input.receiptTokens) && input.receiptTokens.length <= 50, 'Invalid report manifest');
+  const [key, expected] = parseToken(input.reportToken);
+  const anchors = new Map(input.receiptTokens.map(parseToken));
+  assert(anchors.size === input.receiptTokens.length, 'Duplicate receipt token IDs');
   const proposal = load(store, 'proposal', key);
   assert(proposal, 'Proposal not found');
   assert(digest(encode(proposal)) === expected, 'Proposal integrity mismatch');
-  storedProposal(proposal, key);
+  assert([...anchors.keys()].every(id => proposal.candidateIds.includes(id)), 'Unreserved receipt token');
   const baseline = proposal.support.map(ref => {
     const receipt = load(store, 'receipt', ref.id);
     assert(receipt && digest(encode(receipt)) === ref.sha256, 'Baseline evidence changed');
     return receipt;
   });
-  const candidate = proposal.candidateIds.map(key => load(store, 'receipt', key)).filter(Boolean);
-  assert(candidate.every(receipt => matches(receipt, proposal)), 'Prospective cohort mismatch');
+  const candidate = [];
+  for (const key of proposal.candidateIds) {
+    const receipt = load(store, 'receipt', key);
+    if (!receipt) { assert(!anchors.has(key), 'Receipt token has no receipt'); continue; }
+    assert(anchors.has(key) && digest(encode(receipt)) === anchors.get(key), 'Candidate receipt integrity mismatch or missing anchor');
+    assert(matches(receipt, proposal), 'Prospective cohort mismatch');
+    candidate.push(receipt);
+  }
   return { status: 'needs_human_review', kind: proposal.kind, outcomeTrust: 'operator_attested',
     baseline: aggregate(baseline), candidate: aggregate(candidate),
     pending: proposal.candidateIds.length - candidate.length, effectiveness: 'not_established' };
@@ -192,9 +215,9 @@ export function run(command, store, input) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    assert(process.argv.length === 5, 'Usage: node development-learning.mjs record|propose|report /absolute/private/store input.json|report-token');
+    assert(process.argv.length === 5, 'Usage: node development-learning.mjs record|propose|report /absolute/private/store input.json');
     const [, , command, store, source] = process.argv;
-    const input = command === 'report' ? source : JSON.parse(read(source));
+    const input = JSON.parse(read(source));
     console.log(JSON.stringify(run(command, store, input)));
   } catch {
     // Do not echo inputs, file paths, logs or low-level exception contents.
