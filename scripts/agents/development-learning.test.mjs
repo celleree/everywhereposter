@@ -27,11 +27,13 @@ test('record/propose/report closes a measured loop without activating a proposal
   const f = fixture(t);
   assert.equal(f.invoke('record', f.receipt).status, 'recorded');
   assert.equal(f.invoke('record', Object.fromEntries(Object.entries(f.receipt).reverse())).status, 'duplicate');
-  assert.equal(f.invoke('propose', f.proposal).status, 'recorded');
+  const { status, reportToken } = f.invoke('propose', f.proposal);
+  assert.equal(status, 'recorded');
+  assert.match(reportToken, /^proposal:[a-f0-9]{64}$/);
   f.invoke('record', { ...f.receipt, id: 'future', outcome: 'failed', durationMs: 12, repairCount: null });
   f.invoke('record', { ...f.receipt, id: 'future-two', outcome: 'unknown', durationMs: null, repairCount: null });
-  assert.equal(f.invoke('propose', f.proposal).status, 'duplicate');
-  const report = f.invoke('report', 'proposal');
+  assert.deepEqual(f.invoke('propose', f.proposal), { status: 'duplicate' });
+  const report = f.invoke('report', reportToken);
   assert.equal(report.status, 'needs_human_review');
   assert.equal(report.effectiveness, 'not_established');
   assert.equal(report.outcomeTrust, 'operator_attested');
@@ -61,26 +63,60 @@ test('prospective cohorts reject retrospective IDs, mixed classes, sources and r
   f.invoke('record', { ...f.receipt, id: 'old' });
   assert.throws(() => f.invoke('propose', { ...f.proposal, candidateIds: ['old'] }), /already recorded/);
   assert.throws(() => f.invoke('propose', { ...f.proposal, kind: 'real' }), /baseline/);
-  f.invoke('propose', f.proposal);
+  const { reportToken } = f.invoke('propose', f.proposal);
   assert.throws(() => f.invoke('propose', { ...f.proposal, id: 'second' }), /reserved/);
   for (const patch of [{ kind: 'real' }, { checkId: 'other' }, { classId: 'other' }]) {
     assert.throws(() => f.invoke('record', { ...f.receipt, id: 'future', ...patch }), /mismatch/);
   }
   assert.throws(() => f.invoke('propose', { ...f.proposal, summary: 'changed' }), /duplicate/);
-  assert.equal(f.invoke('report', 'proposal').pending, 2);
+  assert.equal(f.invoke('report', reportToken).pending, 2);
 });
 
 test('bound supporting receipts and fail closed on concurrent access', t => {
   const f = fixture(t);
   f.invoke('record', f.receipt);
-  f.invoke('propose', f.proposal);
+  const { reportToken } = f.invoke('propose', f.proposal);
   const file = path.join(f.store, 'receipt-baseline.json');
   const value = JSON.parse(fs.readFileSync(file));
   value.outcome = 'failed';
   fs.writeFileSync(file, JSON.stringify(value));
-  assert.throws(() => f.invoke('report', 'proposal'), /changed/);
+  assert.throws(() => f.invoke('report', reportToken), /changed/);
   fs.mkdirSync(path.join(f.store, '.lock'));
-  assert.throws(() => f.invoke('report', 'proposal'));
+  assert.throws(() => f.invoke('report', reportToken));
+});
+
+test('retained creation token rejects edited cohorts, status, support and fields', t => {
+  const f = fixture(t);
+  f.invoke('record', f.receipt);
+  f.invoke('record', { ...f.receipt, id: 'old' });
+  const { reportToken } = f.invoke('propose', f.proposal);
+  const file = path.join(f.store, 'proposal-proposal.json');
+  const original = JSON.parse(fs.readFileSync(file));
+  for (const token of [undefined, 'proposal', reportToken + ':extra', 'proposal:not-a-hash']) {
+    assert.throws(() => f.invoke('report', token), /token/);
+  }
+  for (const patch of [{ candidateIds: ['old'] }, { status: 'approved' }, { support: [] }, { extra: 'PRIVATE_SENTINEL' }]) {
+    fs.writeFileSync(file, JSON.stringify({ ...original, ...patch }));
+    assert.throws(() => f.invoke('report', reportToken), /integrity/);
+  }
+  const altered = JSON.stringify({ ...original, status: 'approved' }) + '\n';
+  fs.writeFileSync(file, altered);
+  const forged = 'proposal:' + createHash('sha256').update(altered).digest('hex');
+  assert.throws(() => f.invoke('report', forged), /stored proposal state/);
+});
+
+test('editing then replaying a proposal never issues a replacement creation token', t => {
+  const f = fixture(t);
+  f.invoke('record', f.receipt);
+  f.invoke('record', { ...f.receipt, id: 'old' });
+  const { reportToken } = f.invoke('propose', f.proposal);
+  const file = path.join(f.store, 'proposal-proposal.json');
+  const value = JSON.parse(fs.readFileSync(file));
+  value.candidateIds = ['old'];
+  fs.writeFileSync(file, JSON.stringify(value));
+  assert.deepEqual(f.invoke('propose', { ...f.proposal, candidateIds: ['old'] }), { status: 'duplicate' });
+  assert.throws(() => f.invoke('report', reportToken), /integrity/);
+  assert.throws(() => f.invoke('propose', { ...f.proposal, id: 'new', candidateIds: ['old'] }), /already recorded/);
 });
 
 test('rejects Git storage, permissive storage and symlinks', t => {

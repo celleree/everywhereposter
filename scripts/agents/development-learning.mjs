@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const LIMIT = 65536;
+const PROPOSAL_FIELDS = ['version', 'id', 'kind', 'classId', 'checkId', 'summary', 'enforcement', 'baselineIds', 'candidateIds'];
 const id = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value);
 const digest = value => createHash('sha256').update(value).digest('hex');
 const encode = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -58,7 +59,7 @@ function load(store, type, key) {
 
 function proposals(store) {
   return fs.readdirSync(store).filter(name => name.startsWith('proposal-'))
-    .map(name => load(store, 'proposal', name.slice(9, -5)));
+    .map(name => storedProposal(load(store, 'proposal', name.slice(9, -5)), name.slice(9, -5)));
 }
 
 function persist(store, type, key, value) {
@@ -99,8 +100,8 @@ function record(store, input) {
   return persist(store, 'receipt', input.id, value);
 }
 
-function propose(store, input) {
-  exact(input, ['version', 'id', 'kind', 'classId', 'checkId', 'summary', 'enforcement', 'baselineIds', 'candidateIds']);
+function validateProposal(input) {
+  exact(input, PROPOSAL_FIELDS);
   assert(input.version === 1 && id(input.id) && id(input.classId) && id(input.checkId), 'Invalid proposal identity');
   assert(['real', 'synthetic'].includes(input.kind), 'Invalid proposal classification');
   assert(typeof input.summary === 'string' && input.summary.length > 0 && input.summary.length <= 500
@@ -108,6 +109,24 @@ function propose(store, input) {
   assert(['regression_test', 'guard', 'helper', 'contract', 'documentation'].includes(input.enforcement), 'Invalid enforcement');
   assert(list(input.baselineIds) && list(input.candidateIds)
     && input.candidateIds.every(key => !input.baselineIds.includes(key)), 'Invalid cohort IDs');
+}
+
+function storedProposal(value, key) {
+  exact(value, [...PROPOSAL_FIELDS, 'support', 'status']);
+  const { support, status, ...input } = value;
+  validateProposal(input);
+  assert(input.id === key && status === 'needs_human_review', 'Invalid stored proposal state');
+  assert(Array.isArray(support) && support.length === input.baselineIds.length, 'Invalid stored support');
+  support.forEach((ref, index) => {
+    exact(ref, ['id', 'sha256']);
+    assert(ref.id === input.baselineIds[index] && typeof ref.sha256 === 'string'
+      && /^[a-f0-9]{64}$/.test(ref.sha256), 'Invalid stored support');
+  });
+  return value;
+}
+
+function propose(store, input) {
+  validateProposal(input);
   const support = input.baselineIds.map(key => {
     const receipt = load(store, 'receipt', key);
     assert(receipt && matches(receipt, input), 'Missing or mismatched baseline');
@@ -115,12 +134,17 @@ function propose(store, input) {
   });
   const value = { ...input, support, status: 'needs_human_review' };
   const previous = load(store, 'proposal', input.id);
-  if (previous) return persist(store, 'proposal', input.id, value);
+  if (previous) {
+    storedProposal(previous, input.id);
+    return persist(store, 'proposal', input.id, value);
+  }
   assert(input.candidateIds.every(key => !load(store, 'receipt', key)), 'Prospective tasks already recorded');
   for (const proposal of proposals(store)) {
     assert(input.candidateIds.every(key => !proposal.candidateIds.includes(key)), 'Prospective task already reserved');
   }
-  return persist(store, 'proposal', input.id, value);
+  const result = persist(store, 'proposal', input.id, value);
+  return result.status === 'recorded'
+    ? { ...result, reportToken: `${input.id}:${digest(encode(value))}` } : result;
 }
 
 function aggregate(receipts) {
@@ -135,9 +159,14 @@ function aggregate(receipts) {
   return result;
 }
 
-function report(store, key) {
+function report(store, token) {
+  const parts = typeof token === 'string' ? token.split(':') : [];
+  assert(parts.length === 2 && id(parts[0]) && /^[a-f0-9]{64}$/.test(parts[1]), 'Original report token required');
+  const [key, expected] = parts;
   const proposal = load(store, 'proposal', key);
   assert(proposal, 'Proposal not found');
+  assert(digest(encode(proposal)) === expected, 'Proposal integrity mismatch');
+  storedProposal(proposal, key);
   const baseline = proposal.support.map(ref => {
     const receipt = load(store, 'receipt', ref.id);
     assert(receipt && digest(encode(receipt)) === ref.sha256, 'Baseline evidence changed');
@@ -145,7 +174,7 @@ function report(store, key) {
   });
   const candidate = proposal.candidateIds.map(key => load(store, 'receipt', key)).filter(Boolean);
   assert(candidate.every(receipt => matches(receipt, proposal)), 'Prospective cohort mismatch');
-  return { status: proposal.status, kind: proposal.kind, outcomeTrust: 'operator_attested',
+  return { status: 'needs_human_review', kind: proposal.kind, outcomeTrust: 'operator_attested',
     baseline: aggregate(baseline), candidate: aggregate(candidate),
     pending: proposal.candidateIds.length - candidate.length, effectiveness: 'not_established' };
 }
@@ -163,7 +192,7 @@ export function run(command, store, input) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    assert(process.argv.length === 5, 'Usage: node development-learning.mjs record|propose|report /absolute/private/store input.json|proposal-id');
+    assert(process.argv.length === 5, 'Usage: node development-learning.mjs record|propose|report /absolute/private/store input.json|report-token');
     const [, , command, store, source] = process.argv;
     const input = command === 'report' ? source : JSON.parse(read(source));
     console.log(JSON.stringify(run(command, store, input)));

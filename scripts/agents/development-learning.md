@@ -20,6 +20,9 @@ in `codex-task.sh` and the normal review/CI/permission gates continue to apply.
    location (regression test, guard, helper, contract, then documentation). Review
    the private summary and supporting evidence with a human. The tool always
    retains `needs_human_review`; normal authorization governs the implementation PR.
+   Retain the first creation response's `reportToken` privately outside the editable
+   ledger. Reports require this original integrity anchor; duplicate proposals do
+   not issue another token. Never replace it with a hash recomputed from the ledger.
 4. **Before beginning later tasks**, reserve distinct candidate IDs in the proposal.
    Implement the reviewed improvement through the normal bounded PR/review process.
    Then collect the declared tasks using the same class/check and measurement method,
@@ -46,7 +49,7 @@ its path/content. The free-text proposal summary still requires privacy review.
 ```sh
 node scripts/agents/development-learning.mjs record /private/state/ep-learning /private/receipt.json
 node scripts/agents/development-learning.mjs propose /private/state/ep-learning /private/proposal.json
-node scripts/agents/development-learning.mjs report /private/state/ep-learning proposal-001
+node scripts/agents/development-learning.mjs report /private/state/ep-learning "$EP_LEARNING_REPORT_TOKEN"
 node --test scripts/agents/development-learning.test.mjs
 ```
 
@@ -61,6 +64,14 @@ Proposal input:
 ```json
 {"version":1,"id":"proposal-001","kind":"real","classId":"agent-tooling","checkId":"focused-tests","summary":"Enforce a recurring coding-workflow failure with a focused regression test","enforcement":"regression_test","baselineIds":["task-001"],"candidateIds":["task-002","task-003"]}
 ```
+
+Set `EP_LEARNING_REPORT_TOKEN` to the original `reportToken` (`proposal-id:sha256`).
+It binds the canonical proposal fields, status, cohort IDs and supporting hashes.
+The trusted token must remain outside the editable ledger. This detects ledger
+edits relative to that anchor; it is not authentication or protection against a
+privileged operator who rewrites both data and anchor. It does not prove outcomes.
+If the token is lost, or a proposal predates tokens, retain it for audit and create
+a new proposal ID with a new prospective cohort; do not retrospectively bless it.
 
 IDs match `[a-z0-9][a-z0-9_-]{0,63}`. Outcomes are `passed`, `failed` or `unknown`.
 Metrics are nonnegative integers up to 1e12 or `null`; elapsed milliseconds and
