@@ -26,6 +26,7 @@
 
 - `command` — result
 - CI: pending / passed / failed
+- UI evidence: N/A or HEAD / scenario / viewport / artifact / limitations
 
 ## Risk
 

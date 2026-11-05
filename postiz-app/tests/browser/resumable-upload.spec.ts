@@ -143,7 +143,7 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
 
 test('Resumable upload: reload readiness rejects unrelated identities, wrong phases and HTTP errors', async ({ page }) => {
   let status = 200, reads = 0;
-  const token = randomUUID(); let responseToken = token, restored: any;
+  const token = randomUUID(); let responseToken: string = token, restored: any;
   await page.route('**/upload-readiness-fixture', route => route.fulfill({
     contentType: 'text/html', body: '<script>fetch("/backend-api/media/uploads")</script>',
   }));

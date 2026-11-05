@@ -1,8 +1,18 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const discoveryMode = process.env.EP_DISCOVERY_BROWSER === '1';
-const results = discoveryMode ? 'browser-results/discovery' : 'browser-results';
-const report = discoveryMode ? 'browser-report/discovery' : 'browser-report';
+const suite = process.env.BROWSER_SUITE;
+if (suite !== undefined && !['smoke', 'wallet', 'discovery'].includes(suite)) {
+  throw new Error('BROWSER_SUITE must be smoke, wallet or discovery when set');
+}
+if (suite !== undefined && (suite === 'discovery') !== discoveryMode) {
+  throw new Error('BROWSER_SUITE must match the EP_DISCOVERY_BROWSER fixture mode');
+}
+// Keep legacy local paths; CI uses sibling directories so later suites cannot
+// clear earlier reports, traces or JSON results. This never enables a fixture.
+const suffix = suite ? `/${suite}` : discoveryMode ? '/discovery' : '';
+const results = `browser-results${suffix}`;
+const report = `browser-report${suffix}`;
 const frontendPort = process.env.BROWSER_FRONTEND_PORT || '4217';
 const apiPort = process.env.BROWSER_API_PORT || '4218';
 
