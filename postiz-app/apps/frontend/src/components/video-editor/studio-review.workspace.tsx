@@ -15,6 +15,7 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
   const [selected, select] = useState(''), [reviewed, confirm] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [source, setSource] = useState<any>(), [visuals, setVisuals] = useState<string[]>([]), [targets, setTargets] = useState(['instagram']);
   const [brief, setBrief] = useState('Keep my words and make a clear captioned talking-head draft.');
+  const [headline, setHeadline] = useState(''), [revisionHeadline, setRevisionHeadline] = useState('');
   const [framing, setFraming] = useState<any>({ x: .28, y: .28, width: .44, height: .24 }), [framingConfirmed, setFramingConfirmed] = useState(false);
   const [adjusting, setAdjusting] = useState(false), [pendingRequest, setPendingRequest] = useState<any>();
   const drag = useRef<{ x: number; y: number } | undefined>(undefined), receiptKey = 'everywhereposter:studio-request:v1:' + scope;
@@ -33,11 +34,13 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
   };
   const { data: availability } = useSWR(scope ? ['studio-availability', scope] : null, () => read('/media/studio/status'), { shouldRetryOnError: false });
   const { data: jobs, mutate: refreshJobs } = useSWR(scope ? ['studio-jobs', scope] : null, () => read('/media/studio/jobs'), { shouldRetryOnError: false });
+  const approvedStyle = availability?.editorStyle === 'accepted-caption-b-top-rounded-v1';
   const id = selected || (Array.isArray(jobs) ? jobs[0]?.id : '');
   const { data, mutate } = useSWR(id && scope ? ['studio-result', scope, id] : null, () => read('/media/studio/jobs/' + encodeURIComponent(id)), {
     shouldRetryOnError: false, refreshInterval: (value: any) => value?.state === 'RUNNING' && !value?.phase ? 3000 : 0 });
   const ready = !!id && data?.id === id && data.technicalStatus === 'PASS' && data.preview;
   const version = data ? [id, data.generation, data.sha256].join(':') : '';
+  useEffect(() => { setRevisionHeadline(data?.headline || ''); }, [version, data?.headline]);
   const choose = (video: boolean) => modals.openModal({ title: 'Media Library', fullScreen: true, askClose: false,
     closeOnEscape: true, size: 'calc(100% - 80px)', height: 'calc(100% - 80px)',
     children: (close) => <MediaBox {...(video ? { type: 'video' as const } : {})} hideSourceTabs compactPicker closeModal={close}
@@ -58,11 +61,14 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
           if (active.current && sourceGeneration.current === generation && prior.framing) { setFraming(prior.framing); setFramingConfirmed(true); }
         } catch { setError('Source details or previous framing could not be loaded.'); }
       }} /> });
-  const submit = async (recover = false) => {
+  const submit = async (recover = false, revision?: any) => {
     if (busy) return; setBusy(true); setError('');
     try {
-      const body = recover ? pendingRequest : { requestKey: crypto.randomUUID(), sourceMediaId: source.id, brollMediaIds: visuals,
-        destinations: targets, profile: !visuals.length && availability?.sourceOnlyProfile === 'talking-head-v2' ? 'talking-head-v2' : 'easy-graphics-v1', creative: { brief, framing: { ...framing, confirmed: true, stationary: true, singleSpeaker: true } } };
+      const body = recover ? pendingRequest : revision || (approvedStyle ? { requestKey: crypto.randomUUID(), sourceMediaId: source.id, brollMediaIds: [],
+        destinations: targets, profile: 'talking-head-v2', creative: { brief, editorStyle: availability.editorStyle, ...(headline.trim() ? { headline: headline.trim() } : {}), framing: { ...framing, confirmed: true, stationary: true, singleSpeaker: true } } } : { requestKey: crypto.randomUUID(), sourceMediaId: source.id, brollMediaIds: visuals, destinations: targets, profile: !visuals.length && availability?.sourceOnlyProfile === 'talking-head-v2' ? 'talking-head-v2' : 'easy-graphics-v1', creative: { brief, framing: { ...framing, confirmed: true, stationary: true, singleSpeaker: true } } });
+      if (body?.creative?.editorStyle === 'accepted-caption-b-top-rounded-v1' && typeof body.creative.headline === 'string' && body.creative.headline.length > 60) {
+        throw Error('Shorten the headline to 60 characters or fewer, then try again.');
+      }
       // Persist identity before dispatch; uncertain response retries the same body.
       localStorage.setItem(receiptKey, JSON.stringify(body)); setPendingRequest(body);
       const r = await fetch('/media/studio/jobs', { method: 'POST', body: JSON.stringify(body) });
@@ -102,10 +108,11 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
   return <section aria-label="Studio results">
     {availability?.enabled && <div>
       <h2>Create a Studio edit</h2>
-      <p>Beta: one stationary speaker, portrait CFR30 original, up to60seconds/100MB and720x1280. Supporting visuals are optional (up to 8). Creative direction uses prepaid AI credits; review the result before saving or posting. Moving/multiple speakers need adjustment; there is no automatic tracking.</p>
+      <p>{approvedStyle ? 'White captions, a rounded headline and quiet-pause cuts.' : 'Previous Studio editor.'} Beta: one stationary speaker, portrait CFR30 original, up to60seconds/100MB and720x1280. Initial direction uses prepaid AI credits; review the result before saving or posting. Moving/multiple speakers need adjustment; there is no automatic tracking or retake detection.</p>
+      {availability.editorStyle !== 'accepted-caption-b-top-rounded-v1' && <p>Your approved style is unavailable. The previous editor and saved results remain available.</p>}
       <button disabled={busy} onClick={() => choose(true)}>Upload or choose source</button>
-      <button disabled={busy || !source} onClick={() => choose(false)}>Choose optional supporting visuals ({visuals.length}/8)</button>
-      {visuals.length > 0 && <button disabled={busy} onClick={() => setVisuals([])}>Clear supporting visuals</button>}
+      {!approvedStyle && <button disabled={busy || !source} onClick={() => choose(false)}>Choose optional supporting visuals ({visuals.length}/8)</button>}
+      {!approvedStyle && visuals.length > 0 && <button disabled={busy} onClick={() => setVisuals([])}>Clear supporting visuals</button>}
       {source && <>
         <div style={{ position: 'relative', aspectRatio: '9 / 16', maxWidth: 320 }}>
           <video key={source.id} controls playsInline src={directory.set(source.path)} aria-label="Original video for speaker framing" style={{ width: '100%', height: '100%' }} />
@@ -125,7 +132,9 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
         <label><input type="checkbox" checked={framingConfirmed} onChange={e => setFramingConfirmed(e.target.checked)} />I checked that this outlined area contains one stationary speaker throughout the clip.</label>
       </>}
       <label>Direction <textarea maxLength={1000} value={brief} disabled={busy} onChange={e => setBrief(e.target.value)} /></label>
-      <fieldset><legend>Framing destinations</legend>{['instagram', 'facebook', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'reddit', 'dribbble'].map(p =>
+      {approvedStyle && <><label>Headline (optional) <input value={headline} disabled={busy} onChange={e => setHeadline(e.target.value)} placeholder="Leave blank to use your opening sentence" /></label>
+      <p>Headlines must fit one line and be 60 characters or fewer. A headline that does not fit needs a shorter version; it will not be shrunk or rewritten.</p></>}
+      <fieldset><legend>Framing destinations</legend>{(approvedStyle ? ['instagram', 'tiktok'] : ['instagram', 'facebook', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'reddit', 'dribbble']).map(p =>
         <label key={p}><input type="checkbox" checked={targets.includes(p)} disabled={busy} onChange={e => setTargets(v => e.target.checked ? [...v, p] : v.filter(x => x !== p))} />{p}</label>)}</fieldset>
       <button disabled={busy || !!pendingRequest || !source || !targets.length || !framingConfirmed || framing.width < .05 || framing.height < .05 || !brief.trim()} onClick={() => void submit()}>Create Studio edit (uses AI credits)</button>
       {pendingRequest && <><button disabled={busy} onClick={() => void submit(true)}>Recover last edit request</button>
@@ -140,6 +149,12 @@ export function StudioReviewWorkspace({ scope }: { scope: string }) {
     {ready ? <div key={data.sha256}>
       <p>Technical checks passed. Watch and listen before saving. Your original is unchanged.</p>
       <video controls playsInline preload="metadata" aria-label="Studio video to review" src={data.preview} style={{ maxWidth: '100%', maxHeight: 600 }} />
+      {data.editRequest && <div>
+        <label>Edit headline <input value={revisionHeadline} disabled={busy} onChange={e => setRevisionHeadline(e.target.value)} /></label>
+        <button disabled={busy || !revisionHeadline.trim()} onClick={() => void submit(false, { ...data.editRequest, requestKey: crypto.randomUUID(), sourceEvidenceJobId: id, creative: { ...data.editRequest.creative, headline: revisionHeadline.trim() } })}>Apply headline as a new revision</button>
+        <button disabled={busy || data.editRequest.creative.restoreCuts === true} onClick={() => void submit(false, { ...data.editRequest, requestKey: crypto.randomUUID(), sourceEvidenceJobId: id, creative: { ...data.editRequest.creative, headline: data.headline, restoreCuts: true } })}>Restore all cuts</button>
+        <p>These revisions reuse your transcript without an AI charge. Restoring cuts brings back the full source timing and audio. Previous results remain available above.</p>
+      </div>}
       {data.limitations?.map((text: string) => <p key={text}>{text}</p>)}
       <p>Selected framing profiles: {data.safeZoneProfiles?.join(', ')}. Provisional and ad-derived profiles are guidance, not a guarantee for every platform screen.</p>
       {data.outputMediaId ? <><p>Reviewed copy saved in Media Library.</p><button disabled={busy} onClick={() => void composer()}>Use in composer</button></> : <>

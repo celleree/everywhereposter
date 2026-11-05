@@ -7,12 +7,13 @@ import { Prisma } from '@prisma/client';
 import { StudioFraming, validateStudioFraming } from './studio-evidence';
 
 export type StudioEditRequest = { requestKey: string; sourceMediaId: string; brollMediaIds: string[];
-  destinations: string[]; profile: StudioProfile; creative?: { brief: string; framing: StudioFraming } };
+  destinations: string[]; profile: StudioProfile; sourceEvidenceJobId?: string;
+  creative?: { brief: string; framing: StudioFraming; editorStyle?: 'accepted-caption-b-top-rounded-v1'; headline?: string; restoreCuts?: boolean } };
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const id = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const destinations = ['instagram', 'facebook', 'threads', 'tiktok', 'youtube', 'linkedin', 'x', 'pinterest', 'reddit', 'dribbble'];
 export function normalizeStudioRequest(body: StudioEditRequest): StudioEditRequest {
-  if (!body || Object.keys(body).some(k => !['brollMediaIds', 'destinations', 'profile', 'requestKey', 'sourceMediaId', 'creative'].includes(k)) ||
+  if (!body || Object.keys(body).some(k => !['brollMediaIds', 'destinations', 'profile', 'requestKey', 'sourceMediaId', 'creative', 'sourceEvidenceJobId'].includes(k)) ||
       typeof body.requestKey !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(body.requestKey) || !id(body.sourceMediaId) || !isStudioProfile(body.profile) ||
       !Array.isArray(body.brollMediaIds) || body.brollMediaIds.length > 8 || (body.profile === 'talking-head-v2' && body.brollMediaIds.length !== 0) ||
       body.brollMediaIds.some(asset => !id(asset) || asset === body.sourceMediaId) ||
@@ -21,13 +22,22 @@ export function normalizeStudioRequest(body: StudioEditRequest): StudioEditReque
       new Set(body.destinations).size !== body.destinations.length) throw new BadRequestException('Invalid Studio edit request');
   let creative: StudioEditRequest['creative'];
   if (body.creative !== undefined) {
-    if (!body.creative || Object.keys(body.creative).sort().join(',') !== 'brief,framing' || typeof body.creative.brief !== 'string' ||
+    if (!body.creative || Object.keys(body.creative).some(k => !['brief', 'framing', 'editorStyle', 'headline', 'restoreCuts'].includes(k)) || typeof body.creative.brief !== 'string' ||
         !body.creative.brief.trim() || body.creative.brief.length > 1000) throw new BadRequestException('Describe the edit and confirm its stationary speaker framing');
     try { creative = { brief: body.creative.brief.trim(), framing: validateStudioFraming(body.creative.framing) }; }
     catch { throw new BadRequestException('Confirm one stationary speaker; moving or multiple speakers need adjustment'); }
+    if (body.creative.editorStyle !== undefined) {
+      if (body.profile !== 'talking-head-v2' || body.destinations.some(p => !['instagram', 'tiktok'].includes(p)) || body.creative.editorStyle !== 'accepted-caption-b-top-rounded-v1' ||
+          body.creative.headline !== undefined && (typeof body.creative.headline !== 'string' || !body.creative.headline.trim() || body.creative.headline.length > 60 || /[\u0000-\u001f]/.test(body.creative.headline)) ||
+          body.creative.restoreCuts !== undefined && typeof body.creative.restoreCuts !== 'boolean') throw new BadRequestException('Choose a single-line headline of up to 60 characters');
+      creative.editorStyle = body.creative.editorStyle;
+      if (body.creative.headline !== undefined) creative.headline = body.creative.headline.trim();
+      if (body.creative.restoreCuts !== undefined) creative.restoreCuts = body.creative.restoreCuts;
+    } else if (body.creative.headline !== undefined || body.creative.restoreCuts !== undefined) throw new BadRequestException('Headline and cut controls require the approved editor style');
   }
+  if (body.sourceEvidenceJobId !== undefined && (creative?.editorStyle !== 'accepted-caption-b-top-rounded-v1' || !/^[a-f0-9-]{36}$/.test(body.sourceEvidenceJobId))) throw new BadRequestException('Invalid source evidence revision');
   return { requestKey: body.requestKey, sourceMediaId: body.sourceMediaId, brollMediaIds: [...body.brollMediaIds].sort(),
-    destinations: [...body.destinations].sort(), profile: body.profile, ...(creative ? { creative } : {}) };
+    destinations: [...body.destinations].sort(), profile: body.profile, ...(creative ? { creative } : {}), ...(body.sourceEvidenceJobId ? { sourceEvidenceJobId: body.sourceEvidenceJobId } : {}) };
 }
 
 @Injectable()

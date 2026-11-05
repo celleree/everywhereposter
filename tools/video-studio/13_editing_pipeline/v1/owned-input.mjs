@@ -4,6 +4,7 @@ import path from 'node:path';import {execFileSync} from 'node:child_process';
 import {validateProject,audioTimeline,PROFILE_CAPABILITY} from './project.mjs';
 import {hash,json,loadRuntime} from './runtime.mjs';
 export {hash} from './runtime.mjs';
+import {ACCEPTED_STYLE,ACCEPTED_FONTS} from './accepted-style.mjs';
 export async function verified(file,expected){
  if(typeof file!=='string'||!path.isAbsolute(file)||/^(?:\\\\|\/\/)/.test(file)||!/^([a-f0-9]{64})$/.test(expected??''))throw Error('Unverified local input');
  const s=await lstat(file);if(s.isSymbolicLink()||!s.isFile()||s.size>2*1024**3||await hash(file)!==expected)throw Error('Unverified local input');return realpath(file);
@@ -14,7 +15,7 @@ export function checkMedia(a,meta,p){
  if(a.kind==='video'){
   const [n,d]=String(v.avg_frame_rate).split('/').map(Number),fps=n/d,duration=Number(v.duration??meta.format?.duration);
   if(!Number.isFinite(fps)||Math.abs(fps-a.fps)>.001||!Number.isFinite(duration)||Math.abs(duration-a.duration)>1/a.fps+.001)throw Error('Asset clock mismatch');
-  if(a.id===p.source.assetId&&(Math.abs(fps-p.canvas.fps)>.001||Number(v.nb_frames)!==p.source.frames))throw Error('Original source must retain its declared frame clock/count');
+  if(a.id===p.source.assetId&&(Math.abs(fps-p.canvas.fps)>.001||Number(v.nb_frames)!==(p.source.originalFrames??p.source.frames)))throw Error('Original source must retain its declared frame clock/count');
  }else if(!['png','mjpeg','webp','bmp','tiff'].includes(v.codec_name))throw Error('Use a registered still image, not an animated/video panel');
 }
 export function validateOwnedTuple(m){
@@ -37,7 +38,17 @@ export async function prepareOwned(manifestFile,out,runtimeFile){
  const probe=file=>JSON.parse(execFileSync(runtime.ffprobeExecutable,['-v','error','-show_streams','-show_format','-of','json',file],{timeout:15000,maxBuffer:1024*1024}));
  const inputs=[];for(const a of p.assets){const i=records.find(i=>i.id===a.id);if(!i||i.sha256!==a.sha256||a.previewFile)throw Error('Asset binding mismatch or unsupported unbound proxy');const file=await verified(i.path,a.sha256);checkMedia(a,probe(file),p);inputs.push([a,file]);}
  const audioPath=await verified(audio.path,audio.sha256),fontPath=await verified(m.inputs.font.path,m.inputs.font.sha256);
- const audioStream=probe(audioPath).streams.find(s=>s.codec_type==='audio');if(!audioStream||Number(audioStream.duration)<valid.seconds-.001)throw Error('Aligned audio is missing or too short');
+ const accepted=p.editorStyle===ACCEPTED_STYLE;
+ const audioStream=probe(audioPath).streams.find(s=>s.codec_type==='audio');if(!audioStream||Number(audioStream.duration)<valid.seconds-(accepted?1/30:.001))throw Error('Aligned audio is missing or too short');
+ let headlineFontPath;
+ if(accepted){
+  headlineFontPath=await verified(m.inputs.headlineFont?.path,ACCEPTED_FONTS.headline.sha256);
+  if(m.inputs.font.sha256!==ACCEPTED_FONTS.caption.sha256||m.inputs.headlineFont.sha256!==ACCEPTED_FONTS.headline.sha256)throw Error('Approved font identity mismatch');
+  const pcm=file=>execFileSync(runtime.ffmpegExecutable,['-nostdin','-v','error','-threads','2','-protocol_whitelist','file,pipe','-i',file,'-map','0:a:0','-vn','-ar','48000','-ac','2','-c:a','pcm_s32le','-f','s32le','-'],{timeout:120000,maxBuffer:32*1024*1024});
+  const original=pcm(inputs.find(([asset])=>asset.id===p.source.assetId)[1]),actual=pcm(audioPath);
+  const expected=Buffer.concat(p.cuts.map(c=>original.subarray(c.in*1600*8,Math.min(original.length,c.out*1600*8))));
+  if(original.length%8||original.length/8!==p.source.audioSampleFrames||actual.length/8!==p.audioSampleFrames||!actual.equals(expected))throw Error('Aligned PCM differs from the retained original samples');
+ }
  const fontMagic=(await readFile(fontPath)).subarray(0,4).toString('hex');if(!['00010000','4f54544f'].includes(fontMagic))throw Error('Expected a real TTF/OTF font');
  if(m.provenance.proxy!==null&&m.provenance.proxy!==undefined)throw Error('Proxy adaptation is not enabled in this package; submit originals on the source clock');
  if(!path.isAbsolute(runtime.ffmpegExecutable)||!path.isAbsolute(runtime.ffprobeExecutable))throw Error('Explicit absolute media tools required');
@@ -45,11 +56,12 @@ export async function prepareOwned(manifestFile,out,runtimeFile){
  await mkdir(out,{recursive:false});await mkdir(path.join(out,'public/assets'),{recursive:true});
  for(const [a,file]of inputs){await copyFile(file,path.join(out,'public',a.file));a.originalPath=file;if(await hash(path.join(out,'public',a.file))!==a.sha256)throw Error('Staging mismatch');}
  await copyFile(fontPath,path.join(out,'public/font.ttf'));
+ if(headlineFontPath)await copyFile(headlineFontPath,path.join(out,'public/headline-font.ttf'));
  execFileSync(runtime.ffmpegExecutable,['-v','error','-n','-i',audioPath,'-map','0:a:0','-t',String(valid.seconds),'-c:a','pcm_s32le',path.join(out,'public/speech.wav')],{timeout:120000,maxBuffer:1024*1024});
  const meta=JSON.parse(execFileSync(runtime.ffprobeExecutable,['-v','error','-show_streams','-of','json',path.join(out,'public/speech.wav')],{timeout:15000,maxBuffer:1024*1024}));
- if(Math.abs(Number(meta.streams[0].duration)-valid.seconds)>.001)throw Error('Aligned audio duration mismatch');
+ if(Math.abs(Number(meta.streams[0].duration)-(accepted?p.audioSampleFrames/48000:valid.seconds))>.001)throw Error('Aligned audio duration mismatch');
  const projectBytes=JSON.stringify(p,null,2)+'\n';await writeFile(path.join(out,'project.json'),projectBytes,{flag:'wx'});
- await writeFile(path.join(out,'prepare-receipt.json'),JSON.stringify({schemaVersion:1,projectId:p.id,revision:p.revision,profile:p.profile,sourceSha256:p.source.sha256,assetHashes:Object.fromEntries(p.assets.map(a=>[a.id,a.sha256])),audioTimeline:audioTimeline(p),audioSha256:await hash(path.join(out,'public/speech.wav')),inputAudioSha256:audio.sha256,fontSha256:m.inputs.font.sha256,manifestSha256:await hash(manifestFile),provenance:m.provenance,audioProcessing:'Decode approved aligned audio only; no EQ, denoise, gain or normalization',runtimeConfigSha256:await hash(runtimeFile)},null,2));
+ await writeFile(path.join(out,'prepare-receipt.json'),JSON.stringify({schemaVersion:1,projectId:p.id,revision:p.revision,profile:p.profile,sourceSha256:p.source.sha256,assetHashes:Object.fromEntries(p.assets.map(a=>[a.id,a.sha256])),audioTimeline:audioTimeline(p),audioSha256:await hash(path.join(out,'public/speech.wav')),inputAudioSha256:audio.sha256,fontSha256:m.inputs.font.sha256,...(accepted?{headlineFontSha256:ACCEPTED_FONTS.headline.sha256}:{}),manifestSha256:await hash(manifestFile),provenance:m.provenance,audioProcessing:'Decode approved aligned audio only; no EQ, denoise, gain or normalization',runtimeConfigSha256:await hash(runtimeFile)},null,2));
  return {status:'PREPARED',projectId:p.id,revision:p.revision,frames:valid.frames};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

@@ -10,6 +10,7 @@ import { StudioApprovedPlan, inspectStudioExport, runStudioProject, stageStudioP
 import { CookedReviewService } from './cooked-review.service';
 import { StudioDirectorService } from './studio-director.service';
 import { validateStudioEvidence } from './studio-evidence';
+import { ACCEPTED_EDITOR_STYLE } from './studio-accepted-timeline';
 
 // Authored plans enter through the internal worker method, never HTTP paths or
 // uncharged model inference. Technical readiness does not authorize publishing.
@@ -28,16 +29,21 @@ export class StudioEditService {
   private async assertProducerProfile(org: string, row: any) {
     if (row.input?.request?.profile === 'easy-graphics-v1') return;
     if (process.env.STUDIO_EDITOR_V2_ENABLED !== 'true' || !this.director) throw new ServiceUnavailableException('Studio V2 production is unavailable');
-    await this.director.v2Ready(await this.runtime(org, row));
+    await this.director.v2Ready(await this.runtime(org, row), row.input.request.creative?.editorStyle === ACCEPTED_EDITOR_STYLE);
   }
   async availability(org: string) {
     try {
       await studioRuntime(org);
       let sourceOnlyProfile: 'talking-head-v2' | undefined;
+      let editorStyle: typeof ACCEPTED_EDITOR_STYLE | undefined;
       if (process.env.STUDIO_EDITOR_V2_ENABLED === 'true' && this.director) {
-        try { await this.director.v2Ready(await studioRuntime(org, 'talking-head-v2')); sourceOnlyProfile = 'talking-head-v2'; } catch {}
+        try {
+          const config = await studioRuntime(org, 'talking-head-v2');
+          try { await this.director.v2Ready(config, true); sourceOnlyProfile = 'talking-head-v2'; editorStyle = ACCEPTED_EDITOR_STYLE; }
+          catch { try { await this.director.v2Ready(config); sourceOnlyProfile = 'talking-head-v2'; } catch {} }
+        } catch {}
       }
-      return { enabled: true, scope: 'stationary-single-speaker-portrait-cfr30-v1', ...(sourceOnlyProfile ? { sourceOnlyProfile } : {}) };
+      return { enabled: true, scope: 'stationary-single-speaker-portrait-cfr30-v1', ...(sourceOnlyProfile ? { sourceOnlyProfile } : {}), ...(editorStyle ? { editorStyle } : {}) };
     }
     catch { return { enabled: false }; }
   }
@@ -68,9 +74,11 @@ export class StudioEditService {
   private startProducer(org: string, row: any) {
     const key = org + ':' + row.id;
     if (this.running.has(key)) return;
+    if (row.input?.request?.creative?.editorStyle === ACCEPTED_EDITOR_STYLE && this.running.size) throw new ServiceUnavailableException('Studio is busy. Recover this same request and resume it when the current edit completes.');
     const operation = this.produce(org, row).catch(async error => {
       // No raw provider/native errors, transcripts or paths in the public ledger.
-      try { const c = await this.runtime(org, row); await writeFile(join(studioDirectory(c, row), 'producer-status.json'), JSON.stringify({ phase: error?.studioNotAdmitted === true ? 'WAITING_FOR_WORKER' : 'NEEDS_VERIFICATION' })); } catch {}
+      const phase = error?.studioNotAdmitted === true ? 'WAITING_FOR_WORKER' : error?.studioTextLayout === true && row.input?.request?.creative?.editorStyle === ACCEPTED_EDITOR_STYLE ? 'NEEDS_TEXT_ADJUSTMENT' : 'NEEDS_VERIFICATION';
+      try { const c = await this.runtime(org, row); await writeFile(join(studioDirectory(c, row), 'producer-status.json'), JSON.stringify({ phase })); } catch {}
     }).finally(() => this.running.delete(key));
     this.running.set(key, operation);
   }
@@ -79,28 +87,43 @@ export class StudioEditService {
     if (!this.cooked || !this.director) throw new ServiceUnavailableException('Studio producer is unavailable');
     const config = await this.runtime(org, row), dir = studioDirectory(config, row);
     await mkdir(dir, { recursive: true, mode: 0o700 }); await this.assertOwned(org, row);
+    let inheritedDirection: any, inheritedEvidence: any;
+    const sourceJob = row.input.request.sourceEvidenceJobId;
+    if (sourceJob) {
+      const base = await this.jobs.get(org, sourceJob); await this.assertOwned(org, base);
+      if (base.sourceMediaId !== row.sourceMediaId || (base.input as any).request.creative?.editorStyle !== ACCEPTED_EDITOR_STYLE) throw new ConflictException('The reused evidence belongs to a different source or editor');
+      const baseDir = studioDirectory(await this.runtime(org, base), base), authored = await studioJson(join(baseDir, 'authored-plan.json'));
+      inheritedEvidence = await studioJson(join(baseDir, 'evidence.json'));
+      validateStudioEvidence(inheritedEvidence, { organizationId: org, mediaId: row.sourceMediaId });
+      inheritedDirection = { summary: authored.manifest.project.director.summary, effects: [], broll: [] };
+    }
     let raw: any;
     try { raw = await studioJson(join(dir, 'evidence.json')); }
     catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-      let allowCreate = false;
-      const marker = join(dir, 'native-dispatch.json'), guard = join(dir, 'native-admission.lock');
-      // Atomic, short filesystem admission transition shared across processes.
-      // A retained PENDING marker can only find/recover the same native job.
-      await mkdir(guard);
-      try {
-        let prior: any;
-        try { prior = await studioJson(marker); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-        if (prior && (prior.requestId !== row.id || prior.inputFingerprint !== row.inputFingerprint)) throw new ConflictException('Native admission identity changed');
-        allowCreate = !prior || prior.state === 'NOT_ADMITTED';
-        if (allowCreate) await writeFile(marker, JSON.stringify({ requestId: row.id, inputFingerprint: row.inputFingerprint, state: 'PENDING' }), { mode: 0o600 });
-      } finally { await rmdir(guard); }
-      try { raw = await this.cooked.studioSource(org, row.sourceMediaId, row.id, dir, allowCreate); }
-      catch (error) {
-        if (allowCreate && (error as { studioNotAdmitted?: boolean }).studioNotAdmitted === true) {
-          await writeFile(marker, JSON.stringify({ requestId: row.id, inputFingerprint: row.inputFingerprint, state: 'NOT_ADMITTED' }));
+      if (inheritedEvidence) {
+        raw = inheritedEvidence;
+        for (const [name, value] of Object.entries({ 'evidence.json': raw, 'cooked-decisions.json': raw.files.decisions.value, 'cooked-captions.json': raw.files.words.value, 'cooked-receipt.json': raw })) await writeFile(join(dir, name), JSON.stringify(value), { flag: 'wx', mode: 0o600 });
+      } else {
+        let allowCreate = false;
+        const marker = join(dir, 'native-dispatch.json'), guard = join(dir, 'native-admission.lock');
+        // Atomic, short filesystem admission transition shared across processes.
+        // A retained PENDING marker can only find/recover the same native job.
+        await mkdir(guard);
+        try {
+          let prior: any;
+          try { prior = await studioJson(marker); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+          if (prior && (prior.requestId !== row.id || prior.inputFingerprint !== row.inputFingerprint)) throw new ConflictException('Native admission identity changed');
+          allowCreate = !prior || prior.state === 'NOT_ADMITTED';
+          if (allowCreate) await writeFile(marker, JSON.stringify({ requestId: row.id, inputFingerprint: row.inputFingerprint, state: 'PENDING' }), { mode: 0o600 });
+        } finally { await rmdir(guard); }
+        try { raw = await this.cooked.studioSource(org, row.sourceMediaId, row.id, dir, allowCreate); }
+        catch (error) {
+          if (allowCreate && (error as { studioNotAdmitted?: boolean }).studioNotAdmitted === true) {
+            await writeFile(marker, JSON.stringify({ requestId: row.id, inputFingerprint: row.inputFingerprint, state: 'NOT_ADMITTED' }));
+          }
+          throw error;
         }
-        throw error;
       }
     }
     const evidence = validateStudioEvidence(raw, { organizationId: org, mediaId: row.sourceMediaId });
@@ -109,7 +132,7 @@ export class StudioEditService {
     await this.assertOwned(org, row);
     const assets = await this.director.prepareAssets(config, row, dir);
     if (assets.find(a => a.mediaId === row.sourceMediaId)?.sha256 !== evidence.sourceSha256) throw new ConflictException('Studio source bytes changed');
-    const plan = await this.director.produce(config, row, raw, assets, dir);
+    const plan = await this.director.produce(config, row, raw, assets, dir, inheritedDirection);
     await this.assertOwned(org, row);
     const active = await this.jobs.get(org, row.id);
     if (active.generation !== row.generation || active.state !== 'RUNNING' || active.leaseToken !== row.leaseToken) throw new ConflictException('Studio job became stale');
@@ -186,6 +209,7 @@ export class StudioEditService {
       technicalStatus: 'NOT_VERIFIED', creativeApproval: row.reviewedAt ? 'APPROVED' : 'PENDING' };
     if (!['TECHNICAL_READY', 'REVIEWED'].includes(row.state)) {
       try { const c = await this.runtime(org, row), progress = await studioJson(join(studioDirectory(c, row), 'producer-status.json'), 4096);
+        if (progress.phase === 'NEEDS_TEXT_ADJUSTMENT') return { ...response, phase: 'NEEDS_TEXT_ADJUSTMENT', message: 'Text layout could not be verified. For a headline revision, select the previous verified result and enter a shorter headline. For a new edit, shorten the headline or choose another source above, then use Start another edit. No automatic paid retry will run. Your original is unchanged.' };
         if (progress.phase === 'NEEDS_VERIFICATION') return { ...response, phase: 'NEEDS_VERIFICATION', message: 'This edit needs verification or adjustment. No automatic paid retry will run. Your original is unchanged.' };
         if (progress.phase === 'WAITING_FOR_WORKER') return { ...response, phase: 'WAITING_FOR_WORKER', message: 'The native editor was busy, restarting or not ready. No new job was admitted. Resume when it is available; your original is unchanged.' };
       } catch {}
@@ -193,7 +217,11 @@ export class StudioEditService {
     }
     try { await this.verified(org, row); }
     catch { return { ...response, technicalStatus: 'STALE_NEEDS_VERIFICATION' }; }
+    const input = row.input as any;
+    const approved = input?.request?.creative?.editorStyle === ACCEPTED_EDITOR_STYLE;
+    const authored = approved ? await studioJson(join(studioDirectory(await this.runtime(org, row), row), 'authored-plan.json')) : undefined;
     return { ...response, technicalStatus: 'PASS', sha256: row.artifactSha256, preview: true,
+      ...(approved ? { headline: authored.manifest.project.title.text, editRequest: input.request, revisionUsesPaidCredits: false } : {}),
       outputMediaId: row.outputMediaId, savedPath: row.state === 'REVIEWED' ? row.storagePath : undefined,
       limitations: (row.technicalReceipt as any).limitations, safeZoneProfiles: (row.technicalReceipt as any).safeZoneProfiles };
   }

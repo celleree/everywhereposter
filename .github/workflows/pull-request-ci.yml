@@ -269,7 +269,7 @@ jobs:
               for result in selected:
                   assertions = result.get("assertionResults")
                   require(result.get("status") == "passed" and isinstance(assertions, list) and assertions and all(a.get("status") == "passed" for a in assertions), "Required suite failed or skipped")
-                  expected_count = {"launch.permissions.spec.ts": 17, "media.controller.video-edit.spec.ts": 24, "studio-editor.integration.spec.ts": 21, "studio-storage.spec.ts": 7, "studio.review.workspace.spec.tsx": 6, "studio-bridge.spec.ts": 37, "studio-evidence.spec.ts": 13, "studio-director.spec.ts": 59, "studio-title-runtime.spec.ts": 2, "studio-caption-plan.spec.ts": 6, "composer.draft.recovery.spec.tsx": 49, "manage.modal.guided.publish.spec.tsx": 42, "publishing-submission.spec.ts": 15, "publishing-submission.postgres.spec.ts": 36}.get(result["name"].replace("\\", "/").rsplit("/", 1)[-1])
+                  expected_count = {"launch.permissions.spec.ts": 17, "media.controller.video-edit.spec.ts": 24, "studio-editor.integration.spec.ts": 21, "studio-storage.spec.ts": 7, "studio.review.workspace.spec.tsx": 9, "studio-bridge.spec.ts": 37, "studio-evidence.spec.ts": 13, "studio-director.spec.ts": 59, "studio-title-runtime.spec.ts": 2, "studio-caption-plan.spec.ts": 6, "composer.draft.recovery.spec.tsx": 49, "manage.modal.guided.publish.spec.tsx": 42, "publishing-submission.spec.ts": 15, "publishing-submission.postgres.spec.ts": 36}.get(result["name"].replace("\\", "/").rsplit("/", 1)[-1])
                   if expected_count is not None:
                       require(len(assertions) == expected_count, "Unexpected local editor assertion count")
 
@@ -566,9 +566,9 @@ jobs:
           import os, re
           from pathlib import Path
           text = (Path(os.environ['STUDIO_EVIDENCE']) / 'tests.tap').read_text()
-          for name, value in {'tests': 115, 'pass': 115, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}.items():
+          for name, value in {'tests': 122, 'pass': 122, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}.items():
               assert re.findall(r'^# ' + name + r' (\d+)\s*$', text, re.M) == [str(value)], name
-          print('PASS: all 115 Studio tests executed without skips')
+          print('PASS: all 122 Studio tests executed without skips')
           PY
           font="$(cat "$STUDIO_EVIDENCE/font-path.txt")"
           node make-synthetic-fixtures.mjs "$STUDIO_EVIDENCE/runtime.json" "$font" "$STUDIO_EVIDENCE/fixtures"

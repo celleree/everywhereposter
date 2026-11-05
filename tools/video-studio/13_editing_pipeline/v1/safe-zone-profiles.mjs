@@ -39,12 +39,19 @@ export const SAFE_ZONE_PROFILES = freeze([
     'Recommended video width is at least 1600; no required ratio/height. Thumbnail crop and design-work eligibility are separate. Promotional videos/commercials/tutorials are not eligible merely because this profile exists.'),
 ]);
 export const ALL_ADVERTISED_PRESET = 'all-advertised-provisional-v1';
+// User-approved reference guards, not official organic-platform measurements.
+// Keep them separate so legacy presets, identities and layouts do not change.
+export const ACCEPTED_SAFE_ZONE_PROFILES = freeze(['instagram','tiktok'].map(platform => profile(
+  `${platform}-approved-editor-v1`,platform,'vertical-video','provisional',[720,1280],
+  [[72,184],[552,184],[552,832],[72,832]],[],
+  'Approved reference caption/headline guards. Three local references; no universal platform-safe-zone certification.',
+)));
 export function selectProfiles(config) {
-  const known = new Map(SAFE_ZONE_PROFILES.map(p => [p.id, p]));
+  const known = new Map([...SAFE_ZONE_PROFILES,...ACCEPTED_SAFE_ZONE_PROFILES].map(p => [p.id, p]));
   let ids;
   if (config.preset !== undefined) {
     if (config.preset !== ALL_ADVERTISED_PRESET || config.profiles !== undefined) throw Error('Choose explicit profiles OR the named provisional all-advertised preset');
-    ids = [...known.keys()];
+    ids = SAFE_ZONE_PROFILES.map(p => p.id);
   } else {
     ids = config.profiles;
     if (!Array.isArray(ids) || !ids.length || ids.length > known.size || new Set(ids).size !== ids.length) throw Error('Safe-zone destination profiles must be explicit and unique');

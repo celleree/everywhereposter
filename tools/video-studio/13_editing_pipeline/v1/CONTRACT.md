@@ -1,6 +1,8 @@
 # Frozen app/worker contract v1
 
 The input top level is `{schemaVersion, project, inputs, provenance}`.
+The legacy V2 rules below apply when `editorStyle` is absent. The explicit
+approved style is described separately at the end; it never reinterprets a saved plan.
 Accepted tuples are manifest schema 1 / project schema 1 / `easy-graphics-v1`
 and manifest schema 2 / project schema 2 / `talking-head-v2`. Mixed or unknown
 tuples are rejected. V2 requires one source video asset, a single full-source cut,
@@ -120,7 +122,7 @@ network service, database write or app route is implemented by this package.
 `project.json` and `public/font.ttf` from CANDIDATE, validates a titled V2
 1080x1920/30fps full-source project of at most 1800 frames, then renders distinct
 caption/title states with the same font and Film components, without source video
-or audio. Every caption group must be visible and at most 128 states may be
+or audio. Every caption group must be visible and at most 128 legacy states (256 for the approved style) may be
 checked. V2 captions and titles must each fit at most two measured lines.
 A successful probe exclusively writes `title-preflight.json` only after all
 states and bindings have been rechecked. Existing receipts are never overwritten.
@@ -137,3 +139,54 @@ key-sorted compact JSON. This is a layout fit and custody check, not a quality
 or speech judgment; a valid title-free V2 project does not qualify for this probe.
 The capability command advertises `titlePreflight` version 1 with profile,
 commands, style, 96px font size and both two-line limits.
+
+## Approved captions, headline and quiet cuts
+
+`project.editorStyle: 'accepted-caption-b-top-rounded-v1'` is an explicit V2
+opt-in. `capabilities.acceptedEditor` binds version, style, caption-plan command
+and both exact font hashes. The original capabilities remain unchanged.
+`accepted-captions CANDIDATE --runtime RUNTIME` uses actual loaded fonts and
+the shared browser composition to group at most three words on one line, split
+at source seams, gaps over 0.19s, punctuation or measured advance over 360px.
+All design units below are at 720x1280 and scale uniformly with the canvas.
+
+Captions are 34.666667px Liberation Sans Bold, white throughout each phrase,
+with a 2.4px round-joined #080808 stroke at alpha 240/255 and no backing.
+Actual union ink is centered at x=360; the reference em origin is converted to
+a browser baseline using the actual font ascent. The complete caption guard
+fits [72,704,552,832]. Phrases end at the minimum of final word end+0.18s,
+next phrase start and output duration, quantized with decimal round-half-up.
+Accepted words retain sourceStart/sourceEnd, sourceSpan and integer frameOffset;
+tail addition, gap comparison and output projection use rational source times
+through the final rounding step. These fields also enter the frozen layout hash.
+There is no active-word highlighting, shrinking, clipping or text rewriting.
+
+The headline uses TikTokSans36pt-Bold.ttf at 42px. Actual glyph ink is centered
+at [360,228], at most 360px wide. Its white box adds 12px horizontal/8px vertical
+padding, has radius 12px, and fits entirely in [72,184,552,272]. It appears on
+output frames [0,min(135,outputFrames)). Hair overlap is allowed; fixed framing
+still requires creative review. A custom headline is user-authored; default copy
+uses the complete eligible opening sentence. Overflow fails before paid direction.
+
+Only `instagram-approved-editor-v1` and `tiktok-approved-editor-v1` may accompany
+this style. These are user-approved reference guards, explicitly provisional,
+not organic-platform certification. Legacy profiles and presets are unchanged.
+
+Quiet cuts are bounded proposals from the existing source/VAD policy. Every raw
+word interval vetoes an intersecting deletion; no words, semantic retakes or
+sentences are automatically removed. Frame spans and source word IDs remain
+stable. PCM is decoded at 48kHz stereo, then concatenated at sample boundaries
+[in*1600,min(out*1600,sourceSamples)). Preparation independently compares the
+retained PCM to the original source. Original media bytes remain untouched.
+An audio tail of at most one frame is retained with explicit `source.originalFrames`
+and one final held picture frame; `source.audioSampleFrames` and output
+`audioSampleFrames` bind actual sample counts. Codec padding is separate.
+
+The app request opts in through `creative.editorStyle`, optionally `headline`
+and `restoreCuts`. An owned `sourceEvidenceJobId` reuses the original transcript
+and prior direction for a separate, uncharged local revision. Restoring all cuts
+restores every original word time and PCM sample, preserving earlier results.
+No production activation, listening, real-footage acceptance or cross-engine
+pixel equivalence is established by contract/unit tests. Both exact fonts are
+included with verified provenance. Matching-font visual acceptance against the
+private GDI references and real-footage app acceptance remain release gates.

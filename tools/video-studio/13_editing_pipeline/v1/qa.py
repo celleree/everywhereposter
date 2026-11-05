@@ -40,6 +40,7 @@ def main():
   for cut in p['cuts']:
    if offset<=frame<offset+cut['out']-cut['in']:original=cut['in']+frame-offset;break
    offset+=cut['out']-cut['in']
+  original=min(original,p['source'].get('originalFrames',p['source']['frames'])-1)
   w=p['canvas']['width'];h=p['canvas']['height'];half=(h//4)*2
   mask=''
   title=p.get('title') if p.get('profile')=='talking-head-v2' else None

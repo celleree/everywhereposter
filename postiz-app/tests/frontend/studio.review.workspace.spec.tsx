@@ -94,3 +94,55 @@ test('recovers the exact stored V1 body under the original key even when new V2 
   expect(mockFetch.mock.calls.find(([url, options]) => url === '/media/studio/jobs' && options?.method === 'POST')![1].body).toBe(bytes);
   expect(localStorage.getItem(key)).toBe(bytes);
 });
+
+const approvedRequest = (headline: string) => ({ requestKey: 'previous-request-key', sourceMediaId: 'source', brollMediaIds: [],
+  destinations: ['instagram'], profile: 'talking-head-v2', creative: { brief: 'Keep my words', editorStyle: 'accepted-caption-b-top-rounded-v1', headline,
+    framing: { x: .28, y: .28, width: .44, height: .24, confirmed: true, stationary: true, singleSpeaker: true } } });
+const submittedEdits = () => mockFetch.mock.calls.filter(([url, options]) => url === '/media/studio/jobs' && options?.method === 'POST');
+
+test('preserves an overlength headline and rejects it before dispatch or receipt creation, then accepts a correction', async () => {
+  mockAvailability.editorStyle = 'accepted-caption-b-top-rounded-v1';
+  render(<StudioReviewWorkspace scope="test" />); await chooseSource();
+  fireEvent.click(screen.getByRole('checkbox', { name: /one stationary speaker/ }));
+  const input = screen.getByRole('textbox', { name: 'Headline (optional)' }) as HTMLInputElement, full = 'Full headline '.repeat(6);
+  expect(input.hasAttribute('maxlength')).toBe(false);
+  fireEvent.change(input, { target: { value: full } });
+  fireEvent.click(screen.getByRole('button', { name: /Create Studio edit/ }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Shorten the headline to 60 characters or fewer');
+  expect(input.value).toBe(full); expect(submittedEdits()).toHaveLength(0);
+  expect(localStorage.getItem('everywhereposter:studio-request:v1:test')).toBeNull();
+  fireEvent.change(input, { target: { value: 'A shorter headline' } });
+  fireEvent.click(screen.getByRole('button', { name: /Create Studio edit/ }));
+  await waitFor(() => expect(submittedEdits()).toHaveLength(1));
+  expect(JSON.parse(submittedEdits()[0][1].body)).toMatchObject({ profile: 'talking-head-v2', brollMediaIds: [],
+    creative: { editorStyle: 'accepted-caption-b-top-rounded-v1', headline: 'A shorter headline' } });
+});
+
+test('preserves overlength revision text and the prior result, then sends the corrected separate revision', async () => {
+  const id = '00000000-0000-4000-8000-000000000001', request = approvedRequest('Previous headline'), original = JSON.stringify(request);
+  mockJobs = [{ id, state: 'DONE' }];
+  mockResult = { id, generation: 1, sha256: 'hash', technicalStatus: 'PASS', preview: '/preview', headline: 'Previous headline', editRequest: request };
+  render(<StudioReviewWorkspace scope="test" />);
+  const input = screen.getByRole('textbox', { name: 'Edit headline' }) as HTMLInputElement, full = 'Revision headline '.repeat(5);
+  expect(input.hasAttribute('maxlength')).toBe(false);
+  fireEvent.change(input, { target: { value: full } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply headline as a new revision' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Shorten the headline to 60 characters or fewer');
+  expect(input.value).toBe(full); expect(submittedEdits()).toHaveLength(0);
+  expect(localStorage.getItem('everywhereposter:studio-request:v1:test')).toBeNull();
+  expect(JSON.stringify(request)).toBe(original);
+  fireEvent.change(input, { target: { value: 'Corrected headline' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply headline as a new revision' }));
+  await waitFor(() => expect(submittedEdits()).toHaveLength(1));
+  expect(JSON.parse(submittedEdits()[0][1].body)).toMatchObject({ sourceEvidenceJobId: id, creative: { headline: 'Corrected headline' } });
+  expect(JSON.stringify(request)).toBe(original);
+});
+
+test('invalid approved-style recovery preserves its original receipt without dispatching or rewriting it', async () => {
+  const key = 'everywhereposter:studio-request:v1:test', bytes = JSON.stringify(approvedRequest('Retain this headline '.repeat(5)));
+  localStorage.setItem(key, bytes);
+  render(<StudioReviewWorkspace scope="test" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Recover last edit request' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Shorten the headline to 60 characters or fewer');
+  expect(submittedEdits()).toHaveLength(0); expect(localStorage.getItem(key)).toBe(bytes);
+});

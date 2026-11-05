@@ -1,10 +1,15 @@
 import {checkContentBounds} from './safe-zones.mjs';
+import {ACCEPTED_STYLE} from './accepted-style.mjs';
 
 const finite=Number.isFinite;
 const overlap=(a,b)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y;
 const polygon=b=>[[b.x/1080,b.y/1920],[(b.x+b.width)/1080,b.y/1920],[(b.x+b.width)/1080,(b.y+b.height)/1920],[b.x/1080,(b.y+b.height)/1920]];
 export const TITLE_STYLE=Object.freeze({font:'700 96px "EP Plex"',fontSize:96,lineHeight:110,padding:24});
 export function validateTitle(title,p,frames,cells){
+ if(p.editorStyle===ACCEPTED_STYLE){
+  if(!title||Object.keys(title).sort().join(',')!=='bounds,frames,from,style,text,version,wordIds'||title.version!==1||title.style!==ACCEPTED_STYLE||typeof title.text!=='string'||!title.text.trim()||title.text.length>60||/[\r\n]/.test(title.text)||!Array.isArray(title.wordIds)||title.wordIds.some(id=>!p.words.some(w=>w.id===id))||title.from!==0||title.frames!==Math.min(135,frames)||!title.bounds||Object.keys(title.bounds).sort().join(',')!=='height,width,x,y'||Object.entries({x:108,y:276,width:720,height:132}).some(([k,v])=>title.bounds[k]!==v))throw Error('Invalid approved headline. Edit the headline and retry.');
+  return title;
+ }
  if(!title||typeof title!=='object'||Array.isArray(title)||Object.keys(title).sort().join(',')!=='bounds,frames,from,style,text,version,wordIds'||title.version!==1||title.style!=='block-title-v1')throw Error('Invalid title contract');
  if(!Array.isArray(title.wordIds)||title.wordIds.length<3||title.wordIds.length>9)throw Error('Title needs 3-9 contiguous source words');
  const start=p.words.findIndex(w=>w.id===title.wordIds[0]),slice=p.words.slice(start,start+title.wordIds.length);
