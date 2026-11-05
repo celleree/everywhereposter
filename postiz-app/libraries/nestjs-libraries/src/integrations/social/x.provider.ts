@@ -7,8 +7,7 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { lookup } from 'mime-types';
-import sharp from 'sharp';
+import { prepareProviderMedia } from '@gitroom/nestjs-libraries/upload/provider-media';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 import {
   BadBody,
@@ -334,22 +333,10 @@ export class XProvider extends SocialAbstract implements SocialProvider {
           p?.media?.flatMap(async (m) => {
             return {
               id: await this.runInConcurrent(
-                async () =>
-                  client.v2.uploadMedia(
-                    m.path.indexOf('mp4') > -1
-                      ? Buffer.from(await readOrFetch(m.path))
-                      : await sharp(await readOrFetch(m.path), {
-                          animated: lookup(m.path) === 'image/gif',
-                        })
-                          .resize({
-                            width: 1000,
-                          })
-                          .gif()
-                          .toBuffer(),
-                    {
-                      media_type: (lookup(m.path) || '') as any,
-                    }
-                  ),
+                async () => {
+                  const upload = await prepareProviderMedia(Buffer.from(await readOrFetch(m.path)), 'x');
+                  return client.v2.uploadMedia(upload.buffer, { media_type: upload.mimeType as any });
+                },
                 true
               ),
               postId: p.id,
