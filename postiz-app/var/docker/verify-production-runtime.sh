@@ -57,7 +57,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const appRequire = createRequire('/app/package.json');
-assert.equal(appRequire('next/package.json').version, '16.4.3');
+assert.equal(appRequire('next/package.json').version, '16.4.5');
 const nextRequire = createRequire(appRequire.resolve('next/package.json'));
 const { PrismaClient } = require('@prisma/client');
 require('@temporalio/worker');
