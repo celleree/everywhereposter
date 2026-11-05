@@ -243,7 +243,7 @@ export function CreatorAudit() {
                   Instagram connection{' '}
                   <select
                     aria-label="Instagram connection"
-                    className="min-h-[44px] w-full min-w-0 rounded-[8px] border border-newTableBorder bg-newBgColorInner px-3 text-textColor [color-scheme:light] dark:[color-scheme:dark] focus-visible:outline focus-visible:outline-2"
+                    className="min-h-[44px] w-full min-w-0 rounded-[8px] border border-newTableBorder bg-newBgColorInner px-3 text-textColor [color-scheme:light] dark:[color-scheme:dark] focus-visible:!outline focus-visible:!outline-2 focus-visible:outline-offset-2"
                     value={selectedIntegration}
                     onChange={(event) => setSelectedIntegration(event.target.value)}
                   >
