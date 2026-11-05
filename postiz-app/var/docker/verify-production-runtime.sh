@@ -53,7 +53,12 @@ CHECKPOINT_DISABLE=1 PRISMA_HIDE_UPDATE_MESSAGE=1 \
 
 node <<'NODE'
 const bcrypt = require('bcrypt');
-const sharp = require('sharp');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+const appRequire = createRequire('/app/package.json');
+assert.equal(appRequire('next/package.json').version, '16.4.5');
+const nextRequire = createRequire(appRequire.resolve('next/package.json'));
 const { PrismaClient } = require('@prisma/client');
 require('@temporalio/worker');
 
@@ -61,16 +66,55 @@ if (!bcrypt.compareSync('runtime-check', bcrypt.hashSync('runtime-check', 4))) {
   throw new Error('bcrypt runtime check failed');
 }
 
-Promise.all([
-  sharp({ create: { width: 1, height: 1, channels: 4, background: '#000000' } })
-    .png()
-    .toBuffer(),
-  new PrismaClient().$disconnect(),
-]).then(([image]) => {
-  if (image[0] !== 0x89 || image.toString('ascii', 1, 4) !== 'PNG') {
-    throw new Error('sharp runtime check failed');
+// Fixed benign 2x1 fixtures exercise decoders independently of encoders.
+const fixtures = {
+  png: 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAD0lEQVR4nGNwSetwSesAAAfdAmUdxQbZAAAAAElFTkSuQmCC',
+  jpeg: '/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAIDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAABf/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJQA0If/2Q==',
+  avif: 'AAAAHGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZgAAAOptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAAAAAAA5waXRtAAAAAAABAAAAImlsb2MAAAAAREAAAQABAAAAAAEOAAEAAAAAAAAAGgAAACNpaW5mAAAAAAABAAAAFWluZmUCAAAAAAEAAGF2MDEAAAAAamlwcnAAAABLaXBjbwAAABNjb2xybmNseAABAA0ABoAAAAAMYXYxQ4EgAgAAAAAUaXNwZQAAAAAAAAACAAAAAQAAABBwaXhpAAAAAAMICAgAAAAXaXBtYQAAAAAAAAABAAEEAYIDBAAAACJtZGF0EgAKBzgAJhAQ0GkyDRgAAABAALATqdaq5IA=',
+};
+function atLeast(actual, minimum) {
+  assert.ok(actual, `missing native version (minimum ${minimum})`);
+  const a = actual.split('.').map(Number), b = minimum.split('.').map(Number);
+  const first = b.findIndex((part, index) => a[index] !== part);
+  assert.ok(first < 0 || a[first] > b[first], `${actual} is below ${minimum}`);
+}
+async function verifySharp(label, resolveFrom) {
+  const sharp = resolveFrom('sharp');
+  const sharpRequire = createRequire(resolveFrom.resolve('sharp'));
+  assert.equal(sharpRequire(path.join(path.dirname(resolveFrom.resolve('sharp')), '../package.json')).version, '0.35.5');
+  assert.equal(sharp.versions.sharp, '0.35.5');
+  assert.equal(sharpRequire('@img/sharp-linux-x64/package').version, '0.35.5');
+  assert.equal(sharpRequire('@img/sharp-libvips-linux-x64/package').version, '1.3.4');
+  for (const [name, floor] of Object.entries({ vips: '8.18.7', heif: '1.23.5', rsvg: '2.63.2' })) {
+    atLeast(sharp.versions[name], floor);
   }
-}).catch((error) => {
+  console.log(`${label}: ${resolveFrom.resolve('sharp')} ${JSON.stringify(sharp.versions)}`);
+  for (const [format, encoded] of Object.entries(fixtures)) {
+    const input = Buffer.from(encoded, 'base64');
+    const metadata = await sharp(input).metadata();
+    assert.equal(metadata.width, 2);
+    assert.equal(metadata.height, 1);
+    assert.equal(metadata.format, format === 'avif' ? 'heif' : format);
+    const { data, info } = await sharp(input).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    assert.equal(info.width, 2);
+    assert.equal(info.height, 1);
+    assert.equal(data.length, 6);
+    assert.ok(data.every((value, index) => Math.abs(value - [68, 102, 136][index % 3]) <= 8));
+  }
+  const encoded = await sharp({ create: { width: 1, height: 1, channels: 4, background: '#000000' } }).png().toBuffer();
+  assert.equal(encoded[0], 0x89);
+  assert.equal(encoded.toString('ascii', 1, 4), 'PNG');
+  const svg = await sharp('/app/apps/frontend/public/icons/github.svg').raw().toBuffer({ resolveWithObject: true });
+  assert.equal(svg.info.width, 41);
+  assert.equal(svg.info.height, 40);
+  assert.equal(svg.data.length, 41 * 40 * svg.info.channels);
+  assert.ok(svg.data.some((value) => value !== 0));
+}
+Promise.all([
+  verifySharp('app Sharp', appRequire),
+  verifySharp('Next Sharp', nextRequire),
+  new PrismaClient().$disconnect(),
+]).catch((error) => {
   console.error(error.message);
   process.exit(1);
 });

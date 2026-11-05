@@ -22,6 +22,7 @@ import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-set
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import sharp from 'sharp';
+import type { Metadata } from 'sharp';
 
 type InstagramMediaCreateDiagnostics = {
   mediaUrl?: string;
@@ -1423,7 +1424,7 @@ export class InstagramProvider
       );
     }
 
-    let metadata: sharp.Metadata;
+    let metadata: Metadata;
     try {
       metadata = await sharp(buffer, { failOn: 'error' }).metadata();
     } catch (error) {
