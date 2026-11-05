@@ -28,18 +28,6 @@ jest.mock('@gitroom/helpers/utils/strip.html.validation', () => ({
   ),
 }));
 
-jest.mock('sharp', () => {
-  const sharp = jest.fn(() => ({
-    jpeg: jest.fn().mockReturnThis(),
-    toBuffer: jest.fn(),
-  }));
-
-  return {
-    __esModule: true,
-    default: sharp,
-  };
-});
-
 jest.mock('bcrypt', () => ({
   compareSync: jest.fn(),
   hashSync: jest.fn(),
@@ -53,6 +41,9 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import dayjs from 'dayjs';
+import sharp from 'sharp';
+import axios from 'axios';
+import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 
 const createProvider = (overrides: Record<string, any> = {}) => ({
   identifier: 'x',
@@ -456,6 +447,68 @@ describe('PostsService published post management', () => {
           process.env[key] = value;
         }
       }
+    }
+  });
+
+  it('saves oriented, white-flattened sRGB baseline JPEG bytes during media normalization', async () => {
+    // EXIF orientation 6 turns the transparent 20x10 input into a 10x20 image.
+    const source = await sharp({
+      create: {
+        width: 20,
+        height: 10,
+        channels: 4,
+        background: '#00000000',
+      },
+    })
+      .withMetadata({ orientation: 6 })
+      .png()
+      .toBuffer();
+    const get = jest.spyOn(axios, 'get').mockResolvedValue({ data: source });
+    try {
+      const { service, postRepository } = createService();
+      const storage = jest
+        .mocked(UploadFactory.createStorage)
+        .mock.results.slice(-1)[0].value;
+      storage.uploadFile.mockResolvedValue({
+        path: 'https://assets.example/normalized.jpg',
+        originalname: 'normalized.jpg',
+      });
+      const result = await service.updateMedia(
+        'post-1',
+        [
+          {
+            id: 'media-1',
+            path: 'https://assets.example/source.png',
+            type: 'image',
+          },
+        ],
+        true
+      );
+      expect(storage.uploadFile).toHaveBeenCalledTimes(1);
+      const saved = storage.uploadFile.mock.calls[0][0];
+      expect(saved).toMatchObject({
+        mimetype: 'image/jpeg',
+        size: saved.buffer.length,
+      });
+      expect(await sharp(saved.buffer).metadata()).toMatchObject({
+        format: 'jpeg',
+        width: 10,
+        height: 20,
+        space: 'srgb',
+        hasAlpha: false,
+        isProgressive: false,
+      });
+      const pixels = await sharp(saved.buffer).removeAlpha().raw().toBuffer();
+      expect([...pixels].every((channel) => channel >= 250)).toBe(true);
+      expect(result[0]).toMatchObject({
+        path: 'https://assets.example/normalized.jpg',
+        type: 'image',
+      });
+      expect(JSON.parse(postRepository.updateImages.mock.calls[0][1])).toEqual(
+        result
+      );
+    } finally {
+      get.mockRestore();
     }
   });
 
