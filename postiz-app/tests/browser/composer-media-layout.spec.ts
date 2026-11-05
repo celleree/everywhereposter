@@ -6,13 +6,19 @@ for (const [width, height] of [[180, 320], [320, 180], [240, 300], [240, 240]]) 
   test(`Resumable upload: full-frame ${width}x${height} preview clears only attached transfer`, async ({ page }, info) => {
     // Freeze Date only so attachment, not the 10s receipt expiry, clears the tray.
     // Real timers and video playback keep running through composer bootstrap.
-    await page.clock.setFixedTime(new Date());
+    const fixtureTime = new Date();
+    await page.clock.setFixedTime(fixtureTime);
     const videoBytes = readFileSync(path.resolve(`tests/browser/assets/composer-${width}x${height}.mp4`));
     const media = { id: 'layout-video', name: 'server-session.mp4', originalName: 'Original phone video.mp4',
       path: '/audit-fixtures/layout-video.mp4', type: 'video', transcriptionStatus: 'READY' };
     const session = { id: 'saved-session', originalName: media.originalName, byteSize: videoBytes.length,
       status: 'COMPLETE', parts: [], manifest: [], media };
-    await page.route('**/backend-api/media/uploads**', route => route.fulfill({ json: { sessions: [session] } }));
+    let uploadReads = 0, fulfilledReads = 0;
+    await page.route('**/backend-api/media/uploads**', async route => {
+      uploadReads++;
+      await route.fulfill({ json: { sessions: [session] } });
+      fulfilledReads++;
+    });
     await page.route('**/backend-api/media?*', route => route.fulfill({ json: { pages: 1, results: [media] } }));
     await page.route('**/backend-api/media/layout-video**', route => route.fulfill({ json:
       route.request().url().includes('/transcription') ? { mediaId: media.id, status: 'READY', transcription: 'Synthetic test transcript' } : media }));
@@ -20,7 +26,21 @@ for (const [width, height] of [[180, 320], [320, 180], [240, 300], [240, 240]]) 
     await openApp(page, '/create');
     const card = page.locator('.composer-upload-card');
     const tray = card.getByRole('region', { name: 'Video transfers' });
-    await expect(tray.getByText('Transfer complete', { exact: true })).toBeVisible();
+    try {
+      await expect(tray.getByText('Transfer complete', { exact: true })).toBeVisible();
+    } catch (error) {
+      const browser = await page.evaluate(() => ({
+        now: Date.now(),
+        cards: document.querySelectorAll('.composer-upload-card').length,
+        transferRegions: document.querySelectorAll('.composer-upload-card section[aria-label="Video transfers"]').length,
+        transferRows: document.querySelectorAll('.composer-upload-card [data-transfer-id]').length,
+        loadingIndicators: document.querySelectorAll('[aria-busy="true"], [role="progressbar"]').length,
+      })).catch(() => ({ unavailable: true }));
+      const diagnostics = JSON.stringify({ width, height, fixtureTime: fixtureTime.getTime(), uploadReads, fulfilledReads, browser });
+      console.error('COMPOSER_TRANSFER_READINESS ' + diagnostics);
+      await info.attach('composer-transfer-readiness', { body: diagnostics, contentType: 'application/json' }).catch(() => {});
+      throw error;
+    }
     await card.getByRole('button', { name: 'Media Library', exact: true }).click();
     const picker = page.getByRole('dialog', { name: 'Media Library', exact: true });
     await picker.getByRole('button', { name: `Select ${media.originalName}`, exact: true }).click({ position: { x: 10, y: 10 } });
