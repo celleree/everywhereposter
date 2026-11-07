@@ -169,10 +169,38 @@ const fixture = process.env.AI_WALLET_TEST_DATABASE_URL;
   });
   it('retains the request when a full charge summary arrives before its individual refund receipt', async () => {
     await approve(); const summary = event('succeeded', { id: chargeId(), object: 'charge', amount_refunded: 123,
-      refunds: { has_more: false, data: [{ id: refundId() }] } }, 'charge.refunded');
+      refunds: { object: 'list', has_more: false, data: [{ id: refundId() }] } }, 'charge.refunded');
     await deliver(summary); expect(await balance()).toMatchObject({ balanceNanos: 1230000000n, heldNanos: 1230000000n, status: 'ACTIVE' });
-    await deliver(event()); await deliver(summary);
+    await deliver(event()); await deliver({ ...summary, id: 'evt_' + randomUUID() });
     expect(await balance()).toMatchObject({ balanceNanos: 0n, heldNanos: 0n, status: 'ACTIVE' });
+  });
+  it.each([
+    ['PENDING', undefined], ['PENDING', 'wrong'],
+    ['SUCCEEDED', undefined], ['SUCCEEDED', 'wrong'],
+  ])('quarantines malformed charge summaries in %s with list marker %s', async (state, marker) => {
+    await approve();
+    if (state === 'SUCCEEDED') await deliver(event());
+    const summary = event('succeeded', { id: chargeId(), object: 'charge', amount_refunded: 123,
+      refunds: { ...(marker === undefined ? {} : { object: marker }), has_more: false, data: [{ id: refundId() }] } }, 'charge.refunded');
+    await deliver(summary);
+    const expected = state === 'SUCCEEDED'
+      ? { balanceNanos: 0n, heldNanos: 0n, status: 'REVIEW' }
+      : { balanceNanos: 1230000000n, heldNanos: 1230000000n, status: 'REVIEW' };
+    expect(await balance()).toMatchObject(expected);
+    expect(await db.aiWalletRefundEvent.findUniqueOrThrow({ where: { eventId: summary.id } }))
+      .toMatchObject({ outcome: 'UNCERTAIN', evidence: { refundsShape: 'MALFORMED' } });
+    await deliver(summary); await deliver(event('pending')); await deliver(event());
+    const valid = event('succeeded', { id: chargeId(), object: 'charge', amount_refunded: 123,
+      refunds: { object: 'list', has_more: false, data: [{ id: refundId() }] } }, 'charge.refunded');
+    await deliver(valid);
+    expect(await balance()).toMatchObject(expected);
+    expect((await service.summary(org)).requests[0]).toMatchObject({
+      status: state === 'SUCCEEDED' ? 'REFUNDED' : 'REQUESTED',
+      testReconciliation: { state: 'UNCERTAIN' },
+    });
+    expect(await db.aiWalletLedger.count({ where: { organizationId: org, kind: 'REVERSAL' } }))
+      .toBe(state === 'SUCCEEDED' ? 1 : 0);
+    expect(await db.aiWalletRefundEvent.count({ where: { eventId: summary.id } })).toBe(1);
   });
   it.each(['RESERVED', 'UNKNOWN', 'SETTLED'])('refuses reservation/usage history %s', async state => {
     await service.resolve(org, request.id, 'u', 'WITHDRAWN');
