@@ -18,7 +18,7 @@ function transport(reels = [reel()], override?: (url: URL, init: RequestInit) =>
     if (url.pathname.endsWith('/me') || url.pathname === '/v25.0/12345') return json(profile);
     if (url.pathname.endsWith('/media')) return json({ data: reels });
     const metric = url.searchParams.get('metric');
-    return json({ data: [{ name: metric, period: 'lifetime', values: [{ value: metric === 'views' ? 0 : 10 }] }] });
+    return json({ data: [{ name: metric, period: 'lifetime', ...(metric?.includes('watch_time') || metric?.includes('view_total_time') ? { unit: 'milliseconds' } : metric === 'reels_skip_rate' ? { unit: 'percent' } : {}), values: [{ value: metric === 'views' ? 0 : 10 }] }] });
   });
 }
 const collect = (fetcher: any, extra: any = {}, conn = connection, run = 'run-fixture') => collectInstagramAudit(conn, run, { fetcher, now, ...extra });
@@ -32,12 +32,12 @@ it('exports immutable sanitized official measurements including real zero and tr
   expect(result.snapshot.records[0]).toMatchObject({ relationship: 'primary_owned', paid: null, trial: null, duration_seconds: null,
     metrics: { views: { value: 0, status: 'available', unit: 'count', source: 'instagram_media_insights',
       definition: 'instagram-views-lifetime-v25.0', api_version: 'v25.0', observed_at: now().toISOString(), period: 'lifetime', since: null, until: null } } });
-  expect(result.snapshot.records[0].metrics.ig_reels_avg_watch_time).toBeUndefined();
-  expect(result.snapshot.capabilities.ig_reels_avg_watch_time).toBe('not_requested');
+  expect(result.snapshot.records[0].metrics.ig_reels_avg_watch_time.value).toBe(10);
+  expect(result.snapshot.capabilities.ig_reels_avg_watch_time).toBe('available');
   expect(Object.isFrozen(result.snapshot.records[0].metrics.views)).toBe(true);
   expect(result.assets[0].url).toContain('signature=transient');
   expect(JSON.stringify(result.snapshot)).not.toMatch(/FIXTURE_SECRET_TOKEN|signature=transient|media_url/);
-  expect(fetcher).toHaveBeenCalledTimes(8);
+  expect(fetcher).toHaveBeenCalledTimes(19);
   for (const [url, init] of fetcher.mock.calls) {
     expect(url).toMatch(/^https:\/\/graph.instagram.com\/v25.0\//);
     expect(url).not.toContain(connection.token);
@@ -122,7 +122,7 @@ it.each([
   const result = await collect(fetcher);
   expect(result.assets).toEqual([]);
   expect(result.snapshot.records[0].asset_status).toBe('unavailable');
-  expect(fetcher).toHaveBeenCalledTimes(8);
+  expect(fetcher).toHaveBeenCalledTimes(19);
 });
 
 it('accepts Meta fbcdn URLs only as server assets and redacts credential text from captions', async () => {
@@ -189,7 +189,7 @@ it.each([429, 4, 17, 32, 613, 190, 401])('stops rate/auth %s immediately and res
   const resume = transport();
   const result = await collect(resume, { checkpoint: partial.checkpoint }, connection, 'run-resumed');
   expect(calls(resume, 'views')).toHaveLength(0);
-  expect(resume).toHaveBeenCalledTimes(4);
+  expect(resume).toHaveBeenCalledTimes(14);
   expect(result.snapshot.coverage.partial_reason).toBeNull();
   expect(result.snapshot.run_id).toBe('run-resumed');
   expect(partial.snapshot.coverage.partial_reason).not.toBeNull();
@@ -233,7 +233,9 @@ it('caps metadata at 300 with a disclosed partial reason and bounds pagination a
   }) : undefined);
   const result = await collect(fetcher);
   expect(page).toBe(6);
-  expect(result.snapshot.coverage).toEqual({ discovered: 300, truncated: true, partial_reason: 'metadata_limit' });
+  expect(result.snapshot.coverage).toEqual({ discovered: 300, truncated: true, partial_reason: 'request_budget' });
+  expect(result.checkpoint.state.terminalReason).toBe('metadata_limit');
+  expect(result.snapshot.records.every(record => record.metrics.views.status === 'available')).toBe(true);
   let emptyPage = 0;
   const empty = transport([], url => url.pathname.endsWith('/media') ? json({ data: [],
     paging: { next: 'https://ignored.test', cursors: { after: `PAGE_${++emptyPage}` } } }) : undefined);
