@@ -398,7 +398,20 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     const [firstPost] = postDetails;
 
     // upload media for the first post
-    const uploadAll = await this.uploadMedia(client, [firstPost]);
+    let uploadAll: Record<string, string[]>;
+    try {
+      uploadAll = await this.uploadMedia(client, [firstPost]);
+    } catch (error) {
+      if (error instanceof BadBody && error.message === 'Unknown Error') {
+        throw new BadBody(
+          'x',
+          '{}',
+          {} as any,
+          'X could not prepare or upload the attached media. Check that the file is available. For video, export an MP4 with H.264 video and AAC-LC audio.'
+        );
+      }
+      throw error;
+    }
 
     const media_ids = (uploadAll[firstPost.id] || []).filter((f) => f);
 
