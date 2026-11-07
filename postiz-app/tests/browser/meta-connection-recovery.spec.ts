@@ -26,6 +26,21 @@ const pages = [
     picture: { data: { url: '/icons/platforms/facebook.png' } },
   },
 ];
+// Compile the callback page before timing interactive recovery. This HTTP-only
+// fixture GET runs no client effect and sends no OAuth code or state.
+test.beforeAll(async ({ request }) => {
+  const response = await request.get(
+    `${browserOrigin}/integrations/social/facebook`,
+    {
+      headers: { cookie: 'auth=synthetic-playwright-session' },
+      maxRedirects: 0,
+      timeout: 85_000,
+    }
+  );
+  expect(response.status()).toBe(200);
+  await response.dispose();
+});
+
 async function callback(
   page: Page,
   provider: string,
@@ -127,9 +142,9 @@ for (const [provider, name] of providers) {
         page.evaluate(() => sessionStorage.getItem('integration-return-route'))
       )
       .toBeNull();
-    await page.goBack();
+    await page.goBack({ waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL('/create');
-    await page.goForward();
+    await page.goForward({ waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL('/create?draft=kept#channels');
     expect(callbacks).toHaveLength(1);
     const dialog = await picker(page);
