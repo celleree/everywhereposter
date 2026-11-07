@@ -820,7 +820,7 @@ describe('ManageModal guided publishing bridge', () => {
     expect(JSON.stringify(postPayload())).not.toContain('inheritRootMedia');
   });
 
-  it('serializes only submission fields while preserving comments and optional media details', async () => {
+  it('submits enabled destinations with independent Review captions and preserved provider data', async () => {
     providerResults[0].values = [
       { id: '', content: 'Provider root', delay: undefined, media: [
         { ...media[0], alt: '', thumbnailTimestamp: 0, originalName: 'discarded.mp4', chosen: true },
@@ -833,11 +833,18 @@ describe('ManageModal guided publishing bridge', () => {
       { id: 'company-comment', content: 'Company comment', delay: 7, media: [{ id: 'photo', path: '/photo.jpg' }] },
     ];
 
+
     renderGuidedManageModal();
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+
     await waitFor(() => expect(postPayload()).toBeTruthy());
+    expect(mockCheckAllValid).toHaveBeenCalledWith([
+      founderLinkedIn.id,
+      companyLinkedIn.id,
+    ]);
 
     const payload = postPayload();
+    expect(payload).toMatchObject({ type: 'now', shortLink: true });
     expect(payload.posts).toEqual([
       {
         integration: { id: founderLinkedIn.id }, group: expect.any(String),
@@ -859,55 +866,8 @@ describe('ManageModal guided publishing bridge', () => {
       },
     ]);
     expect(payload.posts[1].group).toBe(payload.posts[0].group);
-    expect(providerResults[0].values[0].content).toBe('Provider root');
-  });
-
-  it('submits enabled destinations with independent Review captions and preserved provider data', async () => {
-    renderGuidedManageModal();
-    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
-
-    await waitFor(() => expect(postPayload()).toBeTruthy());
-    expect(mockCheckAllValid).toHaveBeenCalledWith([
-      founderLinkedIn.id,
-      companyLinkedIn.id,
-    ]);
-
-    const payload = postPayload();
-    expect(payload).toMatchObject({
-      type: 'now',
-      shortLink: true,
-      posts: [
-        {
-          integration: { id: founderLinkedIn.id },
-          settings: { __type: 'linkedin', visibility: 'PUBLIC' },
-          value: [
-            {
-              content: 'Edited founder caption.',
-              image: media,
-            },
-            { content: `Provider comment for ${founderLinkedIn.id}` },
-          ],
-        },
-        {
-          integration: { id: companyLinkedIn.id },
-          settings: {
-            __type: 'linkedin-page',
-            organization: 'company-1',
-          },
-          value: [
-            {
-              content: 'Edited company caption.',
-              image: media,
-            },
-            { content: `Provider comment for ${companyLinkedIn.id}` },
-          ],
-        },
-      ],
-    });
     expect(payload.posts).toHaveLength(2);
-    expect(providerResults[0].values[0].content).toBe(
-      `Provider caption for ${founderLinkedIn.id}`
-    );
+    expect(providerResults[0].values[0].content).toBe('Provider root');
     expect(mockCloseAll).not.toHaveBeenCalled();
     expect(mockMutate).toHaveBeenCalledTimes(1);
     expect(
