@@ -205,17 +205,19 @@ export class BillingController {
   async cancel(
     @GetOrgFromRequest() org: Organization,
     @GetUserFromRequest() user: User,
-    @Body() body: { feedback: string }
+    @Body() body?: { feedback?: string }
   ) {
     this.assertBillingEnabled();
     this.assertBillingAdministrator(org);
     const result = await this._stripeService.setToCancel(org.id);
+    const feedback = typeof body?.feedback === 'string' && body.feedback.trim()
+      ? body.feedback.trim() : 'No feedback provided';
     // Billing cancellation must not depend on notification delivery.
     try {
       await this._notificationService.sendEmail(
         process.env.EMAIL_FROM_ADDRESS,
         'Subscription Cancelled',
-        `Organization ${org.name} has cancelled their subscription because: ${body.feedback}`,
+        `Organization ${org.name} has cancelled their subscription. Feedback: ${feedback}`,
         user.email
       );
     } catch {}
