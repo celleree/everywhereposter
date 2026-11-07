@@ -305,7 +305,7 @@ export class AiWalletRefundRequestService {
           } else if (['failed', 'canceled'].includes(object.status)) outcome = reviewed.state === 'SUCCEEDED' ? 'UNCERTAIN' : 'FAILED';
           else if (object.status === 'pending') outcome = ['SUCCEEDED', 'FAILED'].includes(reviewed.state) ? reviewed.state : 'PENDING';
         } else if (event.type === 'charge.refunded' && object.object === 'charge' && matches &&
-            object.amount === reviewed.amountCents && object.amount_refunded === reviewed.amountCents && object.currency === reviewed.currency &&
+            evidence.refundsShape === 'LIST' && object.amount === reviewed.amountCents && object.amount_refunded === reviewed.amountCents && object.currency === reviewed.currency &&
             object.refunds?.has_more === false && refundIds?.length === 1 && refundIds[0] === reviewed.refundId) {
           outcome = reviewed.state;
         }
