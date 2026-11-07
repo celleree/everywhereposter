@@ -820,6 +820,48 @@ describe('ManageModal guided publishing bridge', () => {
     expect(JSON.stringify(postPayload())).not.toContain('inheritRootMedia');
   });
 
+  it('serializes only submission fields while preserving comments and optional media details', async () => {
+    providerResults[0].values = [
+      { id: '', content: 'Provider root', delay: undefined, media: [
+        { ...media[0], alt: '', thumbnailTimestamp: 0, originalName: 'discarded.mp4', chosen: true },
+      ] },
+      { content: 'Comment without media', delay: null },
+    ];
+    providerResults[1].settings = undefined;
+    providerResults[1].values = [
+      { id: 'company-root', content: 'Company root', delay: 0, media: null },
+      { id: 'company-comment', content: 'Company comment', delay: 7, media: [{ id: 'photo', path: '/photo.jpg' }] },
+    ];
+
+    renderGuidedManageModal();
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+
+    const payload = postPayload();
+    expect(payload.posts).toEqual([
+      {
+        integration: { id: founderLinkedIn.id }, group: expect.any(String),
+        settings: { __type: 'linkedin', visibility: 'PUBLIC' },
+        value: [
+          { content: 'Edited founder caption.', delay: 0, image: [{
+            id: 'video-1', path: 'https://media.example.com/video.mp4', alt: '',
+            thumbnail: 'https://media.example.com/video-thumb.jpg', thumbnailTimestamp: 0,
+          }] },
+          { content: 'Comment without media', delay: 0, image: [] },
+        ],
+      },
+      {
+        integration: { id: companyLinkedIn.id }, group: expect.any(String), settings: {},
+        value: [
+          { id: 'company-root', content: 'Edited company caption.', delay: 0, image: [] },
+          { id: 'company-comment', content: 'Company comment', delay: 7, image: [{ id: 'photo', path: '/photo.jpg' }] },
+        ],
+      },
+    ]);
+    expect(payload.posts[1].group).toBe(payload.posts[0].group);
+    expect(providerResults[0].values[0].content).toBe('Provider root');
+  });
+
   it('submits enabled destinations with independent Review captions and preserved provider data', async () => {
     renderGuidedManageModal();
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
