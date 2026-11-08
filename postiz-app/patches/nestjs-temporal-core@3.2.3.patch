@@ -52,7 +52,7 @@
      }
      async startWorkerByTaskQueue(taskQueue) {
 +        if (this.isShuttingDown)
-+            return;
++            throw new Error('Temporal worker manager is shutting down');
          const workerInstance = this.workers.get(taskQueue);
          if (!workerInstance) {
              throw new Error(`Worker for task queue '${taskQueue}' not found`);
@@ -111,7 +111,7 @@
      }
      async startWorker() {
 +        if (this.isShuttingDown)
-+            return;
++            throw new Error('Temporal worker manager is shutting down');
          if (!this.worker) {
              throw new Error('Worker not initialized. Cannot start worker.');
          }
@@ -170,7 +170,7 @@
      }
      async restartWorker() {
 +        if (this.isShuttingDown)
-+            return;
++            return { success: false, error: new Error('Temporal worker manager is shutting down') };
          this.logger.info('Restarting Temporal worker...');
          try {
              await this.stopWorker();

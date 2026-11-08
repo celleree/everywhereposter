@@ -272,3 +272,32 @@ test('real Nest app.close waits for every worker lifecycle completion', async ()
   await closing;
   expect(closed).toBe(true);
 });
+
+test('public start and restart cannot report success after terminal shutdown', async () => {
+  const f = setup();
+  await start(f);
+  const closing = f.manager.shutdown();
+  await tick();
+  f.workers[0].finish();
+  await closing;
+  await expect(f.manager.startWorker()).rejects.toThrow('shutting down');
+  await expect(f.manager.startWorkerByTaskQueue('main')).rejects.toThrow(
+    'shutting down'
+  );
+  expect((await f.manager.restartWorker()).success).toBe(false);
+});
+
+test('an explicit legacy restart crossing shutdown cannot report success', async () => {
+  jest.useFakeTimers();
+  const f = setup();
+  f.manager.worker = f.workers[0];
+  f.manager.isRunning = true;
+  f.manager.runWorker(f.workers[0]);
+  const restarting = f.manager.restartWorker();
+  f.workers[0].finish();
+  await jest.advanceTimersByTimeAsync(0);
+  await f.manager.shutdown();
+  await jest.advanceTimersByTimeAsync(1000);
+  expect((await restarting).success).toBe(false);
+  expect(f.workers[0].run).toHaveBeenCalledTimes(1);
+});
