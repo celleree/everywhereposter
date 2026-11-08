@@ -87,6 +87,7 @@ class Supervisor:
         temporary.mkdir()
         self.env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "TMPDIR": str(temporary),
                     "LANG": "C.UTF-8", "GOMAXPROCS": "2",
+                    "TEMPORAL_VERSION_CHECK_DISABLED": "1",
                     "NODE_OPTIONS": "--max-old-space-size=1024",
                     "DRAIN_PROOF_NAMESPACE": "drain-proof-" + str(uuid.uuid4()),
                     "DRAIN_PROOF_SERVER_VERSION": SERVER_VERSION}

@@ -19,6 +19,12 @@ const queues = Array.from(
 );
 
 async function child() {
+  // Install before imports or bundling can yield to a parent-disconnect event.
+  process.on('disconnect', () => process.exit(1));
+  if (!process.connected) {
+    process.exit(1);
+    return;
+  }
   const { Module } = require('@nestjs/common');
   const { NestFactory } = require('@nestjs/core');
   const {
@@ -63,7 +69,6 @@ async function child() {
       })),
     }
   );
-  process.on('disconnect', () => process.exit(1));
   process.on('message', (message) => {
     if (message.type === 'release')
       for (const queue of message.queues) held.get(queue)?.();

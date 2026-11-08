@@ -24,6 +24,11 @@ class SupervisorTests(unittest.TestCase):
         self.assertRegex(supervisor.env["DRAIN_PROOF_NAMESPACE"], r"^drain-proof-[0-9a-f-]{36}$")
         self.assertTrue(Path(supervisor.env["HOME"]).is_relative_to(self.root))
 
+    def test_server_version_check_is_disabled_despite_ambient_environment(self):
+        with patch.dict("os.environ", {"TEMPORAL_VERSION_CHECK_DISABLED": ""}):
+            supervisor = fixture.Supervisor(self.root)
+        self.assertEqual(supervisor.env["TEMPORAL_VERSION_CHECK_DISABLED"], "1")
+
     def test_aggregate_rss_aborts_before_success(self):
         supervisor = fixture.Supervisor(self.root)
         with patch.object(fixture, "members", return_value=[(123, fixture.RSS_LIMIT + 1, 123)]):

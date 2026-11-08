@@ -70,3 +70,25 @@ CPU affinity, queue events, and cleanup outcome. The launcher prints its
 report path. No fixture data is deleted automatically. Any unexpected
 version, worker identity, duplicate/missing queue event, timeout, resource
 limit, rejected drain, premature exit or incomplete cleanup is a failed proof.
+
+## Independently verifiable fixture inputs
+
+- Official release metadata:
+  https://api.github.com/repos/temporalio/cli/releases/tags/v1.4.1
+  The `temporal_cli_1.4.1_linux_amd64.tar.gz` asset's digest is
+  `sha256:e2063feade24d90cec1590dd9a46b0ccf838433b013738a348af1c01a9cb3874`.
+- Official checksum listing:
+  https://github.com/temporalio/cli/releases/download/v1.4.1/checksums.txt
+- Official CLI source at commit `9bc3d31a00c2786b3af01f1fb9cc87d26538448a`:
+  https://github.com/temporalio/cli/blob/9bc3d31a00c2786b3af01f1fb9cc87d26538448a/temporalcli/devserver/server.go
+  Listener bindings use FrontendIP; the launcher explicitly sets loopback,
+  disables UI and uses local SQLite. Archival is disabled by the dev server.
+- Server version-check implementation:
+  https://github.com/temporalio/temporal/blob/v1.28.0/service/frontend/version_checker.go
+  The launcher always sets `TEMPORAL_VERSION_CHECK_DISABLED=1`, overriding
+  ambient settings, to disable the otherwise automatic outbound version check.
+
+The child installs its IPC-disconnect exit handler before imports and the first
+await, including workflow bundling. An offline VM regression leaves bundling
+pending and verifies disconnect immediately requests exit; it launches no
+workers, servers, or network connections.
