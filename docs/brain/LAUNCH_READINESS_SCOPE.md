@@ -134,4 +134,3 @@ Do not invent a delivery date or fixed effort before the bounded readiness audit
 - [PR 327](https://github.com/celleree/everywhereposter/pull/327), release-candidate identity and scope.
 - [AGENTS.md](https://github.com/celleree/everywhereposter/blob/a237be798549f9d48d80a6b1f351164d9b2257b4/AGENTS.md) and [ChatGPT Codex handoff](https://github.com/celleree/everywhereposter/blob/a237be798549f9d48d80a6b1f351164d9b2257b4/docs/brain/CHATGPT_CODEX_HANDOFF.md), bounded work and review rules.
 - [CURRENT_WORK.md](CURRENT_WORK.md), product routing and launch criteria. Historical operations checkpoints do not override the newer November 8 maintenance plan.
-
