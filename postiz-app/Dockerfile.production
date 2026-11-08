@@ -17,6 +17,7 @@ WORKDIR /app
 
 # Cache dependency installation until a manifest or the Prisma schema changes.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY patches ./patches
 COPY apps/backend/package.json ./apps/backend/package.json
 COPY apps/commands/package.json ./apps/commands/package.json
 COPY apps/extension/package.json ./apps/extension/package.json
@@ -55,6 +56,7 @@ WORKDIR /app
 FROM runtime-base AS production-dependencies
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY patches ./patches
 COPY apps/backend/package.json ./apps/backend/package.json
 COPY apps/commands/package.json ./apps/commands/package.json
 COPY apps/extension/package.json ./apps/extension/package.json
