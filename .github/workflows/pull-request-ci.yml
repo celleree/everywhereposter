@@ -183,7 +183,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test Temporal worker shutdown lifecycle
-        run: pnpm exec jest --config jest.temporal.config.cjs --runInBand
+        run: |
+          pnpm exec jest --config jest.temporal.config.cjs --runInBand
+          python3 -B -m unittest discover -s tests/temporal -p test_native_supervisor.py
 
       - name: Type-check browser fixtures
         run: pnpm exec tsc --noEmit -p tsconfig.browser.json

@@ -7,7 +7,11 @@ const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 
 const address = '127.0.0.1:17233';
-const namespace = 'default';
+const namespace = process.env.DRAIN_PROOF_NAMESPACE;
+assert(
+  /^drain-proof-[0-9a-f-]{36}$/.test(namespace),
+  'Supervisor-owned namespace required'
+);
 const prefix = `drain-proof-${randomUUID()}`;
 const queues = Array.from(
   { length: 32 },
@@ -59,6 +63,7 @@ async function child() {
       })),
     }
   );
+  process.on('disconnect', () => process.exit(1));
   process.on('message', (message) => {
     if (message.type === 'release')
       for (const queue of message.queues) held.get(queue)?.();
@@ -104,15 +109,43 @@ async function parent() {
     'Explicit server version confirmation is required'
   );
   const client = new Client({ connection, namespace });
+  assert.equal(require('@temporalio/worker/package.json').version, '1.15.0');
+  assert.equal(require('nestjs-temporal-core/package.json').version, '3.2.3');
+  const { readFileSync } = require('node:fs');
+  const { createHash } = require('node:crypto');
+  const managerPath = require.resolve(
+    'nestjs-temporal-core/dist/services/temporal-worker.service.js'
+  );
+  const managerHash = createHash('sha256')
+    .update(readFileSync(managerPath))
+    .digest('hex');
+  assert.equal(
+    managerHash,
+    'a223f8ff3779c49235e866d95498b6b6142e7480d88928e8eb8d6e744bcf59bb'
+  );
+  console.log(
+    JSON.stringify({
+      type: 'identities',
+      namespace,
+      serverVersion: info.serverVersion,
+      managerHash,
+      sdkVersion: '1.15.0',
+      managerVersion: '3.2.3',
+    })
+  );
   const messages = [];
   const processChild = fork(__filename, ['child'], {
     env: {
       PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      TMPDIR: process.env.TMPDIR,
+      DRAIN_PROOF_NAMESPACE: namespace,
       NODE_OPTIONS: '--max-old-space-size=1024',
       DRAIN_PROOF_QUEUES: JSON.stringify(queues),
     },
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
+  const exit = once(processChild, 'exit');
   let exited = false;
   processChild.on('exit', () => {
     exited = true;
@@ -144,6 +177,12 @@ async function parent() {
     await waitFor(
       () => messages.filter((m) => m.type === 'activity-started').length === 32
     );
+    const queueSet = (type) =>
+      messages
+        .filter((m) => m.type === type)
+        .map((m) => m.queue)
+        .sort();
+    assert.deepEqual(queueSet('activity-started'), [...queues].sort());
     processChild.kill('SIGTERM');
     await waitFor(() => messages.some((m) => m.type === 'destroy-entered'));
     processChild.send({ type: 'release', queues: queues.slice(1) });
@@ -159,12 +198,14 @@ async function parent() {
       !messages.some((m) => m.type === 'destroy-completed'),
       'Nest hook completed before main drained'
     );
+    assert.deepEqual(queueSet('run-completed'), queues.slice(1).sort());
     processChild.send({ type: 'release', queues: [queues[0]] });
-    const [code, signal] = await once(processChild, 'exit');
+    const [code, signal] = await exit;
     assert.equal(code, null);
     assert.equal(signal, 'SIGTERM');
     const completed = messages.filter((m) => m.type === 'run-completed');
-    assert.equal(completed.length, 32);
+    assert.deepEqual(queueSet('run-completed'), [...queues].sort());
+    assert.deepEqual(queueSet('activity-started'), [...queues].sort());
     assert(completed.every((m) => m.state === 'STOPPED'));
     assert(!messages.some((m) => m.type === 'run-failed'));
     assert(messages.some((m) => m.type === 'destroy-completed'));
@@ -183,7 +224,10 @@ async function parent() {
     );
   } finally {
     // Only this harness's own child is eligible for cleanup.
-    if (!exited) processChild.kill('SIGKILL');
+    if (!exited) {
+      processChild.kill('SIGKILL');
+      await exit;
+    }
     await connection.close();
   }
 }

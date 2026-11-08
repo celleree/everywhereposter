@@ -29,27 +29,44 @@ All 32 raw run completions must report native STOPPED before Nest exits by
 SIGTERM. A workflow may remain incomplete after worker shutdown; that is
 expected and belongs only to the disposable server.
 
-Before running, arrange a dedicated, disposable standalone Temporal dev server
-on **127.0.0.1:17233**, with a new temporary SQLite database and no credentials,
-cloud connection, production Docker daemon, production volumes, or application
-environment files. Verify the listening PID belongs to that exact dev-server
-process and that no listener existed before starting it. Record the official
-CLI binary checksum, CLI version, and embedded server version. Production's
-comparison version is **Temporal Server 1.28.1**, with **TypeScript SDK 1.15.0**.
-Any version difference must be disclosed rather than called a matching proof.
+The reviewed launcher is `run-native-shutdown.py`. It downloads only the pinned
+official CLI 1.4.1 Linux-amd64 archive and verifies its SHA256 before extraction.
+It creates its own private HOME, temp directory, SQLite storage and UUID
+namespace. Server and harness receive only allowlisted environment variables.
+All server listeners must belong to the owned process group and bind loopback.
+Fixed fixture ports are 17233 (gRPC), 17234 (HTTP), and 17235 (metrics); occupied
+ports cause failure before download. The UI is disabled.
 
-The harness accepts no arbitrary address or namespace and loads no dotenv.
-Each run uses UUID-prefixed task queues/workflow IDs in the disposable server.
-The parent and child use synthetic activities only, never application modules.
-A child is force-stopped only on harness failure, which is not passing evidence.
+**Version limitation:** official CLI 1.4.1 embeds server **1.28.0**, so this is
+separately labelled **INTERIM**, not production parity with server **1.28.1**.
+The live server version, SDK 1.15.0 and patched manager SHA256 are checked.
+Exact 1.28.1 evidence remains unresolved; no product dependency version changes
+are part of this fixture.
 
-Example after the separately approved server is running:
+After explicit source-review, download, and resource approval:
 
 ```sh
-DRAIN_PROOF_SERVER_VERSION=1.28.1 NODE_OPTIONS=--max-old-space-size=1024   timeout --kill-after=10s 180s taskset -c 0,1 node tests/temporal/native-shutdown.cjs
+env -i PATH=/usr/bin:/bin /usr/bin/python3 -I \
+  tests/temporal/run-native-shutdown.py --approved-isolated-fixture
 ```
 
-Keep the fixture server and worker processes within an agreed resource budget
-(2 CPU and approximately 2 GiB combined target), retain logs/version/checksum
-evidence, and stop only the exact fixture process created for this test.
-Do not deploy or change any production service as part of this test.
+The supervisor applies two-CPU affinity to every owned fixture process, samples
+aggregate RSS (including itself) every 100ms, and aborts above 2 GiB. This is a
+supervised abort threshold, not an OS-enforced memory cgroup; short sampling
+overshoot is possible. A 180-second wall deadline covers download, server and
+harness. Each Node process additionally has a 1 GiB V8 heap cap; those individual
+caps are not claimed as the combined memory bound.
+
+Only owned process groups are signalled. Cleanup awaits TERM then, if needed,
+KILL and verifies no owned PID remains. Forced cleanup makes the report FAIL.
+Parent-death signals stop the owned server/harness leaders if the supervisor
+dies, and the worker child exits if its IPC parent disconnects. No other server,
+Docker daemon, container, credential, application environment or production
+resource is read or modified.
+
+Evidence stays in the newly created private temporary directory: CLI checksum
+and version, logs, observed server/SDK/manager identities, peak combined RSS,
+CPU affinity, queue events, and cleanup outcome. The launcher prints its
+report path. No fixture data is deleted automatically. Any unexpected
+version, worker identity, duplicate/missing queue event, timeout, resource
+limit, rejected drain, premature exit or incomplete cleanup is a failed proof.
