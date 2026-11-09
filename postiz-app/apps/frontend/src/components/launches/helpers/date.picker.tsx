@@ -44,6 +44,7 @@ export const DatePicker: FC<{
       </div>
       <div className="cursor-pointer">
         {date.format(isUSCitizen() ? 'MM/DD/YYYY hh:mm A' : 'DD/MM/YYYY HH:mm')}
+        <span className="ms-[6px] text-[12px]">UTC{date.format('Z')}</span>
       </div>
       {open && (
         <div
@@ -71,6 +72,7 @@ export const DatePicker: FC<{
               calendarHeaderLevel: 'text-textColor hover:bg-third', // cell: 'child:!text-textColor'
             }}
           />
+          <p className="text-[12px]">Time zone: UTC{date.format('Z')}</p>
           <TimeInput
             onChange={changeDate('time')}
             label="Pick time"
