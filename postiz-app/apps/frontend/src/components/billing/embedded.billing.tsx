@@ -15,6 +15,7 @@ import { Button } from '@gitroom/react/form/button';
 import dayjs from 'dayjs';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { BILLING_TERMS_URL, checkoutDisclosure } from './checkout-disclosure';
 
 export const EmbeddedBilling: FC<{
   stripe: Promise<Stripe>;
@@ -97,32 +98,41 @@ const FormWrapper: FC<{ showCoupon?: boolean; autoApplyCoupon?: string }> = ({
   const checkoutState = useCheckout();
   const toaster = useToaster();
   const [loading, setLoading] = useState(false);
+  const [paymentReady, setPaymentReady] = useState(false);
 
   if (checkoutState.type !== 'success') {
-    return null;
+    return checkoutState.type === 'loading' ? (
+      <p role="status">Loading payment details...</p>
+    ) : <BillingUnavailable />;
   }
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
+    if (loading || !paymentReady || !checkoutState.checkout.canConfirm ||
+        !checkoutDisclosure(checkoutState.checkout)) return;
     setLoading(true);
 
     const { checkout } = checkoutState;
 
-    const confirmResult = await checkout.confirm();
-
-    if (confirmResult.type === 'error') {
-      toaster.show(confirmResult.error.message, 'warning');
+    try {
+      const confirmResult = await checkout.confirm();
+      if (confirmResult.type === 'error') {
+        toaster.show(confirmResult.error.message, 'warning');
+      }
+    } catch {
+      toaster.show('Payment could not be confirmed. Please try again.', 'warning');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col flex-1">
+    <form onSubmit={handleSubmit} className="flex flex-col flex-1 pb-[200px] mobile:pb-[300px]">
       <StripeInputs
         showCoupon={showCoupon}
         autoApplyCoupon={autoApplyCoupon}
         loading={loading}
+        onReadinessChange={setPaymentReady}
       />
     </form>
   );
@@ -132,10 +142,12 @@ const StripeInputs: FC<{
   showCoupon: boolean;
   autoApplyCoupon?: string;
   loading: boolean;
-}> = ({ showCoupon, autoApplyCoupon, loading }) => {
+  onReadinessChange: (ready: boolean) => void;
+}> = ({ showCoupon, autoApplyCoupon, loading, onReadinessChange }) => {
   const checkout = useCheckout();
   const t = useT();
   const [ready, setReady] = useState(false);
+  const [paymentError, setPaymentError] = useState(false);
   return (
     <>
       {/*<div>*/}
@@ -156,13 +168,16 @@ const StripeInputs: FC<{
             fields: { billingDetails: { address: 'if_required' } },
             layout: 'tabs',
           }}
-          onReady={() => setReady(true)}
+          onReady={() => { setReady(true); onReadinessChange(true); }}
+          onLoadError={() => { setPaymentError(true); onReadinessChange(false); }}
         />
-        {ready && <PriceBreakdown />}
+        {paymentError && <BillingUnavailable />}
+        {!ready && !paymentError && <p role="status">Loading payment form...</p>}
+        {!paymentError && <PriceBreakdown />}
         {showCoupon && ready && (
           <CouponInput autoApplyCoupon={autoApplyCoupon} />
         )}
-        {ready && <SubmitBar loading={loading} />}
+        {ready && !paymentError && <SubmitBar loading={loading} />}
         {checkout.type === 'loading' ? null : (
           <div className="mt-[24px] text-[16px] font-[600] flex gap-[4px] items-center">
             <div>
@@ -190,33 +205,23 @@ const StripeInputs: FC<{
   );
 };
 
+const BillingUnavailable: FC = () => (
+  <div role="alert" className="my-[16px] text-[14px]">
+    Payment details are unavailable. Reload to try again or contact{' '}
+    <a className="underline" href="https://everywhereposter.com/contact/">support</a>.
+    <button type="button" className="underline ml-[8px]" onClick={() => window.location.reload()}>
+      Reload
+    </button>
+  </div>
+);
+
 const PriceBreakdown: FC = () => {
   const checkoutState = useCheckout();
   const t = useT();
-
-  if (checkoutState.type !== 'success') {
-    return null;
-  }
-
-  const { checkout } = checkoutState;
-  const lineItem = checkout?.lineItems?.[0];
-  const recurring = checkout?.recurring;
-  const discountAmounts = checkout?.discountAmounts;
-  const hasDiscount = discountAmounts && discountAmounts.length > 0;
-
-  // Get values
-  const planName = lineItem?.name || t('billing_subscription', 'Subscription');
-  const unitAmount = lineItem?.unitAmount?.amount || '$0.00';
-  const discountDisplay = hasDiscount ? discountAmounts[0] : null;
-  const dueToday = checkout?.total?.total?.amount || '$0.00';
-  const nextBillingTotal = recurring?.dueNext?.total?.amount;
-  const nextBillingDate = recurring?.trial?.trialEnd
-    ? dayjs(recurring.trial.trialEnd * 1000).format('MMMM D, YYYY')
-    : null;
-  const billingInterval =
-    recurring?.interval === 'month'
-      ? t('billing_monthly', 'Monthly')
-      : t('billing_yearly', 'Yearly');
+  if (checkoutState.type !== 'success') return null;
+  const details = checkoutDisclosure(checkoutState.checkout);
+  if (!details) return <BillingUnavailable />;
+  const { baseAmount, nextAmount, dueToday, cadence, trialEnd } = details;
 
   return (
     <div className="mt-[40px]">
@@ -224,80 +229,25 @@ const PriceBreakdown: FC = () => {
         {t('billing_order_summary', 'Order Summary')}
       </h4>
       <div className="rounded-[12px] border border-newColColor p-[20px] flex flex-col gap-[12px]">
-        {/* Plan */}
-        <div className="flex justify-between items-center">
-          <div className="flex flex-col">
-            <span className="font-[600] text-textColor">{planName}</span>
-            <span className="text-[13px] text-textColor/60">
-              {billingInterval}
-            </span>
-          </div>
-          <span className="font-[500] text-textColor">{unitAmount}</span>
+        <div>
+          <strong>{t('billing_base_subscription', 'Base subscription')}: {baseAmount} {cadence}</strong>
+          <p className="text-[13px]">Before discounts and taxes.</p>
         </div>
-
-        {/* Discount */}
-        {discountDisplay && (
-          <div className="flex justify-between items-center font-[600]">
-            <div className="flex items-center gap-[6px]">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-                <line x1="7" y1="7" x2="7.01" y2="7" />
-              </svg>
-              <span className="font-[500]">
-                {discountDisplay.displayName || discountDisplay.promotionCode}
-                {discountDisplay.percentOff &&
-                  ` (${discountDisplay.percentOff}% off)`}
-              </span>
-            </div>
-            <span className="font-[500]">
-              {discountDisplay.amount !== '$0.00'
-                ? `-${discountDisplay.amount}`
-                : t('billing_applied', 'Applied')}
-            </span>
-          </div>
-        )}
-
-        {/* Divider */}
-        <div className="border-t border-newColColor my-[4px]" />
-
-        {/* Due today */}
-        <div className="flex justify-between items-center">
-          <span className="font-[600] text-textColor">
-            {t('billing_due_today', 'Due today')}
-          </span>
-          <span className="font-[700] text-[18px] text-textColor">
-            {dueToday}
-          </span>
+        <div className="flex justify-between gap-[12px]">
+          <span>{t('billing_due_today', 'Due today')}</span>
+          <strong>{dueToday}</strong>
         </div>
-
-        {/* Next billing info */}
-        {nextBillingTotal && nextBillingDate && (
-          <div className="flex justify-between items-center text-[13px] text-textColor/60">
-            <span>
-              {t('billing_then', 'Then')} {nextBillingTotal}{' '}
-              {t('billing_on', 'on')} {nextBillingDate}
-            </span>
-          </div>
-        )}
-
-        <div className="text-[12px]">
-          <strong>
-            {t(
-              'billing_cancel_notice',
-              'Cancel anytime from settings without talking to a person and never be charged.'
-            )}
-          </strong>
+        <div>
+          {trialEnd ? (
+            <p>Your trial ends on {dayjs(trialEnd * 1000).format('MMMM D, YYYY')}. It then converts to a paid subscription unless you cancel before the trial ends. Next invoice total: {nextAmount}.</p>
+          ) : <p>Next payment: {nextAmount}.</p>}
+          <p>Payments recur {cadence}. Your subscription renews automatically until canceled.</p>
+          <p>Payment totals reflect applicable discounts and taxes. Temporary discounts end according to their terms.</p>
         </div>
+        <p>Cancel anytime from billing settings without contacting support.</p>
+        <p>By subscribing, you agree to the{' '}
+          <a href={BILLING_TERMS_URL} target="_blank" rel="noopener noreferrer" className="underline">Terms of Service</a>.
+        </p>
       </div>
     </div>
   );
@@ -603,49 +553,26 @@ export const CouponInput: FC<{ autoApplyCoupon?: string }> = ({
 const SubmitBar: FC<{ loading: boolean }> = ({ loading }) => {
   const checkout = useCheckout();
   const t = useT();
-  if (checkout.type === 'loading' || checkout.type === 'error') {
-    return null;
-  }
+  if (checkout.type !== 'success') return null;
+  const details = checkoutDisclosure(checkout.checkout);
 
   return (
-    <div className="animate-fadeIn h-[92px] mobile:h-auto fixed bottom-0 w-full px-[12px] pb-[12px] left-0 bg-newBgColor z-[100]">
-      <div className="w-full h-full border-t border-newColColor bg-newBgColorInner px-[80px] tablet:px-[33px] mobile:!px-[16px] flex mobile:flex-col gap-[32px] mobile:gap-[16px] justify-end items-center font-[400] text-[14px] text-[#A3A3A3] mobile:py-[16px]">
-        {checkout.checkout.recurring?.trial?.trialEnd ? (
-          <div>
-            {t('billing_your_7_day_trial_is', 'Your 7-day trial is')}{' '}
-            <span className="text-textColor font-[600]">
-              {t('billing_100_percent_free', '100% free')}
-            </span>{' '}
-            {t('billing_ending', 'ending')}{' '}
-            <br className="hidden mobile:block" />
-            <span className="text-textColor font-[600]">
-              {dayjs(
-                checkout.checkout.recurring?.trial?.trialEnd * 1000
-              ).format('MMMM D, YYYY')}{' '}
-              —{' '}
-            </span>
-            <span className="text-textColor font-[600]">
-              {t(
-                'billing_cancel_anytime_short',
-                'Cancel anytime from settings'
-              )}
-            </span>
-          </div>
-        ) : null}
-        <div>
-          <Button
-            className="h-[42px] rounded-[10px] mobile:w-full"
-            type="submit"
-            loading={loading}
-          >
-            {checkout.checkout.recurring?.trial?.trialEnd
-              ? t(
-                  'billing_pay_0_start_trial',
-                  'Pay $0 Today - Start your free trial!'
-                )
-              : t('billing_pay_now', 'Pay Now')}
-          </Button>
-        </div>
+    <div className="animate-fadeIn fixed bottom-0 w-full px-[12px] pb-[12px] left-0 bg-newBgColor z-[100]">
+      <div className="w-full border-t border-newColColor bg-newBgColorInner px-[80px] tablet:px-[33px] mobile:!px-[16px] py-[16px] flex mobile:flex-col gap-[24px] mobile:gap-[12px] justify-end items-center font-[400] text-[14px]">
+        {details && <div className="min-w-0">
+          <div>{details.baseAmount} {details.cadence} before discounts and taxes.</div>
+          <div>Renews automatically until canceled.</div>
+          {details.trialEnd && <div>Cancel before {dayjs(details.trialEnd * 1000).format('MMMM D, YYYY')} to avoid the post-trial subscription charge. Next invoice: {details.nextAmount}.</div>}
+          <a href={BILLING_TERMS_URL} target="_blank" rel="noopener noreferrer" className="underline">Terms of Service</a>
+        </div>}
+        <Button
+          className="h-[42px] rounded-[10px] mobile:w-full shrink-0"
+          type="submit"
+          loading={loading}
+          disabled={loading || !details || !checkout.checkout.canConfirm}
+        >
+          {details?.trialEnd ? t('billing_start_trial', 'Start trial') : t('billing_subscribe', 'Subscribe')}
+        </Button>
       </div>
     </div>
   );
