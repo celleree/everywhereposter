@@ -492,7 +492,8 @@ fi
 case "${1:-} ${2:-}" in
   'rev-parse --show-toplevel') printf '%s\n' "$TASK_REPO" ;;
   'rev-parse HEAD')
-    if [[ "$TASK_SCENARIO" == repair* && ! -e "$TASK_CHECKOUT_MARKER" ]]; then echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    if [[ "$TASK_SCENARIO" == repair-untrusted-start ]]; then echo cccccccccccccccccccccccccccccccccccccccc
+    elif [[ "$TASK_SCENARIO" == repair* && ! -e "$TASK_CHECKOUT_MARKER" ]]; then echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     elif [[ "$TASK_SCENARIO" == repair-checkout-head-moved ]]; then echo cccccccccccccccccccccccccccccccccccccccc
     else echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; fi
     ;;
@@ -890,9 +891,10 @@ for denied in guardrail state hook attributes unowned; do
   assert_not_contains "$LAST_TASK_CASE_DIR/log" 'helper:' 'a prohibited PR must be rejected before branch scripts or hook installation'
   assert_not_contains "$LAST_TASK_CASE_DIR/log" 'PROHIBITED_' 'prohibited execution and credential effects must never occur'
 done
-for denied in head-moved-before base-moved-before stale-baseline checkout-head-moved; do
+for denied in untrusted-start head-moved-before base-moved-before stale-baseline checkout-head-moved; do
   run_task_case "repair-$denied" 310 1
   assert_not_contains "$LAST_TASK_CASE_DIR/log" 'helper:' 'revision/baseline races must fail before PR guard scripts'
+  if [[ "$denied" == untrusted-start ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:api graphql' 'a non-main start must fail before repository approval helper execution'; fi
   if [[ "$denied" != checkout-head-moved ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'checkout-effect:' 'identity/ancestry failures must precede checkout'; fi
 done
 run_task_case repair-no-association 305 1

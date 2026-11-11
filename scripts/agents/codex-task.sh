@@ -277,6 +277,8 @@ case "$MODE" in
     REPAIR_BASE_SHA=$(jq -r '.baseRefOid // empty' "$ITEM")
     require_full_sha "$SCOPE_PR_HEAD" "Repair PR head revision"
     require_full_sha "$REPAIR_BASE_SHA" "Repair PR base revision"
+    START_HEAD=$(git rev-parse HEAD)
+    [ "$START_HEAD" = "$REPAIR_BASE_SHA" ] || fail "Repair must start from its pinned trusted main revision."
     bash "$ROOT/scripts/agents/owner-approval.sh" "$REPOSITORY" "$OWNER" "$SCOPE_ISSUE" "$SCOPE_ITEM" ||
       fail "Owner approval of the associated issue content could not be verified."
     scope_prepare
@@ -293,7 +295,6 @@ case "$MODE" in
       fail "Repair PR must contain current origin/main before checkout."
 
     # Validate the pinned PR from the trusted checkout before materializing any PR-owned code.
-    START_HEAD=$(git rev-parse HEAD)
     scope_bind
     scope_verify pr "$REPAIR_BASE_SHA" ||
       fail "The existing PR diff exceeds its approved issue paths."
