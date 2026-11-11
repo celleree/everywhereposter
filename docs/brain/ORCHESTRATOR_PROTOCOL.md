@@ -1,6 +1,6 @@
 # Root Orchestrator Protocol
 
-Updated: 2026-09-14
+Updated: 2026-11-11
 
 ## Purpose
 
@@ -8,55 +8,15 @@ Define the default hands-off coordination loop for EverywherePoster when a long-
 
 Automatic merge is authorized only for pull requests bounded to `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md` and only under the five conditions below. Production deployment and all merges outside that roadmap remain explicit human gates.
 
-## Recommended root route
+## Model and reasoning routing
 
-- Primary: GPT-6.1 Sol / Medium or High
-- Use High for complex engineering, ambiguous planning and independent review; use Max/Ultra only when justified by planning ambiguity.
-- Local worker: `qwen3:8b` through Ollama under the Codex `--oss` harness for cheap, bounded, low-risk work
-- Engineering worker: GPT-6.1 Sol / Medium or High
-- Scoped computer-use and customer-facing writing worker: GPT-6.1 Terra / Medium, High when justified
-- Mechanical cloud worker: GPT-6 Luna / Low or Medium
-- Independent reviewer: GPT-6.1 Sol / High
-- Discuss justification with the user before any Astra escalation; difficulty alone is not authorization.
-
-Choose model and reasoning separately. Optimize for the lowest expected total cost of a correct verified result, including retries and rework.
-
-### Local worker routing
-
-Use `qwen3:8b` first when the task is narrowly bounded and low risk, especially for:
-
-- repository inspection and targeted file reading;
-- extraction, classification, and summarization;
-- simple documentation edits;
-- repetitive or mechanical edits;
-- straightforward tests and test updates;
-- very bounded low-risk code changes with clear acceptance criteria.
-
-Run it through the local Ollama-backed Codex harness, for example:
-
-`codex --oss -m qwen3:8b`
-
-Escalate from the local worker to Sol / Medium or High when:
-
-- implementation contains meaningful business or application logic;
-- scope grows beyond the original bounded contract;
-- requirements or root cause are ambiguous;
-- local verification fails;
-- the local worker struggles, stalls, or produces low-confidence output.
-
-Do not use the local worker as the final independent reviewer or for architecture, authentication/security, database migrations, deployment/infrastructure decisions, destructive operations, or other high-risk work.
-
-The local worker is an optional lowest-cost tier, not a requirement. If Ollama or the local model is unavailable, route directly to the appropriate cloud worker instead of blocking the task.
+Use [AGENTS.md](../../AGENTS.md#model-and-reasoning-routing) as the single owner of the permitted model IDs and session-preservation rules. Choose an authorized worker for the bounded role; preserve the running model and effort unless the user authorizes a change. Model choice does not make an implementer or designer eligible as the final independent reviewer.
 
 ## Bounded release coordinator
 
 After bounded implementation, use the [release-coordinator lifecycle](../GITHUB-HOSTED-DEPLOYMENT.md#bounded-release-coordinator-lifecycle) to coordinate commit/push, PR, CI, exact-HEAD independent review, and subsequent release gates. It owns release transitions; this protocol retains implementation/review roles and existing human gates.
 
-- GPT-6 Luna: routine evidence checking, polling/waiting, deterministic release coordination, and concise reporting.
-- GPT-6.1 Sol: ambiguous failures or substantive diagnosis/repair; escalation itself does not authorize repair.
-- Astra: only after discussing justification with the user.
-
-Model names are routing guidance, not safety mechanisms. Repository gates and matching live evidence remain authoritative. The release coordinator cannot replace the independent reviewer, general merge approval, or production approval. The roadmap-specific merge exception below remains narrowly scoped.
+Follow the model and reasoning owner above for coordination and diagnosis. Escalation itself does not authorize repair. Model names are routing guidance, not safety mechanisms. Repository gates and matching live evidence remain authoritative. The release coordinator cannot replace the independent reviewer, general merge approval, or production approval. The roadmap-specific merge exception below remains narrowly scoped.
 
 ## Canonical local environment
 
@@ -109,7 +69,7 @@ Do not recursively load all repository docs, old PRs, or Git history.
 For each task:
 
 1. Define a narrow task contract with objective, scope, explicit exclusions, verification, and return format.
-2. Choose the cheapest model/reasoning combination likely to complete it correctly.
+2. Preserve the configured model/effort; when dispatching an authorized new worker, follow the model and reasoning owner above.
 3. Create an isolated WSL-native branch/worktree from current `main` with START provenance.
 4. Dispatch one implementation worker by default.
 5. Let the worker investigate and implement only the approved bounded scope.
@@ -118,7 +78,7 @@ For each task:
 8. Inspect the PR diff and focused evidence. The named integrator selects one candidate, fetches/synchronizes main if needed, passes `--integrate`, pushes its final HEAD, and waits for matching CI before final review.
 9. When independent review is required, dispatch a fresh reviewer against the exact HEAD SHA. The implementer may not serve as the final independent reviewer.
 10. Send only concrete review findings or CI failures back to a repair worker/session.
-11. If HEAD changes after a required exact-SHA review, obtain fresh review of the new HEAD. A trivial repair may receive a narrowly scoped fresh review.
+11. If HEAD changes, push the repair and wait for required CI matching the new HEAD before required fresh exact-SHA review. A trivial repair may receive a narrowly scoped fresh review.
 12. Recheck CI and required gates.
 13. When review and CI are complete, apply the roadmap-specific merge authorization below; otherwise stop at the human merge gate.
 14. After any merge, verify live `main` and record material checkpoints. Leave waiting/working PRs frozen; do not routinely synchronize or revalidate them just because main advanced.
@@ -132,9 +92,9 @@ Use these task states when useful:
 - IMPLEMENTING
 - WAITING FOR INTEGRATION
 - INTEGRATING
+- CI / VERIFICATION
 - REVIEWING
 - REPAIRING
-- CI / VERIFICATION
 - AWAITING HUMAN MERGE APPROVAL
 - MERGED
 - BLOCKED
@@ -179,9 +139,9 @@ Do not use parallel implementation for authentication, security, migrations, des
 Do not repeat the same failed approach without new evidence.
 
 - First failure: inspect the failure evidence and make the smallest bounded correction.
-- Repeated failure or ambiguous root cause: escalate reasoning/model strength before widening scope.
+- Repeated failure or ambiguous root cause: reassess the evidence and contract; propose a model/effort change only under the routing and authorization rules above.
 - Two failed automated attempts on the same task should trigger root reassessment rather than blind retry.
-- Cross-phase conflicts or repeated failures require Sol reassessment; discuss any proposed Astra escalation with the user first.
+- Cross-phase conflicts or repeated failures require coordinator reassessment; discuss any proposed Astra escalation with the user first.
 
 ## Bound coordination cost
 
@@ -265,25 +225,16 @@ This root protocol describes local Codex Desktop orchestration. It does not rela
 
 The GitHub unattended queue may remain more restrictive than the local root orchestrator. In particular, Docker, GitHub Actions, infrastructure, deployment, dependency, database, and other high-risk categories may remain blocked from unattended GitHub implementation even when a human-approved local orchestrator is allowed to coordinate bounded work in those areas.
 
-## Current deployment-performance roadmap
+## Current work and roadmap status
 
-For `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`:
+Use [CURRENT_WORK.md](CURRENT_WORK.md) for active priorities and checkpoints, then read only the roadmap or subsystem it identifies. Revalidate current `main`, PR HEADs, required checks, and authorization against live evidence before resuming. Do not maintain a second current phase list here.
 
-- Phase 0 is complete.
-- Phase 1A is complete via PR #100.
-- Phase 1B is complete via PR #101 and controlled deployment run [34910728355](https://github.com/celleree/everywhereposter/actions/runs/34910728355). The same already-running image was redeployed with pruning disabled and no pending or applied migrations; this was not a cold-pull measurement.
-- Phase 4's excluded-Markdown classifier change is repository-complete via PR #103.
-- The planned Phase 2 patch remains blocked by the prior pre-edit automatic approval review; the merge exception above does not itself authorize that rejected action.
-- Phase 3 read-only analysis is complete; implementation waits for a settled Phase 2 image and representative measurements.
-- Phase 5 bounded readiness work is underway from initial startup evidence: frontend readiness appeared about 31.5s after container start, while orchestrator Nest startup appeared about 50.9s after start. The fixed 45s process check can precede all managed-process startup and does not establish full application readiness. Existing frontend and orchestrator health routes returned HTTP 200 after deployment.
-- Phase 6 benchmark preparation is complete; final measurements remain pending.
-- Do not redo Phase 0 unless new evidence materially contradicts the recorded baseline.
+The deployment-performance merge authorization above remains limited to its named roadmap and five conditions. This status routing does not lift a recorded denial or authorize a blocked action.
 
+## Scoped delegation
 
-## Scoped Sol/Terra delegation
-
-Use GPT-6.1 Sol to coordinate and verify bounded engineering work; delegate scoped computer use or customer-facing writing to GPT-6.1 Terra and simple helpers to GPT-6 Luna. No Fast mode. Parent and worker agree scope, plan, owned paths, exclusions and acceptance before implementation. Delegate only when the benefit exceeds briefing/review overhead; tiny tasks can stay with the coordinator.
+Follow [the model and reasoning rules](../../AGENTS.md#model-and-reasoning-routing). No Fast mode. Parent and worker agree scope, plan, owned paths, exclusions and acceptance before implementation. Delegate only when the benefit exceeds briefing/review overhead; tiny tasks can stay with the coordinator.
 
 Keep one browser/desktop owner per shared session. Explicitly release custody before another agent acts. A worker returns the result, actual model/reasoning, commit/artifact identity, evidence, checks run and uncertainties. Sol verifies observable outcomes, factual/voice constraints and required exact-HEAD code review/CI; the implementer is not its own independent reviewer. Missing access or a denied action is a blocker, not permission to try another route.
 
-Native Terra execution was confirmed by the parent on2026-10-26. Select only model/reasoning combinations exposed by the current execution surface: native Codex options and API reasoning options differ. Medium is the usual Terra starting point; High requires task justification. This guidance changes no running root model, global settings, other users' defaults, workspace entitlements or tool permissions. API model selection and credentials are separate. Existing approval, ownership and release gates remain in force.
+Select only model/reasoning combinations verified on the current execution surface; native Codex options and API options differ. Preserve configured effort unless the user authorizes a change. This guidance changes no running root model, global settings, other users' defaults, workspace entitlements or tool permissions. API model selection and credentials are separate. Existing approval, ownership and release gates remain in force.

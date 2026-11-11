@@ -1,23 +1,24 @@
 
-# Copilot Coding Agent Instructions for Postiz
+# Copilot instructions for the application workspace
+
+Read [root AGENTS.md](../../AGENTS.md) first. Use [repository routing](../../docs/brain/REPOSITORY_ROUTING.md) for subsystem ownership and the [handoff protocol](../../docs/brain/CHATGPT_CODEX_HANDOFF.md) for pushed-HEAD CI and independent review. The paths and commands below are relative to `postiz-app/`; they do not authorize dependency installs, database changes, local stack startup, or production operations.
 
 ## Project Architecture
-- Monorepo managed by NX, with apps in `apps/` and shared code in `libraries/`.
-- Main services: `frontend` (Next.js), `backend` (NestJS), `cron`, `commands`, `extension`, `sdk`, and `workers`.
+- pnpm workspace, with applications in `apps/` and shared code in `libraries/`.
+- Main services: `frontend` (Next.js), `backend` (NestJS), and `orchestrator` (Temporal/NestJS); additional workspaces include `commands`, `extension`, and `sdk`.
 - Data layer uses Prisma ORM (`libraries/nestjs-libraries/src/database/prisma/schema.prisma`) with PostgreSQL as the default database.
-- Redis (BullMQ) is used for queues and caching.
+- Temporal orchestration lives in `apps/orchestrator/` and `libraries/nestjs-libraries/src/temporal/`; consult the owning subsystem for Redis usage.
 - Email notifications via Resend.
 - Social login integrations (Instagram, Facebook) and Make.com/N8N integrations.
 
 ## Developer Workflows
-- Use Node.js 20.17.0 and pnpm 8+.
-- Install dependencies: `pnpm install`
-- Build all apps: `pnpm run build`
-- Run all apps in dev mode: `pnpm run dev`
+- Follow `package.json`: Node `>=22.12.0 <23.0.0`, Volta `22.20.0`, and `pnpm@10.6.1`. CI uses Node `22.20.0`; Docker uses the `22.20` image series.
+- When dependency installation is authorized, use the existing pnpm lockfile. Adding dependencies requires explicit approval under root instructions.
+- Build frontend, backend, and orchestrator: `pnpm run build`
+- Run the applications selected by the root dev script: `pnpm run dev`
 - Test: `pnpm test` (Jest, coverage enabled)
 - Individual app scripts are in each app's `package.json` (e.g., `pnpm --filter ./apps/backend run dev`).
-- Prisma DB commands: `pnpm run prisma-generate`, `pnpm run prisma-db-push`, `pnpm run prisma-reset`.
-- Docker: `docker compose -f ./docker-compose.dev.yaml up -d`
+- For database, Docker, environment, or local-stack work, read [OPERATING-MANUAL.md](../../OPERATING-MANUAL.md) first and retain its approval gates. Do not run schema/reset or stack-start commands as routine setup.
 
 ## Conventions & Patterns
 - Use conventional commits (`feat:`, `fix:`, `chore:`).

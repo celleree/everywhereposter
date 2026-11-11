@@ -4,7 +4,7 @@
 
 This document describes the gated Codex development workflows in `.github/workflows/codex-development-agents.yml` and `.github/workflows/codex-issue-queue.yml`.
 
-These workflows are inactive until all of the following are true:
+Execution requires the following readiness prerequisites; checked-in workflow files alone do not establish runner availability, authentication, dry-run acceptance, or activation:
 
 1. The pull request adding the workflow has been reviewed and merged into `main`.
 2. A dedicated self-hosted runner has been registered for `celleree/everywhereposter`.
@@ -12,6 +12,20 @@ These workflows are inactive until all of the following are true:
 4. A harmless planning dry run and a documentation-only implementation dry run have passed.
 
 This is a human-gated system. It must never merge or deploy automatically. The issue queue reduces repeated dispatches, but it does not remove readiness, risk, review, merge, or deployment gates.
+
+## Execution lanes
+
+| Lane | Governing owner and capability |
+| --- | --- |
+| Local supervised Codex | [Root orchestration](ORCHESTRATOR_PROTOCOL.md) and the [manual handoff cycle](CHATGPT_CODEX_HANDOFF.md#chatgpt-managed-implementation-cycle); bounded user authorization and existing human gates apply. |
+| Public GitHub Codex roles | Owner-triggered review only, for owner-controlled, same-repository PRs targeting `main`. The original actor and rerun actor must both be the owner. |
+| Private GitHub Codex roles | Planning, implementation, repair, and memory proposals; queue planning/implementation use the same private-only role wrapper. Local authorization does not bypass the private-only write boundary. |
+
+The separate opt-in `preflight` dispatch is a non-model readiness probe from `main`; it does not launch a Codex role or authorize implementation. `.github/workflows/codex-development-agents.yml`, `.github/workflows/codex-issue-queue.yml`, and `scripts/agents/codex-task.sh` govern event, visibility, and role eligibility. The trigger descriptions below apply only when their lane and readiness requirements pass.
+
+The queue workflow has no repository-visibility predicate of its own. A public owner dispatch can normalize inputs and post status before the task wrapper rejects its planning role; it cannot reach implementation through that wrapper.
+
+For supervised model routing, follow [AGENTS.md](../../AGENTS.md#model-and-reasoning-routing). Verify actual model/effort, enforced scope, and recovery state from each run's invocation, receipts, and current executable guards. Documentation and defaults alone do not establish model identity or completion; record observed values and leave unknowns unknown.
 
 ## Human Gates
 
@@ -36,7 +50,7 @@ Use a dedicated self-hosted Linux runner with the labels:
 
 The runner must:
 
-- Be used only for `celleree/everywhereposter`. Public operation permits only owner-triggered reviews of owner-controlled, same-repository PRs targeting `main`. Both the original actor and rerun actor must be the owner. Planning, implementation, repair, queue and post-merge memory automation remain private-only; public post-merge memory jobs are skipped.
+- Be used only for `celleree/everywhereposter`. Public Codex roles permit only owner-triggered reviews of owner-controlled, same-repository PRs targeting `main`. Both the original actor and rerun actor must be the owner. Planning, implementation, repair, and post-merge memory roles remain private-only; public post-merge memory jobs are skipped. Queue setup/reporting can precede wrapper rejection as described above.
 - Run under a dedicated operating-system user.
 - Have `git`, `gh`, `jq`, `base64`, `bubblewrap`, and the Codex CLI installed.
 - Be authenticated to Codex using the intended ChatGPT/Codex account.
@@ -84,11 +98,11 @@ Do not run this automation from the production application checkout or from a us
 
 ### Plan
 
-Applying `agent-ready` to an issue automatically runs the read-only planner and posts its plan to the issue. The issue template does not apply this label automatically.
+In the private-repository lane, applying `agent-ready` to an issue automatically runs the read-only planner and posts its plan to the issue. The issue template does not apply this label automatically.
 
 ### Implement
 
-Run the `Codex development agents` workflow manually with:
+In the private-repository lane, run the `Codex development agents` workflow manually with:
 
 - mode: `implement`
 - number: the approved issue number
@@ -101,7 +115,7 @@ Marking an owner-controlled draft pull request ready for review automatically ru
 
 ### Repair
 
-Run the workflow manually with:
+In the private-repository lane, run the workflow manually with:
 
 - mode: `repair`
 - number: the draft pull request number
@@ -110,11 +124,11 @@ Repair is restricted to an open, owner-controlled `agent/issue-N` pull request t
 
 ### Memory
 
-Merging a pull request automatically runs the read-only memory coordinator and posts proposed brain or release-ledger updates. It does not edit canonical memory.
+In the private-repository lane, merging a pull request triggers the read-only memory coordinator and posts proposed brain or release-ledger updates. Public post-merge memory jobs are skipped. It does not edit canonical memory.
 
 ### Unattended issue queue
 
-The repository owner may explicitly launch `Codex unattended issue queue` from `main` with `workflow_dispatch` after typing the confirmation phrase. Both GitHub's original workflow actor and the triggering actor must be the repository owner, so a collaborator cannot rerun either the full workflow or an individual privileged issue job from an earlier owner-authorized run. Missing triggering-actor information fails closed. Dispatches from any other ref are rejected. It has no scheduled, issue-label, pull-request, or repository event trigger.
+In the private-repository lane, the repository owner may explicitly launch `Codex unattended issue queue` from `main` with `workflow_dispatch` after typing the confirmation phrase. Both GitHub's original workflow actor and the triggering actor must be the repository owner, so a collaborator cannot rerun either the full workflow or an individual privileged issue job from an earlier owner-authorized run. Missing triggering-actor information fails closed. Dispatches from any other ref are rejected. It has no scheduled, issue-label, pull-request, or repository event trigger.
 
 The owner supplies an issue list and an optional implementation subset. Queue parsing is deterministic: it accepts comma-separated issue numbers, rejects malformed values, removes duplicates while preserving the first occurrence in the generated matrix data, and rejects implementation numbers that are absent from the main queue. An empty implementation subset is valid and makes every entry plan-only.
 
@@ -155,7 +169,7 @@ Every queue-created pull request must be a draft. The implementation role uses `
 
 ## CI Behavior
 
-GitHub events produced with the repository `GITHUB_TOKEN` have special recursion controls. The implementation and repair roles therefore dispatch `pull-request-ci.yml` explicitly against the agent branch after pushing. Normal CI remains the deterministic quality gate; an agent review never replaces it.
+GitHub events produced with the repository `GITHUB_TOKEN` have special recursion controls. The implementation and repair roles therefore dispatch `pull-request-ci.yml` explicitly against the agent branch after pushing, with the resolved full base and head SHAs. The wrapper dispatches CI; it does not wait for success or enforce that final independent review follows matching CI. The integrator must wait for required checks on the pushed HEAD, then obtain required fresh independent exact-SHA review under the [handoff cycle](CHATGPT_CODEX_HANDOFF.md#chatgpt-managed-implementation-cycle). An agent comment never replaces CI, independent review evidence, or human approval.
 
 ## Dry-Run Checklist
 
