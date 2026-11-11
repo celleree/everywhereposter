@@ -169,6 +169,9 @@ jobs:
 
       - name: Process issue with isolated role timeouts
         env:
+          CODEX_TASK_MODEL: ${{ vars.CODEX_AGENT_MODEL }}
+          CODEX_TASK_REASONING_EFFORT: ${{ vars.CODEX_AGENT_REASONING_EFFORT }}
+          CODEX_TASK_SETTINGS_SOURCE: github-actions-vars
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
         run: bash scripts/agents/codex-issue-queue.sh run

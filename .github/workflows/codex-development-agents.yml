@@ -161,6 +161,9 @@ jobs:
       - name: Run bounded Codex role
         if: inputs.mode != 'preflight'
         env:
+          CODEX_TASK_MODEL: ${{ vars.CODEX_AGENT_MODEL }}
+          CODEX_TASK_REASONING_EFFORT: ${{ vars.CODEX_AGENT_REASONING_EFFORT }}
+          CODEX_TASK_SETTINGS_SOURCE: github-actions-vars
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
         run: sh scripts/agents/codex-task.sh "${{ steps.task.outputs.mode }}" "${{ steps.task.outputs.number }}"
@@ -262,6 +265,9 @@ jobs:
 
       - name: Run bounded Codex role
         env:
+          CODEX_TASK_MODEL: ${{ vars.CODEX_AGENT_MODEL }}
+          CODEX_TASK_REASONING_EFFORT: ${{ vars.CODEX_AGENT_REASONING_EFFORT }}
+          CODEX_TASK_SETTINGS_SOURCE: github-actions-vars
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
         run: sh scripts/agents/codex-task.sh "${{ inputs.mode }}" "${{ inputs.number }}"

@@ -483,7 +483,7 @@ TASK_SCRIPT="$TASK_REPO/scripts/agents/codex-task.sh"
 TASK_REAL_SED=$(command -v sed)
 export TASK_REAL_SED
 mkdir -p "$TASK_BIN" "$TASK_REPO/scripts/agents" "$TASK_REPO/docs"
-cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ROOT/scripts/agents/owner-approval.sh" "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$TASK_REPO/scripts/agents/"
+cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ROOT/scripts/agents/owner-approval.sh" "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$ROOT/scripts/agents/codex-execution.mjs" "$ROOT/scripts/agents/codex-execution-policy.json" "$TASK_REPO/scripts/agents/"
 printf 'Original text.\n' > "$TASK_REPO/docs/example.md"
 
 for helper in install-git-guardrails.sh check-repository-state.sh start-change.sh; do
@@ -508,6 +508,13 @@ fi
 case "${1:-} ${2:-}" in
   'rev-parse --show-toplevel') printf '%s\n' "$TASK_REPO" ;;
   'rev-parse HEAD')
+    if [[ "$TASK_SCENARIO" == manual-post-execution-capture-tamper && -f "$TASK_MODEL_MARKER" && ! -e "$TASK_CAPTURE_TAMPER" ]]; then
+      node --input-type=module - "$TASK_EXECUTION_CAPTURE" <<'NODE'
+import { readFileSync,appendFileSync } from 'node:fs';
+appendFileSync(readFileSync(process.argv[2],'utf8').trim(),'\n');
+NODE
+      touch "$TASK_CAPTURE_TAMPER"
+    fi
     [[ "$TASK_SCENARIO" != repair-head-moved-before ]] && echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb || echo cccccccccccccccccccccccccccccccccccccccc
     ;;
   'status --porcelain') ;;
@@ -605,6 +612,7 @@ if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
   exit 0
 fi
 printf 'codex:%s\n' "$*" >> "$TASK_LOG"
+printf '%s\0' "$@" > "$TASK_ARGV_CAPTURE"
 touch "$TASK_MODEL_MARKER"
 if [[ "$TASK_SCENARIO" == *post-wrapper-tamper ]]; then
   node --input-type=module - "$TASK_REPO/scripts/agents/codex-task.sh" <<'NODE'
@@ -629,6 +637,7 @@ fi
 cat > "$TASK_CONTEXT_CAPTURE"
 printf 'GH_TOKEN=%s\n' "${GH_TOKEN-unset}" > "$TASK_ENV_CAPTURE"
 printf 'QUEUE_VALIDATED_ISSUE_SNAPSHOT=%s\n' "${QUEUE_VALIDATED_ISSUE_SNAPSHOT-unset}" >> "$TASK_ENV_CAPTURE"
+printf 'CODEX_TASK_MODEL=%s\n' "${CODEX_TASK_MODEL-unset}" >> "$TASK_ENV_CAPTURE"
 output=
 while [[ "$#" -gt 0 ]]; do
   if [[ "$1" == "--output-last-message" ]]; then
@@ -639,10 +648,14 @@ while [[ "$#" -gt 0 ]]; do
 done
 [[ -n "$output" ]] || exit 2
 echo 'Implemented safely.' > "$output"
+printf '%s\n' "${output%/*}/execution.json" > "$TASK_EXECUTION_CAPTURE"
 echo 'PRIVATE-RAW-STDOUT-SENTINEL'
 echo 'PRIVATE-RAW-STDERR-SENTINEL' >&2
 if [[ "$TASK_SCENARIO" == manual-post-final-secret ]]; then echo 'ghp_00000000000000000000000000000000' > "$output"; fi
 if [[ "$TASK_SCENARIO" == manual-post-model-failure ]]; then exit 7; fi
+if [[ "$TASK_SCENARIO" == manual-post-execution-helper-tamper ]]; then echo '// changed' >> "${output%/*}/codex-execution.mjs"; fi
+if [[ "$TASK_SCENARIO" == manual-post-execution-policy-tamper ]]; then echo ' ' >> "${output%/*}/codex-execution-policy.json"; fi
+if [[ "$TASK_SCENARIO" == manual-post-execution-receipt-failure ]]; then chmod 644 "${output%/*}/execution.json"; fi
 if [[ "$TASK_SCENARIO" == manual-post-recovery-tamper ]]; then
   # output is in the same private temporary root as the trusted helper copy.
   echo '// changed' >> "${output%/*}/task-recovery.mjs"
@@ -741,7 +754,8 @@ run_task_case() {
   [[ "$scenario" != repair* ]] || { role=repair; TASK_ISSUE=42; }
   local TASK_MODEL_MARKER="$case_dir/model-ran" TASK_STAGE_MARKER="$case_dir/staged" TASK_ESCAPE_MARKER="$case_dir/escaped"
   export TASK_ISSUE TASK_MODEL_MARKER TASK_STAGE_MARKER TASK_ESCAPE_MARKER
-  cp "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$TASK_REPO/scripts/agents/"
+  export TASK_ARGV_CAPTURE="$case_dir/argv.nul" TASK_EXECUTION_CAPTURE="$case_dir/execution-path" TASK_CAPTURE_TAMPER="$case_dir/capture-tampered"
+  cp "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$ROOT/scripts/agents/codex-execution.mjs" "$ROOT/scripts/agents/codex-execution-policy.json" "$TASK_REPO/scripts/agents/"
   cp "$ROOT/scripts/agents/codex-task.sh" "$TASK_SCRIPT"
   if [[ "$scenario" == *post-wrapper-tamper ]]; then
     node --input-type=module - "$TASK_SCRIPT" <<'NODE'
@@ -771,6 +785,16 @@ NODE
 
   mkdir -p "$case_dir"
   mkdir -m 700 "$PRIVATE_ROOT/task-$scenario"
+  export CODEX_TASK_MODEL=gpt-6.1-sol CODEX_TASK_REASONING_EFFORT=high CODEX_TASK_SETTINGS_SOURCE=github-actions-vars
+  case "$scenario" in
+    *settings-missing) export CODEX_TASK_MODEL= ;;
+    *settings-effort-missing) export CODEX_TASK_REASONING_EFFORT= ;;
+    *settings-source-missing) export CODEX_TASK_SETTINGS_SOURCE= ;;
+    *settings-disallowed) export CODEX_TASK_MODEL=gpt-6.1-terra ;;
+    *settings-astra) export CODEX_TASK_MODEL=gpt-6-astra ;;
+    *settings-luna-ultra) export CODEX_TASK_MODEL=gpt-6-luna CODEX_TASK_REASONING_EFFORT=ultra ;;
+    *settings-luna-max) export CODEX_TASK_MODEL=gpt-6-luna CODEX_TASK_REASONING_EFFORT=max ;;
+  esac
   export CODEX_RECOVERY_ROOT="$PRIVATE_ROOT/task-$scenario"
   [[ "$scenario" != manual-missing-recovery ]] || export CODEX_RECOVERY_ROOT=
   : > "$case_dir/log"
@@ -813,7 +837,7 @@ NODE
   assert_eq "$expected_rc" "$rc" "unexpected codex-task exit code for $scenario"
   if [[ "$expected_rc" != 0 ]]; then
     if [[ "$scenario" != *post-* ]]; then
-      if grep -Eq '^(helper:|codex:|git:(fetch|switch))' "$case_dir/log" && [[ "$scenario" != repair-pre-unowned && "$scenario" != repair-head-moved-before ]]; then
+      if grep -Eq '^(helper:|codex:|git:(fetch|switch))' "$case_dir/log" && [[ "$scenario" != *settings-* && "$scenario" != repair-pre-unowned && "$scenario" != repair-head-moved-before ]]; then
         fail "denied $scenario reached branch preparation or model"
       fi
       assert_not_contains "$case_dir/log" 'codex:' 'pre-worker denial must never launch a model'
@@ -836,6 +860,29 @@ NODE
   LAST_TASK_CASE_DIR="$case_dir"
 }
 
+for lane in manual queued repair; do
+  for denied in missing effort-missing source-missing disallowed astra luna-ultra; do
+    run_task_case "$lane-settings-$denied" 215 1
+  done
+done
+for failure in helper-tamper policy-tamper receipt-failure capture-tamper; do
+  run_task_case "manual-post-execution-$failure" 216 1
+  [[ -f "$PRIVATE_ROOT/task-manual-post-execution-$failure/ACTIVE" ]] || fail 'execution evidence failure must quarantine recovery'
+  if [[ "$failure" == capture-tamper ]]; then
+    [[ -f "$LAST_TASK_CASE_DIR/capture-tampered" ]] || fail 'the after-verification capture tamper must actually execute'
+    assert_contains "$LAST_TASK_CASE_DIR/output" 'Retained execution evidence does not match its pinned digest.' 'F3 retained-object mismatch must block later writes'
+  fi
+done
+run_task_case manual-settings-luna-max 217 0
+node --input-type=module - "$LAST_TASK_CASE_DIR/argv.nul" <<'NODE'
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const args=readFileSync(process.argv[2],'utf8').split('\0').slice(0,-1);
+assert.equal(args.filter(value=>value==='--model').length,1);
+assert.equal(args[args.indexOf('--model')+1],'gpt-6-luna');
+assert.ok(args.includes('model_reasoning_effort="max"'));assert.ok(args.includes('--json'));assert.ok(args.includes('--ignore-user-config'));
+NODE
+
 run_task_case manual-missing-recovery 214 1
 
 for scenario in manual-post-whitespace-failure manual-post-model-failure manual-post-final-secret manual-post-recovery-tamper manual-post-commit-failure manual-post-push-failure manual-post-pr-ambiguous; do
@@ -856,6 +903,22 @@ for scenario in manual-post-whitespace-failure manual-post-model-failure manual-
 done
 
 run_task_case queued-valid 200 0
+node --input-type=module - "$PRIVATE_ROOT/task-queued-valid" "$LAST_TASK_CASE_DIR/argv.nul" <<'NODE'
+import { readFileSync,readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import assert from 'node:assert/strict';
+const store=process.argv[2],record=join(store,'records',readdirSync(join(store,'records'))[0]);
+const recovery=JSON.parse(readFileSync(join(record,'receipt.json'))),event=recovery.events.at(-1),ref=event.artifacts.codexExecution;
+const bytes=readFileSync(join(record,ref.file)),receipt=JSON.parse(bytes);
+assert.equal(createHash('sha256').update(bytes).digest('hex'),ref.sha256);assert.equal(event.executionSha256,ref.sha256);
+assert.equal(receipt.requested.model,'gpt-6.1-sol');assert.equal(receipt.authorized.reasoningEffort,'high');assert.equal(receipt.invoked.trust,'os_process_started');
+assert.equal(receipt.observed.model,null);assert.equal(receipt.observed.reasoningEffort,null);assert.equal(receipt.observed.usage,null);assert.equal(receipt.billedCost,null);
+assert.equal(receipt.result.exitCode,0);assert.ok(receipt.result.elapsedMs>=0);
+const args=readFileSync(process.argv[3],'utf8').split('\0').slice(0,-1);
+assert.deepEqual(receipt.intendedArgv,args);assert.equal(args.filter(value=>value==='--model').length,1);assert.equal(args[args.indexOf('--model')+1],'gpt-6.1-sol');assert.ok(args.includes('model_reasoning_effort="high"'));assert.ok(args.includes('--json'));assert.ok(args.includes('--ignore-user-config'));
+NODE
+
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Pinned safe title' \
   'queued implementation must use the exact validated snapshot title'
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Pinned safe body with exact approved text.' \
@@ -866,6 +929,7 @@ assert_not_contains "$LAST_TASK_CASE_DIR/context" 'Manual live title' \
   'live issue changes must not enter queued Codex context'
 assert_not_contains "$LAST_TASK_CASE_DIR/context" 'Live protected authentication change' \
   'post-validation protected live content must not enter queued Codex context'
+assert_contains "$LAST_TASK_CASE_DIR/env" 'CODEX_TASK_MODEL=unset' 'the settings input must not remain in the worker environment'
 assert_contains "$LAST_TASK_CASE_DIR/env" 'GH_TOKEN=unset' \
   'the GitHub token must be removed before Codex runs'
 assert_contains "$LAST_TASK_CASE_DIR/env" 'QUEUE_VALIDATED_ISSUE_SNAPSHOT=unset' \

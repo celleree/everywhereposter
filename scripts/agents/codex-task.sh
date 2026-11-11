@@ -78,6 +78,9 @@ RECOVERY_PATH=
 RECOVERY_PHASE=admission
 RECOVERY_SIGNAL=
 RECOVERY_FAILED=false
+EXECUTION_HELPER="$TMP_ROOT/codex-execution.mjs"
+EXECUTION_POLICY="$TMP_ROOT/codex-execution-policy.json"
+EXECUTION_FILE="$TMP_ROOT/execution.json"
 PUSH_STATE=not_attempted
 PR_STATE=not_attempted
 mkdir -m 700 "$AGENT_HOME"
@@ -103,15 +106,15 @@ recovery_context() {
   jq -cn --arg phase "$RECOVERY_PHASE" --arg signal "$RECOVERY_SIGNAL" --argjson exit "$1" \
     --arg base "$RECOVERY_BASE_SHA" --arg start "${START_HEAD:-$RECOVERY_INITIAL_SHA}" \
     --arg contract "${SCOPE_CONTRACT_SHA:-}" --arg issue "${SCOPE_ISSUE:-}" \
-    --arg push "$PUSH_STATE" --arg pr "$PR_STATE" \
-    '{phase:$phase,exit:$exit,signal:(if $signal=="" then null else $signal end),baseSha:$base,startSha:$start,contractHash:$contract,issue:$issue,external:{push:$push,pr:$pr}}'
+    --arg push "$PUSH_STATE" --arg pr "$PR_STATE" --arg execution "${EXECUTION_RECEIPT_SHA:-}" \
+    '{executionSha256:(if $execution=="" then null else $execution end),phase:$phase,exit:$exit,signal:(if $signal=="" then null else $signal end),baseSha:$base,startSha:$start,contractHash:$contract,issue:$issue,external:{push:$push,pr:$pr}}'
 }
 
 recovery_capture() {
   RECOVERY_CONTEXT=$(recovery_context "$1")
   RECOVERY_ATTACHMENTS=$(jq -cn --arg item "$ITEM" --arg context "$CONTEXT" --arg output "$OUTPUT" \
-    --arg issue "$SCOPE_ITEM" --arg contract "$SCOPE_CONTRACT" --arg whitespace "$TMP_ROOT/git-check.log" \
-    '{task:$item,context:$context,finalMessage:$output,approvedIssue:$issue,contract:$contract,whitespace:$whitespace}')
+    --arg issue "$SCOPE_ITEM" --arg contract "$SCOPE_CONTRACT" --arg whitespace "$TMP_ROOT/git-check.log" --arg execution "$EXECUTION_FILE" \
+    '{task:$item,context:$context,finalMessage:$output,approvedIssue:$issue,contract:$contract,whitespace:$whitespace,codexExecution:$execution}')
   if ! recovery_call capture "$RECOVERY_STORE" "$ROOT" "$RECOVERY_RECORD" "$RECOVERY_CONTEXT" "$RECOVERY_ATTACHMENTS" >/dev/null; then
     RECOVERY_FAILED=true
     return 1
@@ -133,6 +136,7 @@ cleanup() {
   git config --local --unset-all "$GIT_AUTH_KEY" >/dev/null 2>&1 || true
   if [ -n "$RECOVERY_RECORD" ] && [ "$RECOVERY_FAILED" = false ] &&
     recovery_capture "$CLEANUP_STATUS" &&
+    { [ -z "${EXECUTION_RECEIPT_SHA:-}" ] || execution_call retained "$RECOVERY_PATH" "$EXECUTION_RECEIPT_SHA" >/dev/null; } &&
     recovery_call finish "$RECOVERY_STORE" "$ROOT" "$RECOVERY_RECORD" >/dev/null; then
     if [ -n "${REVIEW_ROOT:-}" ]; then
       git worktree remove --force "$REVIEW_ROOT" >/dev/null 2>&1 || CLEANUP_STATUS=1
@@ -402,6 +406,49 @@ case "$MODE" in
   *) fail "Unknown mode: $MODE" ;;
 esac
 
+# Snapshot explicit settings and trusted implementation only after existing owner/task gates.
+EXECUTION_REQUESTED=$(jq -cn --arg model "${CODEX_TASK_MODEL-}" --arg effort "${CODEX_TASK_REASONING_EFFORT-}" --arg source "${CODEX_TASK_SETTINGS_SOURCE-}" '{model:$model,reasoningEffort:$effort,source:$source}')
+cp "$ROOT/scripts/agents/codex-execution.mjs" "$EXECUTION_HELPER"
+cp "$ROOT/scripts/agents/codex-execution-policy.json" "$EXECUTION_POLICY"
+EXECUTION_HELPER_SHA=$(sha256sum "$EXECUTION_HELPER" | cut -d ' ' -f 1)
+EXECUTION_POLICY_SHA=$(sha256sum "$EXECUTION_POLICY" | cut -d ' ' -f 1)
+EXECUTION_MODEL=${CODEX_TASK_MODEL-}
+EXECUTION_EFFORT=${CODEX_TASK_REASONING_EFFORT-}
+EXECUTION_IDENTITY=$(jq -cn --arg repository "$REPOSITORY" --arg role "$MODE" --arg number "$NUMBER" \
+  --arg revision "$RECOVERY_INITIAL_SHA" --arg start "${START_HEAD:-$RECOVERY_INITIAL_SHA}" --arg base "$RECOVERY_BASE_SHA" \
+  --arg reviewed "$REVIEW_HEAD_SHA" --arg scope "${SCOPE_CONTRACT_SHA:-}" --arg recovery "$RECOVERY_RECORD" \
+  --arg snapshot "$(sha256sum "$ITEM" | cut -d ' ' -f 1)" --arg run "${GITHUB_RUN_ID-}" --arg attempt "${GITHUB_RUN_ATTEMPT-}" \
+  '{repository:$repository,role:$role,number:$number,revision:$revision,startSha:$start,baseSha:$base,reviewedHead:$reviewed,scopeSha256:$scope,snapshotSha256:$snapshot,recoveryRecord:$recovery,runId:(if $run=="" then null else $run end),runAttempt:(if $attempt=="" then null else $attempt end)}')
+EXECUTION_BOOTSTRAP=$(cat <<'NODE'
+import { constants as C, openSync, fstatSync, readSync, closeSync, writeSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+try {
+  const [helperFile, helperSha256, policyFile, policySha256, mode, ...args] = process.argv.slice(1);
+  const trusted = (file, expected) => {
+    const fd = openSync(file, C.O_RDONLY | C.O_NOFOLLOW);
+    try {
+      const stat = fstatSync(fd), bytes = Buffer.alloc(65537);
+      if (!stat.isFile() || stat.size > 65536) throw new Error();
+      const count = readSync(fd, bytes, 0, bytes.length, 0), source = bytes.subarray(0,count);
+      if (count > 65536 || createHash('sha256').update(source).digest('hex') !== expected) throw new Error();
+      return source;
+    } finally { closeSync(fd); }
+  };
+  const source = trusted(helperFile, helperSha256), policy = JSON.parse(trusted(policyFile, policySha256));
+  const helper = await import(`data:text/javascript;base64,${source.toString('base64')}`);
+  const result = await helper.execute(mode, policy, { helperSha256, policySha256 }, args);
+  if (mode === 'launch') { writeSync(3, JSON.stringify(result)); process.exitCode = result.exitCode; }
+  else console.log(JSON.stringify(result));
+} catch {
+  console.error('ERROR: Explicit execution settings or private receipt could not be verified.');
+  process.exitCode = 1;
+}
+NODE
+)
+execution_call() {
+  node --input-type=module --eval "$EXECUTION_BOOTSTRAP" "$EXECUTION_HELPER" "$EXECUTION_HELPER_SHA" "$EXECUTION_POLICY" "$EXECUTION_POLICY_SHA" "$@"
+}
+
 {
   echo 'BEGIN UNTRUSTED GITHUB CONTEXT'
   cat "$ITEM"
@@ -424,6 +471,7 @@ git_auth_disable
 unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
 unset OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN
 unset SSH_AUTH_SOCK GIT_ASKPASS CODEX_RECOVERY_ROOT
+unset CODEX_TASK_MODEL CODEX_TASK_REASONING_EFFORT CODEX_TASK_SETTINGS_SOURCE
 unset ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
 unset ACTIONS_CACHE_URL ACTIONS_RESULTS_URL
 export GIT_TERMINAL_PROMPT=0
@@ -482,15 +530,12 @@ fi
 
 RUN_ROOT=$ROOT
 [ "$MODE" != "review" ] || RUN_ROOT=$REVIEW_ROOT
-RECOVERY_PHASE=pre_worker
-recovery_capture 0 || fail "Pre-worker recovery capture failed."
-if (
-  # This child-only bound also applies to regular files written by its descendants.
-  ulimit -f 4096
-  cd "$RUN_ROOT"
-  cat "$CONTEXT" | codex --ask-for-approval never exec \
+set -- --ask-for-approval never exec \
     --ephemeral \
     --ignore-user-config \
+    --model "$EXECUTION_MODEL" \
+    --config "model_reasoning_effort=\"$EXECUTION_EFFORT\"" \
+    --json \
     "$@" \
     --config 'tools.web_search=false' \
     --config 'sandbox_workspace_write.network_access=false' \
@@ -501,13 +546,41 @@ if (
     --sandbox "$SANDBOX" \
     --output-last-message "$OUTPUT" \
     "$PROMPT"
-) > "$RECOVERY_PATH/stdout.log" 2> "$RECOVERY_PATH/stderr.log"; then
+EXECUTION_PREPARED=$(execution_call prepare "$EXECUTION_FILE" "$EXECUTION_REQUESTED" "$EXECUTION_IDENTITY" "$@") ||
+  fail "An explicit authorized model and reasoning pair is required; no model started."
+EXECUTION_RECEIPT_SHA=$(printf '%s' "$EXECUTION_PREPARED" | jq -r .sha256)
+RECOVERY_PHASE=pre_worker
+recovery_capture 0 || fail "Pre-worker recovery capture failed."
+if ! execution_call retained "$RECOVERY_PATH" "$EXECUTION_RECEIPT_SHA" >/dev/null; then
+  RECOVERY_FAILED=true
+  fail "Retained execution intent does not match its pinned digest."
+fi
+if EXECUTION_RESULT=$(
+  # Preserve the child-only file bound and private raw streams. FD 3 is not inherited by Codex.
+  ulimit -f 4096
+  cd "$RUN_ROOT"
+  execution_call launch "$EXECUTION_FILE" "$EXECUTION_RECEIPT_SHA" "$RECOVERY_PATH/stdout.log" "$@" \
+    3>&1 > "$RECOVERY_PATH/stdout.log" 2> "$RECOVERY_PATH/stderr.log"
+) < "$CONTEXT"; then
   CODEX_STATUS=0
 else
   CODEX_STATUS=$?
 fi
+EXECUTION_FINISHED_SHA=$(printf '%s' "$EXECUTION_RESULT" | jq -er 'select(.complete == true) | .sha256' 2>/dev/null) || {
+  RECOVERY_FAILED=true
+  fail "Execution receipt is incomplete; recovery remains quarantined."
+}
+if ! execution_call verify "$EXECUTION_FILE" "$EXECUTION_FINISHED_SHA" >/dev/null; then
+  RECOVERY_FAILED=true
+  fail "Execution receipt integrity failed; recovery remains quarantined."
+fi
+EXECUTION_RECEIPT_SHA=$EXECUTION_FINISHED_SHA
 RECOVERY_PHASE=post_worker
 recovery_capture "$CODEX_STATUS" || fail "Worker evidence could not be persisted."
+if ! execution_call retained "$RECOVERY_PATH" "$EXECUTION_RECEIPT_SHA" >/dev/null; then
+  RECOVERY_FAILED=true
+  fail "Retained execution evidence does not match its pinned digest."
+fi
 [ "$CODEX_STATUS" -eq 0 ] || fail "Codex role stopped; private recovery evidence was retained."
 
 [ -s "$OUTPUT" ] || fail "Codex returned no final message."
