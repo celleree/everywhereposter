@@ -75,7 +75,7 @@ has_blocked_category() {
       next
     }
     /^###[[:space:]]+/ { capture=0 }
-    capture { print }
+    capture && $0 != "Shared paths or dependencies:" { print }
   ' <<< "$body")
   grep -Eiq \
     'authentication|authorization|oauth|(^|[^[:alnum:]_])auth([^[:alnum:]_]|$)|security|billing|payments?|databases?|schema|migrations?|infrastructure|dependenc(y|ies)|package[[:space:]]+(upgrade|update|bump)|package\.json|(^|/)(pnpm-lock|package-lock|yarn\.lock|bun\.lock)|containers?|docker|github[[:space:]]+actions|\.github/workflows|workflow[[:space:]]+(file|ya?ml|action|change)|deploy(ment|ing)?|production[[:space:]]+(operation|change|deploy)' <<< "$title"$'\n'"$scoped_text"

@@ -78,6 +78,33 @@ check medium 0 eligible
 body=${valid_body/Application code./Authentication, billing, database migrations, dependencies, Docker, and deployment.}
 check safe-exclusions 0 eligible
 
+# Use the real rendered field labels rather than a hand-written approximation.
+placeholder() {
+  awk -v id="$1" '
+    $0 == "    id: " id { section=1 }
+    section && /^      placeholder: \|$/ { capture=1; next }
+    capture && /^    validations:/ { exit }
+    capture { sub(/^        /, ""); print }
+  ' "$ROOT/.github/ISSUE_TEMPLATE/agent-ready.yml"
+}
+real_scope=$(placeholder scope)
+real_exclusions=$(placeholder exclusions)
+[[ "$real_scope" == *'Owned paths:'* && "$real_scope" == *'Shared paths or dependencies:'* && "$real_exclusions" == *'Prohibited paths:'* ]]
+body=${valid_body/'docs/example.md'/"$real_scope"}
+body=${body/'Application code.'/"$real_exclusions"}
+real_template_body=$body
+check real-template-labels 0 eligible
+body=${real_template_body/'- None'/'- Add a dependency.'}
+check real-template-dependency-list 1 blocked_category
+body=${real_template_body/'path/to/owned-file.ts'/'package upgrade'}
+check real-template-package-upgrade-list 1 blocked_category
+body=${real_template_body/'No additional constraints.'/'Change a package dependency.'}
+check real-template-dependency-content 1 blocked_category
+for near_label in ' Shared paths or dependencies:' 'Shared paths or Dependencies:' 'Shared paths or dependencies :' 'Shared paths or dependencies: add a package'; do
+  body=${real_template_body/'Shared paths or dependencies:'/"$near_label"}
+  check near-label 1 blocked_category
+done
+
 printf -v padding '%60000s' x
 body=${valid_body/'A heading is misspelled.'/"A heading is misspelled. $padding"}
 check long-body 0 eligible
