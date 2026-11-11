@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +20,7 @@ const stream=event=>Buffer.from(JSON.stringify(event)+'\n');
 const completion=(value=usage)=>({type:'turn.completed',usage:value});
 let sequence=0;
 function fixture() {
- const path=join(root,String(sequence++));mkdirSync(path);mkdirSync(join(path,'bin'));
+ const path=join(root,String(sequence++));mkdirSync(path,{mode:0o700});mkdirSync(join(path,'bin'));
  const file=join(path,'execution.json'),stdout=join(path,'stdout'),stderr=join(path,'stderr');
  writeFileSync(stdout,'',{mode:0o600});writeFileSync(stderr,'',{mode:0o600});
  const helper=join(path,'helper.mjs'),policyFile=join(path,'policy.json');
@@ -59,7 +59,7 @@ test('malformed, truncated, duplicate, nested/spoofed, oversized, ambiguous and 
 const task=readFileSync(new URL('./codex-task.sh',import.meta.url),'utf8');
 const bootstrap=task.slice(task.indexOf("EXECUTION_BOOTSTRAP=$(cat <<'NODE'\n")+"EXECUTION_BOOTSTRAP=$(cat <<'NODE'\n".length,task.indexOf('\nNODE\n)\nexecution_call()'));
 function executable(f) {
- const code=`#!/usr/bin/env node\nconst fs=require('node:fs');\nconst args=process.argv.slice(2);fs.writeFileSync(process.env.FIXTURE_ARGV,JSON.stringify(args));\nconst mode=args.at(-1);\nif(mode==='signal'){process.on('SIGTERM',()=>{fs.writeFileSync(process.env.FIXTURE_SIGNAL,'SIGTERM');process.exit(143)});fs.writeFileSync(process.env.FIXTURE_READY,'ready');setTimeout(()=>process.exit(99),5000)}\nelse { console.log(JSON.stringify({type:'turn.completed',usage:${JSON.stringify(usage)}}));console.error(JSON.stringify({type:'turn.completed',usage:{input_tokens:999}}));if(mode==='receipt-failure')fs.chmodSync(process.env.FIXTURE_RECEIPT,0o644);process.exit(mode==='nonzero'?7:0); }\n`;
+ const code=`#!/usr/bin/env node\nconst fs=require('node:fs');\nconst args=process.argv.slice(2);fs.writeFileSync(process.env.FIXTURE_ARGV,JSON.stringify(args));\nconst mode=args.at(-1);\nif(mode==='signal'){process.on('SIGTERM',()=>{fs.writeFileSync(process.env.FIXTURE_SIGNAL,'SIGTERM');process.exit(143)});fs.writeFileSync(process.env.FIXTURE_READY,'ready');setTimeout(()=>process.exit(99),5000)}\nelse { console.log(JSON.stringify({type:'turn.completed',usage:${JSON.stringify(usage)}}));console.error(JSON.stringify({type:'turn.completed',usage:{input_tokens:999}}));if(mode==='receipt-failure')fs.chmodSync(process.env.FIXTURE_RECEIPT,0o644);if(mode==='ancestor-swap'){fs.renameSync(process.env.FIXTURE_SWAP,process.env.FIXTURE_SWAP+'.original');fs.symlinkSync(process.env.FIXTURE_TARGET,process.env.FIXTURE_SWAP)}process.exit(mode==='nonzero'?7:0); }\n`;
  writeFileSync(join(f.path,'bin','codex'),code,{mode:0o700});
 }
 function start(f,prompt='normal',{missing=false,tamper=null}={}) {
@@ -68,7 +68,7 @@ function start(f,prompt='normal',{missing=false,tamper=null}={}) {
  if(tamper==='policy')writeFileSync(f.policyFile,'{}');
  if(tamper==='intent')writeFileSync(f.file,'{}');
  const out=openSync(f.stdout,'w'),err=openSync(f.stderr,'w');
- const child=spawn(process.execPath,['--input-type=module','--eval',bootstrap,f.helper,f.bound.helperSha256,f.policyFile,f.bound.policySha256,'launch',f.file,intent.sha256,f.stdout,...args],{env:{...process.env,PATH:missing?join(f.path,'missing'):join(f.path,'bin')+':'+process.env.PATH,FIXTURE_ARGV:join(f.path,'argv.json'),FIXTURE_READY:join(f.path,'ready'),FIXTURE_SIGNAL:join(f.path,'signal'),FIXTURE_RECEIPT:f.file},stdio:['ignore',out,err,'pipe']});
+ const child=spawn(process.execPath,['--input-type=module','--eval',bootstrap,f.helper,f.bound.helperSha256,f.policyFile,f.bound.policySha256,'launch',f.file,intent.sha256,f.stdout,...args],{env:{...process.env,PATH:missing?join(f.path,'missing'):join(f.path,'bin')+':'+process.env.PATH,FIXTURE_ARGV:join(f.path,'argv.json'),FIXTURE_READY:join(f.path,'ready'),FIXTURE_SIGNAL:join(f.path,'signal'),FIXTURE_RECEIPT:f.file,FIXTURE_SWAP:f.swap,FIXTURE_TARGET:f.target},stdio:['ignore',out,err,'pipe']});
  closeSync(out);closeSync(err);let control='';child.stdio[3].on('data',bytes=>control+=bytes.toString());
  return {child,done:new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal,control}))),args};
 }
@@ -86,6 +86,28 @@ test('spawn failure leaves invoked null; digest/helper/policy tamper and receipt
  assert.equal(failure.code,1);const receipt=verify(missing.file,JSON.parse(failure.control).sha256);assert.equal(receipt.invoked,null);assert.equal(receipt.result.spawnError,'ENOENT');assert.equal(receipt.result.exitCode,null);
  for(const tamper of ['helper','policy','intent']){const f=fixture(),result=await start(f,'normal',{tamper}).done;assert.equal(result.code,1);assert.equal(result.control,'');assert.equal(existsSync(join(f.path,'argv.json')),false);assert.doesNotMatch(readFileSync(f.stderr,'utf8'),/PRIVATE-HELPER-SENTINEL/);}
  const failed=fixture(),result=await start(failed,'receipt-failure').done;assert.equal(result.code,1);assert.equal(result.control,'');
+});
+test('receipt ancestors must be real directories and the receipt parent must be private before any child starts',()=>{
+ const f=fixture(),real=join(f.path,'real');mkdirSync(real,{mode:0o700});
+ symlinkSync(real,join(f.path,'linked'));
+ mkdirSync(join(real,'nested'),{mode:0o700});
+ for(const file of [join(f.path,'linked','execution.json'),join(f.path,'linked','nested','execution.json')])assert.throws(()=>prepare(policy,bindings,requested,identity,argv(),file));
+ chmodSync(real,0o755);assert.throws(()=>prepare(policy,bindings,requested,identity,argv(),join(real,'execution.json')));
+ assert.equal(existsSync(join(real,'execution.json')),false);
+});
+test('child ancestor swap cannot redirect receipt persistence or yield accepted completion',async()=>{
+ for(const nested of [false,true]) {
+  const f=fixture();f.swap=join(f.path,'exposed');f.target=join(f.path,'protected');
+  mkdirSync(f.swap,{mode:0o700});mkdirSync(f.target,{mode:0o700});
+  if(nested){mkdirSync(join(f.swap,'receipts'),{mode:0o700});mkdirSync(join(f.target,'receipts'),{mode:0o700});}
+  const suffix=nested?'receipts/execution.json':'execution.json';f.file=join(f.swap,suffix);
+  const target=join(f.target,suffix),marker=Buffer.from('FIXTURE-OWNED-0600-MARKER\n');writeFileSync(target,marker,{mode:0o600});
+  const result=await start(f,'ancestor-swap').done;
+  assert.equal(result.code,1);assert.equal(result.control,'');assert.deepEqual(readFileSync(target),marker);
+  const original=JSON.parse(readFileSync(join(f.swap+'.original',suffix)));
+  assert.equal(original.result,null);assert.equal(original.invoked.trust,'os_process_started');
+  assert.match(readFileSync(f.stderr,'utf8'),/private receipt could not be verified/);
+ }
 });
 test('launcher forwards SIGTERM to its direct executable child and records interruption without stranding it',{timeout:10000},async()=>{
  const f=fixture(),run=start(f,'signal');

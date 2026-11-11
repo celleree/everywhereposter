@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { constants as C, closeSync, fstatSync, fsyncSync, lstatSync, openSync, readSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { constants as OS } from 'node:os';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -21,15 +21,45 @@ export function boundedRead(file, limit) {
     return bytes.subarray(0, count);
   } finally { closeSync(fd); }
 }
-function persist(file, value, create = false) {
+// Linux directory descriptors anchor every receipt operation even if its declared path moves.
+function openDirectory(path) {
+  let fd = openSync('/', C.O_RDONLY | C.O_DIRECTORY | C.O_NOFOLLOW);
+  const identities = [];
+  try {
+    const remember = () => { const st = fstatSync(fd, { bigint: true }); identities.push(`${st.dev}:${st.ino}`); };
+    remember();
+    for (const part of resolve(path).split('/').filter(Boolean)) {
+      const next = openSync(`/proc/self/fd/${fd}/${part}`, C.O_RDONLY | C.O_DIRECTORY | C.O_NOFOLLOW);
+      closeSync(fd); fd = next; remember();
+    }
+    return { fd, identities };
+  } catch (error) { closeSync(fd); throw error; }
+}
+function pinReceipt(file) {
+  assert(isAbsolute(file));
+  const directory = dirname(file), pinned = openDirectory(directory);
+  const check = () => {
+    const current = openDirectory(directory);
+    try {
+      const st = fstatSync(pinned.fd);
+      assert(JSON.stringify(current.identities) === JSON.stringify(pinned.identities));
+      assert(st.uid === process.getuid() && (st.mode & 0o777) === 0o700);
+    } finally { closeSync(current.fd); }
+  };
+  try { check(); } catch (error) { closeSync(pinned.fd); throw error; }
+  return { file: `/proc/self/fd/${pinned.fd}/${basename(file)}`, fd: pinned.fd, check, close: () => closeSync(pinned.fd) };
+}
+function persist(pinned, value, create = false) {
+  pinned.check();
+  const file = pinned.file;
   const bytes = encoded(value); assert(bytes.length <= 65536);
   if (!create) { const st = lstatSync(file); assert(st.isFile() && st.uid === process.getuid() && (st.mode & 0o777) === 0o600 && st.nlink === 1); }
   const temporary = create ? file : `${file}.${randomUUID()}`;
   const fd = openSync(temporary, C.O_WRONLY | C.O_CREAT | C.O_EXCL | C.O_NOFOLLOW, 0o600);
   try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
   if (!create) renameSync(temporary, file);
-  const directory = openSync(dirname(file), C.O_RDONLY | C.O_DIRECTORY);
-  try { fsyncSync(directory); } finally { closeSync(directory); }
+  fsyncSync(pinned.fd);
+  pinned.check();
   return hash(bytes);
 }
 export function authorize(policy, requested) {
@@ -63,7 +93,8 @@ export function prepare(policy, bindings, requested, identity, argv, file) {
     identity, policy: { ...bindings, advertisedSnapshot: policy.advertisedSnapshot.fetchedAt, cliObservation: policy.cliObservation, remoteSupport: 'unverified' },
     digests: { settings: hash(encoded(requested)), identity: hash(encoded(identity)), argv: hash(encoded(argv)) }, intendedArgv: argv,
     preparedAt: new Date().toISOString(), result: null, billedCost: null };
-  return { sha256: persist(file, receipt, true) };
+  const pinned = pinReceipt(file);
+  try { return { sha256: persist(pinned, receipt, true) }; } finally { pinned.close(); }
 }
 // JSON.parse alone silently accepts duplicate keys. Treat them as ambiguous telemetry.
 function duplicateKeys(line) {
@@ -108,8 +139,13 @@ export function observations(bytes) {
   Object.assign(result.telemetry, { status: 'cli_reported', reason: null, line: entry.line, event: 'turn.completed', lineSha256: entry.lineSha256 });
   return result;
 }
+function verified(pinned, expected) {
+  pinned.check(); const bytes = boundedRead(pinned.file, 65536); pinned.check();
+  assert(hash(bytes) === expected); return JSON.parse(bytes);
+}
 export function verify(file, expected) {
-  const bytes = boundedRead(file, 65536); assert(hash(bytes) === expected); return JSON.parse(bytes);
+  const pinned = pinReceipt(file);
+  try { return verified(pinned, expected); } finally { pinned.close(); }
 }
 export function retained(recordPath, expected) {
   assert(/^[0-9a-f]{64}$/.test(expected));
@@ -122,13 +158,15 @@ export function retained(recordPath, expected) {
   return { verified: true };
 }
 export async function launch(policy, bindings, file, expected, stdoutFile, argv, { executable = 'codex', signals = process } = {}) {
-  const receipt = verify(file, expected);
+  const pinned = pinReceipt(file);
+  try {
+  const receipt = verified(pinned, expected);
   assert(receipt.invoked === null && receipt.policy.helperSha256 === bindings.helperSha256 && receipt.policy.policySha256 === bindings.policySha256);
   assert(JSON.stringify(authorize(policy, receipt.requested)) === JSON.stringify(receipt.authorized));
   checkedArgv(argv, receipt.authorized); assert(hash(encoded(argv)) === receipt.digests.argv);
   const started = process.hrtime.bigint();
   let child, receivedSignal = null, persistenceFailed = false, spawnError = null;
-  const save = () => { try { persist(file, receipt); } catch { persistenceFailed = true; child?.kill('SIGTERM'); } };
+  const save = () => { try { persist(pinned, receipt); } catch { persistenceFailed = true; child?.kill('SIGTERM'); } };
   const handlers = new Map(['SIGTERM','SIGINT','SIGHUP'].map(signal => [signal, () => { receivedSignal = signal; child?.kill(signal); }]));
   for (const [signal, handler] of handlers) signals.on(signal, handler);
   let code, signal;
@@ -148,9 +186,10 @@ export async function launch(policy, bindings, file, expected, stdoutFile, argv,
   const elapsedMs = Math.floor(Number(process.hrtime.bigint() - started) / 1e6);
   receipt.result = { exitCode: safeInteger(code) ? code : null, signal, receivedSignal, spawnError, elapsedMs: safeInteger(elapsedMs) ? elapsedMs : null, completedAt: new Date().toISOString() };
   assert(!persistenceFailed);
-  const sha256 = persist(file, receipt);
+  const sha256 = persist(pinned, receipt);
   const exitCode = receivedSignal || signal ? 128 + (OS.signals[receivedSignal || signal] || 1) : safeInteger(code) ? code : 1;
   return { complete: true, sha256, exitCode };
+  } finally { pinned.close(); }
 }
 export async function execute(mode, policy, bindings, args) {
   if (mode === 'prepare') {
