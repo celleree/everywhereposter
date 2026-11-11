@@ -3,18 +3,32 @@ set -Eeuo pipefail
 ROOT=$(git rev-parse --show-toplevel)
 bash "$ROOT/scripts/agents/test-issue-implementation-contract.sh"
 node --test "$ROOT/scripts/agents/task-path-scope.test.mjs"
+node --test "$ROOT/scripts/agents/task-recovery.test.mjs"
 REAL_GIT=$(command -v git)
 TEST_ROOT=$(mktemp -d)
+PRIVATE_ROOT=$(mktemp -d "$HOME/.ep-recovery-test.XXXXXX")
 BASE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 HEAD_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
-mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/repo"
+trap 'rm -rf "$TEST_ROOT" "$PRIVATE_ROOT"' EXIT HUP INT TERM
+mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/repo/scripts/agents"
+cp "$ROOT/scripts/agents/task-recovery.mjs" "$TEST_ROOT/repo/scripts/agents/"
 export REAL_GIT TEST_ROOT BASE_SHA HEAD_SHA
 
 cat > "$TEST_ROOT/bin/git" <<'MOCK'
 #!/usr/bin/env bash
 printf 'git:%s\n' "$*" >> "$TEST_LOG"
+if [[ "${1:-}" == --literal-pathspecs ]]; then
+  shift
+  case "$*" in
+    'rev-parse HEAD') echo "$HEAD_SHA" ;;
+    'branch --show-current') echo main ;;
+    diff*|ls-files*) ;;
+    *) exit 2 ;;
+  esac
+  exit 0
+fi
 case "$*" in
+  'rev-parse HEAD') echo "$HEAD_SHA" ;;
   'rev-parse --show-toplevel') echo "$TEST_ROOT/repo" ;;
   'status --porcelain') ;;
   'remote get-url origin') echo https://github.com/celleree/everywhereposter.git ;;
@@ -106,13 +120,14 @@ run_case() {
   local case_dir="$TEST_ROOT/$name"
   local runner_home="$case_dir/runner-home"
   mkdir -p "$runner_home"
+  mkdir -m 700 "$PRIVATE_ROOT/$name"
   case "$name" in
     netrc) touch "$runner_home/.netrc" ;;
     windows-netrc) touch "$runner_home/_netrc" ;;
     stored-credentials) touch "$runner_home/.git-credentials" ;;
   esac
   PATH="$TEST_ROOT/bin:$PATH" TEST_LOG="$case_dir/log" SCENARIO="$name" VISIBILITY="$visibility" \
-    HOME="$runner_home" GH_TOKEN=synthetic-workflow-token GITHUB_ACTOR="$actor" GITHUB_TRIGGERING_ACTOR="$rerunner" \
+    CODEX_RECOVERY_ROOT="$PRIVATE_ROOT/$name" HOME="$runner_home" GH_TOKEN=synthetic-workflow-token GITHUB_ACTOR="$actor" GITHUB_TRIGGERING_ACTOR="$rerunner" \
     sh "$ROOT/scripts/agents/codex-task.sh" "$mode" 221 > "$case_dir/output" 2>&1 || status=$?
   if [[ "$status" != "$expected" ]]; then cat "$case_dir/output"; echo "FAIL $name: expected $expected, got $status"; exit 1; fi
   if [[ "$expected" == 0 ]]; then

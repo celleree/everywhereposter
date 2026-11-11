@@ -7,7 +7,8 @@ TASK_SCRIPT="$ROOT/scripts/agents/codex-task.sh"
 WORKFLOW="$ROOT/.github/workflows/codex-issue-queue.yml"
 AUTOMATION_DOC="$ROOT/docs/brain/CODEX_AUTOMATION.md"
 TMP_ROOT=$(mktemp -d)
-trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
+PRIVATE_ROOT=$(mktemp -d "$HOME/.ep-recovery-queue-test.XXXXXX")
+trap 'rm -rf "$TMP_ROOT" "$PRIVATE_ROOT"' EXIT HUP INT TERM
 
 fail() {
   echo "FAIL: $*" >&2
@@ -58,13 +59,18 @@ MOCK_REPO="$TMP_ROOT/repo"
 mkdir -p "$MOCK_BIN" "$MOCK_REPO/scripts/agents"
 : > "$MOCK_REPO/scripts/agents/codex-task.sh"
 QUEUE_SCRIPT="$MOCK_REPO/scripts/agents/codex-issue-queue.sh"
-cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ROOT/scripts/agents/owner-approval.sh" "$ROOT/scripts/agents/task-path-scope.mjs" "$MOCK_REPO/scripts/agents/"
+cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ROOT/scripts/agents/owner-approval.sh" "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$MOCK_REPO/scripts/agents/"
 
 cat > "$MOCK_BIN/git" <<'EOF'
 #!/usr/bin/env bash
-if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--show-toplevel" ]]; then
-  printf '%s\n' "$MOCK_REPO"
-fi
+printf 'git:%s\n' "$*" >> "$MOCK_LOG"
+[[ "${1:-}" != --literal-pathspecs ]] || shift
+if [[ "$MOCK_SCENARIO" == cleanup-persistence-failure && "${1:-}" == diff && "$*" == *--binary* ]]; then exit 1; fi
+case "$*" in
+  'rev-parse --show-toplevel') printf '%s\n' "$MOCK_REPO" ;;
+  'rev-parse HEAD') echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
+  'branch --show-current') echo main ;;
+esac
 exit 0
 EOF
 
@@ -241,6 +247,10 @@ done
 role=${3:-unknown}
 issue=${4:-unknown}
 printf 'role:%s:%s\n' "$role" "$issue" >> "$MOCK_LOG"
+if [[ "$MOCK_SCENARIO" == child-quarantined ]]; then
+  node "$MOCK_REPO/scripts/agents/task-recovery.mjs" begin "$CODEX_RECOVERY_ROOT" "$MOCK_REPO" '{}' >/dev/null
+  exit 7
+fi
 if [[ "$role" == "implement" ]]; then
   if [[ "$MOCK_SCENARIO" == queue-source-tamper ]]; then
     printf '\nprintf "WORKER_APPENDED_QUEUE_BODY\\n" > "$MOCK_SOURCE_ESCAPE"\n' >> "$MOCK_REPO/scripts/agents/codex-issue-queue.sh"
@@ -280,6 +290,7 @@ run_case() {
   cp "$ROOT/scripts/agents/codex-issue-queue.sh" "$QUEUE_SCRIPT"
 
   mkdir -p "$case_dir"
+  mkdir -m 700 "$PRIVATE_ROOT/case-$issue-$scenario"
   : > "$case_dir/log"
   : > "$case_dir/summary"
   : > "$case_dir/pr-count"
@@ -290,6 +301,7 @@ run_case() {
   set +e
   PATH="$MOCK_BIN:$PATH" \
     MOCK_REPO="$MOCK_REPO" \
+    CODEX_RECOVERY_ROOT="$PRIVATE_ROOT/case-$issue-$scenario" \
     MOCK_LOG="$case_dir/log" \
     MOCK_PR_COUNT="$case_dir/pr-count" \
     MOCK_ISSUE_VIEW_COUNT="$case_dir/issue-view-count" \
@@ -320,6 +332,15 @@ run_case() {
   [[ ! -e "$case_dir/source-escape" ]] || fail 'worker-modified queue parent source was executed'
   LAST_CASE_DIR="$case_dir"
 }
+
+for scenario in cleanup-persistence-failure child-quarantined; do
+  run_case "$scenario" 146 false 1
+  assert_not_contains "$LAST_CASE_DIR/log" 'git:reset --hard' 'incomplete recovery must prevent reset'
+  assert_not_contains "$LAST_CASE_DIR/log" 'git:clean -fd' 'incomplete recovery must prevent clean'
+  assert_not_contains "$LAST_CASE_DIR/log" 'git:switch --force-create' 'incomplete recovery must prevent branch replacement'
+  assert_contains "$LAST_CASE_DIR/log" 'git:config --local --unset-all http.https://github.com/.extraheader' 'credential removal must still run'
+  [[ -f "$PRIVATE_ROOT/case-146-$scenario/ACTIVE" ]] || fail 'incomplete recovery must leave quarantine'
+done
 
 run_case safe 100 true 0
 assert_contains "$LAST_CASE_DIR/log" 'role:plan:100' 'safe ready work must run planning'
@@ -462,7 +483,7 @@ TASK_SCRIPT="$TASK_REPO/scripts/agents/codex-task.sh"
 TASK_REAL_SED=$(command -v sed)
 export TASK_REAL_SED
 mkdir -p "$TASK_BIN" "$TASK_REPO/scripts/agents" "$TASK_REPO/docs"
-cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ROOT/scripts/agents/owner-approval.sh" "$ROOT/scripts/agents/task-path-scope.mjs" "$TASK_REPO/scripts/agents/"
+cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ROOT/scripts/agents/owner-approval.sh" "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$TASK_REPO/scripts/agents/"
 printf 'Original text.\n' > "$TASK_REPO/docs/example.md"
 
 for helper in install-git-guardrails.sh check-repository-state.sh start-change.sh; do
@@ -501,7 +522,12 @@ case "${1:-} ${2:-}" in
   'ls-files --stage') printf '100644 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\t%s\0' "$changed" ;;
   'ls-files --others') ;;
   'ls-tree -rz') printf '100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t%s\0' "$changed" ;;
+  'diff --check')
+    if [[ "$TASK_SCENARIO" == manual-post-whitespace-failure ]]; then echo 'PRIVATE-SOURCE-SENTINEL'; exit 1; fi
+    ;;
   'add -A') touch "$TASK_STAGE_MARKER" ;;
+  'commit -m') [[ "$TASK_SCENARIO" != manual-post-commit-failure ]] || exit 1 ;;
+  'push -u') [[ "$TASK_SCENARIO" != manual-post-push-failure ]] || exit 1 ;;
   'config --local')
     [[ "${3:-}" == "--get-all" ]] && exit 1
     ;;
@@ -549,6 +575,7 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
   [[ "$#" == 11 && "$3" == --draft && "$4" == --base && "$5" == main &&
     "$6" == --head && "$7" == "agent/issue-$TASK_NUMBER" && "$8" == --title &&
     "$9" == "Codex implementation for issue #$TASK_NUMBER" && "${10}" == --body ]] || exit 9
+  [[ "$TASK_SCENARIO" != manual-post-pr-ambiguous ]] || exit 1
   echo 'https://github.test/pull/task'
   exit 0
 fi
@@ -612,6 +639,14 @@ while [[ "$#" -gt 0 ]]; do
 done
 [[ -n "$output" ]] || exit 2
 echo 'Implemented safely.' > "$output"
+echo 'PRIVATE-RAW-STDOUT-SENTINEL'
+echo 'PRIVATE-RAW-STDERR-SENTINEL' >&2
+if [[ "$TASK_SCENARIO" == manual-post-final-secret ]]; then echo 'ghp_00000000000000000000000000000000' > "$output"; fi
+if [[ "$TASK_SCENARIO" == manual-post-model-failure ]]; then exit 7; fi
+if [[ "$TASK_SCENARIO" == manual-post-recovery-tamper ]]; then
+  # output is in the same private temporary root as the trusted helper copy.
+  echo '// changed' >> "${output%/*}/task-recovery.mjs"
+fi
 EOF
 
 cat > "$TASK_BIN/sed" <<'EOF'
@@ -706,7 +741,7 @@ run_task_case() {
   [[ "$scenario" != repair* ]] || { role=repair; TASK_ISSUE=42; }
   local TASK_MODEL_MARKER="$case_dir/model-ran" TASK_STAGE_MARKER="$case_dir/staged" TASK_ESCAPE_MARKER="$case_dir/escaped"
   export TASK_ISSUE TASK_MODEL_MARKER TASK_STAGE_MARKER TASK_ESCAPE_MARKER
-  cp "$ROOT/scripts/agents/task-path-scope.mjs" "$TASK_REPO/scripts/agents/"
+  cp "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$TASK_REPO/scripts/agents/"
   cp "$ROOT/scripts/agents/codex-task.sh" "$TASK_SCRIPT"
   if [[ "$scenario" == *post-wrapper-tamper ]]; then
     node --input-type=module - "$TASK_SCRIPT" <<'NODE'
@@ -735,6 +770,9 @@ NODE
   export TASK_BODY TASK_STATE TASK_LABELS
 
   mkdir -p "$case_dir"
+  mkdir -m 700 "$PRIVATE_ROOT/task-$scenario"
+  export CODEX_RECOVERY_ROOT="$PRIVATE_ROOT/task-$scenario"
+  [[ "$scenario" != manual-missing-recovery ]] || export CODEX_RECOVERY_ROOT=
   : > "$case_dir/log"
   : > "$case_dir/context"
   : > "$case_dir/env"
@@ -755,19 +793,19 @@ NODE
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
       TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
-      sh "$TASK_SCRIPT" "$role" "$number" >/dev/null 2>&1
+      sh "$TASK_SCRIPT" "$role" "$number" >"$case_dir/output" 2>&1
   elif [[ "$scenario" == "queued-missing" ]]; then
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
       TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
       QUEUE_IMPLEMENT=true QUEUE_ISSUE="$number" \
-      sh "$TASK_SCRIPT" "$role" "$number" >/dev/null 2>&1
+      sh "$TASK_SCRIPT" "$role" "$number" >"$case_dir/output" 2>&1
   else
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
       TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
       QUEUE_IMPLEMENT=true QUEUE_ISSUE="$number" QUEUE_VALIDATED_ISSUE_SNAPSHOT="$snapshot" \
-      sh "$TASK_SCRIPT" "$role" "$number" >/dev/null 2>&1
+      sh "$TASK_SCRIPT" "$role" "$number" >"$case_dir/output" 2>&1
   fi
   rc=$?
   set -e
@@ -780,7 +818,8 @@ NODE
       fi
       assert_not_contains "$case_dir/log" 'codex:' 'pre-worker denial must never launch a model'
     fi
-    if grep -Eq '^git:(--literal-pathspecs add|commit|push)|^gh:(pr (create|edit)|workflow run)' "$case_dir/log"; then
+    if [[ "$scenario" != manual-post-commit-failure && "$scenario" != manual-post-push-failure && "$scenario" != manual-post-pr-ambiguous ]] &&
+      grep -Eq '^git:(--literal-pathspecs add|commit|push)|^gh:(pr (create|edit)|workflow run)' "$case_dir/log"; then
       fail "denied $scenario reached staging, commit, push, PR or dispatch"
     fi
   else
@@ -796,6 +835,25 @@ NODE
   [[ ! -f "$TASK_ESCAPE_MARKER" ]] || fail 'worker-modified wrapper source executed outside the sandbox'
   LAST_TASK_CASE_DIR="$case_dir"
 }
+
+run_task_case manual-missing-recovery 214 1
+
+for scenario in manual-post-whitespace-failure manual-post-model-failure manual-post-final-secret manual-post-recovery-tamper manual-post-commit-failure manual-post-push-failure manual-post-pr-ambiguous; do
+  run_task_case "$scenario" 213 1
+  assert_not_contains "$LAST_TASK_CASE_DIR/output" 'PRIVATE-RAW-' 'raw Codex streams must remain private'
+  assert_not_contains "$LAST_TASK_CASE_DIR/output" 'PRIVATE-SOURCE-' 'raw source diagnostics must remain private'
+  assert_not_contains "$LAST_TASK_CASE_DIR/output" 'ghp_000000' 'rejected final message must remain private'
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:workflow run' 'failed run must not dispatch CI'
+  assert_contains "$LAST_TASK_CASE_DIR/log" 'git:config --local --unset-all http.https://github.com/.extraheader' 'credential removal must run on recovery failure'
+  store="$PRIVATE_ROOT/task-$scenario"
+  if [[ "$scenario" == *tamper || "$scenario" == *push-failure || "$scenario" == *pr-ambiguous ]]; then
+    [[ -f "$store/ACTIVE" ]] || fail 'incomplete or ambiguous evidence must quarantine'
+  else
+    [[ ! -e "$store/ACTIVE" ]] || fail 'fully captured ordinary failure must release automatically'
+  fi
+  if [[ "$scenario" == manual-post-commit-failure ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'git:push ' 'commit failure must prevent push'; fi
+  if [[ "$scenario" == manual-post-push-failure ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:pr create' 'unconfirmed push must prevent PR creation'; fi
+done
 
 run_task_case queued-valid 200 0
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Pinned safe title' \

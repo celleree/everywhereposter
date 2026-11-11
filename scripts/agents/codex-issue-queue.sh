@@ -86,6 +86,7 @@ run_issue() {
   need jq
   need tail
   need node
+  need sha256sum
 
   : "${GH_TOKEN:?GH_TOKEN must be provided by GitHub Actions}"
   : "${QUEUE_ISSUE:?QUEUE_ISSUE is required}"
@@ -115,7 +116,34 @@ run_issue() {
   validated_snapshot="$TMP_ROOT/validated-issue.json"
   events_file="$TMP_ROOT/issue-authorization-events.jsonl"
   results_file="$TMP_ROOT/results.md"
-  trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
+  local recovery_store=${CODEX_RECOVERY_ROOT-} recovery_helper="$TMP_ROOT/task-recovery.mjs" recovery_hash
+  local recovery_start recovery_info recovery_id recovery_context recovery_attachments
+  RECOVERY_ALLOW_REMOVE=true
+  queue_exit() {
+    git config --local --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
+    if [[ "$RECOVERY_ALLOW_REMOVE" == true ]]; then rm -rf "$TMP_ROOT"; fi
+  }
+  trap queue_exit EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  recovery_call() {
+    node --input-type=module - "$recovery_helper" "$recovery_hash" "$@" <<'NODE'
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+try {
+  const [file, expected, mode, ...args] = process.argv.slice(2);
+  const source = readFileSync(file);
+  if (createHash('sha256').update(source).digest('hex') !== expected) throw new Error();
+  const helper = await import(`data:text/javascript;base64,${source.toString('base64')}`);
+  console.log(JSON.stringify(helper.execute(mode, args)));
+} catch {
+  console.error('ERROR: Private recovery is unavailable or incomplete; checkout reuse is blocked.');
+  process.exitCode = 1;
+}
+NODE
+  }
 
   run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   {
@@ -152,6 +180,25 @@ run_issue() {
         cleanup_failed=1
       fi
     fi
+    # A child receipt must be complete before this parent captures and cleans its checkout.
+    if ! recovery_call guard "$recovery_store" "$root" >/dev/null; then
+      record_operation_failure 'Private recovery is quarantined; runner cleanup was blocked.'
+      return 1
+    fi
+    recovery_context=$(jq -cn --arg start "$recovery_start" --argjson exit "$operational_failures" \
+      '{phase:"queue_cleanup",exit:$exit,signal:null,baseSha:$start,startSha:$start,external:{push:"not_attempted",pr:"not_attempted"}}')
+    recovery_attachments=$(jq -cn --arg item "$item" --arg approved "$validated_snapshot" --arg results "$results_file" \
+      '{task:$item,approvedIssue:$approved,queueResult:$results}')
+    if ! recovery_info=$(recovery_call begin "$recovery_store" "$root" "$(jq -cn --arg issue "$QUEUE_ISSUE" '{mode:"queue_cleanup",issue:$issue}')"); then
+      record_operation_failure 'Private cleanup recovery could not start; runner cleanup was blocked.'
+      return 1
+    fi
+    recovery_id=$(printf '%s' "$recovery_info" | jq -r .id)
+    if ! recovery_call capture "$recovery_store" "$root" "$recovery_id" "$recovery_context" "$recovery_attachments" >/dev/null ||
+      ! recovery_call finish "$recovery_store" "$root" "$recovery_id" >/dev/null; then
+      record_operation_failure 'Private cleanup recovery is incomplete; runner cleanup was blocked.'
+      return 1
+    fi
     if ! git reset --hard >/dev/null 2>&1; then
       record_operation_failure "Could not reset the runner checkout after #${QUEUE_ISSUE}."
       cleanup_failed=1
@@ -164,11 +211,13 @@ run_issue() {
       record_operation_failure "Could not restore trusted main after #${QUEUE_ISSUE}."
       cleanup_failed=1
     fi
+    if [[ "$cleanup_failed" == "0" ]]; then RECOVERY_ALLOW_REMOVE=true; fi
     [[ "$cleanup_failed" == "0" ]]
   }
 
   run_role() {
     local mode=$1
+    RECOVERY_ALLOW_REMOVE=false
     if [[ "$mode" == "implement" ]]; then
       QUEUE_VALIDATED_ISSUE_SNAPSHOT="$validated_snapshot" \
         timeout --signal=TERM --kill-after=5m "${QUEUE_MAX_MINUTES}m" \
@@ -213,6 +262,12 @@ run_issue() {
     finish 1
     return
   fi
+
+  cp "$root/scripts/agents/task-recovery.mjs" "$recovery_helper"
+  recovery_hash=$(sha256sum "$recovery_helper" | cut -d ' ' -f 1)
+  recovery_start=$(git rev-parse HEAD)
+  [[ "$recovery_start" =~ ^[0-9a-f]{40}$ ]] || fail 'Recovery initial revision is invalid.'
+  recovery_call guard "$recovery_store" "$root" >/dev/null || fail 'Private recovery store is not ready; no queue role started.'
 
   if ! gh issue view "$QUEUE_ISSUE" --json number,state,title,body,url,labels,author > "$item"; then
     outcome=failure
