@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT=$(git rev-parse --show-toplevel)
+node --test "$ROOT/scripts/agents/review-evidence.test.mjs"
 REAL_GIT=$(command -v git)
 TEST_ROOT=$(mktemp -d)
 BASE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
