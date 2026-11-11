@@ -497,10 +497,15 @@ cat > "$TASK_BIN/git" <<'EOF'
 #!/usr/bin/env bash
 printf 'git:%s\n' "$*" >> "$TASK_LOG"
 [[ "${1:-}" != --literal-pathspecs ]] || shift
+[[ "${1:-}" != -c || "${2:-}" != core.hooksPath=/dev/null ]] || shift 2
 changed=docs/example.md
-if [[ -f "$TASK_MODEL_MARKER" || "$TASK_SCENARIO" == repair-pre-unowned ]]; then
+if [[ -f "$TASK_MODEL_MARKER" || "$TASK_SCENARIO" == repair-pre-* ]]; then
   case "$TASK_SCENARIO" in
     *post-unowned|repair-pre-unowned) changed=outside.md ;;
+    repair-pre-guardrail) changed=scripts/install-git-guardrails.sh ;;
+    repair-pre-state) changed=scripts/check-repository-state.sh ;;
+    repair-pre-hook) changed=.githooks/pre-push ;;
+    repair-pre-attributes) changed=.gitattributes ;;
     *post-governance) changed=scripts/agents/task-path-scope.mjs ;;
     *post-wrapper-tamper) changed=scripts/agents/codex-task.sh ;;
   esac
@@ -508,13 +513,37 @@ fi
 case "${1:-} ${2:-}" in
   'rev-parse --show-toplevel') printf '%s\n' "$TASK_REPO" ;;
   'rev-parse HEAD')
-    [[ "$TASK_SCENARIO" != repair-head-moved-before ]] && echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb || echo cccccccccccccccccccccccccccccccccccccccc
+    if [[ "$TASK_SCENARIO" == repair-untrusted-start ]]; then echo cccccccccccccccccccccccccccccccccccccccc
+    elif [[ "$TASK_SCENARIO" == repair* && ! -e "$TASK_CHECKOUT_MARKER" ]]; then echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    elif [[ "$TASK_SCENARIO" == repair-checkout-head-moved ]]; then echo cccccccccccccccccccccccccccccccccccccccc
+    else echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; fi
+    ;;
+  'rev-parse --verify')
+    if [[ "$3" == 'refs/remotes/origin/main^{commit}' ]]; then
+      [[ "$TASK_SCENARIO" != repair-base-moved-before ]] && echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa || echo cccccccccccccccccccccccccccccccccccccccc
+    else
+      [[ "$TASK_SCENARIO" != repair-head-moved-before ]] && echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb || echo cccccccccccccccccccccccccccccccccccccccc
+    fi
+    ;;
+  'merge-base --is-ancestor') [[ "$TASK_SCENARIO" != repair-stale-baseline ]] || exit 1 ;;
+  'switch --force-create')
+    touch "$TASK_CHECKOUT_MARKER"
+    printf 'checkout-effect:%s\n' "$TASK_SCENARIO" >> "$TASK_LOG"
+    case "$TASK_SCENARIO" in
+      repair-pre-guardrail|repair-pre-state) printf 'PROHIBITED_BRANCH_SCRIPT_MATERIALIZED\n' >> "$TASK_LOG" ;;
+      repair-pre-hook) printf 'PROHIBITED_HOOK_COPIED\n' >> "$TASK_LOG" ;;
+      repair-pre-attributes) printf 'PROHIBITED_FILTER_EXECUTED\n' >> "$TASK_LOG" ;;
+    esac
     ;;
   'status --porcelain') ;;
   'remote get-url') echo 'https://github.com/celleree/publish-everywhere.git' ;;
   'branch --show-current') printf 'agent/issue-%s\n' "$TASK_ISSUE" ;;
   'ls-remote origin') exit 1 ;;
   'diff --name-only')
+    if [[ "$*" == *'...'* ]]; then
+      [[ ! -e "$TASK_AUTH_MARKER" ]] || { echo 'PROHIBITED_FETCH_CREDENTIAL_RETAINED' >> "$TASK_LOG"; exit 1; }
+      echo 'trusted-pr-scope-check' >> "$TASK_LOG"
+    fi
     if [[ "$*" == *'...'* || "$*" == *'--cached'* && -f "$TASK_STAGE_MARKER" || "$*" != *'--cached'* && -f "$TASK_MODEL_MARKER" && ! -f "$TASK_STAGE_MARKER" ]]; then
       printf '%s\0' "$changed"
     fi
@@ -529,7 +558,9 @@ case "${1:-} ${2:-}" in
   'commit -m') [[ "$TASK_SCENARIO" != manual-post-commit-failure ]] || exit 1 ;;
   'push -u') [[ "$TASK_SCENARIO" != manual-post-push-failure ]] || exit 1 ;;
   'config --local')
-    [[ "${3:-}" == "--get-all" ]] && exit 1
+    if [[ "${3:-}" == "--get-all" ]]; then exit 1
+    elif [[ "${3:-}" == --unset-all ]]; then rm -f "$TASK_AUTH_MARKER"
+    elif [[ "${3:-}" == http.https://github.com/.extraheader ]]; then touch "$TASK_AUTH_MARKER"; fi
     ;;
 esac
 exit 0
@@ -741,6 +772,7 @@ run_task_case() {
   [[ "$scenario" != repair* ]] || { role=repair; TASK_ISSUE=42; }
   local TASK_MODEL_MARKER="$case_dir/model-ran" TASK_STAGE_MARKER="$case_dir/staged" TASK_ESCAPE_MARKER="$case_dir/escaped"
   export TASK_ISSUE TASK_MODEL_MARKER TASK_STAGE_MARKER TASK_ESCAPE_MARKER
+  export TASK_CHECKOUT_MARKER="$case_dir/checked-out" TASK_AUTH_MARKER="$case_dir/auth-header"
   cp "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$TASK_REPO/scripts/agents/"
   cp "$ROOT/scripts/agents/codex-task.sh" "$TASK_SCRIPT"
   if [[ "$scenario" == *post-wrapper-tamper ]]; then
@@ -813,7 +845,7 @@ NODE
   assert_eq "$expected_rc" "$rc" "unexpected codex-task exit code for $scenario"
   if [[ "$expected_rc" != 0 ]]; then
     if [[ "$scenario" != *post-* ]]; then
-      if grep -Eq '^(helper:|codex:|git:(fetch|switch))' "$case_dir/log" && [[ "$scenario" != repair-pre-unowned && "$scenario" != repair-head-moved-before ]]; then
+      if grep -Eq '^(helper:|codex:|git:(fetch|switch))' "$case_dir/log" && [[ "$scenario" != repair-pre-* && "$scenario" != repair-head-moved-before && "$scenario" != repair-base-moved-before && "$scenario" != repair-stale-baseline && "$scenario" != repair-checkout-head-moved ]]; then
         fail "denied $scenario reached branch preparation or model"
       fi
       assert_not_contains "$case_dir/log" 'codex:' 'pre-worker denial must never launch a model'
@@ -898,11 +930,34 @@ run_task_case repair 302 0
 assert_contains "$LAST_TASK_CASE_DIR/log" 'git:--no-pager diff --no-ext-diff --no-textconv --binary aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' 'repair context must use the pinned base/head diff'
 assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:pr diff' 'repair context must not refetch an unpinned live diff'
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Shared paths or dependencies:' 'repair must receive its approved issue scope'
-run_task_case repair-pre-unowned 303 1
+node --input-type=module - "$LAST_TASK_CASE_DIR/log" <<'NODE'
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const log=readFileSync(process.argv[2],'utf8');
+const check=log.indexOf('trusted-pr-scope-check'),checkout=log.indexOf('git:-c core.hooksPath=/dev/null switch --force-create agent/issue-42 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+assert.ok(check>=0&&checkout>check);
+assert.ok(log.indexOf('helper:install-git-guardrails.sh')>checkout);
+assert.ok(log.indexOf('helper:check-repository-state.sh')>checkout);
+assert.ok(log.indexOf('codex:')>log.indexOf('helper:check-repository-state.sh'));
+assert.ok(log.includes('git:commit -m Address review findings on PR #302'));
+assert.ok(log.includes('git:push origin agent/issue-42'));
+NODE
+for denied in guardrail state hook attributes unowned; do
+  run_task_case "repair-pre-$denied" 303 1
+  assert_contains "$LAST_TASK_CASE_DIR/log" 'trusted-pr-scope-check' 'a prohibited PR must reach the trusted pre-checkout scope check'
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'checkout-effect:' 'a prohibited PR must be rejected before checkout effects'
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'helper:' 'a prohibited PR must be rejected before branch scripts or hook installation'
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'PROHIBITED_' 'prohibited execution and credential effects must never occur'
+done
+for denied in untrusted-start head-moved-before base-moved-before stale-baseline checkout-head-moved; do
+  run_task_case "repair-$denied" 310 1
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'helper:' 'revision/baseline races must fail before PR guard scripts'
+  if [[ "$denied" == untrusted-start ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:api graphql' 'a non-main start must fail before repository approval helper execution'; fi
+  if [[ "$denied" != checkout-head-moved ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'checkout-effect:' 'identity/ancestry failures must precede checkout'; fi
+done
 run_task_case repair-no-association 305 1
 run_task_case repair-wrong-issue 306 1
 run_task_case repair-closed 307 1
-run_task_case repair-head-moved-before 308 1
 run_task_case repair-post-head-moved 309 1
 for lane in manual queued repair; do
   for denial in post-unowned post-governance post-helper-tamper post-contract-tamper post-wrapper-tamper; do
