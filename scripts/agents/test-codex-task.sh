@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 ROOT=$(git rev-parse --show-toplevel)
 bash "$ROOT/scripts/agents/test-issue-implementation-contract.sh"
+node --test "$ROOT/scripts/agents/task-path-scope.test.mjs"
 REAL_GIT=$(command -v git)
 TEST_ROOT=$(mktemp -d)
 BASE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
