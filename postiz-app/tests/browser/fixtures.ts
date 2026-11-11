@@ -1,4 +1,4 @@
-import { test as base, expect, Page, TestInfo, Locator } from '@playwright/test';
+import { test as base, expect, Page, TestInfo, Locator, Request as BrowserRequest, Response, Frame } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -27,8 +27,64 @@ export const test = base.extend<{ authenticated: void; diagnostics: void }>({
     page.on('console', message => { if (message.type() === 'error') events.push({ type: 'console', message: message.text() }); });
     page.on('requestfailed', request => events.push({ type: 'requestfailed', url: request.url(), error: request.failure()?.errorText }));
     page.on('response', response => { if (response.status() >= 400) events.push({ type: 'http', url: response.url(), status: response.status() }); });
-    await use();
-    await info.attach('browser-diagnostics', { body: JSON.stringify(events, null, 2), contentType: 'application/json' });
+    const timingEvents: object[] = [];
+    const startedAt = new Date().toISOString(), started = performance.now();
+    let sequence = 0, requestSequence = 0, dropped = 0, pendingDropped = 0, callbackErrors = 0;
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+    const finite = (value: number) => Number.isFinite(value) && value >= 0 ? value : null;
+    const route = (raw: string) => {
+      const url = new URL(raw);
+      if (url.origin !== browserOrigin) return null;
+      const pathname = url.pathname.replace(/^\/backend-api(?=\/)/, '');
+      const routeFamily = /^\/posts\/[^/]+\/facebook-published$/.test(pathname) ? 'facebook-published'
+        : /^\/posts\/group\/[^/]+$/.test(pathname) ? 'post-group'
+        : /^\/settings\/?$/.test(pathname) ? 'settings'
+        : /^\/_next\/static\/chunks\//.test(pathname) && /(?:\/|_|%2[fF])settings(?:\/|_|%2[fF])/.test(pathname) ? 'settings-chunk' : null;
+      return routeFamily && { routeFamily, pathHash: hash(pathname) };
+    };
+    const emit = (value: object) => {
+      const seq = ++sequence;
+      if (timingEvents.length < 128) timingEvents.push({ at: new Date().toISOString(), elapsedMs: performance.now() - started, seq, ...value });
+      else dropped++;
+    };
+    const safe = <T,>(callback: (value: T) => void) => (value: T) => { try { callback(value); } catch { callbackErrors++; } };
+    type Observed = { requestSeq: number; routeFamily: string; pathHash: string; started: number };
+    const observed = new WeakMap<BrowserRequest, Observed>(), pending = new Map<BrowserRequest, Observed>();
+    const timing = (request: BrowserRequest) => {
+      try { return Object.fromEntries(Object.entries(request.timing()).map(([key, value]) => [key, finite(value)])); } catch { return null; }
+    };
+    const record = (type: string, request: BrowserRequest, extra: object = {}) => {
+      const value = observed.get(request);
+      if (value) { const { started: requestStarted, ...identity } = value; emit({ type, ...identity, requestElapsedMs: performance.now() - requestStarted, timing: timing(request), ...extra }); }
+    };
+    const onRequest = safe((request: BrowserRequest) => {
+      const identity = request.method() === 'GET' && route(request.url());
+      if (!identity) return;
+      if (pending.size >= 128) { pendingDropped++; return; }
+      const value = { ...identity, requestSeq: ++requestSequence, started: performance.now() };
+      observed.set(request, value); pending.set(request, value); record('request', request);
+    });
+    const onResponse = safe((response: Response) => record('response', response.request(), { status: response.status() }));
+    const onFinished = safe((request: BrowserRequest) => { record('requestfinished', request); pending.delete(request); });
+    const onFailed = safe((request: BrowserRequest) => { record('requestfailed', request, { failureHash: hash(request.failure()?.errorText || '') }); pending.delete(request); });
+    const onNavigation = safe((frame: Frame) => {
+      if (frame !== page.mainFrame()) return;
+      const url = new URL(frame.url());
+      if (url.origin === browserOrigin) emit({ type: 'mainframe-navigation', routeFamily: /^\/settings\/?$/.test(url.pathname) ? 'settings' : 'other-navigation', pathHash: hash(url.pathname) });
+    });
+    page.on('request', onRequest); page.on('response', onResponse);
+    page.on('requestfinished', onFinished); page.on('requestfailed', onFailed);
+    page.on('framenavigated', onNavigation);
+    try { await use(); } finally {
+      page.off('request', onRequest); page.off('response', onResponse);
+      page.off('requestfinished', onFinished); page.off('requestfailed', onFailed);
+      page.off('framenavigated', onNavigation);
+      const pendingAtTeardown: object[] = [];
+      for (const request of pending.keys()) { try { const value = observed.get(request)!; const { started: requestStarted, ...identity } = value; pendingAtTeardown.push({ ...identity, requestElapsedMs: performance.now() - requestStarted, timing: timing(request) }); } catch { callbackErrors++; } }
+      // Hash matches can be ambiguous; missing timing or truncated evidence stays inconclusive.
+      await info.attach('browser-diagnostics', { body: JSON.stringify(events, null, 2), contentType: 'application/json' });
+      await info.attach('browser-request-timing', { body: JSON.stringify({ revision, sourceHash, startedAt, teardownAt: new Date().toISOString(), elapsedMs: performance.now() - started, events: timingEvents, pendingAtTeardown, truncated: dropped > 0 || pendingDropped > 0, dropped, pendingDropped, callbackErrors }, null, 2), contentType: 'application/json' });
+    }
   }, { auto: true }],
 });
 export { expect };
