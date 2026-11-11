@@ -57,6 +57,7 @@ MOCK_BIN="$TMP_ROOT/bin"
 MOCK_REPO="$TMP_ROOT/repo"
 mkdir -p "$MOCK_BIN" "$MOCK_REPO/scripts/agents"
 : > "$MOCK_REPO/scripts/agents/codex-task.sh"
+cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$MOCK_REPO/scripts/agents/"
 
 cat > "$MOCK_BIN/git" <<'EOF'
 #!/usr/bin/env bash
@@ -447,10 +448,14 @@ fi
 
 TASK_BIN="$TMP_ROOT/task-bin"
 TASK_REPO="$TMP_ROOT/task-repo"
-mkdir -p "$TASK_BIN" "$TASK_REPO/scripts" "$TASK_REPO/docs"
+mkdir -p "$TASK_BIN" "$TASK_REPO/scripts/agents" "$TASK_REPO/docs"
+cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$TASK_REPO/scripts/agents/"
 
 for helper in install-git-guardrails.sh check-repository-state.sh start-change.sh; do
-  printf '#!/bin/sh\nexit 0\n' > "$TASK_REPO/scripts/$helper"
+  cat > "$TASK_REPO/scripts/$helper" <<'EOF'
+#!/bin/sh
+printf 'helper:%s\n' "${0##*/}" >> "$TASK_LOG"
+EOF
 done
 
 cat > "$TASK_BIN/git" <<'EOF'
@@ -487,11 +492,16 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   if [[ "$TASK_SCENARIO" == "queued-valid" ]]; then
     jq -cn '{title:"Live protected authentication change",body:"Change billing and database deployment behavior.",url:"https://github.test/issues/live",labels:[{name:"agent-ready"}],author:{login:"author"}}'
   else
-    jq -cn '{title:"Manual live title",body:"Manual live body",url:"https://github.test/issues/manual",labels:[{name:"agent-ready"}],author:{login:"author"}}'
+    jq -cn --argjson number "$TASK_NUMBER" --arg body "$TASK_BODY" --arg state "$TASK_STATE" \
+      --argjson labels "$TASK_LABELS" \
+      '{number:$number,state:$state,title:"Manual live title",body:$body,url:"https://github.test/issues/manual",labels:$labels,author:{login:"author"}}'
   fi
   exit 0
 fi
 if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
+  [[ "$#" == 11 && "$3" == --draft && "$4" == --base && "$5" == main &&
+    "$6" == --head && "$7" == "agent/issue-$TASK_NUMBER" && "$8" == --title &&
+    "$9" == "Codex implementation for issue #$TASK_NUMBER" && "${10}" == --body ]] || exit 9
   echo 'https://github.test/pull/task'
   exit 0
 fi
@@ -503,6 +513,7 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "edit" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "workflow" && "${2:-}" == "run" ]]; then
+  [[ "$*" == "workflow run pull-request-ci.yml --ref agent/issue-$TASK_NUMBER -f base_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -f head_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]] || exit 9
   exit 0
 fi
 exit 1
@@ -513,6 +524,7 @@ cat > "$TASK_BIN/codex" <<'EOF'
 if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
   exit 0
 fi
+printf 'codex:%s\n' "$*" >> "$TASK_LOG"
 cat > "$TASK_CONTEXT_CAPTURE"
 printf 'GH_TOKEN=%s\n' "${GH_TOKEN-unset}" > "$TASK_ENV_CAPTURE"
 printf 'QUEUE_VALIDATED_ISSUE_SNAPSHOT=%s\n' "${QUEUE_VALIDATED_ISSUE_SNAPSHOT-unset}" >> "$TASK_ENV_CAPTURE"
@@ -535,16 +547,62 @@ EOF
 
 chmod +x "$TASK_BIN/git" "$TASK_BIN/gh" "$TASK_BIN/codex" "$TASK_BIN/bwrap"
 
+TASK_VALID_BODY=$(cat <<'BODY'
+### Desired outcome
+
+Pinned safe body with exact approved text.
+
+### Current behavior
+
+A heading is misspelled.
+
+### Acceptance criteria
+
+The heading is corrected.
+
+### Product and technical constraints
+
+No additional constraints.
+
+### Expected scope
+
+docs/example.md
+
+### Explicitly out of scope
+
+Application code.
+
+### Risk classification
+
+Low - isolated code, copy, tests, or documentation
+
+### Required validation
+
+Check the rendered text.
+
+### Unresolved human decisions
+
+None.
+
+### Readiness confirmation
+
+- [x] The desired outcome and acceptance criteria are clear.
+- [x] Product decisions that still require a human are listed above.
+- [x] Owned paths, shared paths or dependencies, explicit exclusions, and validation requirements are declared.
+- [x] I understand that a repository owner must apply `agent-ready` separately.
+BODY
+)
+
 write_task_snapshot() {
-  local path=$1
-  local number=$2
-  jq -cn --argjson number "$number" '{
+  local path=$1 number=$2
+  jq -cn --argjson number "$number" --arg body "$TASK_BODY" --arg state "$TASK_STATE" \
+    --argjson labels "$TASK_LABELS" '{
     number:$number,
-    state:"OPEN",
+    state:$state,
     title:"Pinned safe title",
-    body:"Pinned safe body with exact approved text.",
+    body:$body,
     url:("https://github.test/issues/" + ($number | tostring)),
-    labels:[{name:"agent-ready"}],
+    labels:$labels,
     author:{login:"author"}
   }' > "$path"
 }
@@ -556,6 +614,21 @@ run_task_case() {
   local case_dir="$TMP_ROOT/task-$scenario"
   local snapshot="$case_dir/snapshot.json"
   local rc
+
+  local TASK_BODY=$TASK_VALID_BODY TASK_STATE=OPEN TASK_LABELS='[{"name":"agent-ready"}]'
+  case "${scenario#*-}" in
+    closed) TASK_STATE=CLOSED ;;
+    empty) TASK_BODY= ;;
+    non-template) TASK_BODY='Low - isolated code, copy, tests, or documentation' ;;
+    duplicate) TASK_BODY+=$'\n\n### Desired outcome\n\nDuplicate.' ;;
+    unknown-risk) TASK_BODY=${TASK_BODY/Low - isolated code, copy, tests, or documentation/Unknown risk} ;;
+    high-risk) TASK_BODY=${TASK_BODY/Low - isolated code, copy, tests, or documentation/High - authentication, security, database, billing, infrastructure, or deployment} ;;
+    blocked) TASK_BODY=${TASK_BODY/No additional constraints./Change authentication behavior.} ;;
+    medium) TASK_BODY=${TASK_BODY/Low - isolated code, copy, tests, or documentation/Medium - shared workflow or user-visible behavior} ;;
+    safe-exclusions) TASK_BODY=${TASK_BODY/Application code./Database migrations, billing, dependencies, Docker and deployment.} ;;
+    no-label) TASK_LABELS='[]' ;;
+  esac
+  export TASK_BODY TASK_STATE TASK_LABELS
 
   mkdir -p "$case_dir"
   : > "$case_dir/log"
@@ -570,10 +643,11 @@ run_task_case() {
       jq 'del(.body)' "$snapshot" > "$snapshot.tmp"
       mv "$snapshot.tmp" "$snapshot"
       ;;
+    queued-*) write_task_snapshot "$snapshot" "$number" ;;
   esac
 
   set +e
-  if [[ "$scenario" == "manual" ]]; then
+  if [[ "$scenario" == manual* ]]; then
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
       TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
@@ -595,6 +669,18 @@ run_task_case() {
   set -e
 
   assert_eq "$expected_rc" "$rc" "unexpected codex-task exit code for $scenario"
+  if [[ "$expected_rc" != 0 ]]; then
+    if grep -Eq '^(helper:|codex:|git:(fetch|switch|add|commit|push)|gh:(pr (create|edit)|workflow run))' "$case_dir/log"; then
+      fail "denied $scenario reached branch preparation, model, commit, push, PR or dispatch"
+    fi
+    assert_not_contains "$case_dir/log" 'git:config --local http.https://github.com/.extraheader ' \
+      'denied implementation must not enable Git credentials'
+  else
+    assert_contains "$case_dir/log" "gh:pr create --draft --base main --head agent/issue-$number " \
+      'accepted implementation must create only the intended draft PR'
+    assert_contains "$case_dir/log" "gh:workflow run pull-request-ci.yml --ref agent/issue-$number -f base_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -f head_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
+      'accepted implementation must dispatch CI with the exact base and head SHAs'
+  fi
   LAST_TASK_CASE_DIR="$case_dir"
 }
 
@@ -624,6 +710,14 @@ assert_contains "$LAST_TASK_CASE_DIR/log" 'gh:issue view 204' \
   'manual implementation must retain its live issue lookup'
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Manual live title' \
   'manual implementation must construct context from the live issue'
+
+for lane in manual queued; do
+  for denial in closed empty non-template duplicate unknown-risk high-risk blocked no-label; do
+    run_task_case "$lane-$denial" 206 1
+  done
+  run_task_case "$lane-medium" 207 0
+  run_task_case "$lane-safe-exclusions" 208 0
+done
 
 assert_eq '1' "$(grep -Ec '^[[:space:]]*workflow_dispatch:' "$WORKFLOW")" \
   'the workflow must expose exactly one workflow_dispatch trigger'

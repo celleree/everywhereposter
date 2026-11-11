@@ -15,6 +15,7 @@ need gh
 need git
 need jq
 need base64
+need bash
 need bwrap
 
 MODE=${1:-}
@@ -143,12 +144,14 @@ case "$MODE" in
       ' "$SNAPSHOT" > "$ITEM" || fail "Validated issue snapshot is malformed or for the wrong issue."
       unset SNAPSHOT QUEUE_VALIDATED_ISSUE_SNAPSHOT
     else
-      gh issue view "$NUMBER" --json title,body,url,labels,author > "$ITEM"
+      gh issue view "$NUMBER" --json number,state,title,body,url,labels,author > "$ITEM"
     fi
-    jq -e '.labels | map(.name) | index("agent-ready")' "$ITEM" >/dev/null ||
-      fail "Issue must have the agent-ready label."
-    grep -Fq 'High - authentication, security, database, billing, infrastructure, or deployment' "$ITEM" &&
-      fail "High-risk issues require manual implementation."
+    if CONTRACT=$(bash "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ITEM"); then
+      : # Static eligibility does not grant owner authorization.
+    else
+      REASON=$(printf '%s' "$CONTRACT" | jq -r '.reason // empty')
+      fail "${REASON:-Issue implementation contract could not be verified.}"
+    fi
 
     git_auth_enable
     git fetch --quiet origin main

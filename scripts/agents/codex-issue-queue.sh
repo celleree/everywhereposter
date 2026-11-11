@@ -72,91 +72,6 @@ prepare_queue() {
   jq -cn --argjson include "$matrix" '{include: $include}'
 }
 
-extract_risk() {
-  local body_file=$1
-  local values risk
-
-  values=$(section_content "$body_file" 'Risk classification' | sed '/^[[:space:]]*$/d')
-  [[ $(printf '%s\n' "$values" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ') == "1" ]] || return 1
-
-  risk=$(printf '%s' "$values" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-  case "$risk" in
-    'Low - isolated code, copy, tests, or documentation'|\
-    'Medium - shared workflow or user-visible behavior')
-      printf '%s\n' "$risk"
-      ;;
-    'High - authentication, security, database, billing, infrastructure, or deployment')
-      return 2
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-section_content() {
-  local body_file=$1
-  local section=$2
-
-  awk -v heading="### $section" '
-    $0 == heading { capture=1; next }
-    capture && /^###/ { exit }
-    capture { print }
-  ' "$body_file"
-}
-
-validate_complete_template() {
-  local body_file=$1
-  local section content heading_count total_headings readiness_lines
-  local required_sections=(
-    'Desired outcome'
-    'Current behavior'
-    'Acceptance criteria'
-    'Product and technical constraints'
-    'Expected scope'
-    'Explicitly out of scope'
-    'Risk classification'
-    'Required validation'
-    'Unresolved human decisions'
-    'Readiness confirmation'
-  )
-
-  total_headings=$(grep -Ec '^###' "$body_file" || true)
-  [[ "$total_headings" == "${#required_sections[@]}" ]] || return 1
-
-  for section in "${required_sections[@]}"; do
-    heading_count=$(grep -Fxc "### $section" "$body_file" || true)
-    [[ "$heading_count" == "1" ]] || return 1
-    content=$(section_content "$body_file" "$section")
-    printf '%s\n' "$content" | grep -q '[^[:space:]]' || return 1
-  done
-
-  readiness_lines=$(section_content "$body_file" 'Readiness confirmation' | sed '/^[[:space:]]*$/d')
-  [[ $(printf '%s\n' "$readiness_lines" | wc -l | tr -d ' ') == "4" ]] || return 1
-  if printf '%s\n' "$readiness_lines" |
-    grep -Ev '^[[:space:]]*-[[:space:]]+\[[xX]\][[:space:]]+[^[:space:]].*$' >/dev/null; then
-    return 1
-  fi
-}
-
-has_blocked_category() {
-  local title=$1
-  local body_file=$2
-  local scoped_text
-
-  scoped_text=$(awk '
-    /^###[[:space:]]+(Desired outcome|Current behavior|Acceptance criteria|Product and technical constraints|Expected scope|Required validation|Unresolved human decisions)[[:space:]]*$/ {
-      capture=1
-      next
-    }
-    /^###[[:space:]]+/ { capture=0 }
-    capture { print }
-  ' "$body_file")
-
-  printf '%s\n%s\n' "$title" "$scoped_text" | grep -Eiq \
-    'authentication|authorization|oauth|(^|[^[:alnum:]_])auth([^[:alnum:]_]|$)|security|billing|payments?|databases?|schema|migrations?|infrastructure|dependenc(y|ies)|package[[:space:]]+(upgrade|update|bump)|package\.json|(^|/)(pnpm-lock|package-lock|yarn\.lock|bun\.lock)|containers?|docker|github[[:space:]]+actions|\.github/workflows|workflow[[:space:]]+(file|ya?ml|action|change)|deploy(ment|ing)?|production[[:space:]]+(operation|change|deploy)'
-}
-
 refresh_owner_approved_issue() {
   local owner=$1
   local output_file=$2
@@ -327,16 +242,15 @@ run_issue() {
   [[ "$QUEUE_MAX_MINUTES" -ge 30 ]] || fail "QUEUE_MAX_MINUTES must be at least 30."
   [[ "$QUEUE_MAX_MINUTES" -le 150 ]] || fail "QUEUE_MAX_MINUTES may not exceed 150."
 
-  local root owner actor triggering_actor item body_file validated_snapshot events_file results_file run_url
+  local root owner actor triggering_actor item validated_snapshot events_file results_file run_url
   local operational_failures=0 outcome=success outcome_detail='Completed successfully'
-  local cleanup_failed=0 rc existing_json existing_pr risk pr_json pr_url pr_draft
+  local cleanup_failed=0 rc existing_json existing_pr risk contract pr_json pr_url pr_draft
 
   root=$(git rev-parse --show-toplevel 2>/dev/null) || fail "Run inside the repository checkout."
   cd "$root"
 
   TMP_ROOT=$(mktemp -d)
   item="$TMP_ROOT/item.json"
-  body_file="$TMP_ROOT/body.md"
   validated_snapshot="$TMP_ROOT/validated-issue.json"
   events_file="$TMP_ROOT/issue-authorization-events.jsonl"
   results_file="$TMP_ROOT/results.md"
@@ -527,27 +441,12 @@ Run: $run_url"; then
     finish 0
     return
   fi
-  jq -r '.body // ""' "$item" > "$body_file"
-  if ! validate_complete_template "$body_file"; then
-    outcome=blocked
-    outcome_detail='Missing, duplicated, malformed, or incomplete required issue-template sections block unattended implementation'
-    rc=1
-  elif risk=$(extract_risk "$body_file"); then
-    rc=0
+  if contract=$(bash "$root/scripts/agents/issue-implementation-contract.sh" "$item"); then
+    risk=$(printf '%s' "$contract" | jq -r .risk)
   else
-    rc=$?
-  fi
-  if [[ "$outcome" == "blocked" ]]; then
-    : # The complete-template validation already supplied the blocking detail.
-  elif [[ "$rc" == "2" ]]; then
     outcome=blocked
-    outcome_detail='High-risk classification blocks unattended implementation'
-  elif [[ "$rc" != "0" ]]; then
-    outcome=blocked
-    outcome_detail='Missing, malformed, or ambiguous risk classification blocks unattended implementation'
-  elif has_blocked_category "$(jq -r '.title // ""' "$item")" "$body_file"; then
-    outcome=blocked
-    outcome_detail='The issue describes a category blocked from unattended implementation'
+    outcome_detail=$(printf '%s' "$contract" | jq -r '.reason // empty')
+    outcome_detail=${outcome_detail:-Issue implementation contract could not be verified}
   fi
   if [[ "$outcome" == "blocked" ]]; then
     if ! post_comment "<!-- codex-queue-result:${GITHUB_RUN_ID} -->
