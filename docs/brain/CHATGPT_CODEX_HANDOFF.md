@@ -9,14 +9,14 @@ Use this protocol when a human is relaying work between ChatGPT and Codex. The g
 Whenever ChatGPT prepares a prompt for Codex, put this routing header above the prompt every time:
 
 ```text
-CODEX MODEL: [recommended model]
+CODEX MODEL: [configured model or explicitly authorized selection]
 CHAT NAME: [specific session/chat name]
-REASONING: [light / medium / high / extra high / ultra]
+REASONING: [configured effort or explicitly authorized selection]
 PARALLEL: YES | NO
 WHY: [one sentence]
 ```
 
-The routing header is a ChatGPT-to-human instruction. Codex does not choose or rewrite these fields after the session starts.
+The routing header is a ChatGPT-to-human instruction. Codex does not choose or rewrite these fields after the session starts. Follow [the model and reasoning owner](../../AGENTS.md#model-and-reasoning-routing); a recommendation alone does not authorize changing the running configuration.
 
 Use the same Codex chat for an approved investigation -> implementation -> repair sequence when retaining context is useful. Use a fresh Codex chat for independent review. A session or agent that implemented the change, designed the fix, or guided the repair is not independent and cannot serve as the final merge-gating reviewer.
 
@@ -114,14 +114,14 @@ For UI changes, fill the PR's conditional `UI evidence` field with the tested HE
 
 ## ChatGPT-managed implementation cycle
 
-For bounded implementation work coordinated manually between ChatGPT and Codex, default to checkpoints instead of one large prompt:
+For bounded implementation work coordinated manually between ChatGPT and Codex, use checkpoints for missing decisions. Continue work already authorized in the same session; do not require another plan approval for the same bounded scope:
 
-1. **Investigation / plan only.** Start from current `main`, inspect the smallest relevant file set, do not edit yet, define the governing contract precisely, including side-effect/trust boundaries when material, propose the smallest coherent implementation, estimate scope, list focused tests, and surface unresolved decisions.
-2. **ChatGPT review.** Return the plan to ChatGPT. Resolve scope, architecture, sequencing, PR-size, and product-contract questions before editing.
+1. **Confirm the contract.** Inspect the smallest relevant file set, define the governing contract and side-effect/trust boundaries, state the smallest coherent plan and focused tests, and surface unresolved decisions. An explicit investigation/plan-only task stops before editing. New work starts from current `main` through the applicable START flow.
+2. **Resolve missing decisions.** Return unresolved scope, architecture, sequencing, PR-size, or product-contract questions to ChatGPT/human review before dependent edits. Existing approval covers reversible work inside the agreed scope.
 3. **Implementation.** Continue the original implementation session and implement only the approved plan. Run focused verification, commit/push the completed change, and create/update the PR before final exact-SHA independent review.
 4. **Independent review.** After matching PR CI passes, use a fresh Codex session for the exact current live PR HEAD SHA when independent review is required. Give it the exact HEAD/base, acceptance criteria, and relevant repository instructions without a desired verdict or a long history of previous findings; include prior findings only when the current task explicitly requires verifying a specific repair. Never claim final exact-SHA review of an uncommitted diff. The reviewer should return findings, not silently repair the implementation.
 5. **Repair.** Send verified findings back to the original implementation session. Keep fixes inside the approved scope unless a new decision is explicitly reviewed.
-6. **Re-verify.** Re-run the relevant checks. Any HEAD change after a required exact-SHA review invalidates that review. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
+6. **Re-verify.** Re-run affected focused checks, push the repair, wait for required CI matching the new HEAD, then obtain required fresh exact-SHA review. Any HEAD change invalidates the prior review. A trivial follow-up review may cover the new diff, but must record the new pushed HEAD. Reuse unchanged valid evidence.
 7. **Merge/deploy gate.** Merge or deployment still requires the repository's normal human approvals and operational rules.
 
 For parallel PRs, waiting/working branches remain frozen as `main` advances. One named integrator owns merge order; only the selected candidate is synchronized. Fetch `main`, synchronize normally if needed, pass the INTEGRATE gate, push the resulting HEAD, wait for matching CI, and obtain fresh independent review of that exact pushed HEAD. If main races before merge, repeat only for that candidate. Any HEAD change invalidates review; final exact-HEAD review cannot cover uncommitted work.
@@ -208,10 +208,10 @@ Prefer the first feasible enforcement location:
 Do not turn routine syntax/type/build fixes, expected failed experiments, transient service errors, abandoned ideas, or one-off debugging into permanent brain entries unless they expose a deeper missing guard.
 
 
-## Scoped Sol/Terra delegation
+## Scoped delegation
 
-Use GPT-6.1 Sol to coordinate and verify bounded engineering work; delegate scoped computer use or customer-facing writing to GPT-6.1 Terra and simple helpers to GPT-6 Luna. No Fast mode. Parent and worker agree scope, plan, owned paths, exclusions and acceptance before implementation. Delegate only when the benefit exceeds briefing/review overhead; tiny tasks can stay with the coordinator.
+Follow [the model and reasoning rules](../../AGENTS.md#model-and-reasoning-routing). No Fast mode. Parent and worker agree scope, plan, owned paths, exclusions and acceptance before implementation. Delegate only when the benefit exceeds briefing/review overhead; tiny tasks can stay with the coordinator.
 
 Keep one browser/desktop owner per shared session. Explicitly release custody before another agent acts. A worker returns the result, actual model/reasoning, commit/artifact identity, evidence, checks run and uncertainties. Sol verifies observable outcomes, factual/voice constraints and required exact-HEAD code review/CI; the implementer is not its own independent reviewer. Missing access or a denied action is a blocker, not permission to try another route.
 
-Native Terra execution was confirmed by the parent on2026-10-26. Select only model/reasoning combinations exposed by the current execution surface: native Codex options and API reasoning options differ. Medium is the usual Terra starting point; High requires task justification. This guidance changes no running root model, global settings, other users' defaults, workspace entitlements or tool permissions. API model selection and credentials are separate. Existing approval, ownership and release gates remain in force.
+Select only model/reasoning combinations verified on the current execution surface; native Codex options and API options differ. Preserve configured effort unless the user authorizes a change. This guidance changes no running root model, global settings, other users' defaults, workspace entitlements or tool permissions. API model selection and credentials are separate. Existing approval, ownership and release gates remain in force.
