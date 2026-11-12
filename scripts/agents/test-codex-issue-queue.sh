@@ -7,7 +7,8 @@ TASK_SCRIPT="$ROOT/scripts/agents/codex-task.sh"
 WORKFLOW="$ROOT/.github/workflows/codex-issue-queue.yml"
 AUTOMATION_DOC="$ROOT/docs/brain/CODEX_AUTOMATION.md"
 TMP_ROOT=$(mktemp -d)
-trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
+PRIVATE_ROOT=$(mktemp -d "$HOME/.ep-recovery-queue-test.XXXXXX")
+trap 'rm -rf "$TMP_ROOT" "$PRIVATE_ROOT"' EXIT HUP INT TERM
 
 fail() {
   echo "FAIL: $*" >&2
@@ -57,12 +58,19 @@ MOCK_BIN="$TMP_ROOT/bin"
 MOCK_REPO="$TMP_ROOT/repo"
 mkdir -p "$MOCK_BIN" "$MOCK_REPO/scripts/agents"
 : > "$MOCK_REPO/scripts/agents/codex-task.sh"
+QUEUE_SCRIPT="$MOCK_REPO/scripts/agents/codex-issue-queue.sh"
+cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ROOT/scripts/agents/owner-approval.sh" "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$MOCK_REPO/scripts/agents/"
 
 cat > "$MOCK_BIN/git" <<'EOF'
 #!/usr/bin/env bash
-if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--show-toplevel" ]]; then
-  printf '%s\n' "$MOCK_REPO"
-fi
+printf 'git:%s\n' "$*" >> "$MOCK_LOG"
+[[ "${1:-}" != --literal-pathspecs ]] || shift
+if [[ "$MOCK_SCENARIO" == cleanup-persistence-failure && "${1:-}" == diff && "$*" == *--binary* ]]; then exit 1; fi
+case "$*" in
+  'rev-parse --show-toplevel') printf '%s\n' "$MOCK_REPO" ;;
+  'rev-parse HEAD') echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
+  'branch --show-current') echo main ;;
+esac
 exit 0
 EOF
 
@@ -88,12 +96,12 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   [[ -f "$MOCK_ISSUE_VIEW_COUNT" ]] && view_count=$(cat "$MOCK_ISSUE_VIEW_COUNT")
   view_count=$((view_count + 1))
   printf '%s\n' "$view_count" > "$MOCK_ISSUE_VIEW_COUNT"
-  body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Current behavior\n\nA heading is misspelled.\n\n### Acceptance criteria\n\nThe heading is corrected.\n\n### Product and technical constraints\n\nNo additional constraints.\n\n### Expected scope\n\ndocs/example.md\n\n### Explicitly out of scope\n\nApplication code.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation\n\n### Required validation\n\nCheck the rendered text.\n\n### Unresolved human decisions\n\nNone.\n\n### Readiness confirmation\n\n- [x] The desired outcome and acceptance criteria are clear.\n- [x] Product decisions that still require a human are listed above.\n- [x] The task has explicit exclusions and validation requirements.\n- [x] I understand that a repository owner must apply `agent-ready` separately.'
+  body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Current behavior\n\nA heading is misspelled.\n\n### Acceptance criteria\n\nThe heading is corrected.\n\n### Product and technical constraints\n\nNo additional constraints.\n\n### Expected scope\n\nOwned paths:\n- docs/example.md\n\nShared paths or dependencies:\n- None\n\n### Explicitly out of scope\n\nProhibited paths:\n- None\n\nOther behavior exclusions:\nApplication code.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation\n\n### Required validation\n\nCheck the rendered text.\n\n### Unresolved human decisions\n\nNone.\n\n### Readiness confirmation\n\n- [x] The desired outcome and acceptance criteria are clear.\n- [x] Product decisions that still require a human are listed above.\n- [x] The task has explicit exclusions and validation requirements.\n- [x] I understand that a repository owner must apply `agent-ready` separately.'
   case "$MOCK_SCENARIO" in
     missing-readiness) labels='[]' ;;
     non-template) body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation' ;;
     missing-section) body=${body//$'\n### Required validation\n\nCheck the rendered text.\n'/} ;;
-    missing-exclusions) body=${body//$'\n### Explicitly out of scope\n\nApplication code.\n'/} ;;
+    missing-exclusions) body=${body//$'\n### Explicitly out of scope\n\nProhibited paths:\n- None\n\nOther behavior exclusions:\nApplication code.\n'/} ;;
     duplicated-section) body+=$'\n\n### Desired outcome\n\nA duplicate outcome.' ;;
     missing-risk) body=${body%%$'\n\n### Risk classification'*} ;;
     malformed-risk) body+=$'\n\n### Risk classification\n\nLow - something else' ;;
@@ -132,7 +140,7 @@ if [[ "${1:-}" == "api" ]]; then
   state=OPEN
   last_edited=null
   include_last_edited=true
-  body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Current behavior\n\nA heading is misspelled.\n\n### Acceptance criteria\n\nThe heading is corrected.\n\n### Product and technical constraints\n\nNo additional constraints.\n\n### Expected scope\n\ndocs/example.md\n\n### Explicitly out of scope\n\nApplication code.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation\n\n### Required validation\n\nCheck the rendered text.\n\n### Unresolved human decisions\n\nNone.\n\n### Readiness confirmation\n\n- [x] The desired outcome and acceptance criteria are clear.\n- [x] Product decisions that still require a human are listed above.\n- [x] The task has explicit exclusions and validation requirements.\n- [x] I understand that a repository owner must apply `agent-ready` separately.'
+  body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Current behavior\n\nA heading is misspelled.\n\n### Acceptance criteria\n\nThe heading is corrected.\n\n### Product and technical constraints\n\nNo additional constraints.\n\n### Expected scope\n\nOwned paths:\n- docs/example.md\n\nShared paths or dependencies:\n- None\n\n### Explicitly out of scope\n\nProhibited paths:\n- None\n\nOther behavior exclusions:\nApplication code.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation\n\n### Required validation\n\nCheck the rendered text.\n\n### Unresolved human decisions\n\nNone.\n\n### Readiness confirmation\n\n- [x] The desired outcome and acceptance criteria are clear.\n- [x] Product decisions that still require a human are listed above.\n- [x] The task has explicit exclusions and validation requirements.\n- [x] I understand that a repository owner must apply `agent-ready` separately.'
   events='[{"__typename":"LabeledEvent","createdAt":"2026-07-16T02:00:00Z","actor":{"login":"celleree"},"label":{"name":"agent-ready"}}]'
   has_next=false
   end_cursor=null
@@ -141,7 +149,7 @@ if [[ "${1:-}" == "api" ]]; then
     missing-readiness) labels='[]' ;;
     non-template) body=$'### Desired outcome\n\nCorrect a documentation typo.\n\n### Risk classification\n\nLow - isolated code, copy, tests, or documentation' ;;
     missing-section) body=${body//$'\n### Required validation\n\nCheck the rendered text.\n'/} ;;
-    missing-exclusions) body=${body//$'\n### Explicitly out of scope\n\nApplication code.\n'/} ;;
+    missing-exclusions) body=${body//$'\n### Explicitly out of scope\n\nProhibited paths:\n- None\n\nOther behavior exclusions:\nApplication code.\n'/} ;;
     duplicated-section) body+=$'\n\n### Desired outcome\n\nA duplicate outcome.' ;;
     missing-risk) body=${body%%$'\n\n### Risk classification'*} ;;
     malformed-risk) body+=$'\n\n### Risk classification\n\nLow - something else' ;;
@@ -239,7 +247,14 @@ done
 role=${3:-unknown}
 issue=${4:-unknown}
 printf 'role:%s:%s\n' "$role" "$issue" >> "$MOCK_LOG"
+if [[ "$MOCK_SCENARIO" == child-quarantined ]]; then
+  node "$MOCK_REPO/scripts/agents/task-recovery.mjs" begin "$CODEX_RECOVERY_ROOT" "$MOCK_REPO" '{}' >/dev/null
+  exit 7
+fi
 if [[ "$role" == "implement" ]]; then
+  if [[ "$MOCK_SCENARIO" == queue-source-tamper ]]; then
+    printf '\nprintf "WORKER_APPENDED_QUEUE_BODY\\n" > "$MOCK_SOURCE_ESCAPE"\n' >> "$MOCK_REPO/scripts/agents/codex-issue-queue.sh"
+  fi
   [[ -n "${QUEUE_VALIDATED_ISSUE_SNAPSHOT:-}" && -r "$QUEUE_VALIDATED_ISSUE_SNAPSHOT" ]] || exit 9
   jq -c . "$QUEUE_VALIDATED_ISSUE_SNAPSHOT" > "$MOCK_SNAPSHOT_CAPTURE"
   printf 'snapshot:%s\n' "$QUEUE_VALIDATED_ISSUE_SNAPSHOT" >> "$MOCK_LOG"
@@ -272,8 +287,10 @@ run_case() {
   [[ $# -ge 6 ]] && triggering_actor=$6
   local case_dir="$TMP_ROOT/case-$issue-$scenario"
   local rc
+  cp "$ROOT/scripts/agents/codex-issue-queue.sh" "$QUEUE_SCRIPT"
 
   mkdir -p "$case_dir"
+  mkdir -m 700 "$PRIVATE_ROOT/case-$issue-$scenario"
   : > "$case_dir/log"
   : > "$case_dir/summary"
   : > "$case_dir/pr-count"
@@ -284,11 +301,13 @@ run_case() {
   set +e
   PATH="$MOCK_BIN:$PATH" \
     MOCK_REPO="$MOCK_REPO" \
+    CODEX_RECOVERY_ROOT="$PRIVATE_ROOT/case-$issue-$scenario" \
     MOCK_LOG="$case_dir/log" \
     MOCK_PR_COUNT="$case_dir/pr-count" \
     MOCK_ISSUE_VIEW_COUNT="$case_dir/issue-view-count" \
     MOCK_SNAPSHOT_CAPTURE="$case_dir/snapshot.json" \
     MOCK_LIVE_CAPTURE="$case_dir/live.json" \
+    MOCK_SOURCE_ESCAPE="$case_dir/source-escape" \
     MOCK_SCENARIO="$scenario" \
     GH_TOKEN=test-token \
     GITHUB_ACTOR="$actor" \
@@ -310,8 +329,18 @@ run_case() {
     cat "$case_dir/summary" >&2
   fi
   assert_eq "$expected_rc" "$rc" "unexpected exit code for $scenario"
+  [[ ! -e "$case_dir/source-escape" ]] || fail 'worker-modified queue parent source was executed'
   LAST_CASE_DIR="$case_dir"
 }
+
+for scenario in cleanup-persistence-failure child-quarantined; do
+  run_case "$scenario" 146 false 1
+  assert_not_contains "$LAST_CASE_DIR/log" 'git:reset --hard' 'incomplete recovery must prevent reset'
+  assert_not_contains "$LAST_CASE_DIR/log" 'git:clean -fd' 'incomplete recovery must prevent clean'
+  assert_not_contains "$LAST_CASE_DIR/log" 'git:switch --force-create' 'incomplete recovery must prevent branch replacement'
+  assert_contains "$LAST_CASE_DIR/log" 'git:config --local --unset-all http.https://github.com/.extraheader' 'credential removal must still run'
+  [[ -f "$PRIVATE_ROOT/case-146-$scenario/ACTIVE" ]] || fail 'incomplete recovery must leave quarantine'
+done
 
 run_case safe 100 true 0
 assert_contains "$LAST_CASE_DIR/log" 'role:plan:100' 'safe ready work must run planning'
@@ -322,6 +351,9 @@ assert_eq 'Safe documentation correction' "$(jq -r .title "$LAST_CASE_DIR/snapsh
 assert_contains "$LAST_CASE_DIR/snapshot.json" 'Correct a documentation typo.' \
   'implementation must receive the exact validated body'
 assert_contains "$LAST_CASE_DIR/summary" 'Draft pull request created' 'safe ready work must report a draft PR'
+
+run_case queue-source-tamper 145 true 0
+assert_contains "$LAST_CASE_DIR/log" 'role:implement:145' 'queue parent-source regression must reach its write role'
 
 run_case owner-initial-dispatch 131 false 0 celleree celleree
 assert_contains "$LAST_CASE_DIR/log" 'role:plan:131' 'an owner initial dispatch must be allowed'
@@ -447,26 +479,95 @@ fi
 
 TASK_BIN="$TMP_ROOT/task-bin"
 TASK_REPO="$TMP_ROOT/task-repo"
-mkdir -p "$TASK_BIN" "$TASK_REPO/scripts" "$TASK_REPO/docs"
+TASK_SCRIPT="$TASK_REPO/scripts/agents/codex-task.sh"
+TASK_REAL_SED=$(command -v sed)
+export TASK_REAL_SED
+mkdir -p "$TASK_BIN" "$TASK_REPO/scripts/agents" "$TASK_REPO/docs"
+cp "$ROOT/scripts/agents/issue-implementation-contract.sh" "$ROOT/scripts/agents/owner-approval.sh" "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$ROOT/scripts/agents/codex-execution.mjs" "$ROOT/scripts/agents/codex-execution-policy.json" "$TASK_REPO/scripts/agents/"
+printf 'Original text.\n' > "$TASK_REPO/docs/example.md"
 
 for helper in install-git-guardrails.sh check-repository-state.sh start-change.sh; do
-  printf '#!/bin/sh\nexit 0\n' > "$TASK_REPO/scripts/$helper"
+  cat > "$TASK_REPO/scripts/$helper" <<'EOF'
+#!/bin/sh
+printf 'helper:%s\n' "${0##*/}" >> "$TASK_LOG"
+EOF
 done
 
 cat > "$TASK_BIN/git" <<'EOF'
 #!/usr/bin/env bash
 printf 'git:%s\n' "$*" >> "$TASK_LOG"
+[[ "${1:-}" != --literal-pathspecs ]] || shift
+[[ "${1:-}" != -c || "${2:-}" != core.hooksPath=/dev/null ]] || shift 2
+changed=docs/example.md
+if [[ -f "$TASK_MODEL_MARKER" || "$TASK_SCENARIO" == repair-pre-* ]]; then
+  case "$TASK_SCENARIO" in
+    *post-unowned|repair-pre-unowned) changed=outside.md ;;
+    repair-pre-guardrail) changed=scripts/install-git-guardrails.sh ;;
+    repair-pre-state) changed=scripts/check-repository-state.sh ;;
+    repair-pre-hook) changed=.githooks/pre-push ;;
+    repair-pre-attributes) changed=.gitattributes ;;
+    *post-governance) changed=scripts/agents/task-path-scope.mjs ;;
+    *post-wrapper-tamper) changed=scripts/agents/codex-task.sh ;;
+  esac
+fi
 case "${1:-} ${2:-}" in
   'rev-parse --show-toplevel') printf '%s\n' "$TASK_REPO" ;;
-  'rev-parse HEAD') echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
+  'rev-parse HEAD')
+    if [[ "$TASK_SCENARIO" == manual-post-execution-capture-tamper && -f "$TASK_MODEL_MARKER" && ! -e "$TASK_CAPTURE_TAMPER" ]]; then
+      node --input-type=module - "$TASK_EXECUTION_CAPTURE" <<'NODE'
+import { readFileSync,appendFileSync } from 'node:fs';
+appendFileSync(readFileSync(process.argv[2],'utf8').trim(),'\n');
+NODE
+      touch "$TASK_CAPTURE_TAMPER"
+    fi
+    if [[ "$TASK_SCENARIO" == repair-untrusted-start ]]; then echo cccccccccccccccccccccccccccccccccccccccc
+    elif [[ "$TASK_SCENARIO" == repair* && ! -e "$TASK_CHECKOUT_MARKER" ]]; then echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    elif [[ "$TASK_SCENARIO" == repair-checkout-head-moved ]]; then echo cccccccccccccccccccccccccccccccccccccccc
+    else echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; fi
+    ;;
+  'rev-parse --verify')
+    if [[ "$3" == 'refs/remotes/origin/main^{commit}' ]]; then
+      [[ "$TASK_SCENARIO" != repair-base-moved-before ]] && echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa || echo cccccccccccccccccccccccccccccccccccccccc
+    else
+      [[ "$TASK_SCENARIO" != repair-head-moved-before ]] && echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb || echo cccccccccccccccccccccccccccccccccccccccc
+    fi
+    ;;
+  'merge-base --is-ancestor') [[ "$TASK_SCENARIO" != repair-stale-baseline ]] || exit 1 ;;
+  'switch --force-create')
+    touch "$TASK_CHECKOUT_MARKER"
+    printf 'checkout-effect:%s\n' "$TASK_SCENARIO" >> "$TASK_LOG"
+    case "$TASK_SCENARIO" in
+      repair-pre-guardrail|repair-pre-state) printf 'PROHIBITED_BRANCH_SCRIPT_MATERIALIZED\n' >> "$TASK_LOG" ;;
+      repair-pre-hook) printf 'PROHIBITED_HOOK_COPIED\n' >> "$TASK_LOG" ;;
+      repair-pre-attributes) printf 'PROHIBITED_FILTER_EXECUTED\n' >> "$TASK_LOG" ;;
+    esac
+    ;;
   'status --porcelain') ;;
   'remote get-url') echo 'https://github.com/celleree/publish-everywhere.git' ;;
-  'branch --show-current') printf 'agent/issue-%s\n' "$TASK_NUMBER" ;;
+  'branch --show-current') printf 'agent/issue-%s\n' "$TASK_ISSUE" ;;
   'ls-remote origin') exit 1 ;;
-  'diff --name-only') echo docs/example.md ;;
+  'diff --name-only')
+    if [[ "$*" == *'...'* ]]; then
+      [[ ! -e "$TASK_AUTH_MARKER" ]] || { echo 'PROHIBITED_FETCH_CREDENTIAL_RETAINED' >> "$TASK_LOG"; exit 1; }
+      echo 'trusted-pr-scope-check' >> "$TASK_LOG"
+    fi
+    if [[ "$*" == *'...'* || "$*" == *'--cached'* && -f "$TASK_STAGE_MARKER" || "$*" != *'--cached'* && -f "$TASK_MODEL_MARKER" && ! -f "$TASK_STAGE_MARKER" ]]; then
+      printf '%s\0' "$changed"
+    fi
+    ;;
+  'ls-files --stage') printf '100644 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\t%s\0' "$changed" ;;
   'ls-files --others') ;;
+  'ls-tree -rz') printf '100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t%s\0' "$changed" ;;
+  'diff --check')
+    if [[ "$TASK_SCENARIO" == manual-post-whitespace-failure ]]; then echo 'PRIVATE-SOURCE-SENTINEL'; exit 1; fi
+    ;;
+  'add -A') touch "$TASK_STAGE_MARKER" ;;
+  'commit -m') [[ "$TASK_SCENARIO" != manual-post-commit-failure ]] || exit 1 ;;
+  'push -u') [[ "$TASK_SCENARIO" != manual-post-push-failure ]] || exit 1 ;;
   'config --local')
-    [[ "${3:-}" == "--get-all" ]] && exit 1
+    if [[ "${3:-}" == "--get-all" ]]; then exit 1
+    elif [[ "${3:-}" == --unset-all ]]; then rm -f "$TASK_AUTH_MARKER"
+    elif [[ "${3:-}" == http.https://github.com/.extraheader ]]; then touch "$TASK_AUTH_MARKER"; fi
     ;;
 esac
 exit 0
@@ -487,22 +588,50 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   if [[ "$TASK_SCENARIO" == "queued-valid" ]]; then
     jq -cn '{title:"Live protected authentication change",body:"Change billing and database deployment behavior.",url:"https://github.test/issues/live",labels:[{name:"agent-ready"}],author:{login:"author"}}'
   else
-    jq -cn '{title:"Manual live title",body:"Manual live body",url:"https://github.test/issues/manual",labels:[{name:"agent-ready"}],author:{login:"author"}}'
+    jq -cn --argjson number "$TASK_NUMBER" --arg body "$TASK_BODY" --arg state "$TASK_STATE" \
+      --argjson labels "$TASK_LABELS" \
+      '{number:$number,state:$state,title:"Manual live title",body:$body,url:"https://github.test/issues/manual",labels:$labels,author:{login:"author"}}'
   fi
   exit 0
 fi
+if [[ "${1:-}" == api && "${2:-}" == graphql ]]; then
+  edited=null
+  issue_number=$TASK_ISSUE
+  [[ "$TASK_SCENARIO" != repair-wrong-issue ]] || issue_number=999
+  [[ "$TASK_SCENARIO" != manual-owner-stale && "$TASK_SCENARIO" != repair-owner-stale ]] || edited='"2026-07-16T03:00:00Z"'
+  jq -cn --argjson number "$issue_number" --arg body "$TASK_BODY" --arg state "$TASK_STATE" \
+    --argjson labels "$TASK_LABELS" --argjson edited "$edited" '{data:{repository:{issue:{
+      number:$number,state:$state,title:"Manual live title",body:$body,url:"https://github.test/issues/manual",author:{login:"author"},
+      lastEditedAt:$edited,labels:{nodes:$labels,pageInfo:{hasNextPage:false}},
+      timelineItems:{nodes:[{__typename:"LabeledEvent",createdAt:"2026-07-16T02:00:00Z",actor:{login:"celleree"},label:{name:"agent-ready"}}],pageInfo:{hasNextPage:false,endCursor:null}}
+    }}}}'
+  exit 0
+fi
+if [[ "${1:-}" == pr && "${2:-}" == diff ]]; then echo 'Pinned repair diff'; exit 0; fi
+if [[ "${1:-}" == pr && "${2:-}" == comment ]]; then exit 0; fi
 if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
+  [[ "$#" == 11 && "$3" == --draft && "$4" == --base && "$5" == main &&
+    "$6" == --head && "$7" == "agent/issue-$TASK_NUMBER" && "$8" == --title &&
+    "$9" == "Codex implementation for issue #$TASK_NUMBER" && "${10}" == --body ]] || exit 9
+  [[ "$TASK_SCENARIO" != manual-post-pr-ambiguous ]] || exit 1
   echo 'https://github.test/pull/task'
   exit 0
 fi
 if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
-  jq -cn '{baseRefOid:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",headRefOid:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+  if [[ "$*" == *'--jq .headRefOid'* ]]; then
+    [[ "$TASK_SCENARIO" != repair-post-head-moved ]] && echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb || echo cccccccccccccccccccccccccccccccccccccccc
+  else
+    branch="agent/issue-$TASK_ISSUE"
+    [[ "$TASK_SCENARIO" != repair-no-association ]] || branch=unassociated
+    jq -cn --arg branch "$branch" '{state:"OPEN",isCrossRepository:false,baseRefName:"main",headRefName:$branch,author:{login:"celleree"},baseRefOid:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",headRefOid:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+  fi
   exit 0
 fi
 if [[ "${1:-}" == "pr" && "${2:-}" == "edit" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "workflow" && "${2:-}" == "run" ]]; then
+  [[ "$*" == "workflow run pull-request-ci.yml --ref agent/issue-$TASK_ISSUE -f base_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -f head_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]] || exit 9
   exit 0
 fi
 exit 1
@@ -513,9 +642,33 @@ cat > "$TASK_BIN/codex" <<'EOF'
 if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
   exit 0
 fi
+printf 'codex:%s\n' "$*" >> "$TASK_LOG"
+printf '%s\0' "$@" > "$TASK_ARGV_CAPTURE"
+touch "$TASK_MODEL_MARKER"
+if [[ "$TASK_SCENARIO" == *post-wrapper-tamper ]]; then
+  node --input-type=module - "$TASK_REPO/scripts/agents/codex-task.sh" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = process.argv[2];
+const source = readFileSync(path, 'utf8');
+const offset = source.indexOf('[ -s "$OUTPUT" ]');
+if (offset < 0) process.exit(2);
+writeFileSync(path, source.slice(0, offset) + 'printf "WORKER_MODIFIED_POST_BODY\\n" > "$TASK_ESCAPE_MARKER"\nexit 0\n');
+NODE
+fi
+if [[ "$TASK_SCENARIO" == *post-governance ]]; then echo 'throw new Error("changed helper loaded");' > "$TASK_REPO/scripts/agents/task-path-scope.mjs"; fi
+if [[ "$TASK_SCENARIO" == *post-helper-tamper || "$TASK_SCENARIO" == *post-contract-tamper ]]; then
+  for argument in "$@"; do
+    if [[ "$argument" =~ HOME[[:space:]]=[[:space:]]\"([^\"]+)\" ]]; then
+      task_tmp=${BASH_REMATCH[1]%/agent-home}
+      [[ "$TASK_SCENARIO" != *post-helper-tamper ]] || echo 'throw new Error("tampered");' >> "$task_tmp/task-path-scope.mjs"
+      [[ "$TASK_SCENARIO" != *post-contract-tamper ]] || echo ' ' >> "$task_tmp/path-scope.json"
+    fi
+  done
+fi
 cat > "$TASK_CONTEXT_CAPTURE"
 printf 'GH_TOKEN=%s\n' "${GH_TOKEN-unset}" > "$TASK_ENV_CAPTURE"
 printf 'QUEUE_VALIDATED_ISSUE_SNAPSHOT=%s\n' "${QUEUE_VALIDATED_ISSUE_SNAPSHOT-unset}" >> "$TASK_ENV_CAPTURE"
+printf 'CODEX_TASK_MODEL=%s\n' "${CODEX_TASK_MODEL-unset}" >> "$TASK_ENV_CAPTURE"
 output=
 while [[ "$#" -gt 0 ]]; do
   if [[ "$1" == "--output-last-message" ]]; then
@@ -526,6 +679,31 @@ while [[ "$#" -gt 0 ]]; do
 done
 [[ -n "$output" ]] || exit 2
 echo 'Implemented safely.' > "$output"
+printf '%s\n' "${output%/*}/execution.json" > "$TASK_EXECUTION_CAPTURE"
+echo 'PRIVATE-RAW-STDOUT-SENTINEL'
+echo 'PRIVATE-RAW-STDERR-SENTINEL' >&2
+if [[ "$TASK_SCENARIO" == manual-post-final-secret ]]; then echo 'ghp_00000000000000000000000000000000' > "$output"; fi
+if [[ "$TASK_SCENARIO" == manual-post-model-failure ]]; then exit 7; fi
+if [[ "$TASK_SCENARIO" == manual-post-execution-helper-tamper ]]; then echo '// changed' >> "${output%/*}/codex-execution.mjs"; fi
+if [[ "$TASK_SCENARIO" == manual-post-execution-policy-tamper ]]; then echo ' ' >> "${output%/*}/codex-execution-policy.json"; fi
+if [[ "$TASK_SCENARIO" == manual-post-execution-receipt-failure ]]; then chmod 644 "${output%/*}/execution.json"; fi
+if [[ "$TASK_SCENARIO" == manual-post-execution-ancestor-swap ]]; then
+  # The fake child only renames/symlinks its exposed parent; it never opens the marker target.
+  printf '%s\n' "${output%/*}" > "$TASK_SWAP_CAPTURE"
+  mv "${output%/*}" "${output%/*}.original"
+  ln -s "$TASK_SWAP_TARGET" "${output%/*}"
+fi
+if [[ "$TASK_SCENARIO" == manual-post-recovery-tamper ]]; then
+  # output is in the same private temporary root as the trusted helper copy.
+  echo '// changed' >> "${output%/*}/task-recovery.mjs"
+fi
+EOF
+
+cat > "$TASK_BIN/sed" <<'EOF'
+#!/usr/bin/env bash
+[[ "$TASK_SCENARIO" != manual-bootstrap-read-failure ]] || exit 1
+[[ "$TASK_SCENARIO" != manual-bootstrap-empty ]] || exit 0
+exec "$TASK_REAL_SED" "$@"
 EOF
 
 cat > "$TASK_BIN/bwrap" <<'EOF'
@@ -533,18 +711,72 @@ cat > "$TASK_BIN/bwrap" <<'EOF'
 exit 0
 EOF
 
-chmod +x "$TASK_BIN/git" "$TASK_BIN/gh" "$TASK_BIN/codex" "$TASK_BIN/bwrap"
+chmod +x "$TASK_BIN/git" "$TASK_BIN/gh" "$TASK_BIN/codex" "$TASK_BIN/bwrap" "$TASK_BIN/sed"
+
+TASK_VALID_BODY=$(cat <<'BODY'
+### Desired outcome
+
+Pinned safe body with exact approved text.
+
+### Current behavior
+
+A heading is misspelled.
+
+### Acceptance criteria
+
+The heading is corrected.
+
+### Product and technical constraints
+
+No additional constraints.
+
+### Expected scope
+
+Owned paths:
+- docs/example.md
+
+Shared paths or dependencies:
+- None
+
+### Explicitly out of scope
+
+Prohibited paths:
+- None
+
+Other behavior exclusions:
+Application code.
+
+### Risk classification
+
+Low - isolated code, copy, tests, or documentation
+
+### Required validation
+
+Check the rendered text.
+
+### Unresolved human decisions
+
+None.
+
+### Readiness confirmation
+
+- [x] The desired outcome and acceptance criteria are clear.
+- [x] Product decisions that still require a human are listed above.
+- [x] Owned paths, shared paths or dependencies, explicit exclusions, and validation requirements are declared.
+- [x] I understand that a repository owner must apply `agent-ready` separately.
+BODY
+)
 
 write_task_snapshot() {
-  local path=$1
-  local number=$2
-  jq -cn --argjson number "$number" '{
+  local path=$1 number=$2
+  jq -cn --argjson number "$number" --arg body "$TASK_BODY" --arg state "$TASK_STATE" \
+    --argjson labels "$TASK_LABELS" '{
     number:$number,
-    state:"OPEN",
+    state:$state,
     title:"Pinned safe title",
-    body:"Pinned safe body with exact approved text.",
+    body:$body,
     url:("https://github.test/issues/" + ($number | tostring)),
-    labels:[{name:"agent-ready"}],
+    labels:$labels,
     author:{login:"author"}
   }' > "$path"
 }
@@ -555,9 +787,60 @@ run_task_case() {
   local expected_rc=$3
   local case_dir="$TMP_ROOT/task-$scenario"
   local snapshot="$case_dir/snapshot.json"
-  local rc
+  local rc role=implement TASK_ISSUE=$number
+  [[ "$scenario" != repair* ]] || { role=repair; TASK_ISSUE=42; }
+  local TASK_MODEL_MARKER="$case_dir/model-ran" TASK_STAGE_MARKER="$case_dir/staged" TASK_ESCAPE_MARKER="$case_dir/escaped"
+  export TASK_ISSUE TASK_MODEL_MARKER TASK_STAGE_MARKER TASK_ESCAPE_MARKER
+  export TASK_CHECKOUT_MARKER="$case_dir/checked-out" TASK_AUTH_MARKER="$case_dir/auth-header"
+  export TASK_ARGV_CAPTURE="$case_dir/argv.nul" TASK_EXECUTION_CAPTURE="$case_dir/execution-path" TASK_CAPTURE_TAMPER="$case_dir/capture-tampered"
+  export TASK_SWAP_TARGET="$case_dir/receipt-swap-target" TASK_SWAP_CAPTURE="$case_dir/swapped-parent"
+  cp "$ROOT/scripts/agents/task-path-scope.mjs" "$ROOT/scripts/agents/task-recovery.mjs" "$ROOT/scripts/agents/codex-execution.mjs" "$ROOT/scripts/agents/codex-execution-policy.json" "$TASK_REPO/scripts/agents/"
+  cp "$ROOT/scripts/agents/codex-task.sh" "$TASK_SCRIPT"
+  if [[ "$scenario" == *post-wrapper-tamper ]]; then
+    node --input-type=module - "$TASK_SCRIPT" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = process.argv[2];
+const source = readFileSync(path, 'utf8');
+writeFileSync(path, source.replace('[ -s "$OUTPUT" ]', '# source-read padding\n'.repeat(2048) + '[ -s "$OUTPUT" ]'));
+NODE
+  fi
+
+  local TASK_BODY=$TASK_VALID_BODY TASK_STATE=OPEN TASK_LABELS='[{"name":"agent-ready"}]'
+  case "${scenario#*-}" in
+    closed) TASK_STATE=CLOSED ;;
+    empty) TASK_BODY= ;;
+    non-template) TASK_BODY='Low - isolated code, copy, tests, or documentation' ;;
+    duplicate) TASK_BODY+=$'\n\n### Desired outcome\n\nDuplicate.' ;;
+    unknown-risk) TASK_BODY=${TASK_BODY/Low - isolated code, copy, tests, or documentation/Unknown risk} ;;
+    high-risk) TASK_BODY=${TASK_BODY/Low - isolated code, copy, tests, or documentation/High - authentication, security, database, billing, infrastructure, or deployment} ;;
+    blocked) TASK_BODY=${TASK_BODY/No additional constraints./Change authentication behavior.} ;;
+    medium) TASK_BODY=${TASK_BODY/Low - isolated code, copy, tests, or documentation/Medium - shared workflow or user-visible behavior} ;;
+    safe-exclusions) TASK_BODY=${TASK_BODY/Application code./Database migrations, billing, dependencies, Docker and deployment.} ;;
+    no-label) TASK_LABELS='[]' ;;
+    bad-paths) TASK_BODY=${TASK_BODY/'Owned paths:'/'Unknown paths:'} ;;
+    shared-paths) TASK_BODY=${TASK_BODY/'- None'/'- docs/shared.md'} ;;
+  esac
+  export TASK_BODY TASK_STATE TASK_LABELS
 
   mkdir -p "$case_dir"
+  if [[ "$scenario" == manual-post-execution-ancestor-swap ]]; then
+    mkdir -m 700 "$TASK_SWAP_TARGET"
+    printf 'FIXTURE-OWNED-0600-MARKER\n' > "$TASK_SWAP_TARGET/execution.json"
+    chmod 600 "$TASK_SWAP_TARGET/execution.json"
+  fi
+  mkdir -m 700 "$PRIVATE_ROOT/task-$scenario"
+  export CODEX_TASK_MODEL=gpt-6.1-sol CODEX_TASK_REASONING_EFFORT=high CODEX_TASK_SETTINGS_SOURCE=github-actions-vars
+  case "$scenario" in
+    *settings-missing) export CODEX_TASK_MODEL= ;;
+    *settings-effort-missing) export CODEX_TASK_REASONING_EFFORT= ;;
+    *settings-source-missing) export CODEX_TASK_SETTINGS_SOURCE= ;;
+    *settings-disallowed) export CODEX_TASK_MODEL=gpt-6.1-terra ;;
+    *settings-astra) export CODEX_TASK_MODEL=gpt-6-astra ;;
+    *settings-luna-ultra) export CODEX_TASK_MODEL=gpt-6-luna CODEX_TASK_REASONING_EFFORT=ultra ;;
+    *settings-luna-max) export CODEX_TASK_MODEL=gpt-6-luna CODEX_TASK_REASONING_EFFORT=max ;;
+  esac
+  export CODEX_RECOVERY_ROOT="$PRIVATE_ROOT/task-$scenario"
+  [[ "$scenario" != manual-missing-recovery ]] || export CODEX_RECOVERY_ROOT=
   : > "$case_dir/log"
   : > "$case_dir/context"
   : > "$case_dir/env"
@@ -570,35 +853,130 @@ run_task_case() {
       jq 'del(.body)' "$snapshot" > "$snapshot.tmp"
       mv "$snapshot.tmp" "$snapshot"
       ;;
+    queued-*) write_task_snapshot "$snapshot" "$number" ;;
   esac
 
   set +e
-  if [[ "$scenario" == "manual" ]]; then
+  if [[ "$scenario" == manual* || "$scenario" == repair* ]]; then
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
       TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
-      sh "$TASK_SCRIPT" implement "$number" >/dev/null 2>&1
+      sh "$TASK_SCRIPT" "$role" "$number" >"$case_dir/output" 2>&1
   elif [[ "$scenario" == "queued-missing" ]]; then
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
       TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
       QUEUE_IMPLEMENT=true QUEUE_ISSUE="$number" \
-      sh "$TASK_SCRIPT" implement "$number" >/dev/null 2>&1
+      sh "$TASK_SCRIPT" "$role" "$number" >"$case_dir/output" 2>&1
   else
     PATH="$TASK_BIN:$PATH" TASK_REPO="$TASK_REPO" TASK_LOG="$case_dir/log" TASK_SCENARIO="$scenario" \
       TASK_NUMBER="$number" TASK_CONTEXT_CAPTURE="$case_dir/context" \
       TASK_ENV_CAPTURE="$case_dir/env" GH_TOKEN=test-token GITHUB_ACTOR=celleree GITHUB_TRIGGERING_ACTOR=celleree \
       QUEUE_IMPLEMENT=true QUEUE_ISSUE="$number" QUEUE_VALIDATED_ISSUE_SNAPSHOT="$snapshot" \
-      sh "$TASK_SCRIPT" implement "$number" >/dev/null 2>&1
+      sh "$TASK_SCRIPT" "$role" "$number" >"$case_dir/output" 2>&1
   fi
   rc=$?
   set -e
 
   assert_eq "$expected_rc" "$rc" "unexpected codex-task exit code for $scenario"
+  if [[ "$expected_rc" != 0 ]]; then
+    if [[ "$scenario" != *post-* ]]; then
+      if grep -Eq '^(helper:|codex:|git:(fetch|switch))' "$case_dir/log" && [[ "$scenario" != *settings-* && "$scenario" != repair-pre-* && "$scenario" != repair-head-moved-before && "$scenario" != repair-base-moved-before && "$scenario" != repair-stale-baseline && "$scenario" != repair-checkout-head-moved ]]; then
+        fail "denied $scenario reached branch preparation or model"
+      fi
+      assert_not_contains "$case_dir/log" 'codex:' 'pre-worker denial must never launch a model'
+    fi
+    if [[ "$scenario" != manual-post-commit-failure && "$scenario" != manual-post-push-failure && "$scenario" != manual-post-pr-ambiguous ]] &&
+      grep -Eq '^git:(--literal-pathspecs add|commit|push)|^gh:(pr (create|edit)|workflow run)' "$case_dir/log"; then
+      fail "denied $scenario reached staging, commit, push, PR or dispatch"
+    fi
+  else
+    if [[ "$role" == implement ]]; then
+      assert_contains "$case_dir/log" "gh:pr create --draft --base main --head agent/issue-$number " \
+        'accepted implementation must create only the intended draft PR'
+    fi
+    assert_contains "$case_dir/log" "gh:workflow run pull-request-ci.yml --ref agent/issue-$TASK_ISSUE -f base_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -f head_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
+      'accepted implementation must dispatch CI with the exact base and head SHAs'
+    assert_contains "$case_dir/log" 'git:--literal-pathspecs add -A --pathspec-from-file=' \
+      'staging must use NUL paths with literal pathspecs'
+  fi
+  [[ ! -f "$TASK_ESCAPE_MARKER" ]] || fail 'worker-modified wrapper source executed outside the sandbox'
   LAST_TASK_CASE_DIR="$case_dir"
 }
 
+for lane in manual queued repair; do
+  for denied in missing effort-missing source-missing disallowed astra luna-ultra; do
+    run_task_case "$lane-settings-$denied" 215 1
+  done
+done
+for failure in helper-tamper policy-tamper receipt-failure capture-tamper ancestor-swap; do
+  run_task_case "manual-post-execution-$failure" 216 1
+  [[ -f "$PRIVATE_ROOT/task-manual-post-execution-$failure/ACTIVE" ]] || fail 'execution evidence failure must quarantine recovery'
+  if [[ "$failure" == capture-tamper ]]; then
+    [[ -f "$LAST_TASK_CASE_DIR/capture-tampered" ]] || fail 'the after-verification capture tamper must actually execute'
+    assert_contains "$LAST_TASK_CASE_DIR/output" 'Retained execution evidence does not match its pinned digest.' 'F3 retained-object mismatch must block later writes'
+  fi
+  if [[ "$failure" == ancestor-swap ]]; then
+    node --input-type=module - "$LAST_TASK_CASE_DIR" <<'NODE'
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import assert from 'node:assert/strict';
+const dir=process.argv[2],swapped=readFileSync(join(dir,'swapped-parent'),'utf8').trim();
+assert.equal(readFileSync(join(dir,'receipt-swap-target/execution.json'),'utf8'),'FIXTURE-OWNED-0600-MARKER\n');
+const original=JSON.parse(readFileSync(join(swapped+'.original','execution.json')));
+assert.equal(original.result,null);assert.equal(original.invoked.trust,'os_process_started');
+const log=readFileSync(join(dir,'log'),'utf8');
+assert.doesNotMatch(log,/^git:(--literal-pathspecs add|commit|push)|^gh:(issue comment|pr (comment|create|edit)|workflow run)/m);
+assert.match(readFileSync(join(dir,'output'),'utf8'),/Execution receipt is incomplete; recovery remains quarantined/);
+NODE
+  fi
+done
+run_task_case manual-settings-luna-max 217 0
+node --input-type=module - "$LAST_TASK_CASE_DIR/argv.nul" <<'NODE'
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const args=readFileSync(process.argv[2],'utf8').split('\0').slice(0,-1);
+assert.equal(args.filter(value=>value==='--model').length,1);
+assert.equal(args[args.indexOf('--model')+1],'gpt-6-luna');
+assert.ok(args.includes('model_reasoning_effort="max"'));assert.ok(args.includes('--json'));assert.ok(args.includes('--ignore-user-config'));
+NODE
+
+run_task_case manual-missing-recovery 214 1
+
+for scenario in manual-post-whitespace-failure manual-post-model-failure manual-post-final-secret manual-post-recovery-tamper manual-post-commit-failure manual-post-push-failure manual-post-pr-ambiguous; do
+  run_task_case "$scenario" 213 1
+  assert_not_contains "$LAST_TASK_CASE_DIR/output" 'PRIVATE-RAW-' 'raw Codex streams must remain private'
+  assert_not_contains "$LAST_TASK_CASE_DIR/output" 'PRIVATE-SOURCE-' 'raw source diagnostics must remain private'
+  assert_not_contains "$LAST_TASK_CASE_DIR/output" 'ghp_000000' 'rejected final message must remain private'
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:workflow run' 'failed run must not dispatch CI'
+  assert_contains "$LAST_TASK_CASE_DIR/log" 'git:config --local --unset-all http.https://github.com/.extraheader' 'credential removal must run on recovery failure'
+  store="$PRIVATE_ROOT/task-$scenario"
+  if [[ "$scenario" == *tamper || "$scenario" == *push-failure || "$scenario" == *pr-ambiguous ]]; then
+    [[ -f "$store/ACTIVE" ]] || fail 'incomplete or ambiguous evidence must quarantine'
+  else
+    [[ ! -e "$store/ACTIVE" ]] || fail 'fully captured ordinary failure must release automatically'
+  fi
+  if [[ "$scenario" == manual-post-commit-failure ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'git:push ' 'commit failure must prevent push'; fi
+  if [[ "$scenario" == manual-post-push-failure ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:pr create' 'unconfirmed push must prevent PR creation'; fi
+done
+
 run_task_case queued-valid 200 0
+node --input-type=module - "$PRIVATE_ROOT/task-queued-valid" "$LAST_TASK_CASE_DIR/argv.nul" <<'NODE'
+import { readFileSync,readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import assert from 'node:assert/strict';
+const store=process.argv[2],record=join(store,'records',readdirSync(join(store,'records'))[0]);
+const recovery=JSON.parse(readFileSync(join(record,'receipt.json'))),event=recovery.events.at(-1),ref=event.artifacts.codexExecution;
+const bytes=readFileSync(join(record,ref.file)),receipt=JSON.parse(bytes);
+assert.equal(createHash('sha256').update(bytes).digest('hex'),ref.sha256);assert.equal(event.executionSha256,ref.sha256);
+assert.equal(receipt.requested.model,'gpt-6.1-sol');assert.equal(receipt.authorized.reasoningEffort,'high');assert.equal(receipt.invoked.trust,'os_process_started');
+assert.equal(receipt.observed.model,null);assert.equal(receipt.observed.reasoningEffort,null);assert.equal(receipt.observed.usage,null);assert.equal(receipt.billedCost,null);
+assert.equal(receipt.result.exitCode,0);assert.ok(receipt.result.elapsedMs>=0);
+const args=readFileSync(process.argv[3],'utf8').split('\0').slice(0,-1);
+assert.deepEqual(receipt.intendedArgv,args);assert.equal(args.filter(value=>value==='--model').length,1);assert.equal(args[args.indexOf('--model')+1],'gpt-6.1-sol');assert.ok(args.includes('model_reasoning_effort="high"'));assert.ok(args.includes('--json'));assert.ok(args.includes('--ignore-user-config'));
+NODE
+
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Pinned safe title' \
   'queued implementation must use the exact validated snapshot title'
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Pinned safe body with exact approved text.' \
@@ -609,6 +987,7 @@ assert_not_contains "$LAST_TASK_CASE_DIR/context" 'Manual live title' \
   'live issue changes must not enter queued Codex context'
 assert_not_contains "$LAST_TASK_CASE_DIR/context" 'Live protected authentication change' \
   'post-validation protected live content must not enter queued Codex context'
+assert_contains "$LAST_TASK_CASE_DIR/env" 'CODEX_TASK_MODEL=unset' 'the settings input must not remain in the worker environment'
 assert_contains "$LAST_TASK_CASE_DIR/env" 'GH_TOKEN=unset' \
   'the GitHub token must be removed before Codex runs'
 assert_contains "$LAST_TASK_CASE_DIR/env" 'QUEUE_VALIDATED_ISSUE_SNAPSHOT=unset' \
@@ -620,10 +999,62 @@ run_task_case queued-wrong-number 203 1
 run_task_case queued-incomplete 205 1
 
 run_task_case manual 204 0
-assert_contains "$LAST_TASK_CASE_DIR/log" 'gh:issue view 204' \
-  'manual implementation must retain its live issue lookup'
+assert_contains "$LAST_TASK_CASE_DIR/log" 'gh:api graphql' \
+  'manual implementation must validate current content against owner approval metadata'
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Manual live title' \
   'manual implementation must construct context from the live issue'
+
+for lane in manual queued; do
+  for denial in closed empty non-template duplicate unknown-risk high-risk blocked no-label bad-paths shared-paths; do
+    run_task_case "$lane-$denial" 206 1
+  done
+  run_task_case "$lane-medium" 207 0
+  run_task_case "$lane-safe-exclusions" 208 0
+done
+
+run_task_case manual-bootstrap-read-failure 210 1
+run_task_case manual-bootstrap-empty 211 1
+run_task_case manual-owner-stale 209 1
+run_task_case repair-owner-stale 301 1
+run_task_case repair 302 0
+assert_contains "$LAST_TASK_CASE_DIR/log" 'git:--no-pager diff --no-ext-diff --no-textconv --binary aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' 'repair context must use the pinned base/head diff'
+assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:pr diff' 'repair context must not refetch an unpinned live diff'
+assert_contains "$LAST_TASK_CASE_DIR/context" 'Shared paths or dependencies:' 'repair must receive its approved issue scope'
+node --input-type=module - "$LAST_TASK_CASE_DIR/log" <<'NODE'
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const log=readFileSync(process.argv[2],'utf8');
+const check=log.indexOf('trusted-pr-scope-check'),checkout=log.indexOf('git:-c core.hooksPath=/dev/null switch --force-create agent/issue-42 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+assert.ok(check>=0&&checkout>check);
+assert.ok(log.indexOf('helper:install-git-guardrails.sh')>checkout);
+assert.ok(log.indexOf('helper:check-repository-state.sh')>checkout);
+assert.ok(log.indexOf('codex:')>log.indexOf('helper:check-repository-state.sh'));
+assert.ok(log.includes('git:commit -m Address review findings on PR #302'));
+assert.ok(log.includes('git:push origin agent/issue-42'));
+NODE
+for denied in guardrail state hook attributes unowned; do
+  run_task_case "repair-pre-$denied" 303 1
+  assert_contains "$LAST_TASK_CASE_DIR/log" 'trusted-pr-scope-check' 'a prohibited PR must reach the trusted pre-checkout scope check'
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'checkout-effect:' 'a prohibited PR must be rejected before checkout effects'
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'helper:' 'a prohibited PR must be rejected before branch scripts or hook installation'
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'PROHIBITED_' 'prohibited execution and credential effects must never occur'
+done
+for denied in untrusted-start head-moved-before base-moved-before stale-baseline checkout-head-moved; do
+  run_task_case "repair-$denied" 310 1
+  assert_not_contains "$LAST_TASK_CASE_DIR/log" 'helper:' 'revision/baseline races must fail before PR guard scripts'
+  if [[ "$denied" == untrusted-start ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'gh:api graphql' 'a non-main start must fail before repository approval helper execution'; fi
+  if [[ "$denied" != checkout-head-moved ]]; then assert_not_contains "$LAST_TASK_CASE_DIR/log" 'checkout-effect:' 'identity/ancestry failures must precede checkout'; fi
+done
+run_task_case repair-no-association 305 1
+run_task_case repair-wrong-issue 306 1
+run_task_case repair-closed 307 1
+run_task_case repair-post-head-moved 309 1
+for lane in manual queued repair; do
+  for denial in post-unowned post-governance post-helper-tamper post-contract-tamper post-wrapper-tamper; do
+    run_task_case "$lane-$denial" 304 1
+    assert_contains "$LAST_TASK_CASE_DIR/log" 'codex:' "post-worker $lane-$denial fixture must actually reach the worker"
+  done
+done
 
 assert_eq '1' "$(grep -Ec '^[[:space:]]*workflow_dispatch:' "$WORKFLOW")" \
   'the workflow must expose exactly one workflow_dispatch trigger'
