@@ -570,6 +570,8 @@ set -- --ask-for-approval never exec \
     --json \
     "$@" \
     --config 'features.apps=false' \
+    --config 'features.plugins=false' \
+    --config 'features.skill_mcp_dependency_install=false' \
     --config 'tools.web_search=false' \
     --config 'sandbox_workspace_write.network_access=false' \
     --config 'allow_login_shell=false' \
