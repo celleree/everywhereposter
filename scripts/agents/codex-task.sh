@@ -555,11 +555,7 @@ if [ "$MODE" = "review" ]; then
     git -c core.hooksPath=/dev/null worktree add --detach "$REVIEW_ROOT" "$REVIEW_HEAD_SHA" >/dev/null
 fi
 
-if [ "$SANDBOX" = "read-only" ]; then
-  set -- --config features.use_legacy_landlock=true
-else
-  set --
-fi
+set --
 
 RUN_ROOT=$ROOT
 [ "$MODE" != "review" ] || RUN_ROOT=$REVIEW_ROOT
