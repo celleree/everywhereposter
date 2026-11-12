@@ -181,6 +181,7 @@ git_auth_disable() {
 allowed_pr_author() {
   case "$1" in
     "$OWNER"|github-actions\[bot\]) return 0 ;;
+    app/github-actions) [ "${2:-}" = true ] ;;
     *) return 1 ;;
   esac
 }
@@ -336,7 +337,7 @@ case "$MODE" in
     [ "$(jq -r '.baseRefName' "$ITEM")" = "main" ] ||
       fail "Automated review is restricted to pull requests targeting main."
     AUTHOR=$(jq -r '.author.login' "$ITEM")
-    allowed_pr_author "$AUTHOR" ||
+    allowed_pr_author "$AUTHOR" "$(jq -r '.author.is_bot == true' "$ITEM")" ||
       fail "Only owner-controlled pull requests are eligible for automated review."
     REVIEW_BASE_SHA=$(jq -r '.baseRefOid // empty' "$ITEM")
     REVIEW_HEAD_SHA=$(jq -r '.headRefOid // empty' "$ITEM")
@@ -365,7 +366,7 @@ case "$MODE" in
     [ "$(jq -r '.baseRefName' "$ITEM")" = "main" ] ||
       fail "Repair is restricted to pull requests targeting main."
     AUTHOR=$(jq -r '.author.login' "$ITEM")
-    allowed_pr_author "$AUTHOR" ||
+    allowed_pr_author "$AUTHOR" "$(jq -r '.author.is_bot == true' "$ITEM")" ||
       fail "Only owner-controlled pull requests may use unattended repair."
 
     BRANCH=$(jq -r '.headRefName' "$ITEM")

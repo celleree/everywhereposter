@@ -78,9 +78,15 @@ case "$*" in
   'repo view --json visibility --jq .visibility') echo "$VISIBILITY" ;;
   'auth status') [[ "$SCENARIO" == gh-credentials ]] && exit 0; exit 1 ;;
   'pr view '*)
-    state=OPEN; cross=false; base=main; author=celleree
+    state=OPEN; cross=false; base=main; author=celleree; is_bot=false
     case "$SCENARIO" in
       fork) cross=true ;; closed) state=CLOSED ;; other-base) base=other ;; author) author=stranger ;;
+      canonical-actions-bot) author='github-actions[bot]'; is_bot=true ;;
+      cli-actions-bot) author=app/github-actions; is_bot=true ;;
+      nonbot-actions-alias) author=app/github-actions ;;
+      missing-bot-identity) author=app/github-actions; is_bot=null ;;
+      string-bot-identity) author=app/github-actions; is_bot='"true"' ;;
+      other-app-bot) author=app/other-app; is_bot=true ;;
     esac
     head_sha=$HEAD_SHA
     base_sha=$BASE_SHA
@@ -92,8 +98,8 @@ case "$*" in
     [[ "$SCENARIO" != missing-base ]] || base_sha=
     [[ "$SCENARIO" != malformed-head ]] || head_sha=not-a-full-commit-sha
     jq -cn --arg state "$state" --argjson cross "$cross" --arg base "$base" --arg author "$author" \
-      --arg baseOid "$base_sha" --arg headOid "$head_sha" \
-      '{state:$state,isCrossRepository:$cross,baseRefName:$base,baseRefOid:$baseOid,headRefOid:$headOid,author:{login:$author}}' ;;
+      --arg baseOid "$base_sha" --arg headOid "$head_sha" --argjson isBot "$is_bot" \
+      '{state:$state,isCrossRepository:$cross,baseRefName:$base,baseRefOid:$baseOid,headRefOid:$headOid,author:{login:$author,is_bot:$isBot}}' ;;
   'pr diff '*) echo 'Synthetic review fixture' ;;
   'pr comment '*) echo posted >> "$TEST_LOG" ;;
   *) echo "Unexpected gh invocation: $*" >&2; exit 2 ;;
@@ -154,6 +160,11 @@ grep -Fq 'git:-c core.hooksPath=/dev/null worktree add --detach ' "$TEST_ROOT/pu
 grep -Fq "git:--no-pager diff --no-ext-diff --no-textconv --binary $BASE_SHA...$HEAD_SHA" "$TEST_ROOT/public-review/log"
 grep -Eq 'codex-cwd:.*/review-tree$' "$TEST_ROOT/public-review/log"
 run_case private-review review PRIVATE 0
+run_case canonical-actions-bot review PUBLIC 0
+run_case cli-actions-bot review PUBLIC 0
+for scenario in nonbot-actions-alias missing-bot-identity string-bot-identity other-app-bot; do
+  run_case "$scenario" review PUBLIC 1
+done
 run_case stale review PUBLIC 1
 grep -Fq 'codex:' "$TEST_ROOT/stale/log"
 ! grep -Fxq posted "$TEST_ROOT/stale/log"
