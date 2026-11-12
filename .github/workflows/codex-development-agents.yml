@@ -53,6 +53,60 @@ jobs:
       GIT_TERMINAL_PROMPT: "0"
 
     steps:
+      - name: Check private recovery before checkout
+        shell: bash
+        run: |
+          node <<'NODE'
+          // RECOVERY_PRECHECK_BEGIN
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const os = require('node:os');
+          try {
+            const store = process.env.CODEX_RECOVERY_ROOT;
+            const inside = (value, root) => value === root || value.startsWith(root + '/');
+            const entry = (value, directory) => {
+              const info = fs.lstatSync(value);
+              if (info.isSymbolicLink() || info.uid !== process.getuid() || (info.mode & 0o777) !== (directory ? 0o700 : 0o600) ||
+                  (directory ? !info.isDirectory() : !info.isFile() || info.nlink !== 1)) throw Error();
+            };
+            if (!store || !path.isAbsolute(store) || path.resolve(store) !== store || store === os.homedir() ||
+                store.split('/').some(part => ['.ssh', '.gnupg', '.aws'].includes(part))) throw Error();
+            let current = '/';
+            for (const part of store.split('/').filter(Boolean)) {
+              current = path.join(current, part);
+              if (fs.lstatSync(current).isSymbolicLink()) throw Error();
+              if (fs.existsSync(path.join(current, '.git'))) throw Error();
+            }
+            entry(store, true);
+            const roots = [process.env.GITHUB_WORKSPACE, process.env.RUNNER_WORKSPACE, process.env.RUNNER_TEMP, process.env.TMPDIR, '/tmp', '/var/tmp'].filter(Boolean).map(value => path.resolve(value));
+            if (roots.some(root => inside(store, root)) || process.env.GITHUB_WORKSPACE && inside(path.resolve(process.env.GITHUB_WORKSPACE), store)) throw Error();
+            const names = fs.readdirSync(store);
+            if (names.some(name => !['store.json', 'records', 'ACTIVE'].includes(name)) || names.includes('ACTIVE')) throw Error();
+            if (names.length) {
+              const formatPath = path.join(store, 'store.json');
+              entry(formatPath, false);
+              if (fs.statSync(formatPath).size > 512 * 1024) throw Error();
+              const format = JSON.parse(fs.readFileSync(formatPath, 'utf8'));
+              if (format.version !== 1 || format.kind !== 'everywhereposter-task-recovery') throw Error();
+            }
+            if (names.includes('records')) {
+              const records = path.join(store, 'records');
+              entry(records, true);
+              const ids = fs.readdirSync(records);
+              if (ids.length >= 100) throw Error();
+              for (const id of ids) {
+                if (!/^[a-zA-Z0-9-]{1,100}$/.test(id)) throw Error();
+                entry(path.join(records, id), true);
+              }
+            }
+            console.log('Recovery quarantine check passed; runner readiness is checked separately.');
+          } catch {
+            console.error('ERROR: Private recovery is unavailable or quarantined; checkout is blocked.');
+            process.exitCode = 1;
+          }
+          // RECOVERY_PRECHECK_END
+          NODE
+
       - name: Check out trusted main
         uses: actions/checkout@v4
         with:
@@ -107,6 +161,9 @@ jobs:
       - name: Run bounded Codex role
         if: inputs.mode != 'preflight'
         env:
+          CODEX_TASK_MODEL: ${{ vars.CODEX_AGENT_MODEL }}
+          CODEX_TASK_REASONING_EFFORT: ${{ vars.CODEX_AGENT_REASONING_EFFORT }}
+          CODEX_TASK_SETTINGS_SOURCE: github-actions-vars
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
         run: sh scripts/agents/codex-task.sh "${{ steps.task.outputs.mode }}" "${{ steps.task.outputs.number }}"
@@ -130,6 +187,60 @@ jobs:
       GIT_TERMINAL_PROMPT: "0"
 
     steps:
+      - name: Check private recovery before checkout
+        shell: bash
+        run: |
+          node <<'NODE'
+          // RECOVERY_PRECHECK_BEGIN
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const os = require('node:os');
+          try {
+            const store = process.env.CODEX_RECOVERY_ROOT;
+            const inside = (value, root) => value === root || value.startsWith(root + '/');
+            const entry = (value, directory) => {
+              const info = fs.lstatSync(value);
+              if (info.isSymbolicLink() || info.uid !== process.getuid() || (info.mode & 0o777) !== (directory ? 0o700 : 0o600) ||
+                  (directory ? !info.isDirectory() : !info.isFile() || info.nlink !== 1)) throw Error();
+            };
+            if (!store || !path.isAbsolute(store) || path.resolve(store) !== store || store === os.homedir() ||
+                store.split('/').some(part => ['.ssh', '.gnupg', '.aws'].includes(part))) throw Error();
+            let current = '/';
+            for (const part of store.split('/').filter(Boolean)) {
+              current = path.join(current, part);
+              if (fs.lstatSync(current).isSymbolicLink()) throw Error();
+              if (fs.existsSync(path.join(current, '.git'))) throw Error();
+            }
+            entry(store, true);
+            const roots = [process.env.GITHUB_WORKSPACE, process.env.RUNNER_WORKSPACE, process.env.RUNNER_TEMP, process.env.TMPDIR, '/tmp', '/var/tmp'].filter(Boolean).map(value => path.resolve(value));
+            if (roots.some(root => inside(store, root)) || process.env.GITHUB_WORKSPACE && inside(path.resolve(process.env.GITHUB_WORKSPACE), store)) throw Error();
+            const names = fs.readdirSync(store);
+            if (names.some(name => !['store.json', 'records', 'ACTIVE'].includes(name)) || names.includes('ACTIVE')) throw Error();
+            if (names.length) {
+              const formatPath = path.join(store, 'store.json');
+              entry(formatPath, false);
+              if (fs.statSync(formatPath).size > 512 * 1024) throw Error();
+              const format = JSON.parse(fs.readFileSync(formatPath, 'utf8'));
+              if (format.version !== 1 || format.kind !== 'everywhereposter-task-recovery') throw Error();
+            }
+            if (names.includes('records')) {
+              const records = path.join(store, 'records');
+              entry(records, true);
+              const ids = fs.readdirSync(records);
+              if (ids.length >= 100) throw Error();
+              for (const id of ids) {
+                if (!/^[a-zA-Z0-9-]{1,100}$/.test(id)) throw Error();
+                entry(path.join(records, id), true);
+              }
+            }
+            console.log('Recovery quarantine check passed; runner readiness is checked separately.');
+          } catch {
+            console.error('ERROR: Private recovery is unavailable or quarantined; checkout is blocked.');
+            process.exitCode = 1;
+          }
+          // RECOVERY_PRECHECK_END
+          NODE
+
       - name: Check out trusted main
         uses: actions/checkout@v4
         with:
@@ -154,6 +265,9 @@ jobs:
 
       - name: Run bounded Codex role
         env:
+          CODEX_TASK_MODEL: ${{ vars.CODEX_AGENT_MODEL }}
+          CODEX_TASK_REASONING_EFFORT: ${{ vars.CODEX_AGENT_REASONING_EFFORT }}
+          CODEX_TASK_SETTINGS_SOURCE: github-actions-vars
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: ${{ runner.temp }}/publish-everywhere-gh-empty
         run: sh scripts/agents/codex-task.sh "${{ inputs.mode }}" "${{ inputs.number }}"
