@@ -1,12 +1,11 @@
+import { formatPreviewContent } from '@gitroom/frontend/components/launches/helpers/format.preview.content';
 import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 import clsx from 'clsx';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { FC } from 'react';
-import { textSlicer } from '@gitroom/helpers/utils/count.length';
 import SafeImage from '@gitroom/react/helpers/safe.image';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
-import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 
 export const GeneralPreviewComponent: FC<{
   maximumCharacters?: number;
@@ -16,34 +15,11 @@ export const GeneralPreviewComponent: FC<{
   const mediaDir = useMediaDirectory();
 
   const renderContent = topValue.map((p) => {
-    const newContent = stripHtmlValidation(
-      'normal',
-      p.content.replace(
-        /<span.*?data-mention-id="([.\s\S]*?)"[.\s\S]*?>([.\s\S]*?)<\/span>/gi,
-        (match, match1, match2) => {
-          return `[[[${match2}]]]`;
-        }
-      ),
-      true
+    const finalValue = formatPreviewContent(
+      p.content,
+      integration?.identifier,
+      props.maximumCharacters
     );
-
-    const { start, end } = textSlicer(
-      integration?.identifier || '',
-      props.maximumCharacters || 10000,
-      newContent
-    );
-
-    const finalValue =
-      newContent
-        .slice(start, end)
-        .replace(/\[\[\[([.\s\S]*?)]]]/, (match, match1) => {
-          return `<span class="font-bold font-[arial]" style="color: rgb(var(--new-textColor))">${match1}</span>`;
-        }) +
-      `<mark class="bg-red-500" data-tooltip-id="tooltip" data-tooltip-content="This text will be cropped">` +
-      newContent.slice(end).replace(/\[\[\[([.\s\S]*?)]]]/, (match, match1) => {
-        return `<span class="font-bold font-[arial]" style="color: rgb(var(--new-textColor))">${match1}</span>`;
-      }) +
-      `</mark>`;
 
     return { text: finalValue, images: p.image };
   });
