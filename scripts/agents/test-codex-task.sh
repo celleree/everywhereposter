@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT=$(git rev-parse --show-toplevel)
+node --test "$ROOT/scripts/agents/review-evidence.test.mjs"
 bash "$ROOT/scripts/agents/test-issue-implementation-contract.sh"
 node --test "$ROOT/scripts/agents/task-path-scope.test.mjs"
 node --test "$ROOT/scripts/agents/task-recovery.test.mjs"
