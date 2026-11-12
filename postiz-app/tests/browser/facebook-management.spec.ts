@@ -14,7 +14,18 @@ async function openPost(page: Page, info: TestInfo, name = 'Browser Page A') {
     await page.getByRole('button', { name: 'All posts', exact: true }).click();
     await page.getByRole('button', { name: `Details: ${name}`, exact: true }).click();
   } else await page.getByText(`Original ${name} text`, { exact: true }).first().click();
-  await page.getByRole('button', { name: 'Edit Post', exact: true }).click();
+  const selected = (await evidence(page.request)).posts.find((post: { integration: { name: string } }) => post.integration.name === name);
+  expect(selected?.group).toEqual(expect.any(String));
+  // Await this selected group's initial load before the unchanged UI assertion;
+  // no edit or reconciliation request has been sent at this bootstrap boundary.
+  const [group] = await Promise.all([
+    page.waitForResponse(response => response.request().method() === 'GET' &&
+      response.url() === `${browserOrigin}/backend-api/posts/group/${encodeURIComponent(selected.group)}`,
+    { timeout: 60_000 }),
+    page.getByRole('button', { name: 'Edit Post', exact: true }).click(),
+  ]);
+  expect(group.ok()).toBeTruthy();
+  expect(await group.finished()).toBeNull();
   await expect(page.getByRole('region', { name: 'Facebook text post management' })).toBeVisible();
 }
 
