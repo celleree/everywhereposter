@@ -173,7 +173,8 @@ jobs:
       github.repository == 'celleree/everywhereposter' &&
       github.actor == github.repository_owner &&
       github.triggering_actor == github.repository_owner &&
-      github.event.repository.private == true &&
+      (github.event.repository.private == true ||
+        (inputs.mode == 'implement' && github.ref == 'refs/heads/main' && vars.CODEX_PUBLIC_DOCS_ENABLED == 'true')) &&
       github.event_name == 'workflow_dispatch' &&
       (inputs.mode == 'implement' || inputs.mode == 'repair')
     runs-on: [self-hosted, linux, codex]
@@ -265,6 +266,7 @@ jobs:
 
       - name: Run bounded Codex role
         env:
+          CODEX_PUBLIC_DOCS_ENABLED: ${{ vars.CODEX_PUBLIC_DOCS_ENABLED }}
           CODEX_TASK_MODEL: ${{ vars.CODEX_AGENT_MODEL }}
           CODEX_TASK_REASONING_EFFORT: ${{ vars.CODEX_AGENT_REASONING_EFFORT }}
           CODEX_TASK_SETTINGS_SOURCE: github-actions-vars

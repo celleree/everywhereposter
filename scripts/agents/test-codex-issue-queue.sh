@@ -502,6 +502,7 @@ changed=docs/example.md
 if [[ -f "$TASK_MODEL_MARKER" || "$TASK_SCENARIO" == repair-pre-* ]]; then
   case "$TASK_SCENARIO" in
     *post-unowned|repair-pre-unowned) changed=outside.md ;;
+    *post-nonmarkdown) changed=docs/example.txt ;;
     repair-pre-guardrail) changed=scripts/install-git-guardrails.sh ;;
     repair-pre-state) changed=scripts/check-repository-state.sh ;;
     repair-pre-hook) changed=.githooks/pre-push ;;
@@ -511,6 +512,7 @@ if [[ -f "$TASK_MODEL_MARKER" || "$TASK_SCENARIO" == repair-pre-* ]]; then
   esac
 fi
 case "${1:-} ${2:-}" in
+  'config --get-regexp'|'-c credential.interactive=false') exit 1 ;;
   'rev-parse --show-toplevel') printf '%s\n' "$TASK_REPO" ;;
   'rev-parse HEAD')
     if [[ "$TASK_SCENARIO" == manual-post-execution-capture-tamper && -f "$TASK_MODEL_MARKER" && ! -e "$TASK_CAPTURE_TAMPER" ]]; then
@@ -578,7 +580,7 @@ cat > "$TASK_BIN/gh" <<'EOF'
 printf 'gh:%s\n' "$*" >> "$TASK_LOG"
 if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
   [[ "$*" == *'nameWithOwner'* ]] && { echo celleree/everywhereposter; exit 0; }
-  [[ "$*" == *'visibility'* ]] && echo PRIVATE || echo celleree
+  [[ "$*" == *'visibility'* ]] && echo "${TASK_VISIBILITY:-PRIVATE}" || echo celleree
   exit 0
 fi
 if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
@@ -806,6 +808,23 @@ NODE
   fi
 
   local TASK_BODY=$TASK_VALID_BODY TASK_STATE=OPEN TASK_LABELS='[{"name":"agent-ready"}]'
+  local TASK_VISIBILITY=PRIVATE CODEX_PUBLIC_DOCS_ENABLED= GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main QUEUE_IMPLEMENT=false
+  if [[ "$scenario" == manual-public-* ]]; then
+    TASK_VISIBILITY=PUBLIC; CODEX_PUBLIC_DOCS_ENABLED=true
+    case "$scenario" in
+      *disabled) CODEX_PUBLIC_DOCS_ENABLED= ;;
+      *event) GITHUB_EVENT_NAME=issues ;;
+      *ref) GITHUB_REF=refs/heads/other ;;
+      *queue) QUEUE_IMPLEMENT=true ;;
+      *medium) TASK_BODY=${TASK_BODY/Low - isolated code, copy, tests, or documentation/Medium - shared workflow or user-visible behavior} ;;
+      *directory) TASK_BODY=${TASK_BODY/docs\/example.md/docs\/} ;;
+      *root) TASK_BODY=${TASK_BODY/docs\/example.md/README.md} ;;
+      *extension) TASK_BODY=${TASK_BODY/docs\/example.md/docs\/example.txt} ;;
+      *mixed) TASK_BODY=${TASK_BODY/docs\/example.md/$'docs/example.md\n- docs/example.txt'} ;;
+      *protected) TASK_BODY=${TASK_BODY/docs\/example.md/docs\/brain\/note.md} ;;
+    esac
+  fi
+  export TASK_VISIBILITY CODEX_PUBLIC_DOCS_ENABLED GITHUB_EVENT_NAME GITHUB_REF QUEUE_IMPLEMENT
   case "${scenario#*-}" in
     closed) TASK_STATE=CLOSED ;;
     empty) TASK_BODY= ;;
@@ -1003,6 +1022,12 @@ assert_contains "$LAST_TASK_CASE_DIR/log" 'gh:api graphql' \
   'manual implementation must validate current content against owner approval metadata'
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Manual live title' \
   'manual implementation must construct context from the live issue'
+
+run_task_case manual-public-docs 218 0
+assert_contains "$LAST_TASK_CASE_DIR/log" 'gh:api graphql' 'public documentation tasks still require fresh owner approval'
+for denial in disabled event ref queue medium directory root extension mixed protected post-unowned post-nonmarkdown; do
+  run_task_case "manual-public-$denial" 219 1
+done
 
 for lane in manual queued; do
   for denial in closed empty non-template duplicate unknown-risk high-risk blocked no-label bad-paths shared-paths; do

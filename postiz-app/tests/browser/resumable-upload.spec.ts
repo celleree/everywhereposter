@@ -1,4 +1,4 @@
-import { test, expect, openApp, mobileProject, capture } from './fixtures';
+import { test, expect, openApp, mobileProject, capture, browserOrigin } from './fixtures';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -71,6 +71,8 @@ test('Resumable upload: navigation, browser return and safe completion', async (
     await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name: 'More', exact: true }).click();
     await page.getByRole('navigation', { name: 'More navigation' }).getByRole('link', { name: 'Settings', exact: true }).click();
   } else await page.locator('#left-menu').getByRole('link', { name: 'Settings', exact: true }).click();
+  // Client navigation can still load development assets after the real link click.
+  await page.waitForURL(url => url.origin === browserOrigin && url.pathname === '/settings', { timeout: 60_000 });
   await expect(page).toHaveURL(/settings/); await expect(tray).toHaveCount(0);
   released = true; resolveChunk!();
   await page.goBack();
@@ -131,6 +133,8 @@ test('Resumable upload: persisted Quick Upload choice before completion survives
     await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name: 'More', exact: true }).click();
     await page.getByRole('navigation', { name: 'More navigation' }).getByRole('link', { name: 'Settings', exact: true }).click();
   } else await page.locator('#left-menu').getByRole('link', { name: 'Settings', exact: true }).click();
+  // Client navigation can still load development assets after the real link click.
+  await page.waitForURL(url => url.origin === browserOrigin && url.pathname === '/settings', { timeout: 60_000 });
   await expect(page).toHaveURL(/settings/); await expect(tray).toHaveCount(0); continueTransfer = true; release!();
   await page.goBack();
   await expect(tray.getByRole('status').first()).toHaveText('Transfer complete');

@@ -158,7 +158,22 @@ async function openCalendar(page: Page, info: TestInfo) {
   // Keep scheduling constraints enabled while making the fixture dates stable.
   // setFixedTime changes Date only; real timers and network gates keep running.
   await page.clock.setFixedTime(new Date('2034-12-31T12:00:00Z'));
-  await openApp(page, calendarUrl);
+  // Initial data belongs to the existing cold-bootstrap budget. Register before
+  // navigation so this cannot consume a later drag reconciliation response.
+  const [initial] = await Promise.all([
+    page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET' &&
+        url.origin === browserOrigin && url.pathname === '/backend-api/posts' &&
+        url.searchParams.get('display') === 'month' &&
+        url.searchParams.get('customer') === '' &&
+        url.searchParams.get('startDate') === '2035-01-01T00:00:00+00:00' &&
+        url.searchParams.get('endDate') === '2035-01-31T23:59:59+00:00';
+    }, { timeout: 60_000 }),
+    openApp(page, calendarUrl),
+  ]);
+  expect(initial.ok()).toBeTruthy();
+  expect(await initial.finished()).toBeNull();
   const effective = await page.evaluate(() => ({
     viewport: { width: innerWidth, height: innerHeight },
     mobileLayout: matchMedia('(max-width: 1025px)').matches,
