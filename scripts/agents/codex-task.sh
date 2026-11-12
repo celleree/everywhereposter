@@ -48,10 +48,20 @@ REPOSITORY=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 [ "$REPOSITORY" = "celleree/everywhereposter" ] ||
   fail "Codex account automation is restricted to celleree/everywhereposter."
 VISIBILITY=$(gh repo view --json visibility --jq .visibility)
+PUBLIC_DOCS=false
 case "$VISIBILITY:$MODE" in
   PRIVATE:*|PUBLIC:review) ;;
+  PUBLIC:implement)
+    [ "${CODEX_PUBLIC_DOCS_ENABLED-}" = true ] &&
+      [ "${GITHUB_EVENT_NAME-}" = workflow_dispatch ] &&
+      [ "${GITHUB_REF-}" = refs/heads/main ] &&
+      [ "${QUEUE_IMPLEMENT-}" != true ] ||
+      fail "Public documentation implementation requires an enabled manual dispatch from main."
+    PUBLIC_DOCS=true
+    ;;
   *) fail "Public repository automation is restricted to the review role." ;;
 esac
+readonly PUBLIC_DOCS
 
 ACTOR=${GITHUB_ACTOR:-$(gh api user --jq .login)}
 [ "$ACTOR" = "$OWNER" ] ||
@@ -202,8 +212,15 @@ scope_prepare() {
   fi
   cp "$ROOT/scripts/agents/task-path-scope.mjs" "$SCOPE_HELPER"
   SCOPE_HELPER_SHA=$(sha256sum "$SCOPE_HELPER" | cut -d ' ' -f 1)
-  node "$SCOPE_HELPER" parse "$SCOPE_ITEM" "$REPOSITORY" "$SCOPE_ISSUE" "$ROOT" >/dev/null ||
+  PARSED_SCOPE=$(node "$SCOPE_HELPER" parse "$SCOPE_ITEM" "$REPOSITORY" "$SCOPE_ISSUE" "$ROOT") ||
     fail "Declared task paths could not be verified."
+  if [ "$PUBLIC_DOCS" = true ]; then
+    [ "$(printf '%s' "$ADMISSION" | jq -r .risk)" = 'Low - isolated code, copy, tests, or documentation' ] &&
+      printf '%s' "$PARSED_SCOPE" | jq -e '.scope.owned | all(.[]; startswith("docs/") and endswith(".md"))' >/dev/null ||
+      fail "Public implementation permits only Low-risk tasks owning exact Markdown files under docs/."
+    # The hashed contract pins these exact files; collect/index reject every
+    # other changed path, including non-Markdown and directory descendants.
+  fi
 }
 
 scope_bind() {

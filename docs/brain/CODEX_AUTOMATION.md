@@ -10,7 +10,7 @@ Execution requires the following readiness prerequisites; checked-in workflow fi
 2. A dedicated self-hosted runner has been registered for `celleree/everywhereposter`.
 3. The runner has been authenticated to Codex and verified to have no persistent GitHub credentials or production access.
 4. Private recovery storage and explicit approved model/reasoning settings are configured as described below.
-5. Qualification for the selected execution lane has passed. Public repositories qualify review only; planning and documentation implementation dry runs apply only to private repositories. Preflight or login status alone does not establish a successful model call.
+5. Qualification for the selected execution lane has passed. Public repositories qualify review and, when explicitly enabled, the manual documentation implementation lane below. Planning dry runs apply only to private repositories. Preflight or login status alone does not establish a successful model call.
 
 This is a human-gated system. It must never merge or deploy automatically. The issue queue reduces repeated dispatches, but it does not remove readiness, risk, review, merge, or deployment gates.
 
@@ -19,10 +19,12 @@ This is a human-gated system. It must never merge or deploy automatically. The i
 | Lane | Governing owner and capability |
 | --- | --- |
 | Local supervised Codex | [Root orchestration](ORCHESTRATOR_PROTOCOL.md) and the [manual handoff cycle](CHATGPT_CODEX_HANDOFF.md#chatgpt-managed-implementation-cycle); bounded user authorization and existing human gates apply. |
-| Public GitHub Codex roles | Owner-triggered review only, for owner-controlled, same-repository PRs targeting `main`. The original actor and rerun actor must both be the owner. |
-| Private GitHub Codex roles | Planning, implementation, repair, and memory proposals; queue planning/implementation use the same private-only role wrapper. Local authorization does not bypass the private-only write boundary. |
+| Public GitHub Codex roles | Owner-triggered review for owner-controlled, same-repository PRs targeting `main`; opt-in manual Low-risk documentation implementation as described below. Both original and rerun actors must be the owner. |
+| Private GitHub Codex roles | Planning, implementation, repair, and memory proposals; queue planning/implementation use the same private-only role wrapper. Other public write roles remain blocked. |
 
 The separate opt-in `preflight` dispatch is a non-model readiness probe from `main`; it does not launch a Codex role or authorize implementation. `.github/workflows/codex-development-agents.yml`, `.github/workflows/codex-issue-queue.yml`, and `scripts/agents/codex-task.sh` govern event, visibility, and role eligibility. The trigger descriptions below apply only when their lane and readiness requirements pass.
+
+Public documentation implementation is disabled unless `CODEX_PUBLIC_DOCS_ENABLED=true` is explicitly approved and configured as an Actions variable. It accepts only owner-dispatched `implement` from `main`, a fresh owner `agent-ready` approval of the complete issue, exactly Low risk, and explicit `.md` files under `docs/`. Directory ownership, shared paths, symlinks and existing protected paths (including `docs/brain/`) remain blocked. The pinned path contract rejects every other changed file before staging. Public planning, repair, memory, queue implementation, automatic coding and external/fork execution remain blocked.
 
 The queue workflow has no repository-visibility predicate of its own. A public owner dispatch can normalize inputs and post status before the task wrapper rejects its planning role; it cannot reach implementation through that wrapper.
 
@@ -51,7 +53,7 @@ Use a dedicated self-hosted Linux runner with the labels:
 
 The runner must:
 
-- Be used only for `celleree/everywhereposter`. Public Codex roles permit only owner-triggered reviews of owner-controlled, same-repository PRs targeting `main`. Both the original actor and rerun actor must be the owner. Planning, implementation, repair, and post-merge memory roles remain private-only; public post-merge memory jobs are skipped. Queue setup/reporting can precede wrapper rejection as described above.
+- Be used only for `celleree/everywhereposter`. Public Codex roles permit owner-triggered reviews of owner-controlled, same-repository PRs targeting `main` and the explicitly enabled manual documentation lane. Both the original actor and rerun actor must be the owner. Planning, repair, and post-merge memory roles remain private-only; public post-merge memory jobs are skipped. Queue setup/reporting can precede wrapper rejection as described above.
 - Run under a dedicated operating-system user.
 - Have `node`, `git`, `gh`, `jq`, `base64`, `bubblewrap`, and the Codex CLI installed.
 - Be authenticated to Codex using the intended ChatGPT/Codex account.
@@ -92,7 +94,7 @@ The workflow file must exist on the default branch before issue-label, pull-requ
 9. Register the GitHub Actions runner for this repository and add the `codex` custom label.
 10. Start the runner service with the recovery-store setting available to its jobs.
 11. Run the owner-dispatched `preflight` from `main` against the intended PR. This checks readiness without a model request; login status does not establish working inference.
-12. Qualify the permitted lane. For a public repository, dispatch `review` for an owner-controlled same-repository PR targeting `main`, and verify the completed review and exact reviewed HEAD. Public planning, implementation, repair, memory and queue roles remain blocked. For a private repository, run the planning and documentation-only implementation dry runs below. Preserve each run's private execution/recovery evidence and report unobserved model identity or usage as unknown.
+12. Qualify the permitted lane. For a public repository, dispatch `review` for an owner-controlled same-repository PR targeting `main`, and verify the completed review and exact reviewed HEAD. For public documentation implementation, explicitly approve and set `CODEX_PUBLIC_DOCS_ENABLED=true`, then complete the documentation dry run below. Public planning, repair, memory and queue roles remain blocked. For a private repository, run the planning and documentation-only implementation dry runs below. Preserve each run's private execution/recovery evidence and report unobserved model identity or usage as unknown.
 13. Keep merge and deployment approvals manual.
 
 Do not run this automation from the production application checkout or from a user account containing production credentials.
@@ -105,7 +107,7 @@ In the private-repository lane, applying `agent-ready` to an issue automatically
 
 ### Implement
 
-In the private-repository lane, run the `Codex development agents` workflow manually with:
+In the private-repository lane or explicitly enabled public documentation lane, run the `Codex development agents` workflow manually from `main` with:
 
 - mode: `implement`
 - number: the approved issue number
@@ -176,7 +178,7 @@ GitHub events produced with the repository `GITHUB_TOKEN` have special recursion
 
 ## Dry-Run Checklist
 
-The planning and implementation dry runs below require the private-repository lane. For public repositories, use the review qualification in the activation sequence; do not dispatch private-only roles or change visibility to bypass their guards. Local supervised work follows its separate execution lane.
+The planning dry run requires a private repository. Public repositories may qualify reviews and the explicitly enabled manual documentation lane; do not dispatch other private-only roles or change visibility to bypass guards. Local supervised work follows its separate execution lane.
 
 ### Planning dry run
 
@@ -187,13 +189,13 @@ The planning and implementation dry runs below require the private-repository la
 
 ### Implementation dry run
 
-1. Use a documentation-only issue that changes one disposable test document.
+1. Use a complete Low-risk documentation issue owning one exact disposable `docs/` Markdown file outside protected paths, then have the owner apply `agent-ready` after its final edit.
 2. Manually dispatch `implement` with the issue number.
 3. Confirm Codex creates an `agent/issue-N` branch and draft pull request.
 4. Confirm pull-request CI was explicitly dispatched for the agent branch.
 5. Confirm no credentials are visible to the Codex command environment.
 6. Confirm the changed-file and protected-file guards behave as documented.
-7. Mark the PR ready and confirm the independent review comment appears.
+7. After matching CI passes, dispatch review and inspect its exact reviewed HEAD and actual verdict; a posted comment alone is not approval.
 8. Close the test PR without merging unless the documentation change is wanted.
 
 ## Limits

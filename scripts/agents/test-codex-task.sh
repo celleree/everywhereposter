@@ -157,6 +157,10 @@ run_case stale review PUBLIC 1
 grep -Fq 'codex:' "$TEST_ROOT/stale/log"
 ! grep -Fxq posted "$TEST_ROOT/stale/log"
 for mode in plan implement repair memory; do run_case "public-$mode" "$mode" PUBLIC 1; done
+for mode in plan repair memory; do
+  CODEX_PUBLIC_DOCS_ENABLED=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main \
+    run_case "public-enabled-$mode" "$mode" PUBLIC 1
+done
 for scenario in other-repo actor rerunner fork closed other-base author missing-base missing-head malformed-head gh-credentials local-header helper scoped-helper header scoped-header filter-driver retrievable config-error netrc windows-netrc stored-credentials; do
   run_case "$scenario" review PUBLIC 1
 done
