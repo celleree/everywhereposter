@@ -958,6 +958,7 @@ const args=readFileSync(process.argv[2],'utf8').split('\0').slice(0,-1);
 assert.equal(args.filter(value=>value==='--model').length,1);
 assert.equal(args[args.indexOf('--model')+1],'gpt-6-luna');
 assert.ok(args.includes('model_reasoning_effort="max"'));assert.ok(args.includes('--json'));assert.ok(args.includes('--ignore-user-config'));
+assert.ok(args.some((arg,index)=>arg==='--config' && args[index+1]==='features.apps=false'));
 NODE
 
 run_task_case manual-missing-recovery 214 1
@@ -994,6 +995,7 @@ assert.equal(receipt.observed.model,null);assert.equal(receipt.observed.reasonin
 assert.equal(receipt.result.exitCode,0);assert.ok(receipt.result.elapsedMs>=0);
 const args=readFileSync(process.argv[3],'utf8').split('\0').slice(0,-1);
 assert.deepEqual(receipt.intendedArgv,args);assert.equal(args.filter(value=>value==='--model').length,1);assert.equal(args[args.indexOf('--model')+1],'gpt-6.1-sol');assert.ok(args.includes('model_reasoning_effort="high"'));assert.ok(args.includes('--json'));assert.ok(args.includes('--ignore-user-config'));
+assert.ok(args.some((arg,index)=>arg==='--config' && args[index+1]==='features.apps=false'));
 NODE
 
 assert_contains "$LAST_TASK_CASE_DIR/context" 'Pinned safe title' \

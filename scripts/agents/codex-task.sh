@@ -569,6 +569,7 @@ set -- --ask-for-approval never exec \
     --config "model_reasoning_effort=\"$EXECUTION_EFFORT\"" \
     --json \
     "$@" \
+    --config 'features.apps=false' \
     --config 'tools.web_search=false' \
     --config 'sandbox_workspace_write.network_access=false' \
     --config 'allow_login_shell=false' \
