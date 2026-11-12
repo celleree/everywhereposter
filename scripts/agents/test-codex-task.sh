@@ -135,6 +135,7 @@ run_case() {
   if [[ "$status" != "$expected" ]]; then cat "$case_dir/output"; echo "FAIL $name: expected $expected, got $status"; exit 1; fi
   if [[ "$expected" == 0 ]]; then
     grep -Fq -- '--sandbox read-only' "$case_dir/log"
+    grep -Fq -- '--config features.apps=false --config tools.web_search=false' "$case_dir/log"
     grep -Fq -- '--model gpt-6.1-sol --config model_reasoning_effort="high" --json' "$case_dir/log"
     grep -Fxq posted "$case_dir/log"
   elif [[ "$name" != stale ]] && grep -Fq 'codex:' "$case_dir/log"; then
