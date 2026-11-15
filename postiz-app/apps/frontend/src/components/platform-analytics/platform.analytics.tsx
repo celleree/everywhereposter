@@ -12,7 +12,6 @@ import { RenderAnalytics } from '@gitroom/frontend/components/platform-analytics
 import { Select } from '@gitroom/react/form/select';
 import { Button } from '@gitroom/react/form/button';
 import { useRouter } from 'next/navigation';
-import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import useCookie from 'react-use-cookie';
@@ -41,7 +40,6 @@ export const PlatformAnalytics = () => {
   const [current, setCurrent] = useState(0);
   const [key, setKey] = useState<AnalyticsRange>(7);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
-  const toaster = useToaster();
   const load = useCallback(async () => {
     const int = (
       await (await fetch('/integrations/list')).json()
@@ -154,13 +152,8 @@ export const PlatformAnalytics = () => {
       ? numericRanges[numericRanges.length - 1] || 7
       : selectedRange;
   const isTotalsMode = selectedRange === 'totals';
-  const selectChannel = (index: number) => {
-    if (sortedIntegrations[index]?.refreshNeeded) {
-      toaster.show('Please refresh the integration from the calendar', 'warning');
-      return;
-    }
-    setCurrent(index);
-  };
+  const selectChannel = (index: number) => setCurrent(index);
+  const requiresAttention = currentIntegration?.refreshNeeded || currentIntegration?.inBetweenSteps || currentIntegration?.disabled;
 
   if (isLoading) {
     return (
@@ -188,10 +181,10 @@ export const PlatformAnalytics = () => {
           {t('supported', 'Supported:')}
           {allowedIntegrations.map((p) => capitalize(p)).join(', ')}
         </div>
-        <Button onClick={() => router.push('/launches')}>
+        <Button onClick={() => router.push('/channels')}>
           {t(
-            'go_to_the_calendar_to_add_channels',
-            'Go to the calendar to add channels'
+            'manage_connected_channels',
+            'Manage connected channels'
           )}
         </Button>
       </div>
@@ -293,6 +286,13 @@ export const PlatformAnalytics = () => {
         </div>
       </div>
       <div className="analytics-panel bg-newBgColorInner min-w-0 flex-1 flex-col flex p-[20px] mobile:p-[16px] gap-[12px]">
+        {requiresAttention ? (
+          <div role="alert" className="rounded-[12px] border border-newBorder p-[20px]">
+            <h2 className="font-[600]">{currentIntegration.name}</h2>
+            <p>This channel needs attention before analytics can load. Reconnect it, finish setup, or enable it in Channels.</p>
+            <a className="inline-flex min-h-[44px] items-center underline" href="/channels">Manage channels</a>
+          </div>
+        ) : <>
         {currentIntegration?.identifier === 'instagram' && (
           <BusinessDiscovery key={currentIntegration.id} integrationId={currentIntegration.id} />
         )}
@@ -331,6 +331,7 @@ export const PlatformAnalytics = () => {
             </div>
           </div>
         )}
+        </>}
       </div>
     </>
   );
