@@ -47,8 +47,8 @@ export function ChannelsComponent() {
       modals.openModal({
         title: 'Instance URL',
         withCloseButton: true,
-        children: <UrlModal gotoUrl={(url) => {
-          modals.closeCurrent();
+        children: (close) => <UrlModal gotoUrl={(url) => {
+          close();
           void startReconnect(channel, url);
         }} />,
       });
