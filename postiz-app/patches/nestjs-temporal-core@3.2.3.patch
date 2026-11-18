@@ -1,0 +1,337 @@
+--- a/dist/services/temporal-worker.service.js
++++ b/dist/services/temporal-worker.service.js
+@@ -34,6 +34,21 @@
+         this.workers = new Map();
+         this.connection = null;
+         this.shutdownPromise = null;
++        this.isShuttingDown = false;
++        this.workerRuns = new WeakMap();
++        this.pendingCreations = new Set();
++        // Close admission before waiting for in-flight native allocations.
++        for (const name of ['createConnection', 'createWorkerFromDefinition', 'initializeWorker']) {
++            const create = this[name].bind(this);
++            this[name] = (...args) => {
++                if (this.isShuttingDown)
++                    return Promise.reject(new Error('Temporal worker manager is shutting down'));
++                const pending = create(...args);
++                this.pendingCreations.add(pending);
++                pending.then(() => this.pendingCreations.delete(pending), () => this.pendingCreations.delete(pending));
++                return pending;
++            };
++        }
+         this.logger = (0, logger_1.createLogger)(TemporalWorkerManagerService_1.name, {
+             enableLogger: options.enableLogger,
+             logLevel: options.logLevel,
+@@ -123,21 +138,9 @@
+             this.logger.info(`Received shutdown signal: ${signal}`);
+         }
+         this.logger.info('Initiating graceful worker shutdown...');
+-        const shutdownTimeout = this.options.shutdownTimeout || 30000;
+-        const shutdownPromise = this.shutdownWorker();
+-        const timeoutPromise = new Promise((resolve) => {
+-            setTimeout(() => {
+-                this.logger.warn(`Shutdown timeout (${shutdownTimeout}ms) reached`);
+-                resolve();
+-            }, shutdownTimeout);
+-        });
+-        try {
+-            await Promise.race([shutdownPromise, timeoutPromise]);
+-        }
+-        catch (error) {
+-            this.logger.error('Error during graceful shutdown', error);
+-        }
+-    }
++        await this.shutdownWorker();
++    }
++
+     async onModuleDestroy() {
+         await this.shutdownWorker();
+     }
+@@ -257,6 +260,8 @@
+         return workerInstance ? this.getWorkerStatusFromInstance(workerInstance) : null;
+     }
+     async startWorkerByTaskQueue(taskQueue) {
++        if (this.isShuttingDown)
++            throw new Error('Temporal worker manager is shutting down');
+         const workerInstance = this.workers.get(taskQueue);
+         if (!workerInstance) {
+             throw new Error(`Worker for task queue '${taskQueue}' not found`);
+@@ -292,7 +297,7 @@
+         }
+         try {
+             this.logger.verbose(`Stopping worker '${taskQueue}'...`);
+-            this.safeShutdownWorker(workerInstance.worker, taskQueue, workerInstance.startedAt);
++            await this.safeShutdownWorker(workerInstance.worker, taskQueue, workerInstance.startedAt);
+             workerInstance.isRunning = false;
+             workerInstance.startedAt = null;
+         }
+@@ -308,11 +313,11 @@
+             return;
+         const workerDef = this.options.workers?.find((w) => w.taskQueue === taskQueue);
+         const maxRestarts = workerDef?.maxRestarts ?? this.options.maxRestarts ?? 3;
+-        workerInstance.worker.run().catch((error) => {
++        this.runWorker(workerInstance.worker).catch((error) => {
+             workerInstance.lastError = this.extractErrorMessage(error);
+             workerInstance.isRunning = false;
+             const autoRestartEnabled = workerDef?.autoRestart ?? this.options.autoRestart;
+-            if (autoRestartEnabled !== false && workerInstance.restartCount < maxRestarts) {
++            if (!this.isShuttingDown && autoRestartEnabled !== false && workerInstance.restartCount < maxRestarts) {
+                 workerInstance.restartCount++;
+                 this.logger.warn(`Worker '${taskQueue}' failed, auto-restarting in 1s (attempt ${workerInstance.restartCount}/${maxRestarts})`, error);
+                 setTimeout(() => {
+@@ -330,6 +335,8 @@
+         });
+     }
+     async autoRestartWorkerByTaskQueue(taskQueue) {
++        if (this.isShuttingDown)
++            return;
+         this.logger.info(`Auto-restarting worker '${taskQueue}'...`);
+         try {
+             const workerDef = this.options.workers?.find((w) => w.taskQueue === taskQueue);
+@@ -340,6 +347,8 @@
+             const restartCount = oldInstance?.restartCount ?? 0;
+             await this.cleanupWorkerForRestartByTaskQueue(taskQueue);
+             await new Promise((resolve) => setTimeout(resolve, 500));
++            if (this.isShuttingDown)
++                return;
+             this.workers.delete(taskQueue);
+             const newInstance = await this.createWorkerFromDefinition(workerDef);
+             newInstance.restartCount = restartCount;
+@@ -364,7 +373,7 @@
+         if (!workerInstance?.worker)
+             return;
+         try {
+-            this.safeShutdownWorker(workerInstance.worker, taskQueue);
++            await this.safeShutdownWorker(workerInstance.worker, taskQueue);
+         }
+         catch (error) {
+             this.logger.warn(`Error during worker '${taskQueue}' cleanup (continuing with restart)`, error);
+@@ -420,6 +429,8 @@
+         }
+     }
+     async startWorker() {
++        if (this.isShuttingDown)
++            throw new Error('Temporal worker manager is shutting down');
+         if (!this.worker) {
+             throw new Error('Worker not initialized. Cannot start worker.');
+         }
+@@ -450,10 +461,14 @@
+             await new Promise((resolve, reject) => {
+                 setImmediate(async () => {
+                     try {
+-                        this.worker.run().catch((error) => {
++                        if (this.isShuttingDown) {
++                            resolve();
++                            return;
++                        }
++                        this.runWorker(this.worker).catch((error) => {
+                             this.lastError = this.extractErrorMessage(error);
+                             this.isRunning = false;
+-                            if (this.autoRestartEnabled && this.restartCount < this.maxRestarts) {
++                            if (!this.isShuttingDown && this.autoRestartEnabled && this.restartCount < this.maxRestarts) {
+                                 this.restartCount++;
+                                 this.logger.warn(`Worker failed, auto-restarting in 1s (attempt ${this.restartCount}/${this.maxRestarts})`, error);
+                                 setTimeout(async () => {
+@@ -485,10 +500,14 @@
+         }
+     }
+     async autoRestartWorker() {
++        if (this.isShuttingDown)
++            return;
+         this.logger.info('Auto-restarting Temporal worker...');
+         try {
+             await this.cleanupWorkerForRestart();
+             await new Promise((resolve) => setTimeout(resolve, 500));
++            if (this.isShuttingDown)
++                return;
+             const initResult = await this.initializeWorker();
+             if (!initResult.success) {
+                 throw initResult.error || new Error('Failed to reinitialize worker');
+@@ -512,7 +531,7 @@
+             return;
+         }
+         try {
+-            this.safeShutdownWorker(this.worker, 'legacy');
++            await this.safeShutdownWorker(this.worker, 'legacy');
+         }
+         catch (error) {
+             this.logger.warn('Error during worker cleanup (continuing with restart)', error);
+@@ -529,7 +548,7 @@
+         try {
+             this.logger.verbose('Stopping Temporal worker...');
+             const taskQueue = this.options.taskQueue || 'default';
+-            this.safeShutdownWorker(this.worker, taskQueue, this.startedAt);
++            await this.safeShutdownWorker(this.worker, taskQueue, this.startedAt);
+             this.isRunning = false;
+             this.startedAt = null;
+         }
+@@ -543,6 +562,8 @@
+         await this.shutdownWorker();
+     }
+     async restartWorker() {
++        if (this.isShuttingDown)
++            return { success: false, error: new Error('Temporal worker manager is shutting down') };
+         this.logger.info('Restarting Temporal worker...');
+         try {
+             await this.stopWorker();
+@@ -831,61 +852,51 @@
+         }
+         return config;
+     }
++    runWorker(worker) {
++        // Keep the raw completion, not the error handler's resolved promise.
++        const completion = worker.run();
++        this.workerRuns.set(worker, completion);
++        completion.catch(() => {}); // Observed again by drain.
++        return completion;
++    }
+     async shutdownWorker() {
+-        if (this.shutdownPromise) {
+-            return this.shutdownPromise;
+-        }
+-        this.shutdownPromise = this.performShutdown();
++        if (!this.shutdownPromise) {
++            this.isShuttingDown = true;
++            let timer;
++            const timeout = new Promise((_, reject) => {
++                timer = setTimeout(() => reject(new Error(
++                    `Temporal worker shutdown timed out after ${this.options.shutdownTimeout || 30000}ms; drain is not complete`
++                )), this.options.shutdownTimeout || 30000);
++            });
++            this.shutdownPromise = Promise.race([this.performShutdown(), timeout])
++                .finally(() => clearTimeout(timer));
++        }
+         return this.shutdownPromise;
+     }
+     async performShutdown() {
+-        try {
+-            this.logger.info('Shutting down Temporal worker manager...');
+-            if (this.workers.size > 0) {
+-                this.logger.info(`Shutting down ${this.workers.size} workers...`);
+-                const shutdownPromises = [];
+-                for (const [taskQueue, workerInstance] of this.workers.entries()) {
+-                    const shutdownPromise = (async () => {
+-                        try {
+-                            if (workerInstance.isRunning && workerInstance.worker) {
+-                                this.logger.debug(`Stopping worker for '${taskQueue}'...`);
+-                                this.safeShutdownWorker(workerInstance.worker, taskQueue);
+-                                workerInstance.isRunning = false;
+-                            }
+-                        }
+-                        catch (error) {
+-                            this.logger.warn(`Error shutting down worker '${taskQueue}'`, error);
+-                        }
+-                    })();
+-                    shutdownPromises.push(shutdownPromise);
+-                }
+-                await Promise.allSettled(shutdownPromises);
+-                this.workers.clear();
+-                this.logger.info('All workers shut down successfully');
+-            }
+-            if (this.worker) {
+-                await this.stopWorker();
+-                this.worker = null;
+-            }
+-            if (this.connection && !this.injectedConnection) {
+-                try {
+-                    await this.connection.close();
+-                    this.logger.info('Connection closed successfully');
+-                }
+-                catch (error) {
+-                    this.logger.warn('Error closing connection', error);
+-                }
+-                this.connection = null;
+-            }
+-            this.isInitialized = false;
+-            this.logger.info('Worker manager shutdown completed');
+-        }
+-        catch (error) {
+-            this.logger.error('Error during worker shutdown', error);
+-        }
+-        finally {
+-            this.shutdownPromise = null;
+-        }
++        this.logger.info('Shutting down Temporal worker manager...');
++        await Promise.allSettled([...this.pendingCreations]);
++        const workers = [...this.workers.entries()].map(([queue, instance]) => ({
++            worker: instance.worker, queue, instance,
++        }));
++        if (this.worker)
++            workers.push({ worker: this.worker, queue: this.options.taskQueue || 'default', instance: this });
++        const results = await Promise.allSettled(workers.map(async ({ worker, queue, instance }) => {
++            await this.safeShutdownWorker(worker, queue);
++            instance.isRunning = false;
++            instance.startedAt = null;
++        }));
++        const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
++        if (errors.length)
++            throw new AggregateError(errors, 'Temporal workers failed during shutdown');
++        if (this.connection && !this.injectedConnection) {
++            await this.connection.close();
++            this.connection = null;
++        }
++        this.workers.clear();
++        this.worker = null;
++        this.isInitialized = false;
++        this.logger.info('Worker manager shutdown completed');
+     }
+     getWorkflowSource(config) {
+         const source = config ?? this.options.worker;
+@@ -937,44 +948,19 @@
+         }
+         return false;
+     }
+-    safeShutdownWorker(worker, identifier, startedAt) {
+-        try {
+-            const workerState = worker.getState();
+-            if (workerState === 'INITIALIZED' ||
+-                workerState === 'RUNNING' ||
+-                workerState === 'FAILED') {
+-                worker.shutdown();
+-                if (startedAt) {
+-                    const uptime = Math.round((Date.now() - startedAt.getTime()) / 1000);
+-                    this.logger.info(`Worker '${identifier}' stopped (uptime: ${uptime}s)`);
+-                }
+-                else {
+-                    this.logger.verbose(`Worker '${identifier}' shut down`);
+-                }
+-                return true;
+-            }
+-            if (workerState === 'STOPPING' ||
+-                workerState === 'DRAINING' ||
+-                workerState === 'DRAINED') {
+-                this.logger.verbose(`Worker '${identifier}' already shutting down (${workerState})`);
+-                return false;
+-            }
+-            if (workerState === 'STOPPED') {
+-                this.logger.verbose(`Worker '${identifier}' already stopped`);
+-                return false;
+-            }
+-            return false;
+-        }
+-        catch (error) {
+-            const msg = error instanceof Error ? error.message : String(error);
+-            if (msg.includes('Not running') ||
+-                msg.includes('DRAINING') ||
+-                msg.includes('STOPPING')) {
+-                this.logger.verbose(`Worker '${identifier}' already shutting down`);
+-                return false;
+-            }
+-            throw error;
+-        }
++    async safeShutdownWorker(worker, identifier, startedAt) {
++        // An initialized native Worker still needs run() to drain.
++        if (!this.workerRuns.has(worker) && worker.getState() === 'INITIALIZED')
++            this.runWorker(worker);
++        if (worker.getState() === 'RUNNING')
++            worker.shutdown();
++        const completion = this.workerRuns.get(worker);
++        if (completion)
++            await completion;
++        if (worker.getState() !== 'STOPPED')
++            throw new Error(`Worker '${identifier}' did not reach STOPPED (${worker.getState()})`);
++        this.logger.verbose(`Worker '${identifier}' stopped after run completed`);
++        return true;
+     }
+     extractErrorMessage(error) {
+         if (error instanceof Error) {
