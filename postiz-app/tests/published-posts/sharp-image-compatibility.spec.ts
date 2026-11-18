@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 jest.mock('@gitroom/helpers/utils/read.or.fetch', () => ({
   readOrFetch: jest.fn(),
 }));
@@ -19,23 +22,29 @@ const image = () =>
 describe('provider image preparation with real Sharp and offline transports', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it.each(['jpeg', 'png', 'avif'] as const)(
-    'prepares LinkedIn %s as a resized JPEG',
-    async (format) => {
+  it.each([
+    ['jpeg', 'jpeg', false],
+    ['png', 'png', true],
+    ['avif', 'jpeg', false],
+  ] as const)(
+    'prepares LinkedIn %s as %s at its original dimensions',
+    async (format, outputFormat, hasAlpha) => {
       const source = await image()[format]().toBuffer();
       jest.mocked(readOrFetch).mockResolvedValue(source);
       const output = await (new LinkedinProvider() as any).prepareMediaBuffer(
         `https://assets.example/photo.${format}`
       );
       expect(await sharp(output).metadata()).toMatchObject({
-        format: 'jpeg',
-        width: 1000,
-        height: 500,
-        hasAlpha: false,
+        format: outputFormat,
+        width: 40,
+        height: 20,
+        hasAlpha,
       });
       expect((await sharp(output).raw().toBuffer()).length).toBe(
-        1000 * 500 * 3
+        40 * 20 * (hasAlpha ? 4 : 3)
       );
+      if (format === outputFormat) expect(output).toEqual(source);
+      else expect(output).not.toEqual(source);
     }
   );
 
@@ -111,9 +120,9 @@ describe('provider image preparation with real Sharp and offline transports', ()
     }
   );
 
-  it('resizes X images to GIF and passes video bytes through unchanged', async () => {
+  it('preserves supported X image and video bytes with their media types', async () => {
     const source = await image().png().toBuffer();
-    const video = Buffer.from('benign offline video bypass fixture');
+    const video = readFileSync(resolve(__dirname, '../browser/assets/synthetic-picker.mp4'));
     jest
       .mocked(readOrFetch)
       .mockImplementation(async (path) =>
@@ -128,15 +137,16 @@ describe('provider image preparation with real Sharp and offline transports', ()
     );
     expect(result).toEqual({ post: ['media-id', 'media-id'] });
     expect(uploadMedia).toHaveBeenCalledTimes(2);
-    const gif = uploadMedia.mock.calls.find(
+    const png = uploadMedia.mock.calls.find(
       ([, options]) => options.media_type === 'image/png'
     )![0];
-    expect(await sharp(gif).metadata()).toMatchObject({
-      format: 'gif',
-      width: 1000,
-      height: 500,
+    expect(png).toEqual(source);
+    expect(await sharp(png).metadata()).toMatchObject({
+      format: 'png',
+      width: 40,
+      height: 20,
     });
-    expect((await sharp(gif).raw().toBuffer()).length).toBeGreaterThan(0);
+    expect((await sharp(png).raw().toBuffer()).length).toBe(40 * 20 * 4);
     expect(
       uploadMedia.mock.calls.find(
         ([, options]) => options.media_type === 'video/mp4'
