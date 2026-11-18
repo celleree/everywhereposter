@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { XProvider } from '@gitroom/nestjs-libraries/integrations/social/x.provider';
 import { BadBody, RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
@@ -5,7 +7,7 @@ import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 jest.mock('@gitroom/helpers/utils/read.or.fetch', () => ({ readOrFetch: jest.fn() }));
 
 const guidance = 'X could not prepare or upload the attached media. Check that the file is available. For video, export an MP4 with H.264 video and AAC-LC audio.';
-const synthetic = Buffer.from('synthetic media only');
+const synthetic = readFileSync(resolve(__dirname, '../browser/assets/synthetic-picker.mp4'));
 
 describe('X media failure guidance', () => {
   const client = { v2: { me: jest.fn(), uploadMedia: jest.fn(), tweet: jest.fn() } };

@@ -42,6 +42,7 @@ import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/po
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import dayjs from 'dayjs';
 import sharp from 'sharp';
+import * as providerMedia from '@gitroom/nestjs-libraries/upload/provider-media';
 import axios from 'axios';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 
@@ -194,6 +195,7 @@ const createPostBody = ({
 describe('PostsService published post management', () => {
   afterEach(() => {
     jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   it.each([
@@ -577,6 +579,38 @@ describe('PostsService published post management', () => {
     } finally {
       get.mockRestore();
     }
+  });
+
+  it('uses a compatible original path without storing a replacement', async () => {
+    const { service } = createService();
+    const source = { id: 'media', path: 'https://assets.example.test/original.jpg', type: 'image' };
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: Buffer.from('source') });
+    jest.spyOn(providerMedia, 'prepareProviderImage').mockImplementationOnce(async buffer => ({ buffer, mimeType: 'image/jpeg' }));
+    expect((await service.updateMedia('post', [source], 'instagram'))[0].path).toBe(source.path);
+    expect((service as any).storage.uploadFile).not.toHaveBeenCalled();
+  });
+
+  it('stores necessary derivatives separately and preserves the source reference', async () => {
+    const { service } = createService();
+    const source = { id: 'media', path: 'https://assets.example.test/original.png', type: 'image' };
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: Buffer.from('source') });
+    const derivative = Buffer.from('separate jpeg');
+    jest.spyOn(providerMedia, 'prepareProviderImage').mockResolvedValueOnce({ buffer: derivative, mimeType: 'image/jpeg' });
+    (service as any).storage.uploadFile.mockResolvedValue({ path: 'https://assets.example.test/derivative.jpg', originalname: 'derivative.jpg' });
+    const result = await service.updateMedia('post', [source], 'instagram');
+    expect((service as any).storage.uploadFile.mock.calls[0][0].buffer).toBe(derivative);
+    expect(result[0].path).toContain('derivative.jpg');
+    expect(source).toEqual({ id: 'media', path: 'https://assets.example.test/original.png', type: 'image' });
+  });
+
+  it('passes the TikTok target and propagates compatibility failures', async () => {
+    const { service } = createService();
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: Buffer.from('source') });
+    const prepare = jest.spyOn(providerMedia, 'prepareProviderImage')
+      .mockRejectedValueOnce(new providerMedia.ProviderImageError('Incompatible original'));
+    await expect(service.updateMedia('post', [{ path: 'https://assets.example.test/file.webp', type: 'image' }], 'tiktok')).rejects.toThrow('Incompatible original');
+    expect(prepare).toHaveBeenCalledWith(expect.any(Buffer), 'tiktok');
+    expect((service as any).storage.uploadFile).not.toHaveBeenCalled();
   });
 
   it('updates a published post through the provider when edit support is enabled', async () => {
