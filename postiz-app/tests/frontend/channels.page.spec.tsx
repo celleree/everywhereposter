@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import { ChannelsComponent } from '../../apps/frontend/src/components/channels/channels.component';
+import { ContinueProvider } from '../../apps/frontend/src/components/layout/continue.provider';
 
 const mockFetch = jest.fn();
 const mockUser = { totalChannels: 2, unlimitedChannels: false };
@@ -15,7 +16,13 @@ jest.mock('@gitroom/frontend/components/launches/calendar.context', () => ({
 }));
 jest.mock('@gitroom/frontend/components/layout/user.context', () => ({ useUser: () => mockUser }));
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({ useFetch: () => mockFetch }));
-jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }));
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: jest.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+jest.mock('@gitroom/frontend/components/new-launch/providers/continue-provider/list', () => ({
+  continueProviderList: {},
+}));
 jest.mock('@gitroom/frontend/components/launches/add.provider.component', () => ({
   AddProviderButton: () => <button>Add Channel</button>,
   UrlModal: () => null,
@@ -30,6 +37,7 @@ function channelList(integrations: unknown[]) {
 function renderChannels() {
   return render(
     <SWRConfig value={{ provider: () => new Map(), shouldRetryOnError: false }}>
+      <ContinueProvider />
       <ChannelsComponent />
     </SWRConfig>
   );
