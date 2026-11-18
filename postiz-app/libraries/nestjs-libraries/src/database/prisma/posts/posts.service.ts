@@ -118,6 +118,12 @@ export class PostsService {
     return this._submissions.runProvider(orgId, postId, integrationId, workflowId, operation);
   }
 
+  private assertScheduledDateInFuture(date: string) {
+    if (!dayjs.utc(date).isAfter(dayjs.utc())) {
+      throw new BadRequestException('Scheduled date must be in the future');
+    }
+  }
+
   searchForMissingThreeHoursPosts() {
     return this._postRepository.searchForMissingThreeHoursPosts();
   }
@@ -1414,11 +1420,8 @@ export class PostsService {
 
   async createPost(orgId: string, body: CreatePostDto): Promise<any[]> {
     if (body.submissionId) return this._submissions.submit(orgId, body);
-    if (
-      body.type === 'schedule' &&
-      !dayjs.utc(body.date).isAfter(dayjs.utc())
-    ) {
-      throw new BadRequestException('Scheduled date must be in the future');
+    if (body.type === 'schedule') {
+      this.assertScheduledDateInFuture(body.date);
     }
 
     if (body.type === 'now' || body.type === 'schedule') {
@@ -1534,6 +1537,9 @@ export class PostsService {
     const saved = await this._prisma.$transaction(async (tx) => {
       const destinations = [];
       for (const { payload, taskQueue } of prepared) {
+        if (body.type === 'schedule') {
+          this.assertScheduledDateInFuture(date);
+        }
         const { posts } = await this._postRepository.createOrUpdatePost(
           body.type, orgId, date, payload, body.tags, body.inter, tx
         );
@@ -1938,7 +1944,13 @@ export class PostsService {
     date: string,
     action: 'schedule' | 'update' = 'schedule'
   ) {
+    if (action === 'schedule') {
+      this.assertScheduledDateInFuture(date);
+    }
     const getPostById = await this._postRepository.getPostById(id, orgId);
+    if (action === 'schedule') {
+      this.assertScheduledDateInFuture(date);
+    }
 
     // schedule: Set status to QUEUE and change date (reschedule the post)
     // update: Just change the date without changing the status
