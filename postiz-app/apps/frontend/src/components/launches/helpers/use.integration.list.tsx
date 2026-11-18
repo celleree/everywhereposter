@@ -8,8 +8,12 @@ export const useIntegrationList = () => {
   const fetch = useFetch();
 
   const load = useCallback(async (path: string) => {
-    return (await (await fetch(path)).json()).integrations;
-  }, []);
+    const response = await fetch(path);
+    if (!response.ok) {
+      throw new Error('Channels could not be loaded.');
+    }
+    return (await response.json()).integrations;
+  }, [fetch]);
 
   return useSWR('/integrations/list', load, {
     revalidateOnFocus: false,

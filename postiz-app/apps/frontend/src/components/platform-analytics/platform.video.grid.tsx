@@ -20,7 +20,7 @@ type PlatformVideoItem = {
   url: string;
   thumbnail?: string;
   name: string;
-  type: 'video' | 'image';
+  type: 'video' | 'image' | 'link' | 'text' | 'unknown';
   publishedAt?: string;
   postId?: string;
   rootPostId?: string;
@@ -92,12 +92,12 @@ export const PlatformVideoGrid: FC<{
         <div className="flex items-center justify-between gap-[12px]">
           <div>
             <h3 className="text-[20px] font-[500] text-newTableText">
-              {t('recent_videos', 'Recent Videos')}
+              {t('recent_published_media', 'Recent Posts')}
             </h3>
             <div className="text-[13px] text-newTableText/60 mt-[4px]">
               {t(
-                'recent_videos_description',
-                'Latest published videos pulled directly from this connected platform.'
+                'recent_published_media_description',
+                'Latest published posts from this connected platform.'
               )}
             </div>
           </div>
@@ -118,8 +118,8 @@ export const PlatformVideoGrid: FC<{
       {!isLoading && !data?.results?.length && (
         <div className="flex items-center justify-center min-h-[180px] rounded-[14px] border border-dashed border-newTableBorder bg-newTableHeader text-newTableText/60 text-[14px] text-center px-[24px]">
           {t(
-            'no_published_videos_found',
-            'No published videos were found for this channel yet.'
+            'no_published_media_found',
+            'No published posts were found for this channel yet.'
           )}
         </div>
       )}
@@ -165,7 +165,7 @@ export const PlatformVideoGrid: FC<{
                       </div>
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                    <div className="absolute inset-0 flex items-center justify-center">
+                    {video.type === 'video' && <div aria-label="Video" className="absolute inset-0 flex items-center justify-center">
                       <div className="w-[54px] h-[54px] rounded-full bg-black/45 border border-white/20 flex items-center justify-center group-hover:scale-105 transition-transform">
                         <svg
                           width="18"
@@ -178,7 +178,7 @@ export const PlatformVideoGrid: FC<{
                           <path d="M4 3.5L14 9L4 14.5V3.5Z" fill="white" />
                         </svg>
                       </div>
-                    </div>
+                    </div>}
                     {!!video.publishedAt && (
                       <div className="absolute top-[10px] left-[10px] rounded-full bg-black/55 px-[8px] py-[4px] text-[11px] text-white">
                         {dayjs(video.publishedAt).format('MMM D, YYYY')}

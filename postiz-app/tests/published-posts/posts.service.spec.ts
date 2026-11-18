@@ -42,6 +42,10 @@ import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/po
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import dayjs from 'dayjs';
 import sharp from 'sharp';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as providerMedia from '@gitroom/nestjs-libraries/upload/provider-media';
 import axios from 'axios';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 
@@ -194,6 +198,7 @@ const createPostBody = ({
 describe('PostsService published post management', () => {
   afterEach(() => {
     jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   it.each([
@@ -405,6 +410,73 @@ describe('PostsService published post management', () => {
     );
   });
 
+  it('rejects a schedule that expires during account preflight', async () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    jest.setSystemTime(now);
+    const { service, postRepository, integrationService, getRawClient } =
+      createService();
+    integrationService.getIntegrationById.mockImplementation(async () => {
+      jest.setSystemTime(now + 2);
+      return {
+        id: 'integration-db-id',
+        name: 'X account',
+        deletedAt: null,
+        disabled: false,
+        inBetweenSteps: false,
+        refreshNeeded: false,
+      };
+    });
+
+    await expect(
+      service.createPost(
+        'org-1',
+        createPostBody({
+          type: 'schedule',
+          date: new Date(now + 1).toISOString(),
+        })
+      )
+    ).rejects.toThrow('Scheduled date must be in the future');
+
+    expect(postRepository.createOrUpdatePost).not.toHaveBeenCalled();
+    expect(getRawClient).not.toHaveBeenCalled();
+  });
+
+  it('rejects past and equal timestamps when changing a date to schedule', async () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    jest.setSystemTime(now);
+    const { service, postRepository } = createService();
+
+    for (const date of [
+      new Date(now - 1).toISOString(),
+      new Date(now).toISOString(),
+    ]) {
+      await expect(
+        service.changeDate('org-1', 'post-1', date, 'schedule')
+      ).rejects.toThrow('Scheduled date must be in the future');
+    }
+
+    expect(postRepository.getPostById).not.toHaveBeenCalled();
+    expect(postRepository.changeDate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reschedule that expires while loading the post', async () => {
+    jest.useFakeTimers();
+    const now = Date.UTC(2030, 0, 1, 12, 0, 0);
+    jest.setSystemTime(now);
+    const { service, postRepository, getRawClient } = createService();
+    postRepository.getPostById.mockImplementationOnce(async () => {
+      jest.setSystemTime(now + 2);
+      return { state: 'DRAFT' };
+    });
+
+    await expect(service.changeDate('org-1', 'post-1', new Date(now + 1).toISOString()))
+      .rejects.toThrow('Scheduled date must be in the future');
+    expect(postRepository.changeDate).not.toHaveBeenCalled();
+    expect(getRawClient).not.toHaveBeenCalled();
+  });
+
   it('blocks Instagram media preparation when a local upload file is missing', async () => {
     const previousEnv = {
       FRONTEND_URL: process.env.FRONTEND_URL,
@@ -510,6 +582,86 @@ describe('PostsService published post management', () => {
     } finally {
       get.mockRestore();
     }
+  });
+
+  it('uses a compatible original path without storing a replacement', async () => {
+    const { service } = createService();
+    const source = { id: 'media', path: 'https://assets.example.test/original.jpg', type: 'image' };
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: Buffer.from('source') });
+    jest.spyOn(providerMedia, 'prepareProviderImage').mockImplementationOnce(async buffer => ({ buffer, mimeType: 'image/jpeg' }));
+    expect((await service.updateMedia('post', [source], 'instagram'))[0].path).toBe(source.path);
+    expect((service as any).storage.uploadFile).not.toHaveBeenCalled();
+  });
+
+  it.each(['jpeg', 'webp'] as const)('stages an external TikTok %s once without changing its bytes', async (format) => {
+    const { service, postRepository } = createService();
+    const bucket = 'https://cdn.example.test/media';
+    jest.replaceProperty(process, 'env', { ...process.env, STORAGE_PROVIDER: 'cloudflare', CLOUDFLARE_BUCKET_URL: bucket,
+      UPLOAD_DIRECTORY: '/tmp/unused-local-uploads' });
+    const source = { id: 'photo', path: 'https://external.example.test/uploads/original', type: 'image' };
+    const bytes = await sharp({ create: { width: 4, height: 3, channels: 3, background: 'red' } }).toFormat(format).toBuffer();
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: bytes });
+    const storedUrl = `${bucket}/saved.${format}`;
+    const upload = (service as any).storage.uploadFile.mockResolvedValue({ path: storedUrl, originalname: `saved.${format}` });
+    const staged = await service.updateMedia('post', [source], 'tiktok');
+    expect(upload).toHaveBeenCalledWith(expect.objectContaining({ buffer: bytes, mimetype: `image/${format}` }));
+    expect(staged[0]).toMatchObject({ id: source.id, path: storedUrl, url: storedUrl });
+    expect(JSON.parse(postRepository.updateImages.mock.calls[0][1])).toEqual(staged);
+    expect(await service.updateMedia('post', staged, 'tiktok')).toEqual(staged);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(postRepository.updateImages).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands TikTok the public URL of an existing local upload and keeps its original file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ep-tiktok-photo-'));
+    try {
+      const origin = 'https://post.example.test';
+      jest.replaceProperty(process, 'env', { ...process.env, STORAGE_PROVIDER: 'local', FRONTEND_URL: origin,
+        UPLOAD_DIRECTORY: root, NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY: '/uploads' });
+      const bytes = await sharp({ create: { width: 5, height: 4, channels: 3, background: 'blue' } }).jpeg().toBuffer();
+      await writeFile(join(root, 'photo.jpg'), bytes);
+      jest.spyOn(axios, 'get').mockResolvedValue({ data: bytes });
+      const { service } = createService();
+      const [media] = await service.updateMedia('post', [{ path: '/uploads/photo.jpg', type: 'image' }], 'tiktok');
+      expect(media.path).toBe(`${origin}/uploads/photo.jpg`);
+      expect((service as any).storage.uploadFile).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('propagates a TikTok storage failure for a photo outside the configured URL prefix', async () => {
+    const { service, postRepository } = createService();
+    jest.replaceProperty(process, 'env', { ...process.env, STORAGE_PROVIDER: 'cloudflare', CLOUDFLARE_BUCKET_URL: 'https://cdn.example.test/media' });
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: Buffer.from('original') });
+    jest.spyOn(providerMedia, 'prepareProviderImage').mockImplementationOnce(async buffer => ({ buffer, mimeType: 'image/jpeg' }));
+    (service as any).storage.uploadFile.mockRejectedValue(new Error('Storage unavailable'));
+    await expect(service.updateMedia('post', [{ path: 'https://cdn.example.test/media-elsewhere/a.jpg', type: 'image' }], 'tiktok'))
+      .rejects.toThrow('Storage unavailable');
+    expect(postRepository.updateImages).not.toHaveBeenCalled();
+  });
+
+  it('stores necessary derivatives separately and preserves the source reference', async () => {
+    const { service } = createService();
+    const source = { id: 'media', path: 'https://assets.example.test/original.png', type: 'image' };
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: Buffer.from('source') });
+    const derivative = Buffer.from('separate jpeg');
+    jest.spyOn(providerMedia, 'prepareProviderImage').mockResolvedValueOnce({ buffer: derivative, mimeType: 'image/jpeg' });
+    (service as any).storage.uploadFile.mockResolvedValue({ path: 'https://assets.example.test/derivative.jpg', originalname: 'derivative.jpg' });
+    const result = await service.updateMedia('post', [source], 'instagram');
+    expect((service as any).storage.uploadFile.mock.calls[0][0].buffer).toBe(derivative);
+    expect(result[0].path).toContain('derivative.jpg');
+    expect(source).toEqual({ id: 'media', path: 'https://assets.example.test/original.png', type: 'image' });
+  });
+
+  it('passes the TikTok target and propagates compatibility failures', async () => {
+    const { service } = createService();
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: Buffer.from('source') });
+    const prepare = jest.spyOn(providerMedia, 'prepareProviderImage')
+      .mockRejectedValueOnce(new providerMedia.ProviderImageError('Incompatible original'));
+    await expect(service.updateMedia('post', [{ path: 'https://assets.example.test/file.webp', type: 'image' }], 'tiktok')).rejects.toThrow('Incompatible original');
+    expect(prepare).toHaveBeenCalledWith(expect.any(Buffer), 'tiktok');
+    expect((service as any).storage.uploadFile).not.toHaveBeenCalled();
   });
 
   it('updates a published post through the provider when edit support is enabled', async () => {

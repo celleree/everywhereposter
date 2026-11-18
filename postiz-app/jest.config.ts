@@ -8,6 +8,7 @@ export default {
     '<rootDir>/jest.post-set-review.config.cjs',
     '<rootDir>/jest.published-posts.config.cjs',
     '<rootDir>/jest.sentry.config.cjs',
+    '<rootDir>/jest.temporal.config.cjs',
   ].map((configPath) => {
     const { testTimeout, ...project } = require(
       configPath.replace('<rootDir>', __dirname)

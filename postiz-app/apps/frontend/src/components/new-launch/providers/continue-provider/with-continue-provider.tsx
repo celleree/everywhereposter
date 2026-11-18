@@ -5,6 +5,7 @@ import useSWR from 'swr';
 import clsx from 'clsx';
 import { Button } from '@gitroom/react/form/button';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { useCustomProviderFunction } from '@gitroom/frontend/components/launches/helpers/use.custom.provider.function';
 
 const SWR_OPTIONS = {
@@ -60,7 +61,8 @@ export function withContinueProvider<TItem, TSelection>(
 
   return function ContinueProviderComponent(props: ContinueProviderProps) {
     const { onSave, existingId, initialData, isSaving } = props;
-    const call = useCustomProviderFunction();
+    const { integration } = useIntegration();
+    const { get } = useCustomProviderFunction();
     const t = useT();
     const [selection, setSelection] = useState<TSelection | null>(null);
 
@@ -70,14 +72,14 @@ export function withContinueProvider<TItem, TSelection>(
         return initialData;
       }
       try {
-        return await call.get(endpoint);
+        return await get(endpoint);
       } catch (e) {
         // Handle error silently
       }
-    }, [initialData]);
+    }, [initialData, get]);
 
     const { data, isLoading } = useSWR(
-      initialData ? null : swrKey,
+      initialData || !integration?.id ? null : [swrKey, integration.id],
       loadData,
       SWR_OPTIONS
     );

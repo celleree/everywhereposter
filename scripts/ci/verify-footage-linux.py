@@ -25,7 +25,7 @@ import uuid
 
 # Official library/registry:3.0.0 index, verified against Docker Hub metadata.
 REGISTRY = 'registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e'
-REQUIRED_UNIT_TESTS = 21  # Nineteen contract/synthetic tests plus two real Linux tests.
+REQUIRED_UNIT_TESTS = 32  # Thirty contract/synthetic tests plus two real Linux tests.
 REQUIRED_REAL_TESTS = {
     'tests.test_runtime_integration.Tests.test_direct_child_network_has_no_route',
     'tests.test_runtime_integration.Tests.test_copy_from_real_container_tmpfs',
@@ -424,7 +424,7 @@ def prepare_runtime(repo, evidence, report):
         smoke.subprocess=original_subprocess;smoke.Runtime=original_runtime
     assert result.testsRun==REQUIRED_UNIT_TESTS and result.wasSuccessful() and not result.skipped
     assert len(smoke_calls)==1 and REQUIRED_REAL_TESTS <= set(result.success_ids)
-    report['unitTests']={'executed':result.testsRun,'skipped':len(result.skipped),'contractAndSyntheticTests':19,
+    report['unitTests']={'executed':result.testsRun,'skipped':len(result.skipped),'contractAndSyntheticTests':30,
                          'realNoRouteSmoke':1,'realTmpfsTransport':1,'successfulTestIds':result.success_ids}
     case(report,'official-tool-hash-and-real-unit-smoke',lambda:report['unitTests'])
 

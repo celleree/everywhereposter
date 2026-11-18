@@ -1,11 +1,11 @@
-import React, { FC, useCallback, useEffect, useMemo } from 'react';
+import React, { FC, useCallback, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { TopTitle } from '@gitroom/frontend/components/launches/helpers/top.title.component';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { IntegrationContext } from '@gitroom/frontend/components/launches/helpers/use.integration';
-import dayjs from 'dayjs';
-import useSWR, { useSWRConfig } from 'swr';
+import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { continueProviderList } from '@gitroom/frontend/components/new-launch/providers/continue-provider/list';
+import type { ContinueProviderProps } from '@gitroom/frontend/components/new-launch/providers/continue-provider/with-continue-provider';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 export const Null: FC<{
@@ -13,64 +13,50 @@ export const Null: FC<{
   existingId: string[];
 }> = () => null;
 export const ContinueProvider: FC = () => {
-  const { mutate } = useSWRConfig();
-  const fetch = useFetch();
+  const { data: integrations } = useIntegrationList();
   const searchParams = useSearchParams();
   const added = searchParams.get('added');
   const continueId = searchParams.get('continue');
   const router = useRouter();
-  const load = useCallback(async (path: string) => {
-    const list = (await (await fetch(path)).json()).integrations;
-    return list;
-  }, []);
-  const { data: integrations } = useSWR('/integrations/list', load, {
-    revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    revalidateIfStale: false,
-    revalidateOnMount: true,
-    refreshWhenHidden: false,
-    refreshWhenOffline: false,
-    fallbackData: [],
-  });
-  const refreshList = useCallback(() => {
-    mutate('/integrations/list');
-    const url = new URL(window.location.href);
-    url.searchParams.delete('added');
-    url.searchParams.delete('continue');
-    router.push(url.toString());
-  }, []);
-  const Provider = useMemo(() => {
-    if (!added) {
-      return Null;
-    }
-    return (
-      continueProviderList[added as keyof typeof continueProviderList] || Null
-    );
-  }, [added]);
+  const { openModal, closeById } = useModals();
+  const hasList = !!integrations;
 
-  if (!added || !continueId || !integrations) {
-    return null;
-  }
+  useEffect(() => {
+    if (!added || !continueId || !hasList) return;
+    const id = makeId(20);
+    let active = true;
+    const provider = continueProviderList[added as keyof typeof continueProviderList] || Null;
+    openModal({
+      id,
+      title: 'Configure Channel',
+      onClose: () => {
+        if (!active) return;
+        active = false;
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('added') !== added || url.searchParams.get('continue') !== continueId) return;
+        url.searchParams.delete('added');
+        url.searchParams.delete('continue');
+        router.replace(`${url.pathname}${url.search}${url.hash}`, { scroll: false });
+      },
+      children: (close) => <ModalContent added={added} continueId={continueId} provider={provider} closeModal={close} />,
+    });
+    return () => {
+      active = false;
+      closeById(id);
+    };
+  }, [added, continueId, hasList, openModal, closeById, router]);
 
-  return (
-    <ContinueModal
-      refreshList={refreshList}
-      added={added}
-      continueId={continueId}
-      integrations={integrations.map((p: any) => p.internalId)}
-      provider={Provider}
-    />
-  );
+  return null;
 };
 
 const ModalContent: FC<{
   continueId: string;
-  added: any;
-  provider: any;
+  added: string;
+  provider: FC<ContinueProviderProps>;
   closeModal: () => void;
-  integrations: string[];
-}> = ({ continueId, added, provider: Provider, closeModal, integrations }) => {
+}> = ({ continueId, added, provider: Provider, closeModal }) => {
   const fetch = useFetch();
+  const { data: integrations, mutate } = useIntegrationList();
 
   const onSave = useCallback(
     async (data: any) => {
@@ -78,9 +64,10 @@ const ModalContent: FC<{
         method: 'POST',
         body: JSON.stringify(data),
       });
+      void mutate();
       closeModal();
     },
-    [continueId, closeModal]
+    [continueId, closeModal, fetch, mutate]
   );
 
   return (
@@ -109,34 +96,7 @@ const ModalContent: FC<{
         },
       }}
     >
-      <Provider onSave={onSave} existingId={integrations} />
+      <Provider onSave={onSave} existingId={(integrations || []).map((channel: { internalId: string }) => channel.internalId)} />
     </IntegrationContext.Provider>
   );
-};
-
-const ContinueModal: FC<{
-  continueId: string;
-  added: any;
-  provider: any;
-  integrations: string[];
-  refreshList: () => void;
-}> = (props) => {
-  const modals = useModals();
-
-  useEffect(() => {
-    modals.openModal({
-      title: 'Configure Channel',
-      children: (close) => (
-        <ModalContent
-          {...props}
-          closeModal={() => {
-            props.refreshList();
-            close();
-          }}
-        />
-      ),
-    });
-  }, []);
-
-  return null;
 };
