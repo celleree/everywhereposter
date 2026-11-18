@@ -868,7 +868,13 @@ export class PostsService {
 
               const imageBuffer = Buffer.from(response.data);
               const prepared = await prepareProviderImage(imageBuffer, convertToJPEG === 'tiktok' ? 'tiktok' : 'instagram');
-              if (prepared.buffer === imageBuffer) return m;
+              if (prepared.buffer === imageBuffer) {
+                if (convertToJPEG !== 'tiktok') return m;
+                const uploadBase = process.env.STORAGE_PROVIDER === 'cloudflare'
+                  ? process.env.CLOUDFLARE_BUCKET_URL
+                  : this.joinPublicUrl(process.env.FRONTEND_URL || '', this.getUploadStaticDirectory());
+                if (this.publicUploadSuffix(m.url, uploadBase)) return { ...m, path: m.url };
+              }
               imageUpdateNeeded = true;
               const buffer = prepared.buffer;
 
@@ -922,7 +928,8 @@ export class PostsService {
       return getImageList;
     } catch (err: any) {
       if (err instanceof ProviderImageError) throw new BadRequestException(err.message);
-      if (err instanceof BadRequestException) {
+      const preparingTikTokPhoto = convertToJPEG === 'tiktok' && imagesList?.some(media => this.getMediaType(media) === 'image');
+      if (err instanceof BadRequestException || preparingTikTokPhoto) {
         throw err;
       }
 
@@ -956,22 +963,31 @@ export class PostsService {
     return `${uploadPrefix}${pathWithSlash}`;
   }
 
+  private publicUploadSuffix(mediaUrl: string, baseUrl?: string) {
+    if (!baseUrl || !URL.canParse(baseUrl) || !URL.canParse(mediaUrl)) return undefined;
+    const url = new URL(mediaUrl);
+    const base = new URL(baseUrl);
+    const prefix = `${base.pathname.replace(/\/+$/, '')}/`;
+    if (url.origin !== base.origin || url.username || url.password || !url.pathname.startsWith(prefix)) return undefined;
+    return url.pathname.slice(prefix.length);
+  }
+
   private getLocalUploadDiskPath(mediaPath: string) {
     const uploadDirectory = process.env.UPLOAD_DIRECTORY;
     if (!uploadDirectory || !mediaPath) {
       return undefined;
     }
 
-    let pathname = mediaPath;
-    try {
-      pathname = new URL(mediaPath).pathname;
-    } catch {}
-
     const uploadPrefix = this.getUploadStaticDirectory();
-    if (pathname.startsWith(`${uploadPrefix}/`)) {
+    let pathname = mediaPath;
+    if (/^https?:\/\//i.test(mediaPath)) {
+      if (process.env.STORAGE_PROVIDER === 'cloudflare') return undefined;
+      const base = this.joinPublicUrl(process.env.FRONTEND_URL || '', uploadPrefix);
+      const suffix = this.publicUploadSuffix(mediaPath, base);
+      if (!suffix) return undefined;
+      pathname = suffix;
+    } else if (pathname.startsWith(`${uploadPrefix}/`)) {
       pathname = pathname.slice(uploadPrefix.length);
-    } else if (/^https?:\/\//i.test(mediaPath)) {
-      return undefined;
     }
 
     const relativePath = pathname.replace(/^\/+/, '');
