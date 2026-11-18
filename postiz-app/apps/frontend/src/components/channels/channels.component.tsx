@@ -25,6 +25,7 @@ export function ChannelsComponent() {
   const [reconnecting, setReconnecting] = useState('');
   const reload = () => { void mutate(); };
   const enabledCount = channels.filter(channel => !channel.disabled).length;
+  const hasChannelCapacity = user?.unlimitedChannels || enabledCount < (user?.totalChannels ?? 0);
 
   const startReconnect = async (channel: { id: string; identifier: string; internalId: string }, externalUrl?: string) => {
     if (reconnecting) return;
@@ -84,7 +85,7 @@ export function ChannelsComponent() {
                   ) : channel.inBetweenSteps ? (
                     <button type="button" className="min-h-[44px] px-[8px]" onClick={() => router.push(`/channels?added=${encodeURIComponent(channel.identifier)}&continue=${encodeURIComponent(channel.id)}`)}>Finish setup</button>
                   ) : null}
-                  <Menu id={channel.id} canEnable={!!channel.disabled && enabledCount < (user?.totalChannels || 0)}
+                  <Menu id={channel.id} canEnable={!!channel.disabled && hasChannelCapacity}
                     canDisable={!channel.disabled} canChangeProfilePicture={channel.changeProfilePicture}
                     canChangeNickName={channel.changeNickName} refreshChannel={reconnect}
                     mutate={reload} onChange={reload} />
