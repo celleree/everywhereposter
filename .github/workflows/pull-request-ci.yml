@@ -81,7 +81,7 @@ jobs:
   quality:
     name: Type checks and stable unit tests
     needs: resolve-revisions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       publication-fixtures:
         image: postgres:17-alpine
