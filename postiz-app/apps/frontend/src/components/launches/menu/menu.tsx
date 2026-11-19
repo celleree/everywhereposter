@@ -332,6 +332,16 @@ export const Menu: FC<{
   return (
     <div
       className="cursor-pointer relative select-none flex"
+      role="button"
+      tabIndex={0}
+      aria-label="Manage channel"
+      aria-expanded={!!show}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          event.currentTarget.click();
+        }
+      }}
       onClick={changeShow}
       ref={ref}
     >
@@ -412,7 +422,7 @@ export const Menu: FC<{
           </div>
           {canDisable &&
             findIntegration?.refreshNeeded &&
-            !findIntegration.customFields && (
+            !findIntegration.customFields && !findIntegration.isCustomFields && (
               <div
                 className="flex gap-[12px] items-center py-[8px] px-[10px]"
                 onClick={refreshChannel(findIntegration!)}

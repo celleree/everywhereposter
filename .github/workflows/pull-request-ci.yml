@@ -81,7 +81,7 @@ jobs:
   quality:
     name: Type checks and stable unit tests
     needs: resolve-revisions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       publication-fixtures:
         image: postgres:17-alpine
@@ -181,6 +181,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Test Temporal worker shutdown lifecycle
+        run: |
+          pnpm exec jest --config jest.temporal.config.cjs --runInBand
+          python3 -B -m unittest discover -s tests/temporal -p test_native_supervisor.py
 
       - name: Type-check browser fixtures
         run: pnpm exec tsc --noEmit -p tsconfig.browser.json

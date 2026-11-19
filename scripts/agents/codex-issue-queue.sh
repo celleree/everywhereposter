@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+QUEUE_SOURCE=$(sed '1,/^# CODEX_QUEUE_SOURCE$/d' "$0")
+[[ -n "$QUEUE_SOURCE" ]] || { echo 'ERROR: Queue wrapper source is empty.' >&2; exit 1; }
+exec bash -c "$QUEUE_SOURCE" "$0" "$@"
+# CODEX_QUEUE_SOURCE
+set -Eeuo pipefail
 
 fail() {
   echo "ERROR: $*" >&2
@@ -72,237 +77,6 @@ prepare_queue() {
   jq -cn --argjson include "$matrix" '{include: $include}'
 }
 
-extract_risk() {
-  local body_file=$1
-  local values risk
-
-  values=$(section_content "$body_file" 'Risk classification' | sed '/^[[:space:]]*$/d')
-  [[ $(printf '%s\n' "$values" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ') == "1" ]] || return 1
-
-  risk=$(printf '%s' "$values" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-  case "$risk" in
-    'Low - isolated code, copy, tests, or documentation'|\
-    'Medium - shared workflow or user-visible behavior')
-      printf '%s\n' "$risk"
-      ;;
-    'High - authentication, security, database, billing, infrastructure, or deployment')
-      return 2
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-section_content() {
-  local body_file=$1
-  local section=$2
-
-  awk -v heading="### $section" '
-    $0 == heading { capture=1; next }
-    capture && /^###/ { exit }
-    capture { print }
-  ' "$body_file"
-}
-
-validate_complete_template() {
-  local body_file=$1
-  local section content heading_count total_headings readiness_lines
-  local required_sections=(
-    'Desired outcome'
-    'Current behavior'
-    'Acceptance criteria'
-    'Product and technical constraints'
-    'Expected scope'
-    'Explicitly out of scope'
-    'Risk classification'
-    'Required validation'
-    'Unresolved human decisions'
-    'Readiness confirmation'
-  )
-
-  total_headings=$(grep -Ec '^###' "$body_file" || true)
-  [[ "$total_headings" == "${#required_sections[@]}" ]] || return 1
-
-  for section in "${required_sections[@]}"; do
-    heading_count=$(grep -Fxc "### $section" "$body_file" || true)
-    [[ "$heading_count" == "1" ]] || return 1
-    content=$(section_content "$body_file" "$section")
-    printf '%s\n' "$content" | grep -q '[^[:space:]]' || return 1
-  done
-
-  readiness_lines=$(section_content "$body_file" 'Readiness confirmation' | sed '/^[[:space:]]*$/d')
-  [[ $(printf '%s\n' "$readiness_lines" | wc -l | tr -d ' ') == "4" ]] || return 1
-  if printf '%s\n' "$readiness_lines" |
-    grep -Ev '^[[:space:]]*-[[:space:]]+\[[xX]\][[:space:]]+[^[:space:]].*$' >/dev/null; then
-    return 1
-  fi
-}
-
-has_blocked_category() {
-  local title=$1
-  local body_file=$2
-  local scoped_text
-
-  scoped_text=$(awk '
-    /^###[[:space:]]+(Desired outcome|Current behavior|Acceptance criteria|Product and technical constraints|Expected scope|Required validation|Unresolved human decisions)[[:space:]]*$/ {
-      capture=1
-      next
-    }
-    /^###[[:space:]]+/ { capture=0 }
-    capture { print }
-  ' "$body_file")
-
-  printf '%s\n%s\n' "$title" "$scoped_text" | grep -Eiq \
-    'authentication|authorization|oauth|(^|[^[:alnum:]_])auth([^[:alnum:]_]|$)|security|billing|payments?|databases?|schema|migrations?|infrastructure|dependenc(y|ies)|package[[:space:]]+(upgrade|update|bump)|package\.json|(^|/)(pnpm-lock|package-lock|yarn\.lock|bun\.lock)|containers?|docker|github[[:space:]]+actions|\.github/workflows|workflow[[:space:]]+(file|ya?ml|action|change)|deploy(ment|ing)?|production[[:space:]]+(operation|change|deploy)'
-}
-
-refresh_owner_approved_issue() {
-  local owner=$1
-  local output_file=$2
-  local events_file=$3
-  local repo_name=${GITHUB_REPOSITORY#*/}
-  local query response issue_json reference_json cursor='' previous_cursor=''
-  local has_next label_event label_actor label_time label_epoch last_edited edit_epoch rename_epoch
-  local first_page=true
-
-  APPROVAL_ERROR='Readiness and content-version metadata could not be verified'
-  : > "$events_file"
-  query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
-    repository(owner:$owner,name:$name) {
-      issue(number:$number) {
-        number state title body url lastEditedAt
-        author { login }
-        labels(first:100) { nodes { name } pageInfo { hasNextPage } }
-        timelineItems(first:100,after:$endCursor,itemTypes:[LABELED_EVENT,RENAMED_TITLE_EVENT]) {
-          nodes {
-            __typename
-            ... on LabeledEvent { createdAt actor { login } label { name } }
-            ... on RenamedTitleEvent { createdAt actor { login } previousTitle currentTitle }
-          }
-          pageInfo { hasNextPage endCursor }
-        }
-      }
-    }
-  }'
-
-  while true; do
-    local args=(api graphql -f "query=$query" -F "owner=$owner" -F "name=$repo_name" -F "number=$QUEUE_ISSUE")
-    if [[ -n "$cursor" ]]; then
-      args+=(-f "endCursor=$cursor")
-    fi
-    if ! response=$(gh "${args[@]}"); then
-      APPROVAL_ERROR='Readiness audit lookup failed'
-      return 1
-    fi
-    if ! issue_json=$(printf '%s' "$response" | jq -ce '
-      .data.repository.issue |
-      select(type == "object") |
-      select(has("lastEditedAt")) |
-      select(.number | type == "number") |
-      select(.state | type == "string") |
-      select(.title | type == "string") |
-      select(.body | type == "string") |
-      select(.url | type == "string") |
-      select(.author | type == "object") |
-      select(.labels.nodes | type == "array") |
-      select(.labels.pageInfo.hasNextPage == false) |
-      select(.timelineItems.nodes | type == "array") |
-      select(.timelineItems.pageInfo.hasNextPage | type == "boolean")
-    '); then
-      APPROVAL_ERROR='Missing or malformed issue edit, label, or pagination metadata'
-      return 1
-    fi
-
-    if [[ "$first_page" == "true" ]]; then
-      reference_json=$(printf '%s' "$issue_json" | jq -c 'del(.timelineItems)')
-      if ! printf '%s' "$issue_json" | jq -ce '{
-        number, state, title, body, url,
-        labels: .labels.nodes,
-        author,
-        lastEditedAt
-      }' > "$output_file"; then
-        APPROVAL_ERROR='Refreshed issue content could not be parsed'
-        return 1
-      fi
-      first_page=false
-    elif [[ $(printf '%s' "$issue_json" | jq -c 'del(.timelineItems)') != "$reference_json" ]]; then
-      APPROVAL_ERROR='Issue content changed while readiness metadata was paginated'
-      return 1
-    fi
-
-    if ! printf '%s' "$issue_json" | jq -ce '.timelineItems.nodes[]' >> "$events_file"; then
-      APPROVAL_ERROR='Timeline event metadata could not be parsed'
-      return 1
-    fi
-    has_next=$(printf '%s' "$issue_json" | jq -r '.timelineItems.pageInfo.hasNextPage')
-    if [[ "$has_next" == "false" ]]; then
-      break
-    fi
-    previous_cursor=$cursor
-    cursor=$(printf '%s' "$issue_json" | jq -r '.timelineItems.pageInfo.endCursor // empty')
-    if [[ -z "$cursor" || "$cursor" == "$previous_cursor" ]]; then
-      APPROVAL_ERROR='Timeline pagination cursor is missing or repeated'
-      return 1
-    fi
-  done
-
-  if ! jq -es '
-    all(.[];
-      if .__typename == "LabeledEvent" then
-        ((.createdAt | type) == "string") and
-        ((.actor.login | type) == "string") and
-        ((.actor.login | length) > 0) and
-        ((.label.name | type) == "string") and
-        ((.label.name | length) > 0)
-      elif .__typename == "RenamedTitleEvent" then
-        ((.createdAt | type) == "string") and
-        ((.previousTitle | type) == "string") and
-        ((.currentTitle | type) == "string")
-      else false end
-    ) and
-    all(.[]; try (.createdAt | fromdateiso8601 | type == "number") catch false)
-  ' "$events_file" >/dev/null; then
-    APPROVAL_ERROR='Timeline event metadata or timestamps are missing or malformed'
-    return 1
-  fi
-  if ! label_event=$(jq -ces '
-    [.[] | select(.__typename == "LabeledEvent" and .label.name == "agent-ready")] |
-    sort_by(.createdAt) | last | select(type == "object")
-  ' "$events_file"); then
-    APPROVAL_ERROR='The latest agent-ready label event or timestamp is missing'
-    return 1
-  fi
-  label_actor=$(printf '%s' "$label_event" | jq -r '.actor.login')
-  label_time=$(printf '%s' "$label_event" | jq -r '.createdAt')
-  if [[ "$label_actor" != "$owner" ]]; then
-    APPROVAL_ERROR='agent-ready was not most recently applied by the repository owner'
-    return 1
-  fi
-  if ! jq -e '.labels | map(.name) | index("agent-ready")' "$output_file" >/dev/null; then
-    APPROVAL_ERROR='The pre-existing agent-ready label is missing'
-    return 1
-  fi
-
-  label_epoch=$(jq -nr --arg value "$label_time" '$value | fromdateiso8601')
-  last_edited=$(jq -r 'if .lastEditedAt == null then "" else .lastEditedAt end' "$output_file")
-  edit_epoch=-1
-  if [[ -n "$last_edited" ]]; then
-    if ! edit_epoch=$(jq -enr --arg value "$last_edited" '$value | fromdateiso8601'); then
-      APPROVAL_ERROR='The issue lastEditedAt timestamp is malformed'
-      return 1
-    fi
-  fi
-  rename_epoch=$(jq -es '[.[] | select(.__typename == "RenamedTitleEvent") | (.createdAt | fromdateiso8601)] | max // -1' "$events_file")
-  if [[ "$rename_epoch" -gt "$edit_epoch" ]]; then
-    edit_epoch=$rename_epoch
-  fi
-  if [[ "$edit_epoch" -ge "$label_epoch" ]]; then
-    APPROVAL_ERROR='The issue title or body changed after owner readiness approval; remove and reapply agent-ready after the final edit'
-    return 1
-  fi
-}
-
 run_issue() {
   need gh
   need git
@@ -311,6 +85,8 @@ run_issue() {
   need grep
   need jq
   need tail
+  need node
+  need sha256sum
 
   : "${GH_TOKEN:?GH_TOKEN must be provided by GitHub Actions}"
   : "${QUEUE_ISSUE:?QUEUE_ISSUE is required}"
@@ -327,20 +103,47 @@ run_issue() {
   [[ "$QUEUE_MAX_MINUTES" -ge 30 ]] || fail "QUEUE_MAX_MINUTES must be at least 30."
   [[ "$QUEUE_MAX_MINUTES" -le 150 ]] || fail "QUEUE_MAX_MINUTES may not exceed 150."
 
-  local root owner actor triggering_actor item body_file validated_snapshot events_file results_file run_url
+  local root owner actor triggering_actor item validated_snapshot events_file results_file run_url
   local operational_failures=0 outcome=success outcome_detail='Completed successfully'
-  local cleanup_failed=0 rc existing_json existing_pr risk pr_json pr_url pr_draft
+  local cleanup_failed=0 rc existing_json existing_pr risk contract pr_json pr_url pr_draft
 
   root=$(git rev-parse --show-toplevel 2>/dev/null) || fail "Run inside the repository checkout."
   cd "$root"
+  source "$root/scripts/agents/owner-approval.sh"
 
   TMP_ROOT=$(mktemp -d)
   item="$TMP_ROOT/item.json"
-  body_file="$TMP_ROOT/body.md"
   validated_snapshot="$TMP_ROOT/validated-issue.json"
   events_file="$TMP_ROOT/issue-authorization-events.jsonl"
   results_file="$TMP_ROOT/results.md"
-  trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
+  local recovery_store=${CODEX_RECOVERY_ROOT-} recovery_helper="$TMP_ROOT/task-recovery.mjs" recovery_hash
+  local recovery_start recovery_info recovery_id recovery_context recovery_attachments
+  RECOVERY_ALLOW_REMOVE=true
+  queue_exit() {
+    git config --local --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
+    if [[ "$RECOVERY_ALLOW_REMOVE" == true ]]; then rm -rf "$TMP_ROOT"; fi
+  }
+  trap queue_exit EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  recovery_call() {
+    node --input-type=module - "$recovery_helper" "$recovery_hash" "$@" <<'NODE'
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+try {
+  const [file, expected, mode, ...args] = process.argv.slice(2);
+  const source = readFileSync(file);
+  if (createHash('sha256').update(source).digest('hex') !== expected) throw new Error();
+  const helper = await import(`data:text/javascript;base64,${source.toString('base64')}`);
+  console.log(JSON.stringify(helper.execute(mode, args)));
+} catch {
+  console.error('ERROR: Private recovery is unavailable or incomplete; checkout reuse is blocked.');
+  process.exitCode = 1;
+}
+NODE
+  }
 
   run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   {
@@ -377,6 +180,25 @@ run_issue() {
         cleanup_failed=1
       fi
     fi
+    # A child receipt must be complete before this parent captures and cleans its checkout.
+    if ! recovery_call guard "$recovery_store" "$root" >/dev/null; then
+      record_operation_failure 'Private recovery is quarantined; runner cleanup was blocked.'
+      return 1
+    fi
+    recovery_context=$(jq -cn --arg start "$recovery_start" --argjson exit "$operational_failures" \
+      '{phase:"queue_cleanup",exit:$exit,signal:null,baseSha:$start,startSha:$start,external:{push:"not_attempted",pr:"not_attempted"}}')
+    recovery_attachments=$(jq -cn --arg item "$item" --arg approved "$validated_snapshot" --arg results "$results_file" \
+      '{task:$item,approvedIssue:$approved,queueResult:$results}')
+    if ! recovery_info=$(recovery_call begin "$recovery_store" "$root" "$(jq -cn --arg issue "$QUEUE_ISSUE" '{mode:"queue_cleanup",issue:$issue}')"); then
+      record_operation_failure 'Private cleanup recovery could not start; runner cleanup was blocked.'
+      return 1
+    fi
+    recovery_id=$(printf '%s' "$recovery_info" | jq -r .id)
+    if ! recovery_call capture "$recovery_store" "$root" "$recovery_id" "$recovery_context" "$recovery_attachments" >/dev/null ||
+      ! recovery_call finish "$recovery_store" "$root" "$recovery_id" >/dev/null; then
+      record_operation_failure 'Private cleanup recovery is incomplete; runner cleanup was blocked.'
+      return 1
+    fi
     if ! git reset --hard >/dev/null 2>&1; then
       record_operation_failure "Could not reset the runner checkout after #${QUEUE_ISSUE}."
       cleanup_failed=1
@@ -389,11 +211,13 @@ run_issue() {
       record_operation_failure "Could not restore trusted main after #${QUEUE_ISSUE}."
       cleanup_failed=1
     fi
+    if [[ "$cleanup_failed" == "0" ]]; then RECOVERY_ALLOW_REMOVE=true; fi
     [[ "$cleanup_failed" == "0" ]]
   }
 
   run_role() {
     local mode=$1
+    RECOVERY_ALLOW_REMOVE=false
     if [[ "$mode" == "implement" ]]; then
       QUEUE_VALIDATED_ISSUE_SNAPSHOT="$validated_snapshot" \
         timeout --signal=TERM --kill-after=5m "${QUEUE_MAX_MINUTES}m" \
@@ -438,6 +262,12 @@ run_issue() {
     finish 1
     return
   fi
+
+  cp "$root/scripts/agents/task-recovery.mjs" "$recovery_helper"
+  recovery_hash=$(sha256sum "$recovery_helper" | cut -d ' ' -f 1)
+  recovery_start=$(git rev-parse HEAD)
+  [[ "$recovery_start" =~ ^[0-9a-f]{40}$ ]] || fail 'Recovery initial revision is invalid.'
+  recovery_call guard "$recovery_store" "$root" >/dev/null || fail 'Private recovery store is not ready; no queue role started.'
 
   if ! gh issue view "$QUEUE_ISSUE" --json number,state,title,body,url,labels,author > "$item"; then
     outcome=failure
@@ -527,27 +357,16 @@ Run: $run_url"; then
     finish 0
     return
   fi
-  jq -r '.body // ""' "$item" > "$body_file"
-  if ! validate_complete_template "$body_file"; then
-    outcome=blocked
-    outcome_detail='Missing, duplicated, malformed, or incomplete required issue-template sections block unattended implementation'
-    rc=1
-  elif risk=$(extract_risk "$body_file"); then
-    rc=0
+  if contract=$(bash "$root/scripts/agents/issue-implementation-contract.sh" "$item"); then
+    risk=$(printf '%s' "$contract" | jq -r .risk)
+    if ! node "$root/scripts/agents/task-path-scope.mjs" parse "$item" "$GITHUB_REPOSITORY" "$QUEUE_ISSUE" "$root" >/dev/null; then
+      outcome=blocked
+      outcome_detail='Declared owned/prohibited paths could not be verified'
+    fi
   else
-    rc=$?
-  fi
-  if [[ "$outcome" == "blocked" ]]; then
-    : # The complete-template validation already supplied the blocking detail.
-  elif [[ "$rc" == "2" ]]; then
     outcome=blocked
-    outcome_detail='High-risk classification blocks unattended implementation'
-  elif [[ "$rc" != "0" ]]; then
-    outcome=blocked
-    outcome_detail='Missing, malformed, or ambiguous risk classification blocks unattended implementation'
-  elif has_blocked_category "$(jq -r '.title // ""' "$item")" "$body_file"; then
-    outcome=blocked
-    outcome_detail='The issue describes a category blocked from unattended implementation'
+    outcome_detail=$(printf '%s' "$contract" | jq -r '.reason // empty')
+    outcome_detail=${outcome_detail:-Issue implementation contract could not be verified}
   fi
   if [[ "$outcome" == "blocked" ]]; then
     if ! post_comment "<!-- codex-queue-result:${GITHUB_RUN_ID} -->

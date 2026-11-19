@@ -78,19 +78,9 @@ Responsibilities:
 
 ## Standard Workflow
 
-1. A ChatGPT project conversation defines the desired outcome.
-2. The planner creates or improves a bounded GitHub issue or investigation plan.
-3. A human/ChatGPT checkpoint approves scope before meaningful implementation.
-4. The implementer creates a branch from current `main` and performs only the approved work.
-5. Focused local validation runs.
-6. A draft pull request is opened.
-7. A separate fresh-context reviewer checks the exact current HEAD, issue, diff, tests, and product contracts.
-8. The original implementation session or repair agent addresses verified findings.
-9. Verification and, when required, fresh exact-SHA review run again after any HEAD change. For a trivial follow-up commit, the fresh review may be scoped to the new diff, but the new HEAD SHA must still be reviewed and recorded.
-10. GitHub Actions runs the full pull-request checks.
-11. A human decides whether to merge.
-12. The coordinator prepares deployment steps and any proposed durable learning.
-13. A human explicitly approves any production deployment.
+Use the [ChatGPT-managed implementation cycle](CHATGPT_CODEX_HANDOFF.md#chatgpt-managed-implementation-cycle) for the canonical handoff sequence. Carry existing bounded authorization forward; explicit planning-only requests stop before implementation, and unresolved decisions return to the human checkpoint.
+
+After focused checks, commit/push the completed change and create or update its draft PR. Required CI must pass for that pushed HEAD before a fresh independent reviewer gives the final exact-SHA review. Repairs repeat the affected checks, push, matching CI, and required fresh review. The human merge and deployment gates below remain in force.
 
 ## Review Depth
 
@@ -144,7 +134,7 @@ When parallel work is used:
 - If a workstream discovers a shared-contract dependency, stop that workstream and return the dependency instead of inventing a competing design.
 - After one branch merges, waiting/working branches remain frozen. One named integrator owns merge order and synchronizes only the selected integration candidate.
 
-Create orchestrated workers from clean, current canonical `main` with `scripts/start-change.sh <branch> --worktree /home/arund/dev/<worker-name>`. This START flow fetches `origin/main`, creates the worker from that exact commit, records full-SHA branch-bound local provenance, and leaves canonical `main` in place. Use `scripts/check-repository-state.sh --continue` during work: it validates provenance and ancestry in both worker and current main, while allowing main to advance beyond worker HEAD. For the selected PR, fetch main, synchronize normally if needed, pass `--integrate`, push final HEAD, wait for matching CI, and obtain fresh independent review of the exact pushed HEAD. A main race repeats integration only for that candidate. Any HEAD change invalidates review; uncommitted work cannot receive final exact-HEAD review. The no-argument check remains strict/current-main for unattended workflows.
+Follow [root worktree ownership](ORCHESTRATOR_PROTOCOL.md#worktree-ownership) for START, CONTINUE, selected-candidate INTEGRATE, and final pushed-HEAD evidence. The executable owners are `scripts/start-change.sh` and `scripts/check-repository-state.sh`; do not infer provenance from a merge-base or review uncommitted work as a final exact HEAD.
 
 Do not use parallel agents for:
 

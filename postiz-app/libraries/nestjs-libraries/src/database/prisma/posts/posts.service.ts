@@ -23,7 +23,7 @@ import { ShortLinkService } from '@gitroom/nestjs-libraries/short-linking/short.
 import { CreateTagDto } from '@gitroom/nestjs-libraries/dtos/posts/create.tag.dto';
 import { minifyPostsList, minifyPosts } from '@gitroom/helpers/utils/posts.list.minify';
 import axios from 'axios';
-import sharp from 'sharp';
+import { prepareProviderImage, ProviderImageError } from '@gitroom/nestjs-libraries/upload/provider-media';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { Readable } from 'stream';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
@@ -116,6 +116,12 @@ export class PostsService {
   runSubmissionProvider(orgId: string, postId: string, integrationId: string,
     workflowId: string, operation: () => Promise<PostResponse[]>) {
     return this._submissions.runProvider(orgId, postId, integrationId, workflowId, operation);
+  }
+
+  private assertScheduledDateInFuture(date: string) {
+    if (!dayjs.utc(date).isAfter(dayjs.utc())) {
+      throw new BadRequestException('Scheduled date must be in the future');
+    }
   }
 
   searchForMissingThreeHoursPosts() {
@@ -799,7 +805,7 @@ export class PostsService {
     );
   }
 
-  async updateMedia(id: string, imagesList: any[], convertToJPEG = false) {
+  async updateMedia(id: string, imagesList: any[], convertToJPEG: boolean | string = false) {
     try {
       let imageUpdateNeeded = false;
       const getImageList = await Promise.all(
@@ -861,22 +867,20 @@ export class PostsService {
               });
 
               const imageBuffer = Buffer.from(response.data);
+              const prepared = await prepareProviderImage(imageBuffer, convertToJPEG === 'tiktok' ? 'tiktok' : 'instagram');
+              if (prepared.buffer === imageBuffer) {
+                if (convertToJPEG !== 'tiktok') return m;
+                const uploadBase = process.env.STORAGE_PROVIDER === 'cloudflare'
+                  ? process.env.CLOUDFLARE_BUCKET_URL
+                  : this.joinPublicUrl(process.env.FRONTEND_URL || '', this.getUploadStaticDirectory());
+                if (this.publicUploadSuffix(m.url, uploadBase)) return { ...m, path: m.url };
+              }
               imageUpdateNeeded = true;
-              const buffer = await sharp(imageBuffer, { failOn: 'error' })
-                .rotate()
-                .flatten({ background: '#ffffff' })
-                .toColorspace('srgb')
-                .withMetadata({ density: 72 })
-                .jpeg({
-                  quality: 90,
-                  progressive: false,
-                  mozjpeg: false,
-                })
-                .toBuffer();
+              const buffer = prepared.buffer;
 
               const { path, originalname } = await this.storage.uploadFile({
                 buffer,
-                mimetype: 'image/jpeg',
+                mimetype: prepared.mimeType,
                 size: buffer.length,
                 path: '',
                 fieldname: '',
@@ -923,7 +927,9 @@ export class PostsService {
 
       return getImageList;
     } catch (err: any) {
-      if (err instanceof BadRequestException) {
+      if (err instanceof ProviderImageError) throw new BadRequestException(err.message);
+      const preparingTikTokPhoto = convertToJPEG === 'tiktok' && imagesList?.some(media => this.getMediaType(media) === 'image');
+      if (err instanceof BadRequestException || preparingTikTokPhoto) {
         throw err;
       }
 
@@ -957,22 +963,31 @@ export class PostsService {
     return `${uploadPrefix}${pathWithSlash}`;
   }
 
+  private publicUploadSuffix(mediaUrl: string, baseUrl?: string) {
+    if (!baseUrl || !URL.canParse(baseUrl) || !URL.canParse(mediaUrl)) return undefined;
+    const url = new URL(mediaUrl);
+    const base = new URL(baseUrl);
+    const prefix = `${base.pathname.replace(/\/+$/, '')}/`;
+    if (url.origin !== base.origin || url.username || url.password || !url.pathname.startsWith(prefix)) return undefined;
+    return url.pathname.slice(prefix.length);
+  }
+
   private getLocalUploadDiskPath(mediaPath: string) {
     const uploadDirectory = process.env.UPLOAD_DIRECTORY;
     if (!uploadDirectory || !mediaPath) {
       return undefined;
     }
 
-    let pathname = mediaPath;
-    try {
-      pathname = new URL(mediaPath).pathname;
-    } catch {}
-
     const uploadPrefix = this.getUploadStaticDirectory();
-    if (pathname.startsWith(`${uploadPrefix}/`)) {
+    let pathname = mediaPath;
+    if (/^https?:\/\//i.test(mediaPath)) {
+      if (process.env.STORAGE_PROVIDER === 'cloudflare') return undefined;
+      const base = this.joinPublicUrl(process.env.FRONTEND_URL || '', uploadPrefix);
+      const suffix = this.publicUploadSuffix(mediaPath, base);
+      if (!suffix) return undefined;
+      pathname = suffix;
+    } else if (pathname.startsWith(`${uploadPrefix}/`)) {
       pathname = pathname.slice(uploadPrefix.length);
-    } else if (/^https?:\/\//i.test(mediaPath)) {
-      return undefined;
     }
 
     const relativePath = pathname.replace(/^\/+/, '');
@@ -1414,11 +1429,8 @@ export class PostsService {
 
   async createPost(orgId: string, body: CreatePostDto): Promise<any[]> {
     if (body.submissionId) return this._submissions.submit(orgId, body);
-    if (
-      body.type === 'schedule' &&
-      !dayjs.utc(body.date).isAfter(dayjs.utc())
-    ) {
-      throw new BadRequestException('Scheduled date must be in the future');
+    if (body.type === 'schedule') {
+      this.assertScheduledDateInFuture(body.date);
     }
 
     if (body.type === 'now' || body.type === 'schedule') {
@@ -1534,6 +1546,9 @@ export class PostsService {
     const saved = await this._prisma.$transaction(async (tx) => {
       const destinations = [];
       for (const { payload, taskQueue } of prepared) {
+        if (body.type === 'schedule') {
+          this.assertScheduledDateInFuture(date);
+        }
         const { posts } = await this._postRepository.createOrUpdatePost(
           body.type, orgId, date, payload, body.tags, body.inter, tx
         );
@@ -1687,7 +1702,7 @@ export class PostsService {
         media: await this.updateMedia(
           post.id,
           JSON.parse(post.image || '[]'),
-          integrationProvider?.convertToJPEG || false
+          integrationProvider?.convertToJPEG ? integrationProvider.identifier : false
         ),
       }))
     );
@@ -1938,7 +1953,13 @@ export class PostsService {
     date: string,
     action: 'schedule' | 'update' = 'schedule'
   ) {
+    if (action === 'schedule') {
+      this.assertScheduledDateInFuture(date);
+    }
     const getPostById = await this._postRepository.getPostById(id, orgId);
+    if (action === 'schedule') {
+      this.assertScheduledDateInFuture(date);
+    }
 
     // schedule: Set status to QUEUE and change date (reschedule the post)
     // update: Just change the date without changing the status

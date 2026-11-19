@@ -118,26 +118,17 @@ Meaningful MEDIUM integration/runtime changes should receive independent review.
 
 ## Model and reasoning routing
 
-Optimize for the lowest expected total cost of a correct, verified result, including retries and rework. Choose model and reasoning effort separately.
+Preserve the current session's configured model and reasoning effort unless the user authorizes a change. Choose model and effort separately; do not infer supported options, availability, or price.
 
-Starting points:
+For an authorized new worker, the permitted models are:
 
-- Local `qwen3:8b` via Ollama/Codex `--oss`: targeted inspection, extraction/classification, simple docs, repetitive edits, straightforward tests, and very bounded low-risk code changes.
-- Luna: mechanical/repetitive cloud work, extraction/classification, targeted inspection, very easy tasks when the local worker is unavailable or unsuitable.
-- GPT-6.1 Terra: scoped computer use and customer-facing writing after the Sol coordinator supplies a bounded task and acceptance checks.
-- GPT-6.1 Sol: default coordinator and engineering worker; Medium for routine implementation, High for complex planning/coding and independent review.
-- Astra: exceptional escalation only after discussing justification with the user; never select it automatically.
+- `gpt-6-luna`: lighter tasks, targeted inspection, extraction, and mechanical work.
+- `gpt-6.1-sol`: ordinary coding, coordination, debugging, and independent review.
+- `gpt-6-astra`: exceptional work only when the permitted smaller models cannot adequately handle it, after discussing justification and obtaining user authorization. Never escalate to Astra automatically.
 
-Do not use the local worker as the final independent reviewer or for architecture, authentication/security, database migrations, deployment/infrastructure decisions, destructive operations, or other high-risk work. Follow `docs/brain/ORCHESTRATOR_PROTOCOL.md` for the complete local-worker escalation policy.
+Retain any stricter applicable allowlist. Model choice does not replace fresh reviewer context or repository gates. Follow [the root protocol](docs/brain/ORCHESTRATOR_PROTOCOL.md) for worker ownership and escalation; verify the executor exposes an option before recommending it.
 
-Reasoning:
-
-- Low: straightforward/local work.
-- Medium: normal implementation/investigation.
-- High: difficult ambiguity/integration/consequential review.
-- Extra-high: only when clearly justified.
-
-Do not retry a failed model/reasoning configuration unchanged without new evidence. Escalate only when difficulty, ambiguity, context, risk, or failed verification warrants it.
+Do not retry a failed model/reasoning configuration unchanged without new evidence. Reassess the failure before proposing an authorized change.
 
 ## Operational rules for this repo
 
@@ -203,10 +194,10 @@ Prefer enforcement over prose when practical:
 Use `docs/brain/WORKED_LEARNINGS.md`, `FAILED_APPROACHES.md`, `KNOWN_ISSUES.md`, or `DEPLOYMENT_NOTES.md` only for durable knowledge that is likely to prevent meaningful future rework. Do not store secrets, raw logs, temporary state, or routine debugging history.
 
 
-## Scoped Sol/Terra delegation
+## Scoped delegation
 
-Use GPT-6.1 Sol to coordinate and verify bounded engineering work; delegate scoped computer use or customer-facing writing to GPT-6.1 Terra and simple helpers to GPT-6 Luna. No Fast mode. Parent and worker agree scope, plan, owned paths, exclusions and acceptance before implementation. Delegate only when the benefit exceeds briefing/review overhead; tiny tasks can stay with the coordinator.
+Follow [the model and reasoning rules](#model-and-reasoning-routing). No Fast mode. Parent and worker agree scope, plan, owned paths, exclusions and acceptance before implementation. Delegate only when the benefit exceeds briefing/review overhead; tiny tasks can stay with the coordinator.
 
 Keep one browser/desktop owner per shared session. Explicitly release custody before another agent acts. A worker returns the result, actual model/reasoning, commit/artifact identity, evidence, checks run and uncertainties. Sol verifies observable outcomes, factual/voice constraints and required exact-HEAD code review/CI; the implementer is not its own independent reviewer. Missing access or a denied action is a blocker, not permission to try another route.
 
-Native Terra execution was confirmed by the parent on2026-10-26. Select only model/reasoning combinations exposed by the current execution surface: native Codex options and API reasoning options differ. Medium is the usual Terra starting point; High requires task justification. This guidance changes no running root model, global settings, other users' defaults, workspace entitlements or tool permissions. API model selection and credentials are separate. Existing approval, ownership and release gates remain in force.
+Select only model/reasoning combinations verified on the current execution surface; native Codex options and API options differ. Preserve configured effort unless the user authorizes a change. This guidance changes no running root model, global settings, other users' defaults, workspace entitlements or tool permissions. API model selection and credentials are separate. Existing approval, ownership and release gates remain in force.

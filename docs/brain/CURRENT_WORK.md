@@ -1,6 +1,6 @@
 # Current Work
 
-Updated: 2026-10-24
+Updated: 2026-11-08
 
 Use this file when the user asks to continue the project, continue a roadmap, decide what to do next, or coordinate work across multiple EverywherePoster workstreams. Do not load it for a narrow bug with an already-named issue or file unless the current priority matters.
 
@@ -11,6 +11,18 @@ For long-running local Codex Desktop orchestration, also follow `docs/brain/ORCH
 ## Current release objective
 
 Get EverywherePoster to a safe early paid launch with the core repurposing/publishing workflow usable, external social-app reviews completed, and production operations verified.
+
+## Launch-readiness setup checkpoint — 2026-11-08
+
+Use [LAUNCH_READINESS_SCOPE.md](LAUNCH_READINESS_SCOPE.md) for the five work packages, acceptance criteria, exclusions and sequence. The separately supplied CONTROL-PLAN.md governs maintenance; it remains outside tracked files and must be available before dependent work.
+
+- Live GitHub checkpoint verified November 8: canonical `main` is `a237be798549f9d48d80a6b1f351164d9b2257b4`; [PR #327](https://github.com/celleree/everywhereposter/pull/327) is OPEN, DRAFT and UNMERGED at `b6402e4e888be9d85fb9950f1b62de3a171c5bfb`. Revalidate before execution.
+- Production remains on hold. Maintenance controls were last documented as unapplied; current runtime identity, health and controller exclusion need fresh verification. CI, Preview and repository state do not establish those facts.
+- Current authorization covers setup, documentation and readiness preparation only. No package implementation, controller implementation, control application, app/proxy interruption, image build/publication, merge, deployment, recovery re-enable, migration/replay/restore, external publication or new charge is authorized.
+- Preserve the editor pause until package 5 is selected, after core-flow and payment gates. Standard output acceptance remains required if the launch promise relies on it; Cooked activation and prototype translation remain separate.
+- PRs #263, #113 and #110 overlap this file and remain frozen. Do not import or synchronize their work into this setup change.
+
+One root coordinator owns sequencing, shared contracts and integration; use one implementation worker by default, independently bounded additional workers only, one-level delegation and fresh final review independent of design/implementation.
 
 ## Priority workstreams
 
@@ -48,7 +60,7 @@ Canonical roadmap: `docs/brain/DEPLOYMENT_PERFORMANCE_ROADMAP.md`.
 
 The current pipeline is much slower than the TRA/Vercel workflow because EverywherePoster performs full GitHub Actions validation, Docker packaging/cache export, GHCR transfer, image extraction, and container startup work.
 
-Current checkpoint:
+Historical operations checkpoint (October 24; retained roadmap evidence, not current production state or execution authority):
 
 - Phase 0 baseline / dependency graph — COMPLETE.
 - Phase 1A — COMPLETE via PR #100. PR CI fell from the 13m46s–13m55s baseline to 10m05s on the measured post-change run, with 3m56s of actual quality/Docker overlap (about 27% faster).
@@ -61,7 +73,7 @@ Current checkpoint:
 - Phase 6 — PARTIAL: docs-only PR #104 run [34912004960](https://github.com/celleree/everywhereposter/actions/runs/34912004960) completed in 313s with a 285s active critical path and skipped Docker validation/package work. This single observation does not establish causal speedup or complete the representative matrix.
 - Do not rerun Phase 0 unless new evidence materially contradicts the recorded baseline.
 
-Remaining roadmap:
+Historical remaining roadmap (revalidate before selection; the November 8 launch-readiness sequence takes priority):
 
 1. Phase 2 — complete and verify the production multi-stage runtime image under Issue #15.
 2. Phase 3 — optimize BuildKit/pnpm caching against the settled Phase 2 image and measurements.
@@ -120,7 +132,9 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-Start new work from current main and define it in a bounded task with explicit owned, shared, and prohibited paths. Video-editor tasks must preserve Standard routing and keep Cooked activation/runtime work and PR #251 visual-prototype translation separate unless an approved task explicitly joins them. Record unresolved capacity, deployment, or activation decisions rather than inferring them from repository state.
+Prepare the foreground maintenance-controller implementation proposal, isolated verification plan and review package against the separately supplied CONTROL-PLAN.md. Return the proposed artifact set and remaining gates; do not implement the controller or apply controls under the current setup-only authorization. See [LAUNCH_READINESS_SCOPE.md](LAUNCH_READINESS_SCOPE.md).
+
+Any later implementation starts from current main with explicit owned, shared and prohibited paths. Video-editor tasks must preserve Standard routing and keep Cooked activation/runtime work and PR #251 visual-prototype translation separate unless an approved task explicitly joins them. Record unresolved capacity, deployment or activation decisions rather than inferring them from repository state.
 
 The deployment-performance auto-merge authorization does not authorize production deployment. All other existing human gates remain unchanged.
 

@@ -1,18 +1,36 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT=$(git rev-parse --show-toplevel)
+node --test "$ROOT/scripts/agents/review-evidence.test.mjs"
+bash "$ROOT/scripts/agents/test-issue-implementation-contract.sh"
+node --test "$ROOT/scripts/agents/task-path-scope.test.mjs"
+node --test "$ROOT/scripts/agents/task-recovery.test.mjs"
+node --test "$ROOT/scripts/agents/codex-execution.test.mjs"
 REAL_GIT=$(command -v git)
 TEST_ROOT=$(mktemp -d)
+PRIVATE_ROOT=$(mktemp -d "$HOME/.ep-recovery-test.XXXXXX")
 BASE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 HEAD_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
-mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/repo"
+trap 'rm -rf "$TEST_ROOT" "$PRIVATE_ROOT"' EXIT HUP INT TERM
+mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/repo/scripts/agents"
+cp "$ROOT/scripts/agents/task-recovery.mjs" "$ROOT/scripts/agents/codex-execution.mjs" "$ROOT/scripts/agents/codex-execution-policy.json" "$TEST_ROOT/repo/scripts/agents/"
 export REAL_GIT TEST_ROOT BASE_SHA HEAD_SHA
 
 cat > "$TEST_ROOT/bin/git" <<'MOCK'
 #!/usr/bin/env bash
 printf 'git:%s\n' "$*" >> "$TEST_LOG"
+if [[ "${1:-}" == --literal-pathspecs ]]; then
+  shift
+  case "$*" in
+    'rev-parse HEAD') echo "$HEAD_SHA" ;;
+    'branch --show-current') echo main ;;
+    diff*|ls-files*) ;;
+    *) exit 2 ;;
+  esac
+  exit 0
+fi
 case "$*" in
+  'rev-parse HEAD') echo "$HEAD_SHA" ;;
   'rev-parse --show-toplevel') echo "$TEST_ROOT/repo" ;;
   'status --porcelain') ;;
   'remote get-url origin') echo https://github.com/celleree/everywhereposter.git ;;
@@ -60,9 +78,15 @@ case "$*" in
   'repo view --json visibility --jq .visibility') echo "$VISIBILITY" ;;
   'auth status') [[ "$SCENARIO" == gh-credentials ]] && exit 0; exit 1 ;;
   'pr view '*)
-    state=OPEN; cross=false; base=main; author=celleree
+    state=OPEN; cross=false; base=main; author=celleree; is_bot=false
     case "$SCENARIO" in
       fork) cross=true ;; closed) state=CLOSED ;; other-base) base=other ;; author) author=stranger ;;
+      canonical-actions-bot) author='github-actions[bot]'; is_bot=true ;;
+      cli-actions-bot) author=app/github-actions; is_bot=true ;;
+      nonbot-actions-alias) author=app/github-actions ;;
+      missing-bot-identity) author=app/github-actions; is_bot=null ;;
+      string-bot-identity) author=app/github-actions; is_bot='"true"' ;;
+      other-app-bot) author=app/other-app; is_bot=true ;;
     esac
     head_sha=$HEAD_SHA
     base_sha=$BASE_SHA
@@ -74,8 +98,8 @@ case "$*" in
     [[ "$SCENARIO" != missing-base ]] || base_sha=
     [[ "$SCENARIO" != malformed-head ]] || head_sha=not-a-full-commit-sha
     jq -cn --arg state "$state" --argjson cross "$cross" --arg base "$base" --arg author "$author" \
-      --arg baseOid "$base_sha" --arg headOid "$head_sha" \
-      '{state:$state,isCrossRepository:$cross,baseRefName:$base,baseRefOid:$baseOid,headRefOid:$headOid,author:{login:$author}}' ;;
+      --arg baseOid "$base_sha" --arg headOid "$head_sha" --argjson isBot "$is_bot" \
+      '{state:$state,isCrossRepository:$cross,baseRefName:$base,baseRefOid:$baseOid,headRefOid:$headOid,author:{login:$author,is_bot:$isBot}}' ;;
   'pr diff '*) echo 'Synthetic review fixture' ;;
   'pr comment '*) echo posted >> "$TEST_LOG" ;;
   *) echo "Unexpected gh invocation: $*" >&2; exit 2 ;;
@@ -104,17 +128,22 @@ run_case() {
   local case_dir="$TEST_ROOT/$name"
   local runner_home="$case_dir/runner-home"
   mkdir -p "$runner_home"
+  mkdir -m 700 "$PRIVATE_ROOT/$name"
   case "$name" in
     netrc) touch "$runner_home/.netrc" ;;
     windows-netrc) touch "$runner_home/_netrc" ;;
     stored-credentials) touch "$runner_home/.git-credentials" ;;
   esac
   PATH="$TEST_ROOT/bin:$PATH" TEST_LOG="$case_dir/log" SCENARIO="$name" VISIBILITY="$visibility" \
-    HOME="$runner_home" GH_TOKEN=synthetic-workflow-token GITHUB_ACTOR="$actor" GITHUB_TRIGGERING_ACTOR="$rerunner" \
+    CODEX_TASK_MODEL=gpt-6.1-sol CODEX_TASK_REASONING_EFFORT=high CODEX_TASK_SETTINGS_SOURCE=github-actions-vars \
+    CODEX_RECOVERY_ROOT="$PRIVATE_ROOT/$name" HOME="$runner_home" GH_TOKEN=synthetic-workflow-token GITHUB_ACTOR="$actor" GITHUB_TRIGGERING_ACTOR="$rerunner" \
     sh "$ROOT/scripts/agents/codex-task.sh" "$mode" 221 > "$case_dir/output" 2>&1 || status=$?
   if [[ "$status" != "$expected" ]]; then cat "$case_dir/output"; echo "FAIL $name: expected $expected, got $status"; exit 1; fi
   if [[ "$expected" == 0 ]]; then
     grep -Fq -- '--sandbox read-only' "$case_dir/log"
+    ! grep -Fq -- 'features.use_legacy_landlock=' "$case_dir/log"
+    grep -Fq -- '--config features.apps=false --config features.plugins=false --config features.skill_mcp_dependency_install=false --config tools.web_search=false' "$case_dir/log"
+    grep -Fq -- '--model gpt-6.1-sol --config model_reasoning_effort="high" --json' "$case_dir/log"
     grep -Fxq posted "$case_dir/log"
   elif [[ "$name" != stale ]] && grep -Fq 'codex:' "$case_dir/log"; then
     echo "FAIL $name reached Codex"; exit 1
@@ -132,10 +161,19 @@ grep -Fq 'git:-c core.hooksPath=/dev/null worktree add --detach ' "$TEST_ROOT/pu
 grep -Fq "git:--no-pager diff --no-ext-diff --no-textconv --binary $BASE_SHA...$HEAD_SHA" "$TEST_ROOT/public-review/log"
 grep -Eq 'codex-cwd:.*/review-tree$' "$TEST_ROOT/public-review/log"
 run_case private-review review PRIVATE 0
+run_case canonical-actions-bot review PUBLIC 0
+run_case cli-actions-bot review PUBLIC 0
+for scenario in nonbot-actions-alias missing-bot-identity string-bot-identity other-app-bot; do
+  run_case "$scenario" review PUBLIC 1
+done
 run_case stale review PUBLIC 1
 grep -Fq 'codex:' "$TEST_ROOT/stale/log"
 ! grep -Fxq posted "$TEST_ROOT/stale/log"
 for mode in plan implement repair memory; do run_case "public-$mode" "$mode" PUBLIC 1; done
+for mode in plan repair memory; do
+  CODEX_PUBLIC_DOCS_ENABLED=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main \
+    run_case "public-enabled-$mode" "$mode" PUBLIC 1
+done
 for scenario in other-repo actor rerunner fork closed other-base author missing-base missing-head malformed-head gh-credentials local-header helper scoped-helper header scoped-header filter-driver retrievable config-error netrc windows-netrc stored-credentials; do
   run_case "$scenario" review PUBLIC 1
 done

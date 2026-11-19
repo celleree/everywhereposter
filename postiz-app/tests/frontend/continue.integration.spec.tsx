@@ -34,10 +34,6 @@ jest.mock('@gitroom/frontend/components/layout/redirect', () => ({
   Redirect: () => null,
 }));
 jest.mock(
-  '@gitroom/frontend/components/launches/helpers/use.integration',
-  () => ({ IntegrationContext: require('react').createContext({}) })
-);
-jest.mock(
   '@gitroom/frontend/components/launches/helpers/use.custom.provider.function',
   () => ({ useCustomProviderFunction: () => ({ get: jest.fn() }) })
 );

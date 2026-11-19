@@ -165,6 +165,18 @@ export const useMenuItem = () => {
       path: '/media',
     },
     {
+      name: t('manage_channels', 'Channels'),
+      icon: (
+        <svg aria-hidden="true" width="21" height="21" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="2" />
+          <rect x="14" y="14" width="7" height="7" rx="2" />
+          <path d="M14 6h4v4M6 14v4h4M10 6h4M18 10v4M6 10v4M10 18h4" />
+        </svg>
+      ),
+      path: '/channels',
+    },
+    {
       name: t('video_editor', 'Video Editor'),
       icon: (
         <svg aria-hidden="true" width="21" height="21" viewBox="0 0 24 24" fill="none"

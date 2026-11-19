@@ -7,7 +7,7 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import sharp from 'sharp';
-import { lookup } from 'mime-types';
+import { prepareProviderMedia } from '@gitroom/nestjs-libraries/upload/provider-media';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 import {
   BadBody,
@@ -21,6 +21,8 @@ import { LinkedinDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-sett
 import imageToPDF from 'image-to-pdf';
 import { Readable } from 'stream';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { fromBuffer } = require('file-type');
 
 @Rules(
   'LinkedIn can have maximum one attachment when selecting video, when choosing a carousel on LinkedIn minimum amount of attachment must be two, and only pictures, if uploading a video, LinkedIn can have only one attachment'
@@ -304,15 +306,16 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   }
 
   protected async uploadPicture(
-    fileName: string,
+    _fileName: string,
     accessToken: string,
     personId: string,
     picture: any,
     type = 'personal' as 'company' | 'personal'
   ) {
-    // Determine the appropriate endpoint based on file type
-    const isVideo = fileName.indexOf('mp4') > -1;
-    const isPdf = fileName.toLowerCase().indexOf('pdf') > -1;
+    // Generated PDF carousels and ordinary media are identified by their bytes.
+    const detected = await fromBuffer(picture);
+    const isVideo = ['video/mp4', 'video/quicktime'].includes(detected?.mime);
+    const isPdf = detected?.mime === 'application/pdf';
 
     let endpoint: string;
     if (isVideo) {
@@ -359,7 +362,8 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     const finalOutput = video || image || document;
 
     const etags = [];
-    for (let i = 0; i < picture.length; i += 1024 * 1024 * 2) {
+    const partSize = isVideo || isPdf ? 1024 * 1024 * 2 : picture.length;
+    for (let i = 0; i < picture.length; i += partSize) {
       const upload = await this.fetch(
         sendUrlRequest,
         {
@@ -372,9 +376,9 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
               ? { 'Content-Type': 'application/octet-stream' }
               : isPdf
               ? { 'Content-Type': 'application/pdf' }
-              : {}),
+              : { 'Content-Type': detected?.mime || 'application/octet-stream' }),
           },
-          body: picture.slice(i, i + 1024 * 1024 * 2),
+          body: picture.slice(i, i + partSize),
         },
         'linkedin',
         0,
@@ -554,18 +558,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   }
 
   private async prepareMediaBuffer(mediaUrl: string): Promise<Buffer> {
-    const isVideo = mediaUrl.indexOf('mp4') > -1;
-
-    if (isVideo) {
-      return Buffer.from(await readOrFetch(mediaUrl));
-    }
-
-    return await sharp(await readOrFetch(mediaUrl), {
-      animated: lookup(mediaUrl) === 'image/gif',
-    })
-      .toFormat('jpeg')
-      .resize({ width: 1000 })
-      .toBuffer();
+    return (await prepareProviderMedia(Buffer.from(await readOrFetch(mediaUrl)), 'linkedin')).buffer;
   }
 
   private buildPostContent(isPdf: boolean, mediaIds: string[], pdfTitle?: string) {

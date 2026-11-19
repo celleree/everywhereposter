@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "settingsSource": "github-actions-vars",
+  "globalAllowlist": [
+    "gpt-6-luna",
+    "gpt-6.1-sol",
+    "gpt-6-astra"
+  ],
+  "unattendedAllowlist": [
+    "gpt-6-luna",
+    "gpt-6.1-sol"
+  ],
+  "advertisedSnapshot": {
+    "source": "native-models-cache",
+    "fetchedAt": "2026-10-25T07:46:44.595003279Z",
+    "clientVersion": "0.164.0",
+    "sha256": "403d0e7c553d105c3b4d04c78f3c69078efa57e8bd2d7425fe8e4ef27bc4fc3f",
+    "models": {
+      "gpt-6-luna": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "gpt-6.1-sol": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "gpt-6-astra": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    }
+  },
+  "cliObservation": {
+    "version": "codex-cli 0.163.0",
+    "source": "separate-native-observation"
+  },
+  "remoteSupport": "unverified",
+  "usageTelemetry": {
+    "source": "codex-exec-jsonl",
+    "event": "turn.completed",
+    "documentation": "https://learn.chatgpt.com/docs/non-interactive-mode"
+  }
+}
