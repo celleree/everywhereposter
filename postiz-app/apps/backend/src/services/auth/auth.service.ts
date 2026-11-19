@@ -76,12 +76,7 @@ export class AuthService {
             : false;
 
         const obj = { addedOrg, jwt: await this.jwt(create.users[0].user) };
-        await this._emailService.sendEmail(
-          body.email,
-          'Activate your account',
-          `Click <a href="${process.env.FRONTEND_URL}/auth/activate/${obj.jwt}">here</a> to activate your account`,
-          'top'
-        );
+        await this.sendActivationEmail(body.email, obj.jwt);
         return obj;
       }
 
@@ -279,16 +274,21 @@ export class AuthService {
       throw new Error('Account is already activated');
     }
 
-    const jwt = await this.jwt(user);
-
-    await this._emailService.sendEmail(
-      user.email,
-      'Activate your account',
-      `Click <a href="${process.env.FRONTEND_URL}/auth/activate/${jwt}">here</a> to activate your account`,
-      'top'
-    );
+    await this.sendActivationEmail(user.email, await this.jwt(user));
 
     return true;
+  }
+
+  private sendActivationEmail(email: string, jwt: string) {
+    const logoBaseUrl = process.env.FRONTEND_URL?.replace(/\/+$/, '');
+
+    return this._emailService.sendEmail(
+      email,
+      'Activate your account',
+      `<img src="${logoBaseUrl}/favicon.png" alt="EverywherePoster" width="64" height="64" style="display: block; margin-bottom: 16px;">
+      Click <a href="${process.env.FRONTEND_URL}/auth/activate/${jwt}">here</a> to activate your account`,
+      'top'
+    );
   }
 
   oauthLink(provider: string, query?: any) {
