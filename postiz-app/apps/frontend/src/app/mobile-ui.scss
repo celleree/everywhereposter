@@ -218,7 +218,7 @@
   min-width: 0; min-height: 52px; display: flex; align-items: center; gap: 8px;
   padding: 10px; border-radius: 8px; text-align: left; font-size: 13px; line-height: 1.35;
   background: var(--new-bgColor); color: var(--new-btn-text); border: 1px solid var(--new-border);
-  img { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
+  img { width: 24px; height: 24px; border-radius: 6px; object-fit: contain; flex-shrink: 0; }
   span { overflow-wrap: anywhere; }
 }
 .channel-choice:not(:disabled):hover { background: var(--new-box-hover); }
