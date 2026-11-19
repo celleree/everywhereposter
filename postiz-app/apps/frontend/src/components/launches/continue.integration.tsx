@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HttpStatusCode } from 'axios';
 import { useRouter } from 'next/navigation';
 import { Redirect } from '@gitroom/frontend/components/layout/redirect';
@@ -76,7 +76,7 @@ export const ContinueIntegration: FC<{
   logged: boolean;
 }> = (props) => {
   const { provider, searchParams, logged } = props;
-  const { push } = useRouter();
+  const { push, replace } = useRouter();
   const t = useT();
   const fetch = useFetch();
   const { extensionId, backendUrl } = useVariables();
@@ -86,6 +86,10 @@ export const ContinueIntegration: FC<{
   const [successState, setSuccessState] = useState<SuccessState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [failureRedirectUrl, setFailureRedirectUrl] = useState('/launches');
+  const flowVersion = useRef(0);
+  const exited = useRef(false);
+  const saving = useRef(false);
+  const isMeta = provider === 'facebook' || provider === 'instagram';
 
   const getFailureFallback = useCallback(
     (onboarding?: boolean) =>
@@ -107,6 +111,17 @@ export const ContinueIntegration: FC<{
     },
     [getFailureFallback]
   );
+
+  const backToApp = useCallback(() => {
+    if (exited.current) return;
+    exited.current = true;
+    flowVersion.current += 1;
+    const returnRoute = error
+      ? failureRedirectUrl
+      : getIntegrationReturnRoute(getFailureFallback(twoStepState?.onboarding));
+    clearIntegrationReturnRoute();
+    replace(returnRoute);
+  }, [error, failureRedirectUrl, getFailureFallback, replace, twoStepState]);
 
   // Helper to handle navigation - redirects if logged or returnURL exists, otherwise shows inline
   const navigateOrShow = useCallback(
@@ -166,139 +181,168 @@ export const ContinueIntegration: FC<{
   }, []);
 
   useEffect(() => {
+    const version = ++flowVersion.current;
+    const controller = new AbortController();
+    const isCurrent = () => version === flowVersion.current;
+    exited.current = false;
     (async () => {
-      if (
-        provider === 'youtube' &&
-        firstValue(modifiedParams.state) === 'login' &&
-        firstValue(modifiedParams.code)
-      ) {
-        push(
-          `/auth?provider=GOOGLE&code=${encodeURIComponent(
-            firstValue(modifiedParams.code)
-          )}`
-        );
-        return;
-      }
-
-      const providerErrorMessage = getProviderErrorMessage(modifiedParams);
-      if (providerErrorMessage) {
-        completeFailure(providerErrorMessage);
-        return;
-      }
-
-      const timezone = String(dayjs.tz().utcOffset());
-
-      // Try public endpoint first (handles both public and fallback scenarios)
-      let data = await fetch(`/integrations/social-connect/${provider}`, {
-        method: 'POST',
-        body: JSON.stringify({ ...modifiedParams, timezone }),
-      });
-
-      // If public endpoint fails with specific errors, try authenticated endpoint
-      if (data.status === HttpStatusCode.BadRequest) {
-        const errorData = await data.json().catch(() => ({}));
-        // "Invalid connection type" means this wasn't started as a public flow
+      try {
         if (
-          errorData.message?.includes('Invalid connection type') ||
-          errorData.message?.includes('Invalid or expired state')
+          provider === 'youtube' &&
+          firstValue(modifiedParams.state) === 'login' &&
+          firstValue(modifiedParams.code)
         ) {
-          data = await fetch(`/integrations/social-connect/${provider}`, {
-            method: 'POST',
-            body: JSON.stringify({ ...modifiedParams, timezone }),
-          });
-        }
-      }
-
-      if (data.status === HttpStatusCode.PreconditionFailed) {
-        const { returnURL } = await data.json().catch(() => ({}));
-        completeFailure(
-          'Precondition failed',
-          `/launches?precondition=true`,
-          returnURL || getFailureFallback()
-        );
-        return;
-      }
-
-      if (data.status === HttpStatusCode.NotAcceptable) {
-        const { msg, returnURL } = await data.json();
-        completeFailure(
-          msg,
-          `/launches?msg=${msg}`,
-          returnURL || getFailureFallback()
-        );
-        return;
-      }
-
-      if (
-        data.status !== HttpStatusCode.Ok &&
-        data.status !== HttpStatusCode.Created
-      ) {
-        const errorData = await data.json().catch(() => ({}));
-        completeFailure(
-          errorData.message || errorData.msg || 'Could not add provider'
-        );
-        return;
-      }
-
-      const {
-        inBetweenSteps,
-        id,
-        onboarding: resOnboarding,
-        pages,
-        returnURL,
-        extensionToken,
-      } = await data.json();
-      const onboarding = resOnboarding || searchParams.onboarding === 'true';
-
-      // Store refresh token in extension for background cookie refresh
-      if (
-        extensionToken &&
-        extensionId &&
-        typeof chrome !== 'undefined' &&
-        chrome?.runtime?.sendMessage
-      ) {
-        try {
-          chrome.runtime.sendMessage(
-            extensionId,
-            {
-              type: 'STORE_REFRESH_TOKEN',
-              provider,
-              integrationId: id,
-              jwt: extensionToken,
-              backendUrl,
-            },
-            () => {}
+          push(
+            `/auth?provider=GOOGLE&code=${encodeURIComponent(
+              firstValue(modifiedParams.code)
+            )}`
           );
-        } catch {
-          // Silently ignore — extension may not be available
+          return;
+        }
+
+        const providerErrorMessage = getProviderErrorMessage(modifiedParams);
+        if (providerErrorMessage) {
+          completeFailure(providerErrorMessage);
+          return;
+        }
+
+        const timezone = String(dayjs.tz().utcOffset());
+
+        // Try public endpoint first (handles both public and fallback scenarios)
+        let data = await fetch(`/integrations/social-connect/${provider}`, {
+          method: 'POST',
+          body: JSON.stringify({ ...modifiedParams, timezone }),
+          signal: controller.signal,
+        });
+
+        if (!isCurrent()) return;
+
+        // If public endpoint fails with specific errors, try authenticated endpoint
+        if (data.status === HttpStatusCode.BadRequest) {
+          const errorData = await data.json().catch(() => ({}));
+          if (!isCurrent()) return;
+          // "Invalid connection type" means this wasn't started as a public flow
+          if (
+            errorData.message?.includes('Invalid connection type') ||
+            errorData.message?.includes('Invalid or expired state')
+          ) {
+            data = await fetch(`/integrations/social-connect/${provider}`, {
+              method: 'POST',
+              body: JSON.stringify({ ...modifiedParams, timezone }),
+              signal: controller.signal,
+            });
+          }
+        }
+
+        if (!isCurrent()) return;
+
+        if (data.status === HttpStatusCode.PreconditionFailed) {
+          const { returnURL } = await data.json().catch(() => ({}));
+          if (!isCurrent()) return;
+          completeFailure(
+            'Precondition failed',
+            `/launches?precondition=true`,
+            returnURL || getFailureFallback()
+          );
+          return;
+        }
+
+        if (data.status === HttpStatusCode.NotAcceptable) {
+          const { msg, returnURL } = await data.json();
+          if (!isCurrent()) return;
+          completeFailure(
+            msg,
+            `/launches?msg=${msg}`,
+            returnURL || getFailureFallback()
+          );
+          return;
+        }
+
+        if (
+          data.status !== HttpStatusCode.Ok &&
+          data.status !== HttpStatusCode.Created
+        ) {
+          const errorData = await data.json().catch(() => ({}));
+          if (!isCurrent()) return;
+          completeFailure(
+            errorData.message || errorData.msg || 'Could not add provider'
+          );
+          return;
+        }
+
+        const {
+          inBetweenSteps,
+          id,
+          onboarding: resOnboarding,
+          pages,
+          returnURL,
+          extensionToken,
+        } = await data.json();
+        if (!isCurrent()) return;
+        const onboarding = resOnboarding || searchParams.onboarding === 'true';
+
+        // Store refresh token in extension for background cookie refresh
+        if (
+          extensionToken &&
+          extensionId &&
+          typeof chrome !== 'undefined' &&
+          chrome?.runtime?.sendMessage
+        ) {
+          try {
+            chrome.runtime.sendMessage(
+              extensionId,
+              {
+                type: 'STORE_REFRESH_TOKEN',
+                provider,
+                integrationId: id,
+                jwt: extensionToken,
+                backendUrl,
+              },
+              () => {}
+            );
+          } catch {
+            // Silently ignore — extension may not be available
+          }
+        }
+
+        // If it's a two-step provider, show the selection UI inline
+        if (inBetweenSteps && !searchParams.refresh) {
+          setTwoStepState({
+            integrationId: id,
+            onboarding,
+            pages: pages || [],
+            returnURL,
+          });
+          return;
+        }
+
+        navigateOrShow(
+          `/launches?added=${provider}&msg=Channel Updated${
+            onboarding ? '&onboarding=true' : ''
+          }`,
+          returnURL,
+          'Channel Updated'
+        );
+      } catch {
+        if (isCurrent()) {
+          completeFailure(
+            'Could not finish loading this connection. Return to the app and start a new connection.'
+          );
         }
       }
-
-      // If it's a two-step provider, show the selection UI inline
-      if (inBetweenSteps && !searchParams.refresh) {
-        setTwoStepState({
-          integrationId: id,
-          onboarding,
-          pages: pages || [],
-          returnURL,
-        });
-        return;
-      }
-
-      navigateOrShow(
-        `/launches?added=${provider}&msg=Channel Updated${
-          onboarding ? '&onboarding=true' : ''
-        }`,
-        returnURL,
-        'Channel Updated'
-      );
     })();
+    return () => {
+      flowVersion.current += 1;
+      controller.abort();
+    };
   }, []);
 
   const onSave = useCallback(
     async (data: any) => {
-      if (!twoStepState) return;
-
+      if (!twoStepState || saving.current || exited.current) return;
+      const version = flowVersion.current;
+      saving.current = true;
+      setErrorMessage(null);
       setIsSaving(true);
 
       try {
@@ -312,15 +356,16 @@ export const ContinueIntegration: FC<{
           body: JSON.stringify({ ...modifiedParams, ...data }),
         });
 
+        if (version !== flowVersion.current) return;
         if (
           response.status !== HttpStatusCode.Ok &&
           response.status !== HttpStatusCode.Created
         ) {
           const errorData = await response.json().catch(() => ({}));
-          completeFailure(
-            errorData.message || 'Failed to save channel configuration',
-            '',
-            getFailureFallback(twoStepState.onboarding)
+          if (version !== flowVersion.current) return;
+          setErrorMessage(
+            errorData.message ||
+              'Failed to save channel configuration. You can choose another page or return to the app.'
           );
           return;
         }
@@ -332,8 +377,15 @@ export const ContinueIntegration: FC<{
           twoStepState.returnURL,
           'Channel Added'
         );
+      } catch {
+        if (version === flowVersion.current) {
+          setErrorMessage(
+            'Could not confirm the channel configuration. Return to the app and check your channels before trying again.'
+          );
+        }
       } finally {
-        setIsSaving(false);
+        saving.current = false;
+        if (version === flowVersion.current) setIsSaving(false);
       }
     },
     [twoStepState, fetch, modifiedParams, provider, navigateOrShow]
@@ -356,6 +408,45 @@ export const ContinueIntegration: FC<{
     };
     return names[provider] || provider;
   }, [provider]);
+
+  const recoveryControls = (
+    <div className="flex flex-col items-center gap-[12px] text-center">
+      <button
+        type="button"
+        onClick={backToApp}
+        className="min-h-[44px] px-[20px] py-[10px] rounded-[8px] border border-gray-500 focus-visible:outline focus-visible:outline-2"
+      >
+        {t('connection_back_to_app', 'Back to app')}
+      </button>
+      {isMeta && (
+        <p className="text-[14px] text-gray-400 max-w-[440px]">
+          {t(
+            'meta_connection_switch_account_help',
+            'Wrong Facebook account? Switch accounts on Facebook in this browser, then return to the app and choose Add Channel to start again.'
+          )}{' '}
+          <a
+            href="https://www.facebook.com/help/804757836392387"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            {t(
+              'meta_connection_switch_account_link',
+              'How to switch Facebook accounts'
+            )}
+          </a>
+        </p>
+      )}
+      {!logged && (
+        <p className="text-[14px] text-gray-400 max-w-[440px]">
+          {t(
+            'connection_guest_close_help',
+            'You can close this tab without signing in to the app. To try again, ask the person who sent this connection link for a new link.'
+          )}
+        </p>
+      )}
+    </div>
+  );
 
   // Success state for non-logged users without returnURL
   if (successState) {
@@ -399,7 +490,7 @@ export const ContinueIntegration: FC<{
   // Show the two-step selection UI
   if (twoStepState && Provider) {
     return (
-      <div className="flex flex-1 items-center justify-center text-white relative overflow-hidden">
+      <div className="flex flex-1 items-start justify-center text-white relative overflow-y-auto py-[20px]">
         {/* Background gradient decoration */}
         <div className="absolute inset-0 opacity-30">
           <div className="absolute top-[20%] left-[10%] w-[300px] h-[300px] bg-btnPrimary rounded-full blur-[120px]" />
@@ -420,6 +511,13 @@ export const ContinueIntegration: FC<{
                 )}
               </p>
             </div>
+
+            {errorMessage && (
+              <p role="alert" className="text-center text-[14px] text-red-400">
+                {errorMessage}
+              </p>
+            )}
+            {recoveryControls}
 
             <IntegrationContext.Provider
               value={{
@@ -457,7 +555,7 @@ export const ContinueIntegration: FC<{
 
   if (error) {
     return (
-      <div className="flex flex-1 items-center justify-center text-white relative overflow-hidden">
+      <div className="flex flex-1 items-start justify-center text-white relative overflow-y-auto py-[20px]">
         {/* Background gradient decoration */}
         <div className="absolute inset-0 opacity-30">
           <div className="absolute top-[20%] left-[10%] w-[300px] h-[300px] bg-btnPrimary rounded-full blur-[120px]" />
@@ -481,14 +579,17 @@ export const ContinueIntegration: FC<{
           <div className="text-[28px] font-semibold mb-[12px]">
             {t('could_not_add_provider', 'Could not add provider')}
           </div>
-          <div className="text-[16px] text-gray-400 max-w-[400px]">
+          <div role="alert" className="text-[16px] text-gray-400 max-w-[400px]">
             {errorMessage ||
               t(
                 'you_are_being_redirected_back',
                 'An error occurred. Please try again.'
               )}
           </div>
-          {logged && <Redirect url={failureRedirectUrl} delay={3000} />}
+          <div className="mt-[24px]">{recoveryControls}</div>
+          {logged && !isMeta && (
+            <Redirect url={failureRedirectUrl} delay={3000} />
+          )}
         </div>
       </div>
     );
@@ -496,7 +597,7 @@ export const ContinueIntegration: FC<{
 
   // Loading state
   return (
-    <div className="flex flex-1 items-center justify-center text-white relative overflow-hidden">
+    <div className="flex flex-1 items-start justify-center text-white relative overflow-y-auto py-[20px]">
       {/* Background gradient decoration */}
       <div className="absolute inset-0 opacity-30">
         <div className="absolute top-[20%] left-[10%] w-[300px] h-[300px] bg-btnPrimary rounded-full blur-[120px]" />
@@ -510,6 +611,7 @@ export const ContinueIntegration: FC<{
         <div className="text-[16px] text-gray-400">
           {t('please_wait', 'Please wait while we connect your account...')}
         </div>
+        <div className="mt-[24px]">{recoveryControls}</div>
         {/* Loading spinner */}
         <div className="mt-[32px] flex justify-center">
           <div className="w-[48px] h-[48px] border-[3px] border-ai border-t-transparent rounded-full animate-spin" />

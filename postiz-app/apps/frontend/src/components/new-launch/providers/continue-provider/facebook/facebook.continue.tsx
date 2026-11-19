@@ -20,16 +20,16 @@ export const FacebookContinue = withContinueProvider<FacebookItem, string>({
   titleDefault: 'Select Page:',
   emptyStateMessages: [
     {
-      key: 'we_couldn_t_find_any_business_connected_to_the_selected_pages',
-      text: "We couldn't find any business connected to the selected pages.",
+      key: 'facebook_connection_no_eligible_accounts',
+      text: 'No eligible Facebook Page was returned for this Facebook connection.',
     },
     {
-      key: 'we_recommend_you_to_connect_all_the_pages_and_all_the_businesses',
-      text: 'We recommend you to connect all the pages and all the businesses.',
+      key: 'facebook_connection_account_access_help',
+      text: 'Check that you signed in to the Facebook account that manages the intended Page and allowed access to it. A temporary loading problem can also cause this.',
     },
     {
-      key: 'please_close_this_dialog_delete_your_integration_and_add_a_new_channel_again',
-      text: 'Please close this dialog, delete your integration and add a new channel again.',
+      key: 'meta_connection_return_and_retry',
+      text: 'Use Back to app to leave this screen, then choose Add Channel to start a new connection. You do not need to delete an existing channel just to leave.',
     },
   ],
   getItemId: (item) => item.id,
