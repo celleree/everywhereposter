@@ -168,10 +168,16 @@ export function createOAuthPublishingTools(deps: Dependencies) {
       inputSchema: z.object({ integrationId: id }).strict(), mcp: oauthToolMeta('posts:write', true),
       execute: async ({ integrationId }) => {
         const { provider } = await account(integrationId);
+        const tools = (manager.getAllTools()[provider.identifier] || [])
+          .filter((t) => optionMethods[provider.identifier]?.includes(t.methodName));
+        // creatorInfo is OAuth-allowlisted but intentionally has no legacy @Tool decorator.
+        if (provider.identifier === 'tiktok' && !tools.some((t) => t.methodName === 'creatorInfo')) {
+          tools.push({ methodName: 'creatorInfo', description: 'Pass empty data to get current TikTok privacy and interaction options before preparing a post.', dataSchema: [] });
+        }
         return { platform: provider.identifier, maxLength: provider.maxLength(false),
           rules: manager.getAllRulesDescription()[provider.identifier],
           settings: provider.dto ? getValidationSchemas()[provider.dto.name] : {},
-          tools: (manager.getAllTools()[provider.identifier] || []).filter((t) => optionMethods[provider.identifier]?.includes(t.methodName)),
+          tools,
           ...(provider.identifier === 'lemmy' ? { publishingOptionsTool: 'lemmy_communities' } : {}),
           ...(provider.identifier === 'tiktok' ? { creatorInfo: 'Call triggerTool with methodName creatorInfo before choosing privacy and interaction settings.' } : {}),
         };

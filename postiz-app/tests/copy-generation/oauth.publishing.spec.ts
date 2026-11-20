@@ -1,7 +1,7 @@
 jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 jest.mock('@mastra/core/tools', () => ({ createTool: (definition: unknown) => definition }));
 import { createOAuthPublishingTools } from '../../libraries/nestjs-libraries/src/chat/oauth-publishing.tools';
-import { socialIntegrationList } from '../../libraries/nestjs-libraries/src/integrations/integration.manager';
+import { IntegrationManager, socialIntegrationList } from '../../libraries/nestjs-libraries/src/integrations/integration.manager';
 import { runWithContext } from '../../libraries/nestjs-libraries/src/chat/async.storage';
 import { BadBody, RefreshToken } from '../../libraries/nestjs-libraries/src/integrations/social.abstract';
 
@@ -250,10 +250,31 @@ describe('restricted OAuth publishing', () => {
       expect(deps.redis.set).not.toHaveBeenCalled();
       lookup.mockRestore(); network.mockRestore();
     });
+    it('lists the OAuth creator-info lookup exactly once without invoking the provider', async () => {
+      const schema = await call('integrationSchema', { integrationId: 'account' });
+      expect(schema.tools).toEqual([{ methodName: 'creatorInfo', description: 'Pass empty data to get current TikTok privacy and interaction options before preparing a post.', dataSchema: [] }]);
+      expect(schema.creatorInfo).toContain('creatorInfo');
+      expect(lookup).not.toHaveBeenCalled();
+      expect(new IntegrationManager().getAllTools().tiktok).toEqual([]);
+      await expect(call('integrationSchema', { integrationId: 'account' }, ['accounts:read'])).rejects.toThrow('scope');
+      deps.integrations.getIntegrationById.mockResolvedValue(null);
+      await expect(call('integrationSchema', { integrationId: 'foreign' })).rejects.toThrow('Account unavailable');
+      deps.integrations.getIntegrationById.mockResolvedValue({ providerIdentifier: 'tiktok', refreshNeeded: true });
+      await expect(call('integrationSchema', { integrationId: 'account' })).rejects.toThrow('Account unavailable');
+      expect(lookup).not.toHaveBeenCalled();
+    });
+    it('retains other providers’ descriptors without exposing creatorInfo', async () => {
+      deps.integrations.getIntegrationById.mockResolvedValue({ providerIdentifier: 'pinterest' });
+      const schema = await call('integrationSchema', { integrationId: 'account' });
+      expect(schema.tools).toEqual(new IntegrationManager().getAllTools().pinterest.filter((t) => t.methodName === 'boards'));
+      expect(schema.tools).toEqual(expect.arrayContaining([expect.objectContaining({ methodName: 'boards' })]));
+      expect(schema.tools).not.toEqual(expect.arrayContaining([expect.objectContaining({ methodName: 'creatorInfo' })]));
+    });
     it('projects only validated creator settings and never adds a retry', async () => {
       lookup.mockResolvedValue({ data: { ...creator, token: secret, creator_avatar_url: secret }, error: { code: 'ok', message: secret } });
       const { creator_nickname: name, ...settings } = creator;
-      expect(await call('triggerTool', args)).toEqual({ creator: { name, ...settings } });
+      const schema = await call('integrationSchema', { integrationId: 'account' });
+      expect(await call('triggerTool', { ...args, methodName: schema.tools[0].methodName, data: {} })).toEqual({ creator: { name, ...settings } });
       expect(lookup).toHaveBeenCalledTimes(1);
     });
     it.each([
