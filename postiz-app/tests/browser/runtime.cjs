@@ -1,4 +1,5 @@
 const http = require('node:http');
+const { createHash } = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
 const net = require('node:net');
@@ -70,8 +71,38 @@ let frontend;
 let ready = false;
 let stopping = false;
 let createdBranding = false;
+// Passive completion evidence only: finish means data handed to the OS, not browser receipt.
+const responseDiagnosticLimit = 512;
+let responseDiagnosticSequence = 0, responseRequestSequence = 0, responseDiagnosticDropped = 0;
+function responseDiagnostic(value) {
+  try {
+    const seq = ++responseDiagnosticSequence;
+    if (seq <= responseDiagnosticLimit) console.log('BROWSER_API_COMPLETION ' + JSON.stringify({ at: new Date().toISOString(), seq, ...value }));
+    else if (++responseDiagnosticDropped === 1) console.log('BROWSER_API_COMPLETION ' + JSON.stringify({ type: 'truncated', dropped: responseDiagnosticDropped }));
+  } catch { /* Diagnostics must not change fixture responses. */ }
+}
+process.once('exit', () => {
+  try { if (responseDiagnosticDropped) console.log('BROWSER_API_COMPLETION ' + JSON.stringify({ type: 'truncated', dropped: responseDiagnosticDropped })); } catch { /* Passive reporting. */ }
+});
+function observeResponseCompletion(req, res, url) {
+  try {
+    const pathname = url.pathname.replace(/^\/backend-api(?=\/)/, '');
+    const routeFamily = /^\/posts\/[^/]+\/facebook-published$/.test(pathname) ? 'facebook-published' : /^\/posts\/group\/[^/]+$/.test(pathname) ? 'post-group' : null;
+    if (req.method !== 'GET' || !routeFamily) return;
+    const requestSeq = ++responseRequestSequence;
+    const pathHash = createHash('sha256').update(pathname).digest('hex');
+    const started = process.hrtime.bigint();
+    const record = type => {
+      try { responseDiagnostic({ type, requestSeq, routeFamily, pathHash, elapsedMs: Number(process.hrtime.bigint() - started) / 1e6, status: type === 'ingress' ? null : res.statusCode, writableEnded: res.writableEnded, writableFinished: res.writableFinished }); } catch { /* Passive reporting. */ }
+    };
+    res.once('finish', () => record('finish'));
+    res.once('close', () => record('close'));
+    record('ingress');
+  } catch { /* Diagnostics must not change fixture routing. */ }
+}
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${apiPort}`);
+  observeResponseCompletion(req, res, url);
   if (studio && await studio.handle(req, res, url)) return;
   if (discovery && await discovery.handle(req, res, url, token)) return;
   if (videoEditor && await videoEditor.handle(req, res, url, token)) return;
