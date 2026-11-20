@@ -252,7 +252,11 @@ export function RegisterAfter({
                 <div className="w-full flex">
                   <Button
                     type="submit"
-                    className="flex-1 rounded-[10px] !h-[52px]"
+                    className={clsx(
+                      'flex-1 rounded-[10px] !h-[52px] focus-visible:!outline focus-visible:!outline-2 focus-visible:!outline-white focus-visible:outline-offset-2',
+                      !loading &&
+                        '!bg-white !text-neutral-900 transition-colors [@media(hover:hover)]:hover:!bg-neutral-600 [@media(hover:hover)]:hover:!text-white'
+                    )}
                     loading={loading}
                   >
                     {t('create_account', 'Create Account')}
