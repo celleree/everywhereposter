@@ -821,6 +821,19 @@ describe('ManageModal guided publishing bridge', () => {
   });
 
   it('submits enabled destinations with independent Review captions and preserved provider data', async () => {
+    providerResults[0].values = [
+      { id: '', content: 'Provider root', delay: undefined, media: [
+        { ...media[0], alt: '', thumbnailTimestamp: 0, originalName: 'discarded.mp4', chosen: true },
+      ] },
+      { content: 'Comment without media', delay: null },
+    ];
+    providerResults[1].settings = undefined;
+    providerResults[1].values = [
+      { id: 'company-root', content: 'Company root', delay: 0, media: null },
+      { id: 'company-comment', content: 'Company comment', delay: 7, media: [{ id: 'photo', path: '/photo.jpg' }] },
+    ];
+
+
     renderGuidedManageModal();
     fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
 
@@ -831,41 +844,30 @@ describe('ManageModal guided publishing bridge', () => {
     ]);
 
     const payload = postPayload();
-    expect(payload).toMatchObject({
-      type: 'now',
-      shortLink: true,
-      posts: [
-        {
-          integration: { id: founderLinkedIn.id },
-          settings: { __type: 'linkedin', visibility: 'PUBLIC' },
-          value: [
-            {
-              content: 'Edited founder caption.',
-              image: media,
-            },
-            { content: `Provider comment for ${founderLinkedIn.id}` },
-          ],
-        },
-        {
-          integration: { id: companyLinkedIn.id },
-          settings: {
-            __type: 'linkedin-page',
-            organization: 'company-1',
-          },
-          value: [
-            {
-              content: 'Edited company caption.',
-              image: media,
-            },
-            { content: `Provider comment for ${companyLinkedIn.id}` },
-          ],
-        },
-      ],
-    });
+    expect(payload).toMatchObject({ type: 'now', shortLink: true });
+    expect(payload.posts).toEqual([
+      {
+        integration: { id: founderLinkedIn.id }, group: expect.any(String),
+        settings: { __type: 'linkedin', visibility: 'PUBLIC' },
+        value: [
+          { content: 'Edited founder caption.', delay: 0, image: [{
+            id: 'video-1', path: 'https://media.example.com/video.mp4', alt: '',
+            thumbnail: 'https://media.example.com/video-thumb.jpg', thumbnailTimestamp: 0,
+          }] },
+          { content: 'Comment without media', delay: 0, image: [] },
+        ],
+      },
+      {
+        integration: { id: companyLinkedIn.id }, group: expect.any(String), settings: {},
+        value: [
+          { id: 'company-root', content: 'Edited company caption.', delay: 0, image: [] },
+          { id: 'company-comment', content: 'Company comment', delay: 7, image: [{ id: 'photo', path: '/photo.jpg' }] },
+        ],
+      },
+    ]);
+    expect(payload.posts[1].group).toBe(payload.posts[0].group);
     expect(payload.posts).toHaveLength(2);
-    expect(providerResults[0].values[0].content).toBe(
-      `Provider caption for ${founderLinkedIn.id}`
-    );
+    expect(providerResults[0].values[0].content).toBe('Provider root');
     expect(mockCloseAll).not.toHaveBeenCalled();
     expect(mockMutate).toHaveBeenCalledTimes(1);
     expect(
