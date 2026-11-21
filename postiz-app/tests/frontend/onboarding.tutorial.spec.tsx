@@ -35,6 +35,14 @@ it('keeps Back and Finish usable around the captioned tutorial', () => {
   expect(video.autoplay).toBe(false);
   expect(video.querySelector('track')?.getAttribute('srclang')).toBe('en');
   expect(video.querySelector('track')?.hasAttribute('default')).toBe(true);
+  const captions = { mode: 'disabled' };
+  Object.defineProperty(video, 'textTracks', { value: [captions] });
+  fireEvent.loadedMetadata(video);
+  expect(captions.mode).toBe('showing');
+  // A later metadata event must not undo the user's CC toggle.
+  captions.mode = 'disabled';
+  fireEvent.loadedMetadata(video);
+  expect(captions.mode).toBe('disabled');
   fireEvent.click(screen.getByRole('button', { name: 'Back' }));
   expect(pause).toHaveBeenCalledTimes(1);
   expect(screen.queryByLabelText('Learn How to Use EverywherePoster')).toBeNull();

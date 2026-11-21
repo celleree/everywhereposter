@@ -27,6 +27,7 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
       </style>
       <div className="flex flex-1 bg-newBgColorInner rounded-[20px] flex-col relative">
         <button
+          aria-label={t('close', 'Close')}
           className="outline-none absolute end-[20px] top-[20px] mantine-UnstyledButton-root mantine-ActionIcon-root hover:bg-tableBorder cursor-pointer mantine-Modal-close mantine-1dcetaa"
           type="button"
           onClick={modals.closeAll}
@@ -46,7 +47,7 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
             ></path>
           </svg>
         </button>
-        <div className="flex-1 flex p-[40px] mobile:p-[12px] min-w-0">
+        <div className="flex-1 flex p-[40px] mobile:p-[12px] mobile:pt-[56px] min-w-0">
           <div className="flex flex-col gap-[24px] flex-1">
             {/* Step indicators */}
             <div className="flex items-center justify-center gap-[16px] mobile:gap-[8px]">

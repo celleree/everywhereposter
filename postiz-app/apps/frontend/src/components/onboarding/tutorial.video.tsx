@@ -7,6 +7,7 @@ export const TutorialVideo = () => {
   const t = useT();
   const [failed, setFailed] = useState(false);
   const player = useRef<HTMLVideoElement>(null);
+  const selectedInitialCaptions = useRef(false);
   useEffect(() => {
     const video = player.current;
     return () => video?.pause();
@@ -25,6 +26,12 @@ export const TutorialVideo = () => {
         width={1440}
         height={900}
         onError={() => setFailed(true)}
+        onLoadedMetadata={(event) => {
+          if (selectedInitialCaptions.current) return;
+          selectedInitialCaptions.current = true;
+          const captions = event.currentTarget.textTracks[0];
+          if (captions) captions.mode = 'showing';
+        }}
       >
         <source src="/videos/everywhereposter-onboarding.mp4" type="video/mp4" />
         <track

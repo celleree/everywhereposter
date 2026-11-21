@@ -32,6 +32,11 @@ if (!billing) {
     await openApp(page, '/launches?onboarding=true');
     await page.getByRole('button', { name: 'Continue without channels', exact: true }).click();
     await playTutorial(page);
+    if (await page.evaluate(() => innerWidth <= 1025)) {
+      const close = await page.getByRole('button', { name: 'Close', exact: true }).boundingBox();
+      const step = await page.getByText('Watch Tutorial', { exact: true }).boundingBox();
+      expect(close!.y + close!.height).toBeLessThanOrEqual(step!.y);
+    }
     await capture(page, info, 'onboarding-tutorial-playing');
     const playing = await page.getByLabel(title, { exact: true }).elementHandle();
     await page.getByRole('button', { name: 'Back', exact: true }).click();
