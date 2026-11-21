@@ -142,7 +142,7 @@ test('Create: guided media affordance and valid reached steps survive backward n
   await expect(shell.locator('h1:visible')).toHaveCount(mobileProject(info) ? 0 : 1);
   await capture(page, info, 'guided-upload-empty');
   hasAccount = true;
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await openApp(page, '/create');
   await expect(shell).toBeVisible();
   await expect(connect).toBeVisible();
   await page.getByRole('button', { name: 'Media Library', exact: true }).click();
