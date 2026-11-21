@@ -123,6 +123,7 @@ export const GuidedComposerShell: FC<{
   );
   const {
     composerStep,
+    furthestComposerStep,
     sourceMediaId,
     transcriptionStatus,
     captionMode,
@@ -134,6 +135,7 @@ export const GuidedComposerShell: FC<{
     generationInputFingerprint,
     reviewDrafts,
     setComposerStep,
+    limitComposerProgress,
     selectSourceMedia,
     setTranscriptionState,
     nextComposerStep,
@@ -149,6 +151,7 @@ export const GuidedComposerShell: FC<{
   } = useGuidedComposerStore(
     useShallow((state) => ({
       composerStep: state.composerStep,
+      furthestComposerStep: state.furthestComposerStep,
       sourceMediaId: state.sourceMediaId,
       transcriptionStatus: state.transcriptionStatus,
       captionMode: state.captionMode,
@@ -160,6 +163,7 @@ export const GuidedComposerShell: FC<{
       generationInputFingerprint: state.generationInputFingerprint,
       reviewDrafts: state.reviewDrafts,
       setComposerStep: state.setComposerStep,
+      limitComposerProgress: state.limitComposerProgress,
       selectSourceMedia: state.selectSourceMedia,
       setTranscriptionState: state.setTranscriptionState,
       nextComposerStep: state.nextComposerStep,
@@ -279,6 +283,32 @@ export const GuidedComposerShell: FC<{
     enabledReviewDrafts.length > 0 &&
     !reviewHasBlockingError &&
     !reviewRegenerationLoading;
+  const progressInputFingerprint = JSON.stringify({
+    generationFingerprint,
+    mediaIds: globalMedia.map((media) => media.id),
+    content: global[0]?.content || '',
+  });
+  const previousProgressInputFingerprint = useRef(progressInputFingerprint);
+  useEffect(() => {
+    if (
+      previousProgressInputFingerprint.current !== progressInputFingerprint ||
+      !uploadStepValid
+    ) {
+      limitComposerProgress(uploadStepValid ? 'destinations' : 'upload');
+    }
+    previousProgressInputFingerprint.current = progressInputFingerprint;
+  }, [progressInputFingerprint, uploadStepValid, limitComposerProgress]);
+  const furthestStepIndex = GUIDED_COMPOSER_STEPS.indexOf(
+    furthestComposerStep ?? composerStep
+  );
+  const lastValidStepIndex = !uploadStepValid
+    ? 0
+    : !destinationStepValid ||
+      (sourceType !== 'text' && (!allSelectedDestinationsAvailable || !generationReady))
+    ? destinationStepIndex
+    : !reviewStepValid
+    ? reviewStepIndex
+    : GUIDED_COMPOSER_STEPS.length - 1;
   const navigationLocked =
     locked ||
     generationLoading ||
@@ -289,7 +319,7 @@ export const GuidedComposerShell: FC<{
     sourceType !== 'text' && currentStepIndex >= reviewStepIndex;
   const continueDisabled =
     navigationLocked ||
-    (composerStep === 'upload' && !uploadStepValid) ||
+    !uploadStepValid ||
     (destinationRequiredForCurrentStep && !destinationStepValid) ||
     (composerStep === 'destinations' &&
       sourceType !== 'text' &&
@@ -819,9 +849,6 @@ export const GuidedComposerShell: FC<{
       <header className="guided-composer-header border-b border-newBorder bg-newBgColorInner px-[24px] py-[18px] mobile:px-[14px] mobile:py-[14px]">
         <div className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-[16px]">
           <div className="mobile:hidden min-w-0">
-            <div className="text-[13px] font-[700] uppercase tracking-[0.12em] text-textColor/55">
-              Create post
-            </div>
             <h1
               ref={headingRef}
               tabIndex={-1}
@@ -842,8 +869,8 @@ export const GuidedComposerShell: FC<{
               {GUIDED_COMPOSER_STEPS.map((step, index) => {
                 const details = GUIDED_COMPOSER_STEP_DETAILS[step];
                 const isActive = step === composerStep;
-                const isComplete = index < currentStepIndex;
-                const isFuture = index > currentStepIndex;
+                const isReached = index <= Math.min(furthestStepIndex, lastValidStepIndex);
+                const isComplete = isReached && !isActive;
 
                 return (
                   <li key={step} className="flex items-center gap-[8px]">
@@ -852,7 +879,7 @@ export const GuidedComposerShell: FC<{
                       aria-label={`${details.title} Step ${index + 1} of ${GUIDED_COMPOSER_STEPS.length}`}
                       aria-current={isActive ? 'step' : undefined}
                       disabled={
-                        isFuture || navigationLocked || (locked && !isActive)
+                        !isReached || navigationLocked
                       }
                       onClick={() => setComposerStep(step)}
                       className={clsx(
