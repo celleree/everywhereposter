@@ -6,6 +6,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import {
   CaptionMode,
+  getGuidedTranscriptTextPresence,
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import {
@@ -38,6 +39,9 @@ const GUIDED_UPLOAD_PROGRESS_CLASS = 'guided-upload-progress-only';
 
 const ADDITIONAL_CONTEXT_HELP =
   'Add details that may not be clear from the photo or video, such as the target audience, key facts, names, offers, links, desired call to action, or anything the AI should avoid mentioning.';
+
+export const GUIDED_NO_SPEECH_MESSAGE =
+  'No speech was detected in this media. Add your own caption to continue, or try AI captions from available source details.';
 
 const CAPTION_OPTIONS: Array<{
   value: CaptionMode;
@@ -78,6 +82,7 @@ export const GuidedComposerUploadDetails: FC<{
     sourceCaption,
     sourceMediaId,
     transcriptionStatus,
+    transcriptionHasUsableText,
     transcriptionError,
     setAdditionalContext,
     setCaptionMode,
@@ -90,6 +95,7 @@ export const GuidedComposerUploadDetails: FC<{
       sourceCaption: state.sourceCaption,
       sourceMediaId: state.sourceMediaId,
       transcriptionStatus: state.transcriptionStatus,
+      transcriptionHasUsableText: state.transcriptionHasUsableText,
       transcriptionError: state.transcriptionError,
       setAdditionalContext: state.setAdditionalContext,
       setCaptionMode: state.setCaptionMode,
@@ -110,6 +116,8 @@ export const GuidedComposerUploadDetails: FC<{
       media.id === sourceMediaId && isGuidedMp4MovMedia(media)
   );
   const captionRequired = captionMode !== 'generate';
+  const noSpeech =
+    transcriptionStatus === 'READY' && transcriptionHasUsableText === false;
 
   const retryTranscription = async () => {
     if (!sourceMediaId) return;
@@ -129,7 +137,8 @@ export const GuidedComposerUploadDetails: FC<{
       setTranscriptionState(
         sourceMediaId,
         status.status,
-        status.error?.message || null
+        status.error?.message || null,
+        getGuidedTranscriptTextPresence(status.text)
       );
     } catch (error) {
       setTranscriptionState(
@@ -319,7 +328,7 @@ export const GuidedComposerUploadDetails: FC<{
       {!textMode && <MobileUploadContext disabled={disabled} />}
 
       {!!generationMedia && (
-        <details className="mobile-caption-options hidden">
+        <details className="mobile-caption-options hidden" open={noSpeech || undefined}>
           <summary>Caption options</summary>
           <fieldset disabled={disabled}>
             <legend className="sr-only">Caption options</legend>
@@ -360,9 +369,19 @@ export const GuidedComposerUploadDetails: FC<{
                   <span>Transcribing… You can continue choosing destinations.</span>
                 </>
               )}
-              {transcriptionStatus === 'READY' && (
-                <span>Transcript ready</span>
-              )}
+              {transcriptionStatus === 'READY' && (noSpeech ? (
+                <>
+                  <span>{GUIDED_NO_SPEECH_MESSAGE}</span>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setCaptionMode('use-everywhere')}
+                    className="min-h-[44px] rounded-[8px] border border-newBorder px-[12px] py-[6px] font-[700] text-white disabled:opacity-50"
+                  >
+                    Add my own caption
+                  </button>
+                </>
+              ) : <span>Transcript ready</span>)}
               {transcriptionStatus === 'FAILED' && (
                 <>
                   <span className="text-red-300">
@@ -423,7 +442,7 @@ export const GuidedComposerUploadDetails: FC<{
                 />
               </section>
 
-              <details className="mobile:hidden">
+              <details className="mobile:hidden" open={noSpeech || undefined}>
                 <summary className="cursor-pointer text-[14px] font-[600] text-newTextColor">Caption options</summary>
                 <div className="mobile:hidden mt-[14px] flex flex-col gap-[10px]">
                   {CAPTION_OPTIONS.map((option) => (
