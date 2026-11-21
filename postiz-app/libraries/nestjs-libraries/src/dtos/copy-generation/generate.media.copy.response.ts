@@ -98,6 +98,7 @@ export interface CopyGenerationBrief {
 export interface GenerateMediaCopyResult {
   platform: CopyPlatform;
   draft: string;
+  title?: string;
   origin: 'generated' | 'original' | 'adapted';
   angle?: string;
   hook?: string;
@@ -108,6 +109,14 @@ export interface GenerateMediaCopyResult {
   rewritten: boolean;
   warnings: CopyGenerationWarning[];
 }
+
+export const normalizeGeneratedYoutubeTitle = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const title = value.trim();
+  return title.length >= 2 && title.length <= 100 && !/[\r\n<>\x00-\x1f]/.test(title)
+    ? title
+    : undefined;
+};
 
 export interface GenerateMediaCopyResponse {
   requestId: string;

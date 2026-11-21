@@ -10,6 +10,7 @@ import {
   GenerateMediaCopyResponse,
   GenerateMediaCopyResult,
   ImagePlanItem,
+  normalizeGeneratedYoutubeTitle,
 } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
 import { TranscriptionLifecycleError } from '@gitroom/nestjs-libraries/database/prisma/media-transcription/media-transcription.service';
 import {
@@ -578,9 +579,11 @@ export class CopyGenerationService {
           });
         }
 
+        const title = platform === 'youtube' ? normalizeGeneratedYoutubeTitle(generated.title) : undefined;
         const result: GenerateMediaCopyResult = {
           platform,
           draft,
+          ...(title ? { title } : {}),
           origin: resultOrigin,
           ...(resultOrigin !== 'original'
             ? {
