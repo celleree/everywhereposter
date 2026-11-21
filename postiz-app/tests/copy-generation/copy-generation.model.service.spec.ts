@@ -299,6 +299,19 @@ describe('CopyGenerationModelService structured output schemas', () => {
     });
   });
 
+  it.each(['A grounded video title', null, undefined, 42])('returns a YouTube title in the same structured draft call (%s)', async title => {
+    const parse = getParseMock().mockImplementation(async request => ({ choices: [{ message: {
+      parsed: request.response_format.$parseRaw(JSON.stringify({ draft: 'Description', title })),
+    } }] }));
+    const result = await service.generatePlatformDraft({ platform: { name: 'youtube', targetCharacters: 900 } } as any, 'Grounding facts and context', 'Existing constraints');
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ draft: 'Description', title: typeof title === 'string' ? title : null });
+    const request = parse.mock.calls[0][0];
+    expect(request.messages[0].content).toContain('Grounding facts and context');
+    expect(request.messages[1].content).toContain('2–100 characters');
+    expect(request.response_format.json_schema.schema.required).toContain('title');
+  });
+
   it('keeps platform draft defaults compatible with structured outputs', async () => {
     const parse = getParseMock().mockImplementation(async (params) => ({
       choices: [

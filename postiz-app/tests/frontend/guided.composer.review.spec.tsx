@@ -874,6 +874,20 @@ describe('guided composer review', () => {
     ).toBeDisabled();
   });
 
+  it('exposes only the active YouTube settings form and leaves non-YouTube Review unchanged', async () => {
+    const youtube = { ...linkedinPersonal, id: 'youtube-one', identifier: 'youtube', name: 'First YouTube' };
+    const second = { ...youtube, id: 'youtube-two', name: 'Second YouTube' };
+    seedGeneratedReview({ destinations: [youtube, second, linkedinPage], response: generatedResponse([generatedResult('youtube', 'Video description'), generatedResult('linkedin', 'LinkedIn caption')]) });
+    renderReview();
+    await screen.findByLabelText('First YouTube caption');
+    expect(useLaunchStore.getState().current).toBe(youtube.id);
+    expect(document.querySelector('[data-guided-youtube-settings]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: /Second YouTube/ }));
+    expect(useLaunchStore.getState().current).toBe(second.id);
+    fireEvent.click(screen.getByRole('tab', { name: /Company LinkedIn/ }));
+    expect(document.querySelector('[data-guided-youtube-settings]')).toBeNull();
+  });
+
   it('preserves edits across normal navigation and removes deselected destinations', async () => {
     seedGeneratedReview();
     renderReview();
