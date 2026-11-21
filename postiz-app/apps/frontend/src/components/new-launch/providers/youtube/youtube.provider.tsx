@@ -18,6 +18,7 @@ import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import { buildGuidedGenerationFingerprint, selectGuidedGenerationMedia } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
 import { normalizeGeneratedYoutubeTitle } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
 const type = [
   {
     label: 'Public',
@@ -82,6 +83,7 @@ const license = [
 ];
 
 const YoutubeSettings: FC = () => {
+  const t = useT();
   const { register, control, getValues, getFieldState, setValue } = useSettings();
   const { integration } = useIntegration();
   const launch = useLaunchStore(useShallow(state => ({
@@ -128,7 +130,7 @@ const YoutubeSettings: FC = () => {
   return (
     <div className="flex flex-col">
       <div className="text-[14px] font-[600] mb-[10px]">Details</div>
-      <Input label="Title" {...titleField} maxLength={100} onChange={event => {
+      <Input label="Title" translationKey="label_title" aria-label={t('label_title', 'Title')} {...titleField} maxLength={100} onChange={event => {
         titleOwned.current = true;
         titleField.onChange(event);
       }} />

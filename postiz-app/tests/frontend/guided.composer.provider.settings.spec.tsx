@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react';
 
 const mockCustomProviderGet = jest.fn();
+let mockTitleTranslation: string | null = null;
 
 jest.mock(
   '@gitroom/frontend/components/launches/general.preview.component',
@@ -28,7 +29,8 @@ jest.mock(
 );
 
 jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
-  useT: () => (_key: string, fallback: string) => fallback,
+  useT: () => (key: string, fallback: string) =>
+    key === 'label_title' ? mockTitleTranslation || fallback : fallback,
 }));
 
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
@@ -68,9 +70,12 @@ jest.mock('@gitroom/frontend/components/layout/set.timezone', () => ({
 
 jest.mock('@gitroom/react/form/input', () => {
   const ReactModule = require('react');
+  const ActualInput = jest.requireActual('@gitroom/react/form/input').Input;
   return {
     Input: ReactModule.forwardRef(
-      ({ label, ...props }: any, ref: React.Ref<HTMLInputElement>) => (
+      ({ label, ...props }: any, ref: React.Ref<HTMLInputElement>) => props.name === 'title' ? (
+        <ActualInput label={label} ref={ref} {...props} />
+      ) : (
         <label>
           {label}
           <input aria-label={label} ref={ref} {...props} />
@@ -199,7 +204,14 @@ describe('guided composer existing provider settings', () => {
     useLaunchStore.getState().reset();
     useGuidedComposerStore.getState().resetGuidedComposer();
     mockCustomProviderGet.mockReset();
+    mockTitleTranslation = null;
   });
+
+  const validateYoutube = async (ref: { current: any }) => {
+    let result: any;
+    await act(async () => { result = await ref.current.isValid(); });
+    return result;
+  };
 
   it('uses the existing YouTube form and DTO for the required title', async () => {
     const integration = {
@@ -216,14 +228,14 @@ describe('guided composer existing provider settings', () => {
     ]);
 
     await waitFor(() => expect(providerRef.current).toBeTruthy());
-    expect((await providerRef.current.isValid()).valid).toBe(false);
+    expect((await validateYoutube(providerRef)).valid).toBe(false);
 
     fireEvent.change(screen.getByLabelText('Title'), {
       target: { value: 'Launch walkthrough' },
     });
 
     await waitFor(async () =>
-      expect((await providerRef.current.isValid()).valid).toBe(true)
+      expect((await validateYoutube(providerRef)).valid).toBe(true)
     );
     expect(providerRef.current.getValues().settings).toMatchObject({
       title: 'Launch walkthrough',
@@ -233,6 +245,15 @@ describe('guided composer existing provider settings', () => {
 
   const youtube = { ...baseIntegration, id: 'youtube-ai', identifier: 'youtube' };
   const video = [{ id: 'video-1', path: '/video.mp4', type: 'video' }];
+  it.each(['Title', 'Titre'])('names the real YouTube Title input with its visible translation (%s)', async label => {
+    mockTitleTranslation = label;
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    expect(screen.getByText(label)).toBeTruthy();
+    const title = screen.getByRole('textbox', { name: label, exact: true });
+    fireEvent.change(title, { target: { value: 'My accessible title' } });
+    expect(ref.current.getValues().settings.title).toBe('My accessible title');
+    await waitFor(async () => expect((await validateYoutube(ref)).valid).toBe(true));
+  });
   const completeTitle = (title: unknown, mode: 'generate' | 'adapt-by-platform' | 'use-everywhere' = 'generate', stale = false) => act(() => {
     const launch = useLaunchStore.getState();
     const guided = useGuidedComposerStore.getState();
@@ -250,14 +271,14 @@ describe('guided composer existing provider settings', () => {
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: '' } });
     completeTitle('Another title', mode);
     expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
-    expect((await ref.current.isValid()).valid).toBe(false);
+    expect((await validateYoutube(ref)).valid).toBe(false);
   });
 
   it.each([undefined, null, '', 'x', 'x'.repeat(101), 'Bad\ntitle', '<bad>'])('retains required manual validation for unusable title %s', async title => {
     const ref = renderProvider(YoutubeProvider, youtube, video);
     completeTitle(title);
     expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
-    expect((await ref.current.isValid()).valid).toBe(false);
+    expect((await validateYoutube(ref)).valid).toBe(false);
   });
 
   it.each([{ title: 'Saved manual title' }, { title: '' }])('preserves existing title authority including an explicitly blank restored field (%j)', settings => {
