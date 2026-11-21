@@ -9,6 +9,7 @@ import SafeImage from '@gitroom/react/helpers/safe.image';
 import { AddProviderComponent } from '@gitroom/frontend/components/launches/add.provider.component';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { TutorialVideo } from './tutorial.video';
 
 interface OnboardingModalProps {
   onClose: () => void;
@@ -20,12 +21,13 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
   const t = useT();
 
   return (
-    <div className="w-full min-h-full flex-1 p-[40px] flex relative">
+    <div className="w-full min-h-full flex-1 p-[40px] mobile:p-[12px] flex relative">
       <style>
         {`#support-discord {display: none}`}
       </style>
       <div className="flex flex-1 bg-newBgColorInner rounded-[20px] flex-col relative">
         <button
+          aria-label={t('close', 'Close')}
           className="outline-none absolute end-[20px] top-[20px] mantine-UnstyledButton-root mantine-ActionIcon-root hover:bg-tableBorder cursor-pointer mantine-Modal-close mantine-1dcetaa"
           type="button"
           onClick={modals.closeAll}
@@ -45,10 +47,10 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
             ></path>
           </svg>
         </button>
-        <div className="flex-1 flex p-[40px]">
+        <div className="flex-1 flex p-[40px] mobile:p-[12px] mobile:pt-[56px] min-w-0">
           <div className="flex flex-col gap-[24px] flex-1">
             {/* Step indicators */}
-            <div className="flex items-center justify-center gap-[16px]">
+            <div className="flex items-center justify-center gap-[16px] mobile:gap-[8px]">
               <div className="flex items-center gap-[8px]">
                 <div
                   className={clsx(
@@ -69,7 +71,7 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
                   {t('connect_channels', 'Connect Channels')}
                 </span>
               </div>
-              <div className="w-[40px] h-[2px] bg-boxFocused" />
+              <div className="w-[40px] mobile:w-[16px] h-[2px] bg-boxFocused" />
               <div className="flex items-center gap-[8px]">
                 <div
                   className={clsx(
@@ -250,28 +252,17 @@ const OnboardingStep2: FC<{ onBack: () => void; onFinish: () => void }> = ({
     <div className="flex flex-col gap-[24px] flex-1">
       <div className="flex gap-[4px] flex-col text-center">
         <div className="text-[24px] font-semibold">
-          {t('watch_tutorial_title', 'Learn How to Use Postiz')}
+          {t('watch_tutorial_title', 'Learn How to Use EverywherePoster')}
         </div>
         <div className="text-[14px] text-customColor18">
           {t(
             'watch_tutorial_description',
-            'Watch this short video to learn how to get the most out of Postiz'
+            'Watch this short video to learn how to get the most out of EverywherePoster'
           )}
         </div>
       </div>
 
-      {/* YouTube Video Embed */}
-      <div className="relative flex-1 rounded-[12px] overflow-hidden">
-        <div className="absolute left-0 top-0 w-full h-full flex justify-center">
-          <iframe
-            className="h-full aspect-video"
-            src="https://www.youtube.com/embed/BdsCVvEYgHU?si=vvhaZJ8I5oXXvVJS?autoplay=1"
-            title="Postiz Tutorial"
-            allow="autoplay"
-            allowFullScreen
-          />
-        </div>
-      </div>
+      <TutorialVideo />
 
       {/* Action buttons */}
       <div className="flex justify-between pt-[24px] mt-[8px]">

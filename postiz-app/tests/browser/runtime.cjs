@@ -9,8 +9,9 @@ const frontendPort = Number(process.env.BROWSER_FRONTEND_PORT || 4217);
 const apiPort = Number(process.env.BROWSER_API_PORT || 4218);
 if (![frontendPort, apiPort].every(port => Number.isInteger(port) && port > 1024 && port < 65536) || frontendPort === apiPort) throw new Error('Invalid owned fixture ports');
 const origin = `http://127.0.0.1:${frontendPort}`;
-if (['EP_FACEBOOK_BROWSER', 'EP_DISCOVERY_BROWSER', 'EP_VIDEO_EDITOR_BROWSER', 'EP_COOKED_BROWSER', 'EP_WALLET_BROWSER', 'EP_STUDIO_BROWSER'].filter(key => process.env[key] === '1').length > 1) throw new Error('Select only one isolated browser fixture mode per process');
+if (['EP_FACEBOOK_BROWSER', 'EP_DISCOVERY_BROWSER', 'EP_VIDEO_EDITOR_BROWSER', 'EP_COOKED_BROWSER', 'EP_WALLET_BROWSER', 'EP_STUDIO_BROWSER', 'EP_TUTORIAL_BROWSER', 'EP_TUTORIAL_BILLING_BROWSER'].filter(key => process.env[key] === '1').length > 1) throw new Error('Select only one isolated browser fixture mode per process');
 const walletMode = process.env.EP_WALLET_BROWSER === '1';
+const tutorialBillingMode = process.env.EP_TUTORIAL_BILLING_BROWSER === '1';
 const facebook = process.env.EP_FACEBOOK_BROWSER === '1' ? require('./facebook-runtime.cjs')() : undefined;
 const branding = path.join(root, 'apps/frontend/public/branding');
 const brandingSource = path.resolve(root, '../site/branding');
@@ -26,7 +27,7 @@ const discovery = process.env.EP_DISCOVERY_BROWSER === '1' ? require('./discover
 const videoEditor = process.env.EP_VIDEO_EDITOR_BROWSER === '1' || process.env.EP_COOKED_BROWSER === '1' ? require('./video-editor-runtime.cjs')({ cooked: process.env.EP_COOKED_BROWSER === '1' }) : undefined;
 const studio = process.env.EP_STUDIO_BROWSER === '1' ? require('./studio-browser-runtime.cjs')() : undefined;
 const token = studio?.token || videoEditor?.token || 'synthetic-playwright-session';
-const user = { id: studio?.user.id || 'synthetic-user', orgId: studio?.user.orgId || 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: walletMode ? 'LAUNCH_V1' : 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
+const user = { id: studio?.user.id || 'synthetic-user', orgId: studio?.user.orgId || 'synthetic-org', email: 'fixture@example.test', name: 'Synthetic Creator', role: 'ADMIN', tier: tutorialBillingMode ? 'FREE' : walletMode ? 'LAUNCH_V1' : 'STANDARD', publicApi: '', totalChannels: 0, admin: false, allowTrial: false, isTrailing: false, impersonate: false, streakSince: null };
 const posts = Array.from({ length: 18 }, (_, index) => ({ id: `synthetic-post-${index}`, group: `synthetic-group-${index}`, state: 'QUEUE', content: `Synthetic scheduled post ${index + 1}: a long caption for responsive scrolling and reachability checks.`, publishDate: '2035-01-01T18:00:00.000Z', tags: [], intervalInDays: null, integration: { id: 'synthetic-channel', name: 'Synthetic channel', providerIdentifier: 'x', picture: '/icons/platforms/x.png' } }));
 const values = {
   '/user/self': user,
@@ -106,6 +107,7 @@ function startFrontend() {
     BROWSER_FRONTEND_PORT: String(frontendPort), BROWSER_API_PORT: String(apiPort),
     NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1',
     ...(walletMode ? { BILLING_ENABLED: 'true', STRIPE_SECRET_KEY: 'sk_test_synthetic_fixture_not_a_credential' } : {}),
+    ...(tutorialBillingMode ? { BILLING_ENABLED: 'true', IS_GENERAL: 'true', STRIPE_PUBLISHABLE_KEY: 'pk_test_synthetic_fixture_not_a_credential' } : {}),
     FRONTEND_URL: origin, MAIN_URL: origin, NOT_SECURED: 'true',
     BACKEND_INTERNAL_URL: `http://127.0.0.1:${apiPort}`, NEXT_PUBLIC_BACKEND_URL: '/backend-api',
     DISABLE_REGISTRATION: 'true', STORAGE_PROVIDER: 'local',
@@ -132,7 +134,7 @@ function startFrontend() {
 async function warmRoutes() {
   await studio?.ready;
   const deadline = Date.now() + 330_000;
-  for (const route of (process.env.EP_TRANSFER_BROWSER === '1' ? ['/auth/login', '/create'] : walletMode ? ['/auth/login', '/billing'] : discovery ? ['/auth/login', '/analytics'] : videoEditor || studio ? ['/auth/login', '/video-editor', '/create'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
+  for (const route of (process.env.EP_TUTORIAL_BROWSER === '1' || tutorialBillingMode ? ['/auth/login', '/launches'] : process.env.EP_TRANSFER_BROWSER === '1' ? ['/auth/login', '/create'] : walletMode ? ['/auth/login', '/billing'] : discovery ? ['/auth/login', '/analytics'] : videoEditor || studio ? ['/auth/login', '/video-editor', '/create'] : ['/auth/login', '/media', '/launches', '/create', '/settings', '/video-editor'])) {
     let loaded = false;
     while (!stopping && !loaded && Date.now() < deadline) {
       try {
