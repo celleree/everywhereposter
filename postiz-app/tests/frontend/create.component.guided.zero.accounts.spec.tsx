@@ -129,7 +129,7 @@ describe('standalone create zero-account entry point', () => {
     expect(composer.getAttribute('data-has-set')).toBe('false');
     expect(screen.queryByText('Connect a channel to create')).toBeNull();
     expect(screen.queryByText('Create Post')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Connect account' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Connect account' })).toBeTruthy();
   });
 
   it('hides saved Sets and keeps the zero-account guided draft blank', () => {
@@ -178,6 +178,7 @@ describe('standalone create zero-account entry point', () => {
 
     expect(screen.getByRole('combobox')).toBeTruthy();
     expect(screen.getByText('Saved Set')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Connect account' })).toBeTruthy();
     expect(screen.queryByText('Create Post')).toBeNull();
     expect(
       screen.queryByText(

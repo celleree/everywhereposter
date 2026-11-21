@@ -128,16 +128,23 @@ test('Create: interrupted text survives reload and Back; Cancel closes a real di
 test('Create: guided media affordance and valid reached steps survive backward navigation', async ({ page }, info) => {
   const account = { id: 'synthetic-linkedin', name: 'Synthetic LinkedIn', identifier: 'linkedin', type: 'social', editor: 'normal', picture: '', additionalSettings: '[]', time: [], inBetweenSteps: false };
   const media = { id: 'synthetic-guided-image', originalName: 'Guided fixture image', type: 'image', path: '/audit-fixtures/guided-image.svg' };
-  await page.route('**/backend-api/integrations/list', route => route.fulfill({ json: { integrations: [account] } }));
+  let hasAccount = false;
+  await page.route('**/backend-api/integrations/list', route => route.fulfill({ json: { integrations: hasAccount ? [account] : [] } }));
   await page.route('**/backend-api/media?**', route => route.fulfill({ json: { pages: 1, results: [media] } }));
   await page.route('**/audit-fixtures/guided-image.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#36557c"/><text x="20" y="240" fill="white" font-size="40">Guided fixture image</text></svg>' }));
   await openApp(page, '/create');
   const shell = page.locator('.guided-composer-shell');
+  const connect = page.locator('[data-guided-composer-actions]').getByRole('button', { name: 'Add Channel', exact: true });
+  await expect(connect).toBeVisible();
   await expect(page.locator('.mobile-create-toolbar')).toHaveCount(0);
   await expect(page.getByText('Create Post', { exact: true })).toHaveCount(0);
   await expect(shell.getByText('4 Review and edit', { exact: true })).toHaveCount(0);
   await expect(shell.locator('h1:visible')).toHaveCount(mobileProject(info) ? 0 : 1);
   await capture(page, info, 'guided-upload-empty');
+  hasAccount = true;
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(shell).toBeVisible();
+  await expect(connect).toBeVisible();
   await page.getByRole('button', { name: 'Media Library', exact: true }).click();
   const picker = page.getByRole('dialog', { name: 'Media Library', exact: true });
   await picker.getByRole('button', { name: 'Select Guided fixture image', exact: true }).click();
