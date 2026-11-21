@@ -28,6 +28,7 @@ import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import useCookie from 'react-use-cookie';
 import { LogoutComponent } from '@gitroom/frontend/components/layout/logout.component';
 import { DeveloperIconComponent } from '@gitroom/frontend/components/developer/developer.icon.component';
+import { TutorialVideo } from '@gitroom/frontend/components/onboarding/tutorial.video';
 
 const ModeComponent = dynamic(
   () => import('@gitroom/frontend/components/layout/mode.component'),
@@ -81,16 +82,8 @@ export const FirstBillingComponent = () => {
 
   const showYouTube = () => {
     modals.openModal({
-      title: 'Grow Fast With Postiz (Play the video)',
-      children: (
-        <iframe
-          className="h-full aspect-video min-w-[800px]"
-          src="https://www.youtube.com/embed/BdsCVvEYgHU?si=vvhaZJ8I5oXXvVJS?autoplay=1"
-          title="Postiz Tutorial"
-          allow="autoplay"
-          allowFullScreen
-        />
-      ),
+      title: t('watch_tutorial_title', 'Learn How to Use EverywherePoster'),
+      children: <TutorialVideo />,
     });
   };
 
@@ -114,20 +107,16 @@ export const FirstBillingComponent = () => {
   const JoinOver = () => {
     return (
       <>
-        <div className="flex" onClick={showYouTube}>
+        <button type="button" className="flex" onClick={showYouTube}>
           <div className="tablet:mb-[32px] cursor-pointer mt-[32px] flex gap-[10px] items-center underline hover:font-[700]">
             <div>
-              <SafeImage
-                className="text-[12px]"
-                src="/icons/platforms/youtube.svg"
-                width={22.5}
-                height={16}
-                alt="YouTube"
-              />
+              <svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true">
+                <path d="M6 1 19 8 6 15Z" fill="currentColor" />
+              </svg>
             </div>
-            <div>See the power of Postiz (click here)</div>
+            <div>{t('watch_tutorial', 'Watch Tutorial')}</div>
           </div>
-        </div>
+        </button>
 
         {!!user?.allowTrial && (
           <div className="flex mt-[32px] mb-[10px] gap-[15px] tablet:mt-[32px] tablet:mb-[32px] text-[16px] font-[500] mobile:flex-col">
