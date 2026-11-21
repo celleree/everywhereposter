@@ -83,6 +83,7 @@ export const FirstBillingComponent = () => {
   const showYouTube = () => {
     modals.openModal({
       title: t('watch_tutorial_title', 'Learn How to Use EverywherePoster'),
+      size: 'min(960px, calc(100vw - 32px))',
       children: <TutorialVideo />,
     });
   };

@@ -1,4 +1,4 @@
-import { test, expect, openApp, capture, noHorizontalOverflow } from './fixtures';
+import { test, expect, openApp, capture, noHorizontalOverflow, reachable } from './fixtures';
 
 const title = 'Learn How to Use EverywherePoster';
 const billing = process.env.EP_TUTORIAL_BILLING_BROWSER === '1';
@@ -64,8 +64,15 @@ if (!billing) {
       await openApp(page, '/launches');
       await page.getByRole('button', { name: 'Watch Tutorial', exact: true }).click();
       await playTutorial(page);
+      const dialog = page.getByRole('dialog', { name: title, exact: true });
+      const bounds = await dialog.boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
+      const close = dialog.getByRole('button', { name: 'Close dialog', exact: true });
+      await reachable(close);
+      await expect(close).toBeInViewport({ ratio: 1 });
       await capture(page, info, 'billing-tutorial-playing');
-      await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+      await close.click();
       await expect(page.getByLabel(title, { exact: true })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Watch Tutorial', exact: true })).toBeVisible();
     } finally { releaseCheckout(); }
