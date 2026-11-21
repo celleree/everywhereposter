@@ -97,4 +97,24 @@ describe('guided composer store', () => {
       sourceCaption: '',
     });
   });
+
+  it('keeps unknown transcript presence distinct from canonical no-speech and ignores a late source result', () => {
+    const store = useGuidedComposerStore.getState();
+    store.selectSourceMedia('video-1');
+    store.setTranscriptionState('video-1', 'READY');
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBeNull();
+    store.setTranscriptionState('video-1', 'READY', null, false);
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBe(false);
+    store.setTranscriptionState('video-1', 'PROCESSING');
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBeNull();
+    store.setTranscriptionState('video-1', 'READY', null, true);
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBe(true);
+    store.selectSourceMedia('video-2');
+    store.setTranscriptionState('video-1', 'READY', null, false);
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      sourceMediaId: 'video-2', transcriptionStatus: 'PENDING', transcriptionHasUsableText: null,
+    });
+    store.resetGuidedComposer();
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBeNull();
+  });
 });

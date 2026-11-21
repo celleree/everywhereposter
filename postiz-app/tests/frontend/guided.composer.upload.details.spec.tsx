@@ -947,6 +947,21 @@ describe('guided composer video picker', () => {
     unmount();
   });
 
+  it('keeps recovered READY status neutral until a canonical no-speech result is available', () => {
+    useLaunchStore.getState().addGlobalValue(0, [{ id: 'post-1', content: '', delay: 0, media: [createVideo('source')] } as any]);
+    useGuidedComposerStore.setState({ sourceMediaId: 'source', transcriptionStatus: 'READY' });
+    const { container } = render(<GuidedComposerUploadDetails />);
+    expect(screen.getByText('Transcript ready')).toBeTruthy();
+    expect(screen.queryByText(/No speech was detected/)).toBeNull();
+    act(() => useGuidedComposerStore.getState().setTranscriptionState('source', 'READY', null, false));
+    expect(screen.queryByText('Transcript ready')).toBeNull();
+    expect(screen.getByText(/No speech was detected/)).toBeTruthy();
+    expect(Array.from(container.querySelectorAll('details')).every((details) => details.open)).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Add my own caption' }));
+    expect(useGuidedComposerStore.getState().captionMode).toBe('use-everywhere');
+    expect(screen.getAllByLabelText('Your caption')).toHaveLength(2);
+  });
+
   it('advertises images and supported video formats in the shared picker', () => {
     expect(GUIDED_MEDIA_ACCEPT).toContain('image/*');
     expect(GUIDED_MEDIA_ACCEPT).toContain('video/mp4');
