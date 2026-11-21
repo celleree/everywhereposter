@@ -4,7 +4,7 @@ const title = 'Learn How to Use EverywherePoster';
 const billing = process.env.EP_TUTORIAL_BILLING_BROWSER === '1';
 
 async function playTutorial(page: import('@playwright/test').Page) {
-  const video = page.getByLabel(title, { exact: true });
+  const video = page.locator('video').and(page.getByLabel(title, { exact: true }));
   await expect(video).toBeVisible();
   await expect(video).toHaveAttribute('controls', '');
   await expect(video).toHaveAttribute('playsinline', '');
