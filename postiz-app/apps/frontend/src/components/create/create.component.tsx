@@ -90,6 +90,8 @@ export const CreateComponent = () => {
   );
   const hasActiveIntegrations = activeIntegrations.length > 0;
   const composerSet = hasActiveIntegrations ? parsedSet : undefined;
+  const guidedBlankCreate = guidedComposerEnabled && !composerSet?.posts?.length;
+  const hasSavedSets = hasActiveIntegrations && sets.length > 0;
 
   useEffect(() => {
     if (!hasActiveIntegrations && selectedSetId) {
@@ -133,47 +135,53 @@ export const CreateComponent = () => {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-newBgColorInner mobile:overflow-y-auto mobile-upload-page">
-      <div className="flex flex-wrap items-center justify-between gap-[12px] border-b border-newBorder bg-newBgColorInner px-[20px] py-[14px] mobile:px-[12px] mobile:py-[10px] mobile-create-toolbar">
-        <div className="mobile-create-title flex min-w-0 flex-col">
-          <div className="text-[16px] font-[700] text-white mobile:text-[15px]">
-            {t('create_post', 'Create Post')}
-          </div>
-          {hasActiveIntegrations && (
-            <div className="mt-[3px] text-[13px] text-textColor/65 mobile:hidden">
-              {t(
-                'create_post_inline_set_hint',
-                'Start blank or preload a saved Set without leaving the composer.'
+      {(!guidedBlankCreate || hasSavedSets) && (
+        <div className="flex flex-wrap items-center justify-between gap-[12px] border-b border-newBorder bg-newBgColorInner px-[20px] py-[14px] mobile:px-[12px] mobile:py-[10px] mobile-create-toolbar">
+          {!guidedBlankCreate && (
+            <div className="mobile-create-title flex min-w-0 flex-col">
+              <div className="text-[16px] font-[700] text-white mobile:text-[15px]">
+                {t('create_post', 'Create Post')}
+              </div>
+              {hasActiveIntegrations && (
+                <div className="mt-[3px] text-[13px] text-textColor/65 mobile:hidden">
+                  {t(
+                    'create_post_inline_set_hint',
+                    'Start blank or preload a saved Set without leaving the composer.'
+                  )}
+                </div>
               )}
             </div>
           )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-[12px] mobile:w-full mobile:flex-col mobile:items-stretch">
-          <div className="mobile-create-channel w-[260px] mobile:w-full">
-            <AddProviderButton update={() => mutateIntegrations()} />
+          <div className="flex flex-wrap items-center justify-end gap-[12px] mobile:w-full mobile:flex-col mobile:items-stretch">
+            {!guidedBlankCreate && (
+              <div className="mobile-create-channel w-[260px] mobile:w-full">
+                <AddProviderButton update={() => mutateIntegrations()} />
+              </div>
+            )}
+            {hasSavedSets && (
+              <label className="flex items-center gap-[10px] text-[13px] text-textColor/70 mobile:w-full mobile:flex-col mobile:items-start">
+                <span>{t('saved_set', 'Saved Set')}</span>
+                <select
+                  value={selectedSetId}
+                  onChange={(event) => setSelectedSetId(event.target.value)}
+                  disabled={setsLoading}
+                  className={clsx(
+                    'h-[40px] min-w-[260px] rounded-[8px] border border-newBorder bg-newBgColor px-[12px] text-[14px] text-white outline-none mobile:w-full',
+                    setsLoading && 'opacity-70'
+                  )}
+                >
+                  <option value="">{t('blank_post', 'Blank post')}</option>
+                  {sets.map((set) => (
+                    <option key={set.id} value={set.id}>
+                      {set.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
-          {hasActiveIntegrations && !!sets.length && (
-            <label className="flex items-center gap-[10px] text-[13px] text-textColor/70 mobile:w-full mobile:flex-col mobile:items-start">
-              <span>{t('saved_set', 'Saved Set')}</span>
-              <select
-                value={selectedSetId}
-                onChange={(event) => setSelectedSetId(event.target.value)}
-                disabled={setsLoading}
-                className={clsx(
-                  'h-[40px] min-w-[260px] rounded-[8px] border border-newBorder bg-newBgColor px-[12px] text-[14px] text-white outline-none mobile:w-full',
-                  setsLoading && 'opacity-70'
-                )}
-              >
-                <option value="">{t('blank_post', 'Blank post')}</option>
-                {sets.map((set) => (
-                  <option key={set.id} value={set.id}>
-                    {set.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
         </div>
-      </div>
+      )}
       <div className="flex min-h-0 flex-1 mobile:block mobile:flex-none">
         <CreatePostComposer
           key={`${hasActiveIntegrations && selectedSetId ? selectedSetId : 'blank'}-${nextSlot}-${composerKey}`}

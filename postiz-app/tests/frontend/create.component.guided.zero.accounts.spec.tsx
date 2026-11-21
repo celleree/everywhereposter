@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
@@ -128,6 +128,8 @@ describe('standalone create zero-account entry point', () => {
     expect(composer.getAttribute('data-standalone')).toBe('true');
     expect(composer.getAttribute('data-has-set')).toBe('false');
     expect(screen.queryByText('Connect a channel to create')).toBeNull();
+    expect(screen.queryByText('Create Post')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Connect account' })).toBeNull();
   });
 
   it('hides saved Sets and keeps the zero-account guided draft blank', () => {
@@ -176,11 +178,27 @@ describe('standalone create zero-account entry point', () => {
 
     expect(screen.getByRole('combobox')).toBeTruthy();
     expect(screen.getByText('Saved Set')).toBeTruthy();
+    expect(screen.queryByText('Create Post')).toBeNull();
     expect(
-      screen.getByText(
+      screen.queryByText(
         'Start blank or preload a saved Set without leaving the composer.'
       )
-    ).toBeTruthy();
+    ).toBeNull();
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'saved-set-1' } });
+    expect(screen.getByText('Create Post')).toBeTruthy();
+    expect(screen.getByText('Start blank or preload a saved Set without leaving the composer.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Connect account' })).toBeTruthy();
+    expect(screen.getByTestId('create-post-composer').getAttribute('data-has-set')).toBe('true');
+  });
+
+  it('preserves the full legacy toolbar for an active account when guided mode is off', () => {
+    process.env.NEXT_PUBLIC_GUIDED_COMPOSER_SHELL = 'false';
+    mockIntegrations = [{ id: 'linkedin-account', disabled: false, inBetweenSteps: false }];
+    render(<CreateComponent />);
+    expect(screen.getByText('Create Post')).toBeTruthy();
+    expect(screen.getByText('Start blank or preload a saved Set without leaving the composer.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Connect account' })).toBeTruthy();
   });
 
   it('preserves the existing connect-channel empty state when guided mode is off', () => {
