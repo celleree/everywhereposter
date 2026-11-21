@@ -112,7 +112,10 @@ for (const lateStatus of ['READY', 'FAILED']) {
       bReady = true;
       await expect.poll(() => draftState(page)).toMatchObject({ ...activeB, composerStep: 'destinations', transcriptionStatus: 'READY' });
       expect(reads).toContain(b.id);
-      expect(mutations.every(value => media.some(item => value === `POST /backend-api/media/${item.id}/transcription/ensure`))).toBe(true);
+      // Background assistant traffic is unrelated; composer writes must be
+      // exactly the transcription ensures, with no media deletion or publishing.
+      expect(mutations.filter(value => /\/backend-api\/(?:media|posts)(?:\/|$)/.test(value)))
+        .toEqual(ensures.map(id => `POST /backend-api/media/${id}/transcription/ensure`));
       await info.attach('issue-80-replacement-evidence', { contentType: 'application/json', body: JSON.stringify({
         fixture: 'isolated real frontend; synthetic transcription responses; no real backend or provider',
         lateStatus, ensures, reads, mutations, finalDraft: await draftState(page),
