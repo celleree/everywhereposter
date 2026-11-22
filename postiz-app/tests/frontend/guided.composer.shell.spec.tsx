@@ -705,7 +705,7 @@ describe('guided composer shell', () => {
     expect(
       screen.getByRole('navigation', { name: 'Post creation progress' })
     ).toBeTruthy();
-    expect(screen.getByText('Create post')).toBeTruthy();
+    expect(screen.queryByText('Create post')).toBeNull();
     expect(screen.getByText('Existing composer content')).toBeTruthy();
     expect(screen.getByLabelText('Additional context')).toBeTruthy();
     expect(
@@ -775,6 +775,78 @@ describe('guided composer shell', () => {
         .hasAttribute('hidden')
     ).toBe(false);
     expect(useGuidedComposerStore.getState().composerStep).toBe('upload');
+  });
+
+  const seedNavigationDraft = (source: 'text' | 'video') => {
+    const integration = quickAccounts[1];
+    useLaunchStore.getState().setAllIntegrations([integration]);
+    useLaunchStore.getState().setSelectedIntegrations([
+      { selectedIntegrations: integration, settings: {} },
+    ]);
+    if (source === 'text') {
+      useLaunchStore.getState().setGlobalValueMedia(0, []);
+      useLaunchStore.getState().setGlobalValueText(0, 'A valid source caption.');
+    }
+    quickFetch();
+    render(<GuidedComposerShell><div>Existing composer content</div></GuidedComposerShell>);
+  };
+
+  const reachNavigationReview = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Destinations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(useGuidedComposerStore.getState().composerStep).toBe('review'));
+  };
+
+  it.each(['text', 'video'] as const)('directly revisits reached valid %s steps without unlocking future steps', async (source) => {
+    seedNavigationDraft(source);
+    const review = screen.getByRole('button', { name: 'Review Step 3 of 4' });
+    const publish = screen.getByRole('button', { name: 'Publish Step 4 of 4' });
+    expect(review.hasAttribute('disabled')).toBe(true);
+    await reachNavigationReview();
+    expect(publish.hasAttribute('disabled')).toBe(true);
+    const generationCalls = () => mockFetch.mock.calls.filter(([url]) => url === '/posts/copy/generate').length;
+    const requests = generationCalls();
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Step 1 of 4' }));
+    expect(review.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(review);
+    expect(useGuidedComposerStore.getState().composerStep).toBe('review');
+    expect(generationCalls()).toBe(requests);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Publish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Step 1 of 4' }));
+    expect(publish.hasAttribute('disabled')).toBe(false);
+  });
+
+  it.each(['text', 'video', 'destination', 'context'] as const)('locks stale downstream progress after an earlier %s edit', async (edit) => {
+    seedNavigationDraft(edit === 'text' ? 'text' : 'video');
+    await reachNavigationReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Publish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Step 1 of 4' }));
+    act(() => {
+      if (edit === 'text') useLaunchStore.getState().setGlobalValueText(0, 'Changed source caption.');
+      if (edit === 'video') useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'video-2', path: '/replacement.mp4', type: 'video' } as any]);
+      if (edit === 'destination') useLaunchStore.getState().setSelectedIntegrations([]);
+      if (edit === 'context') useGuidedComposerStore.getState().setAdditionalContext('Changed context.');
+    });
+    expect(screen.getByRole('button', { name: 'Review Step 3 of 4' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Publish Step 4 of 4' }).hasAttribute('disabled')).toBe(true);
+    if (edit === 'destination') {
+      act(() => useLaunchStore.getState().setSelectedIntegrations([
+        { selectedIntegrations: quickAccounts[1], settings: {} },
+      ]));
+      expect(screen.getByRole('button', { name: 'Review Step 3 of 4' }).hasAttribute('disabled')).toBe(true);
+    }
+    await reachNavigationReview();
+    expect(screen.getByRole('button', { name: 'Publish Step 4 of 4' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('blocks forward navigation when the source becomes empty on a reached step', async () => {
+    seedNavigationDraft('text');
+    await reachNavigationReview();
+    fireEvent.click(screen.getByRole('button', { name: 'Destinations Step 2 of 4' }));
+    act(() => useLaunchStore.getState().setGlobalValueText(0, ''));
+    expect(screen.getByRole('button', { name: 'Continue to Review' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Step 1 of 4' }));
+    expect(screen.getByRole('button', { name: 'Destinations Step 2 of 4' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('moves focus to the active step heading', () => {

@@ -81,6 +81,30 @@ describe('guided composer store', () => {
     });
   });
 
+  it('preserves reached progress on Back and caps it when upstream inputs invalidate it', () => {
+    const store = useGuidedComposerStore.getState();
+    store.setComposerStep('review');
+    store.previousComposerStep();
+    store.setComposerStep('upload');
+    expect(useGuidedComposerStore.getState().furthestComposerStep).toBe('review');
+    store.limitComposerProgress('destinations');
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      composerStep: 'upload',
+      furthestComposerStep: 'destinations',
+    });
+    store.nextComposerStep();
+    store.nextComposerStep();
+    expect(useGuidedComposerStore.getState().furthestComposerStep).toBe('review');
+    store.resetGuidedComposer();
+    expect(useGuidedComposerStore.getState().furthestComposerStep).toBeNull();
+  });
+
+  it('initializes reached progress from a restored current step', () => {
+    useGuidedComposerStore.setState({ composerStep: 'review' });
+    useGuidedComposerStore.getState().setComposerStep('upload');
+    expect(useGuidedComposerStore.getState().furthestComposerStep).toBe('review');
+  });
+
   it('restores the complete guided workflow state to its defaults', () => {
     const store = useGuidedComposerStore.getState();
 

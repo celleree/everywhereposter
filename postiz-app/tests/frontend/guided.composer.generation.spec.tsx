@@ -595,6 +595,8 @@ describe('guided composer generation transition', () => {
         generationInputFingerprint: null,
       })
     );
+    expect(screen.getByRole('button', { name: 'Review Step 3 of 4' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Publish Step 4 of 4' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('retains unsupported-only destinations and does not make a network request', async () => {
