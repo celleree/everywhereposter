@@ -67,6 +67,7 @@ export interface GuidedReviewDraft extends GuidedReviewDraftSeed {
 
 interface GuidedComposerValues {
   composerStep: GuidedComposerStep;
+  furthestComposerStep: GuidedComposerStep | null;
   sourceMediaId: string | null;
   transcriptionStatus: GuidedTranscriptionStatus;
   transcriptionHasUsableText: boolean | null;
@@ -85,6 +86,7 @@ interface GuidedComposerValues {
 
 interface GuidedComposerStore extends GuidedComposerValues {
   setComposerStep: (composerStep: GuidedComposerStep) => void;
+  limitComposerProgress: (lastValidStep: GuidedComposerStep) => void;
   selectSourceMedia: (sourceMediaId: string | null) => void;
   setTranscriptionState: (
     sourceMediaId: string,
@@ -150,6 +152,8 @@ const initialGenerationState = {
 
 const initialGuidedComposerState: GuidedComposerValues = {
   composerStep: 'upload',
+  // A restored draft's current step initializes progress on its first navigation.
+  furthestComposerStep: null,
   sourceMediaId: null,
   transcriptionStatus: 'IDLE',
   transcriptionHasUsableText: null,
@@ -178,7 +182,19 @@ const moveComposerStep = (
 
 export const useGuidedComposerStore = create<GuidedComposerStore>()((set) => ({
   ...initialGuidedComposerState,
-  setComposerStep: (composerStep) => set({ composerStep }),
+  setComposerStep: (composerStep) => set((state) => ({
+    composerStep,
+    furthestComposerStep: GUIDED_COMPOSER_STEPS[Math.max(
+      GUIDED_COMPOSER_STEPS.indexOf(state.furthestComposerStep ?? state.composerStep),
+      GUIDED_COMPOSER_STEPS.indexOf(composerStep)
+    )],
+  })),
+  limitComposerProgress: (lastValidStep) => set((state) => ({
+    furthestComposerStep: GUIDED_COMPOSER_STEPS[Math.min(
+      GUIDED_COMPOSER_STEPS.indexOf(state.furthestComposerStep ?? state.composerStep),
+      GUIDED_COMPOSER_STEPS.indexOf(lastValidStep)
+    )],
+  })),
   selectSourceMedia: (sourceMediaId) =>
     set({
       sourceMediaId,
@@ -207,10 +223,15 @@ export const useGuidedComposerStore = create<GuidedComposerStore>()((set) => ({
   nextComposerStep: () =>
     set((state) => ({
       composerStep: moveComposerStep(state.composerStep, 1),
+      furthestComposerStep: GUIDED_COMPOSER_STEPS[Math.max(
+        GUIDED_COMPOSER_STEPS.indexOf(state.furthestComposerStep ?? state.composerStep),
+        GUIDED_COMPOSER_STEPS.indexOf(moveComposerStep(state.composerStep, 1))
+      )],
     })),
   previousComposerStep: () =>
     set((state) => ({
       composerStep: moveComposerStep(state.composerStep, -1),
+      furthestComposerStep: state.furthestComposerStep ?? state.composerStep,
     })),
   setAdditionalContext: (additionalContext) => set({ additionalContext }),
   setCaptionMode: (captionMode) => set({ captionMode }),

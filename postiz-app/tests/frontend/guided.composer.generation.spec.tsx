@@ -619,6 +619,8 @@ describe('guided composer generation transition', () => {
         generationInputFingerprint: null,
       })
     );
+    expect(screen.getByRole('button', { name: 'Review Step 3 of 4' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Publish Step 4 of 4' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('ignores a late NO_TRANSCRIPT result after a new video establishes usable speech', async () => {
