@@ -12,6 +12,14 @@ Update this ledger after each verified deployment and after any rollback. Record
 - Verification result: `<result, including the runtime container and public check>`
 - Rollback reference: `<last known-good full SHA or retained rollback tag>`
 
+## Connected Apps Icon Rounding, 2026-11-19
+
+- Release: [PR #345](https://github.com/celleree/everywhereposter/pull/345), reviewed at `674f1aa1dbddbe5e9d040fb5d8d9310cc417a929` and merged as `ed28801f675e9c8510dd639d0444be09cc34db4c`. The Add Channel picker uses a 6 px radius on its 24 px platform icons. The retry of [PR CI](https://github.com/celleree/everywhereposter/actions/runs/44579409358) passed.
+- Image: [push build 44590268543](https://github.com/celleree/everywhereposter/actions/runs/44590268543) published `ghcr.io/celleree/publish-everywhere-postiz:ed28801f675e9c8510dd639d0444be09cc34db4c`. The published index and running `EP-Production` Postiz image ID matched `sha256:c5d6cdb3c5b42b6124bd41979102ba9b56e88b982e225084c298c935e63f4a5e`.
+- Backup and cutover: The approved PC procedure captured, encrypted, authenticated, and unpacked 16 checkpoint components. The isolated restore verified six databases, Redis, and eight Elasticsearch primary shards. Preflight matched all 21 migration checksums. The cutover replaced only Postiz with the staged image.
+- Production verification: All 12 roles were running, Postiz was healthy with zero restarts, Elasticsearch was green, and 32 Temporal activity queues had pollers. Local and public sign-in pages returned HTTP 200 with frontend build `P4bpIpQo3pxQpnuMJFv2t`. The public stylesheet served the 6 px picker rule. The six visible tiles were checked in the local browser fixture.
+- Rollback reference: previous release `9b996527aee1fd6eb565a0d3dc4b8d178c71d2ae`, cached image `sha256:08491d419783ec98db1f675128443e21ff25cf907899dca4cb43f5c5a1466154`. The authenticated encrypted checkpoint has SHA-256 `04c52c4abbf938c79519c331f73fa009a3ea6d7073ff7df1b35c8c8fb709260b`.
+
 ## App Release with Paid and Studio Features Disabled — 2026-10-27
 
 - Release status: runtime and public anonymous rendering verified. Authenticated YouTube reconnection, publishing and editor behavior remain `DEPLOYED_UNVERIFIED`; no live OAuth consent, post, retry, provider generation, charge or refund was initiated. Studio/Cooked and paid capabilities remain disabled and are unavailable to users.
