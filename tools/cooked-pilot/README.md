@@ -48,7 +48,7 @@ Both had zero OOM events, preserved the source and made no paid calls. The long 
 
 ## Licenses and exclusions
 
-cooked. authored source and faster-whisper are MIT. The current Systran tiny-model card labels its conversion MIT; the exact historical model README was unavailable, so the underlying OpenAI Whisper notice and that limitation are retained in `MODEL-NOTICES.md`. No blanket license certification is claimed.
+cooked. authored source and faster-whisper are MIT. The exact pinned Systran tiny-model README now declares MIT (retrieved 2026-11-21); `MODEL-NOTICES.md` records its revision-specific source/hash, the prior audit's unavailable-README limitation and the retained underlying OpenAI Whisper notice. No blanket license certification is claimed.
 
 The wheel closure also includes Apache, BSD, PSF and MPL components (notably certifi and tqdm), plus PyAV's bundled codec libraries. Debian FFmpeg/codecs and fonts have separate notices/terms. Bundled package notices remain installed and Debian copyright files are retained. Complete image redistribution/source-offer obligations need review before publishing an image externally. Excluded: noncommercial CrisperWhisper, Scribe/paid APIs, Remotion, GSAP, matting, downloaded creator assets, music and remote capture.
 
