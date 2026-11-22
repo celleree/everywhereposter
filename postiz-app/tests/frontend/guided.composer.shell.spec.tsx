@@ -431,7 +431,40 @@ describe('guided composer shell', () => {
     expect(useGuidedComposerStore.getState()).toMatchObject({
       sourceMediaId: 'video-1',
       transcriptionStatus: 'READY',
+      transcriptionHasUsableText: true,
     });
+    expect(screen.getByText('Transcript ready')).toBeTruthy();
+  });
+
+  it('keeps a READY response without text metadata neutral', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ mediaId: 'video-1', status: 'READY' }) });
+    render(<GuidedComposerShell><div>Existing composer content</div></GuidedComposerShell>);
+    expect(await screen.findByText('Transcript ready')).toBeTruthy();
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBeNull();
+    expect(screen.queryByText(/No speech was detected/)).toBeNull();
+  });
+
+  it.each([null, '', ' \n\t '])('explains a completed unusable transcript (%p) and lets the user add a caption', async (text) => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ mediaId: 'video-1', status: 'READY', text, error: null }),
+    });
+    useGuidedComposerStore.getState().setSourceCaption('An existing caption.');
+    render(<GuidedComposerShell><div>Existing composer content</div></GuidedComposerShell>);
+    expect(await screen.findByText(/No speech was detected in this media/)).toBeTruthy();
+    expect(screen.queryByText('Transcript ready')).toBeNull();
+    expect(screen.queryByText(/Transcribing…/)).toBeNull();
+    expect(useGuidedComposerStore.getState().captionMode).toBe('generate');
+    fireEvent.click(screen.getByRole('button', { name: 'Add my own caption' }));
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      captionMode: 'use-everywhere',
+      sourceCaption: 'An existing caption.',
+    });
+    fireEvent.change(screen.getAllByLabelText('Your caption').at(-1)!, { target: { value: 'My own caption for this silent video.' } });
+    const next = screen.getByRole('button', { name: 'Continue to Destinations' });
+    expect(next.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(next);
+    expect(useGuidedComposerStore.getState().composerStep).toBe('destinations');
   });
 
   it('does not request transcription for a normal image upload', async () => {

@@ -16,9 +16,13 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import {
   GUIDED_COMPOSER_STEPS,
   GuidedComposerStep,
+  getGuidedTranscriptTextPresence,
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
-import { GuidedComposerUploadDetails } from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
+import {
+  GUIDED_NO_SPEECH_MESSAGE,
+  GuidedComposerUploadDetails,
+} from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
 import {
   getGuidedAvailableIntegrations,
   GuidedComposerDestinations,
@@ -126,6 +130,7 @@ export const GuidedComposerShell: FC<{
     furthestComposerStep,
     sourceMediaId,
     transcriptionStatus,
+    transcriptionHasUsableText,
     captionMode,
     sourceCaption,
     additionalContext,
@@ -154,6 +159,7 @@ export const GuidedComposerShell: FC<{
       furthestComposerStep: state.furthestComposerStep,
       sourceMediaId: state.sourceMediaId,
       transcriptionStatus: state.transcriptionStatus,
+      transcriptionHasUsableText: state.transcriptionHasUsableText,
       captionMode: state.captionMode,
       sourceCaption: state.sourceCaption,
       additionalContext: state.additionalContext,
@@ -192,6 +198,10 @@ export const GuidedComposerShell: FC<{
   const hasUploadedVideo = globalMedia.some(
     (media) => media.id === sourceMediaId && isGuidedMp4MovMedia(media)
   );
+  const noSpeech =
+    hasUploadedVideo &&
+    transcriptionStatus === 'READY' &&
+    transcriptionHasUsableText === false;
   const legacyDraftValid =
     stripHtmlValidation('normal', global[0]?.content || '', true).length > 0 ||
     globalMedia.length > 0;
@@ -406,7 +416,8 @@ export const GuidedComposerShell: FC<{
         setTranscriptionState(
           sourceMediaId,
           status.status,
-          status.error?.message || null
+          status.error?.message || null,
+          getGuidedTranscriptTextPresence(status.text)
         );
 
         if (status.status === 'PENDING' || status.status === 'PROCESSING') {
@@ -558,6 +569,13 @@ export const GuidedComposerShell: FC<{
         return;
       }
 
+      if (
+        sourceType === 'video' &&
+        result.response?.warnings.some((warning) => warning.code === 'NO_TRANSCRIPT')
+      ) {
+        setTranscriptionState(generationMedia.id, 'READY', null, false);
+      }
+
       if (!result.response) {
         if (captionMode === 'use-everywhere') {
           completeGeneration(
@@ -631,6 +649,7 @@ export const GuidedComposerShell: FC<{
     selectedDestinations,
     setComposerStep,
     setGenerationProgress,
+    setTranscriptionState,
     sourceCaption,
     startGeneration,
     generationMedia,
@@ -964,7 +983,25 @@ export const GuidedComposerShell: FC<{
             <GuidedComposerGeneration progress={generationProgress} />
           )}
           {composerStep === 'destinations' && !generationLoading && !quickUpload && (
-            <GuidedComposerDestinations disabled={navigationLocked} />
+            <>
+              <GuidedComposerDestinations disabled={navigationLocked} />
+              {noSpeech && (
+                <div role="status" className="mx-auto w-full max-w-[1120px] px-[20px] pb-[20px] text-[13px] mobile:px-[14px]">
+                  <p>{GUIDED_NO_SPEECH_MESSAGE}</p>
+                  <button
+                    type="button"
+                    disabled={navigationLocked}
+                    onClick={() => {
+                      useGuidedComposerStore.getState().setCaptionMode('use-everywhere');
+                      setComposerStep('upload');
+                    }}
+                    className="mt-[8px] min-h-[44px] rounded-[8px] border border-newBorder px-[12px] font-[700] disabled:opacity-50"
+                  >
+                    Add my own caption
+                  </button>
+                </div>
+              )}
+            </>
           )}
           {quickUpload && (
             <section aria-label="Quick Upload progress" className="mx-auto w-full max-w-[1120px] p-[20px] mobile:p-[14px]">

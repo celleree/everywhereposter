@@ -43,6 +43,9 @@ export type GuidedTranscriptionStatus =
   | 'READY'
   | 'FAILED';
 
+export const getGuidedTranscriptTextPresence = (text: unknown): boolean | null =>
+  text === null ? false : typeof text === 'string' ? Boolean(text.trim()) : null;
+
 export interface GuidedReviewDraftSeed {
   destinationId: string;
   platform: CopyPlatform | null;
@@ -67,6 +70,7 @@ interface GuidedComposerValues {
   furthestComposerStep: GuidedComposerStep | null;
   sourceMediaId: string | null;
   transcriptionStatus: GuidedTranscriptionStatus;
+  transcriptionHasUsableText: boolean | null;
   transcriptionError: string | null;
   additionalContext: string;
   captionMode: CaptionMode;
@@ -87,7 +91,8 @@ interface GuidedComposerStore extends GuidedComposerValues {
   setTranscriptionState: (
     sourceMediaId: string,
     status: GuidedTranscriptionStatus,
-    error?: string | null
+    error?: string | null,
+    hasUsableText?: boolean | null
   ) => void;
   nextComposerStep: () => void;
   previousComposerStep: () => void;
@@ -151,6 +156,7 @@ const initialGuidedComposerState: GuidedComposerValues = {
   furthestComposerStep: null,
   sourceMediaId: null,
   transcriptionStatus: 'IDLE',
+  transcriptionHasUsableText: null,
   transcriptionError: null,
   additionalContext: '',
   captionMode: 'generate',
@@ -193,14 +199,25 @@ export const useGuidedComposerStore = create<GuidedComposerStore>()((set) => ({
     set({
       sourceMediaId,
       transcriptionStatus: sourceMediaId ? 'PENDING' : 'IDLE',
+      transcriptionHasUsableText: null,
       transcriptionError: null,
       reviewDrafts: {},
       ...initialGenerationState,
     }),
-  setTranscriptionState: (sourceMediaId, transcriptionStatus, error = null) =>
+  setTranscriptionState: (
+    sourceMediaId,
+    transcriptionStatus,
+    error = null,
+    hasUsableText = null
+  ) =>
     set((state) =>
       state.sourceMediaId === sourceMediaId
-        ? { transcriptionStatus, transcriptionError: error }
+        ? {
+            transcriptionStatus,
+            transcriptionError: error,
+            transcriptionHasUsableText:
+              transcriptionStatus === 'READY' ? hasUsableText : null,
+          }
         : state
     ),
   nextComposerStep: () =>
