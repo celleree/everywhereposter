@@ -89,6 +89,8 @@ Rules:
 
 ## Current Deployment Model
 
+The verified production target as of 2026-11-22 is PC WSL `EP-Production`, rootless `epprod-live`; see the [release ledger](docs/RELEASE-LEDGER.md#pc-image-release--2026-11-22-utc-authenticated-acceptance-pending). Legacy Hetzner remains fenced. The local custom-tag, migration/recreation commands and GitHub-hosted SSH workflow documented below describe the preserved Hetzner route. They are not the PC/rootless release procedure; any later PC operation requires current reviewed target-specific operational authority and applicable human approval.
+
 - Record each verified deployment or rollback in `docs/RELEASE-LEDGER.md`.
 - GitHub Actions builds the Postiz app image.
 - Image: ghcr.io/celleree/publish-everywhere-postiz
@@ -101,7 +103,7 @@ Rules:
 - Confirm the exact image ID and internal health, then use the bounded public readiness retry before manual browser verification.
 - Verify the exact app behavior manually.
 
-Use the manual GitHub-hosted production workflow described in `docs/GITHUB-HOSTED-DEPLOYMENT.md`. Normal deployments leave image pruning disabled and use `scripts/deploy-production.sh` for migration, recreation, bounded internal readiness polling, exact-image verification, and timing output. The workflow then applies bounded public readiness retry/backoff. Production deployment still requires explicit human approval.
+For an explicitly authorized release to the preserved Hetzner route, use the manual GitHub-hosted production workflow described in `docs/GITHUB-HOSTED-DEPLOYMENT.md`. That route leaves image pruning disabled and uses `scripts/deploy-production.sh` for migration, recreation, bounded internal readiness polling, exact-image verification, and timing output. The workflow then applies bounded public readiness retry/backoff. Production deployment still requires explicit human approval; do not dispatch this workflow for the PC target.
 
 For authorized AI-assisted continuation, use the [bounded release-coordinator lifecycle](docs/GITHUB-HOSTED-DEPLOYMENT.md#bounded-release-coordinator-lifecycle). It coordinates evidence and approvals; this manual retains operational authority and existing workflows/scripts retain execution authority.
 
