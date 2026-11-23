@@ -6,6 +6,7 @@ Keep normal AI/Codex context small. Read only what the current task requires.
 
 - For a narrow issue with an explicit file/error: start from that issue/error and the directly relevant code/tests.
 - For product behavior, UX copy, platform promises, or capability claims: read `docs/brain/PRODUCT_TRUTH.md`.
+- For UI design, layout, responsive behavior, visual critique, or frontend polish: read `docs/brain/UI_DESIGN_GUIDELINES.md` alongside the owning components. Use expert design skills for methodology, not as a substitute for product-specific rules.
 - For “continue the project,” roadmap, prioritization, or deciding what to do next: read `docs/brain/CURRENT_WORK.md`.
 - For long-running local Codex Desktop orchestration across bounded worker sessions: follow `docs/brain/ORCHESTRATOR_PROTOCOL.md`.
 - For locating the owning subsystem: read `docs/brain/REPOSITORY_ROUTING.md`.
