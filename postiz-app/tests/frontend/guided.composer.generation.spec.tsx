@@ -510,6 +510,30 @@ describe('guided composer generation transition', () => {
     ).toBeNull();
   });
 
+  it('offers own-caption recovery after no-speech generation fails and continues with the supplied caption', async () => {
+    seedDraft();
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBeNull();
+    const failed = { ...response('failed'), warnings: [{ code: 'NO_TRANSCRIPT', message: 'No usable source facts are available.' }] };
+    const caption = 'My supplied caption for a silent source.';
+    mockFetch.mockResolvedValueOnce(streamResponse(failed as any)).mockResolvedValueOnce(streamResponse({
+      ...response(), results: [{ ...result, draft: caption, origin: 'original' }],
+    } as any));
+    renderGeneration();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(useGuidedComposerStore.getState().generationStatus).toBe('failed'));
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBe(false);
+    expect(screen.getAllByRole('status').some((status) => status.textContent?.includes('No speech was detected in this media'))).toBe(true);
+    expect(screen.queryByText(/still being transcribed/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add my own caption' }));
+    expect(useGuidedComposerStore.getState()).toMatchObject({ composerStep: 'upload', captionMode: 'use-everywhere' });
+    fireEvent.change(screen.getAllByLabelText('Your caption').at(-1)!, { target: { value: caption } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Destinations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(useGuidedComposerStore.getState().composerStep).toBe('review'));
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({ captionMode: 'use-everywhere', sourceCaption: caption });
+    expect((screen.getByLabelText('Founder LinkedIn caption') as HTMLTextAreaElement).value).toBe(caption);
+  });
+
   it('keeps network failures on Destinations and allows retry', async () => {
     seedDraft();
     mockFetch
@@ -595,6 +619,25 @@ describe('guided composer generation transition', () => {
         generationInputFingerprint: null,
       })
     );
+    expect(screen.getByRole('button', { name: 'Review Step 3 of 4' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Publish Step 4 of 4' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('ignores a late NO_TRANSCRIPT result after a new video establishes usable speech', async () => {
+    seedDraft();
+    const controlled = controlledStreamResponse({ ...response('failed'), warnings: [{ code: 'NO_TRANSCRIPT', message: 'No speech in the old video.' }] } as any);
+    mockFetch.mockImplementation(async (url: string) => url === '/posts/copy/generate' ? controlled.response : {
+      ok: true, json: async () => ({ mediaId: 'video-2', status: 'READY', text: 'New video has spoken words.' }),
+    });
+    renderGeneration();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    await waitFor(() => expect(useGuidedComposerStore.getState().generationStatus).toBe('loading'));
+    act(() => useLaunchStore.getState().setGlobalValueMedia(0, [{ id: 'video-2', path: '/replacement.mp4', type: 'video' } as any]));
+    await waitFor(() => expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBe(true));
+    act(() => controlled.finish());
+    await waitFor(() => expect(useGuidedComposerStore.getState().generationStatus).toBe('idle'));
+    expect(useGuidedComposerStore.getState()).toMatchObject({ sourceMediaId: 'video-2', transcriptionStatus: 'READY', transcriptionHasUsableText: true });
+    expect(screen.queryByText(/No speech was detected/)).toBeNull();
   });
 
   it('retains unsupported-only destinations and does not make a network request', async () => {

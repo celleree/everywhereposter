@@ -43,6 +43,9 @@ export type GuidedTranscriptionStatus =
   | 'READY'
   | 'FAILED';
 
+export const getGuidedTranscriptTextPresence = (text: unknown): boolean | null =>
+  text === null ? false : typeof text === 'string' ? Boolean(text.trim()) : null;
+
 export interface GuidedReviewDraftSeed {
   destinationId: string;
   platform: CopyPlatform | null;
@@ -64,8 +67,10 @@ export interface GuidedReviewDraft extends GuidedReviewDraftSeed {
 
 interface GuidedComposerValues {
   composerStep: GuidedComposerStep;
+  furthestComposerStep: GuidedComposerStep | null;
   sourceMediaId: string | null;
   transcriptionStatus: GuidedTranscriptionStatus;
+  transcriptionHasUsableText: boolean | null;
   transcriptionError: string | null;
   additionalContext: string;
   captionMode: CaptionMode;
@@ -81,11 +86,13 @@ interface GuidedComposerValues {
 
 interface GuidedComposerStore extends GuidedComposerValues {
   setComposerStep: (composerStep: GuidedComposerStep) => void;
+  limitComposerProgress: (lastValidStep: GuidedComposerStep) => void;
   selectSourceMedia: (sourceMediaId: string | null) => void;
   setTranscriptionState: (
     sourceMediaId: string,
     status: GuidedTranscriptionStatus,
-    error?: string | null
+    error?: string | null,
+    hasUsableText?: boolean | null
   ) => void;
   nextComposerStep: () => void;
   previousComposerStep: () => void;
@@ -145,8 +152,11 @@ const initialGenerationState = {
 
 const initialGuidedComposerState: GuidedComposerValues = {
   composerStep: 'upload',
+  // A restored draft's current step initializes progress on its first navigation.
+  furthestComposerStep: null,
   sourceMediaId: null,
   transcriptionStatus: 'IDLE',
+  transcriptionHasUsableText: null,
   transcriptionError: null,
   additionalContext: '',
   captionMode: 'generate',
@@ -172,28 +182,56 @@ const moveComposerStep = (
 
 export const useGuidedComposerStore = create<GuidedComposerStore>()((set) => ({
   ...initialGuidedComposerState,
-  setComposerStep: (composerStep) => set({ composerStep }),
+  setComposerStep: (composerStep) => set((state) => ({
+    composerStep,
+    furthestComposerStep: GUIDED_COMPOSER_STEPS[Math.max(
+      GUIDED_COMPOSER_STEPS.indexOf(state.furthestComposerStep ?? state.composerStep),
+      GUIDED_COMPOSER_STEPS.indexOf(composerStep)
+    )],
+  })),
+  limitComposerProgress: (lastValidStep) => set((state) => ({
+    furthestComposerStep: GUIDED_COMPOSER_STEPS[Math.min(
+      GUIDED_COMPOSER_STEPS.indexOf(state.furthestComposerStep ?? state.composerStep),
+      GUIDED_COMPOSER_STEPS.indexOf(lastValidStep)
+    )],
+  })),
   selectSourceMedia: (sourceMediaId) =>
     set({
       sourceMediaId,
       transcriptionStatus: sourceMediaId ? 'PENDING' : 'IDLE',
+      transcriptionHasUsableText: null,
       transcriptionError: null,
       reviewDrafts: {},
       ...initialGenerationState,
     }),
-  setTranscriptionState: (sourceMediaId, transcriptionStatus, error = null) =>
+  setTranscriptionState: (
+    sourceMediaId,
+    transcriptionStatus,
+    error = null,
+    hasUsableText = null
+  ) =>
     set((state) =>
       state.sourceMediaId === sourceMediaId
-        ? { transcriptionStatus, transcriptionError: error }
+        ? {
+            transcriptionStatus,
+            transcriptionError: error,
+            transcriptionHasUsableText:
+              transcriptionStatus === 'READY' ? hasUsableText : null,
+          }
         : state
     ),
   nextComposerStep: () =>
     set((state) => ({
       composerStep: moveComposerStep(state.composerStep, 1),
+      furthestComposerStep: GUIDED_COMPOSER_STEPS[Math.max(
+        GUIDED_COMPOSER_STEPS.indexOf(state.furthestComposerStep ?? state.composerStep),
+        GUIDED_COMPOSER_STEPS.indexOf(moveComposerStep(state.composerStep, 1))
+      )],
     })),
   previousComposerStep: () =>
     set((state) => ({
       composerStep: moveComposerStep(state.composerStep, -1),
+      furthestComposerStep: state.furthestComposerStep ?? state.composerStep,
     })),
   setAdditionalContext: (additionalContext) => set({ additionalContext }),
   setCaptionMode: (captionMode) => set({ captionMode }),

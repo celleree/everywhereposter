@@ -16,9 +16,13 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import {
   GUIDED_COMPOSER_STEPS,
   GuidedComposerStep,
+  getGuidedTranscriptTextPresence,
   useGuidedComposerStore,
 } from '@gitroom/frontend/components/new-launch/guided.composer.store';
-import { GuidedComposerUploadDetails } from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
+import {
+  GUIDED_NO_SPEECH_MESSAGE,
+  GuidedComposerUploadDetails,
+} from '@gitroom/frontend/components/new-launch/guided.composer.upload.details';
 import {
   getGuidedAvailableIntegrations,
   GuidedComposerDestinations,
@@ -123,8 +127,10 @@ export const GuidedComposerShell: FC<{
   );
   const {
     composerStep,
+    furthestComposerStep,
     sourceMediaId,
     transcriptionStatus,
+    transcriptionHasUsableText,
     captionMode,
     sourceCaption,
     additionalContext,
@@ -134,6 +140,7 @@ export const GuidedComposerShell: FC<{
     generationInputFingerprint,
     reviewDrafts,
     setComposerStep,
+    limitComposerProgress,
     selectSourceMedia,
     setTranscriptionState,
     nextComposerStep,
@@ -149,8 +156,10 @@ export const GuidedComposerShell: FC<{
   } = useGuidedComposerStore(
     useShallow((state) => ({
       composerStep: state.composerStep,
+      furthestComposerStep: state.furthestComposerStep,
       sourceMediaId: state.sourceMediaId,
       transcriptionStatus: state.transcriptionStatus,
+      transcriptionHasUsableText: state.transcriptionHasUsableText,
       captionMode: state.captionMode,
       sourceCaption: state.sourceCaption,
       additionalContext: state.additionalContext,
@@ -160,6 +169,7 @@ export const GuidedComposerShell: FC<{
       generationInputFingerprint: state.generationInputFingerprint,
       reviewDrafts: state.reviewDrafts,
       setComposerStep: state.setComposerStep,
+      limitComposerProgress: state.limitComposerProgress,
       selectSourceMedia: state.selectSourceMedia,
       setTranscriptionState: state.setTranscriptionState,
       nextComposerStep: state.nextComposerStep,
@@ -188,6 +198,10 @@ export const GuidedComposerShell: FC<{
   const hasUploadedVideo = globalMedia.some(
     (media) => media.id === sourceMediaId && isGuidedMp4MovMedia(media)
   );
+  const noSpeech =
+    hasUploadedVideo &&
+    transcriptionStatus === 'READY' &&
+    transcriptionHasUsableText === false;
   const legacyDraftValid =
     stripHtmlValidation('normal', global[0]?.content || '', true).length > 0 ||
     globalMedia.length > 0;
@@ -279,6 +293,32 @@ export const GuidedComposerShell: FC<{
     enabledReviewDrafts.length > 0 &&
     !reviewHasBlockingError &&
     !reviewRegenerationLoading;
+  const progressInputFingerprint = JSON.stringify({
+    generationFingerprint,
+    mediaIds: globalMedia.map((media) => media.id),
+    content: global[0]?.content || '',
+  });
+  const previousProgressInputFingerprint = useRef(progressInputFingerprint);
+  useEffect(() => {
+    if (
+      previousProgressInputFingerprint.current !== progressInputFingerprint ||
+      !uploadStepValid
+    ) {
+      limitComposerProgress(uploadStepValid ? 'destinations' : 'upload');
+    }
+    previousProgressInputFingerprint.current = progressInputFingerprint;
+  }, [progressInputFingerprint, uploadStepValid, limitComposerProgress]);
+  const furthestStepIndex = GUIDED_COMPOSER_STEPS.indexOf(
+    furthestComposerStep ?? composerStep
+  );
+  const lastValidStepIndex = !uploadStepValid
+    ? 0
+    : !destinationStepValid ||
+      (sourceType !== 'text' && (!allSelectedDestinationsAvailable || !generationReady))
+    ? destinationStepIndex
+    : !reviewStepValid
+    ? reviewStepIndex
+    : GUIDED_COMPOSER_STEPS.length - 1;
   const navigationLocked =
     locked ||
     generationLoading ||
@@ -289,7 +329,7 @@ export const GuidedComposerShell: FC<{
     sourceType !== 'text' && currentStepIndex >= reviewStepIndex;
   const continueDisabled =
     navigationLocked ||
-    (composerStep === 'upload' && !uploadStepValid) ||
+    !uploadStepValid ||
     (destinationRequiredForCurrentStep && !destinationStepValid) ||
     (composerStep === 'destinations' &&
       sourceType !== 'text' &&
@@ -376,7 +416,8 @@ export const GuidedComposerShell: FC<{
         setTranscriptionState(
           sourceMediaId,
           status.status,
-          status.error?.message || null
+          status.error?.message || null,
+          getGuidedTranscriptTextPresence(status.text)
         );
 
         if (status.status === 'PENDING' || status.status === 'PROCESSING') {
@@ -528,6 +569,13 @@ export const GuidedComposerShell: FC<{
         return;
       }
 
+      if (
+        sourceType === 'video' &&
+        result.response?.warnings.some((warning) => warning.code === 'NO_TRANSCRIPT')
+      ) {
+        setTranscriptionState(generationMedia.id, 'READY', null, false);
+      }
+
       if (!result.response) {
         if (captionMode === 'use-everywhere') {
           completeGeneration(
@@ -601,6 +649,7 @@ export const GuidedComposerShell: FC<{
     selectedDestinations,
     setComposerStep,
     setGenerationProgress,
+    setTranscriptionState,
     sourceCaption,
     startGeneration,
     generationMedia,
@@ -819,9 +868,6 @@ export const GuidedComposerShell: FC<{
       <header className="guided-composer-header border-b border-newBorder bg-newBgColorInner px-[24px] py-[18px] mobile:px-[14px] mobile:py-[14px]">
         <div className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-[16px]">
           <div className="mobile:hidden min-w-0">
-            <div className="text-[13px] font-[700] uppercase tracking-[0.12em] text-textColor/55">
-              Create post
-            </div>
             <h1
               ref={headingRef}
               tabIndex={-1}
@@ -842,8 +888,8 @@ export const GuidedComposerShell: FC<{
               {GUIDED_COMPOSER_STEPS.map((step, index) => {
                 const details = GUIDED_COMPOSER_STEP_DETAILS[step];
                 const isActive = step === composerStep;
-                const isComplete = index < currentStepIndex;
-                const isFuture = index > currentStepIndex;
+                const isReached = index <= Math.min(furthestStepIndex, lastValidStepIndex);
+                const isComplete = isReached && !isActive;
 
                 return (
                   <li key={step} className="flex items-center gap-[8px]">
@@ -852,7 +898,7 @@ export const GuidedComposerShell: FC<{
                       aria-label={`${details.title} Step ${index + 1} of ${GUIDED_COMPOSER_STEPS.length}`}
                       aria-current={isActive ? 'step' : undefined}
                       disabled={
-                        isFuture || navigationLocked || (locked && !isActive)
+                        !isReached || navigationLocked
                       }
                       onClick={() => setComposerStep(step)}
                       className={clsx(
@@ -937,7 +983,25 @@ export const GuidedComposerShell: FC<{
             <GuidedComposerGeneration progress={generationProgress} />
           )}
           {composerStep === 'destinations' && !generationLoading && !quickUpload && (
-            <GuidedComposerDestinations disabled={navigationLocked} />
+            <>
+              <GuidedComposerDestinations disabled={navigationLocked} />
+              {noSpeech && (
+                <div role="status" className="mx-auto w-full max-w-[1120px] px-[20px] pb-[20px] text-[13px] mobile:px-[14px]">
+                  <p>{GUIDED_NO_SPEECH_MESSAGE}</p>
+                  <button
+                    type="button"
+                    disabled={navigationLocked}
+                    onClick={() => {
+                      useGuidedComposerStore.getState().setCaptionMode('use-everywhere');
+                      setComposerStep('upload');
+                    }}
+                    className="mt-[8px] min-h-[44px] rounded-[8px] border border-newBorder px-[12px] font-[700] disabled:opacity-50"
+                  >
+                    Add my own caption
+                  </button>
+                </div>
+              )}
+            </>
           )}
           {quickUpload && (
             <section aria-label="Quick Upload progress" className="mx-auto w-full max-w-[1120px] p-[20px] mobile:p-[14px]">

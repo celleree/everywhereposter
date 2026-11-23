@@ -2,7 +2,7 @@
 
 Systran faster-whisper-tiny conversion; pinned weights repository revision d90ca5fe260221311c53c58e660288d3deb8d356.
 Current model card labels the model MIT: https://huggingface.co/Systran/faster-whisper-tiny
-The README at that exact historical revision was unavailable during this audit.
+The README at that exact historical revision was unavailable during the prior audit; on 2026-11-21, the [pinned README](https://huggingface.co/Systran/faster-whisper-tiny/resolve/d90ca5fe260221311c53c58e660288d3deb8d356/README.md) was retrieved (1991 bytes; SHA256 `29fb8444a02c1f133ab7e538525aa478ff68845964f21cf42500842b0e4a7b20`) and its YAML declares `license: mit`. This is a revision-specific model-card declaration, not complete rights clearance; the revision-specific LICENSE endpoint returns 404, and bundled/native, per-wheel and image obligations still need separate review.
 Underlying OpenAI Whisper license, retrieved from https://raw.githubusercontent.com/openai/whisper/main/LICENSE:
 
 MIT License

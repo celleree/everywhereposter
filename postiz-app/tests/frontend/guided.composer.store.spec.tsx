@@ -81,6 +81,30 @@ describe('guided composer store', () => {
     });
   });
 
+  it('preserves reached progress on Back and caps it when upstream inputs invalidate it', () => {
+    const store = useGuidedComposerStore.getState();
+    store.setComposerStep('review');
+    store.previousComposerStep();
+    store.setComposerStep('upload');
+    expect(useGuidedComposerStore.getState().furthestComposerStep).toBe('review');
+    store.limitComposerProgress('destinations');
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      composerStep: 'upload',
+      furthestComposerStep: 'destinations',
+    });
+    store.nextComposerStep();
+    store.nextComposerStep();
+    expect(useGuidedComposerStore.getState().furthestComposerStep).toBe('review');
+    store.resetGuidedComposer();
+    expect(useGuidedComposerStore.getState().furthestComposerStep).toBeNull();
+  });
+
+  it('initializes reached progress from a restored current step', () => {
+    useGuidedComposerStore.setState({ composerStep: 'review' });
+    useGuidedComposerStore.getState().setComposerStep('upload');
+    expect(useGuidedComposerStore.getState().furthestComposerStep).toBe('review');
+  });
+
   it('restores the complete guided workflow state to its defaults', () => {
     const store = useGuidedComposerStore.getState();
 
@@ -96,5 +120,25 @@ describe('guided composer store', () => {
       captionMode: 'generate',
       sourceCaption: '',
     });
+  });
+
+  it('keeps unknown transcript presence distinct from canonical no-speech and ignores a late source result', () => {
+    const store = useGuidedComposerStore.getState();
+    store.selectSourceMedia('video-1');
+    store.setTranscriptionState('video-1', 'READY');
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBeNull();
+    store.setTranscriptionState('video-1', 'READY', null, false);
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBe(false);
+    store.setTranscriptionState('video-1', 'PROCESSING');
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBeNull();
+    store.setTranscriptionState('video-1', 'READY', null, true);
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBe(true);
+    store.selectSourceMedia('video-2');
+    store.setTranscriptionState('video-1', 'READY', null, false);
+    expect(useGuidedComposerStore.getState()).toMatchObject({
+      sourceMediaId: 'video-2', transcriptionStatus: 'PENDING', transcriptionHasUsableText: null,
+    });
+    store.resetGuidedComposer();
+    expect(useGuidedComposerStore.getState().transcriptionHasUsableText).toBeNull();
   });
 });
