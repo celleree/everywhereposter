@@ -1,6 +1,6 @@
 # Current Work
 
-Updated: 2026-11-08
+Updated: 2026-11-22
 
 Use this file when the user asks to continue the project, continue a roadmap, decide what to do next, or coordinate work across multiple EverywherePoster workstreams. Do not load it for a narrow bug with an already-named issue or file unless the current priority matters.
 
@@ -12,15 +12,17 @@ For long-running local Codex Desktop orchestration, also follow `docs/brain/ORCH
 
 Get EverywherePoster to a safe early paid launch with the core repurposing/publishing workflow usable, external social-app reviews completed, and production operations verified.
 
-## Launch-readiness setup checkpoint — 2026-11-08
+## Launch-readiness release checkpoint — 2026-11-22
 
 Use [LAUNCH_READINESS_SCOPE.md](LAUNCH_READINESS_SCOPE.md) for the five work packages, acceptance criteria, exclusions and sequence. The separately supplied CONTROL-PLAN.md governs maintenance; it remains outside tracked files and must be available before dependent work.
 
-- Live GitHub checkpoint verified November 8: canonical `main` is `a237be798549f9d48d80a6b1f351164d9b2257b4`; [PR #327](https://github.com/celleree/everywhereposter/pull/327) is OPEN, DRAFT and UNMERGED at `b6402e4e888be9d85fb9950f1b62de3a171c5bfb`. Revalidate before execution.
-- Production remains on hold. Maintenance controls were last documented as unapplied; current runtime identity, health and controller exclusion need fresh verification. CI, Preview and repository state do not establish those facts.
-- Current authorization covers setup, documentation and readiness preparation only. No package implementation, controller implementation, control application, app/proxy interruption, image build/publication, merge, deployment, recovery re-enable, migration/replay/restore, external publication or new charge is authorized.
+- The authorized bounded release merged PRs #357, #355, #356 and #358, then deployed image source `478e1423a436b9405d6c454572945748e8e51ac7` to the PC/rootless production target. Final release `main` was `d1c1ff4ee55915e3df77a075498aaab630eccb6b`, with unchanged image inputs. See the [verified runtime, recovery evidence and acceptance limits](../RELEASE-LEDGER.md#pc-image-release--2026-11-22-utc-authenticated-acceptance-pending).
+- Deployment/runtime checks passed: new BUILD_ID, healthy app with zero restarts, 12 roles, 32 activity queues with pollers and Elasticsearch green. Fresh control diagnosis found no holds or loaded drop-ins; legacy Hetzner remains fenced. Cooked remains off; billing and wallet flags remain false. No migration or feature activation occurred.
+- Authenticated tutorial/composer acceptance remains `DEPLOYED_UNVERIFIED`; the anonymous asset checker failed on an expected authentication redirect before playback. Separate login rendering/build checks do not prove hydration or native playback. Issues #76, #86, #218 and #348 remain open with release evidence and outstanding criteria.
+- The completed release superseded November 8's setup-only session restriction. Future merges, production actions, rollback, data restore, activation and provider/publishing/payment actions remain subject to their applicable human approval gates.
+- Historical November 8 setup snapshot: `main` was `a237be798549f9d48d80a6b1f351164d9b2257b4`; [PR #327](https://github.com/celleree/everywhereposter/pull/327) was OPEN, DRAFT and UNMERGED at `b6402e4e888be9d85fb9950f1b62de3a171c5bfb`. Revalidate its live state before any future work.
 - Preserve the editor pause until package 5 is selected, after core-flow and payment gates. Standard output acceptance remains required if the launch promise relies on it; Cooked activation and prototype translation remain separate.
-- PRs #263, #113 and #110 overlap this file and remain frozen. Do not import or synchronize their work into this setup change.
+- PRs #263, #113 and #110 overlap this file and remain frozen. Do not import or synchronize their work into this release record.
 
 One root coordinator owns sequencing, shared contracts and integration; use one implementation worker by default, independently bounded additional workers only, one-level delegation and fresh final review independent of design/implementation.
 
@@ -80,7 +82,7 @@ Historical remaining roadmap (revalidate before selection; the November 8 launch
 3. Phase 5 — run a separately approved production validation of the combined internal and public readiness path under Issue #18.
 4. Phase 6 — finish the representative frontend, backend, dependency, Docker, and config benchmark matrix and update operating documentation to verified behavior.
 
-Preserve the GitHub -> GHCR -> Hetzner architecture unless a separately approved architecture decision changes it.
+The roadmap's GitHub -> GHCR -> Hetzner architecture was its historical assumption. Use the current PC/rootless route recorded above; any future architecture change requires a separately approved decision.
 
 ### 4. TRA-quality media intelligence and image generation — PLANNED
 
@@ -132,7 +134,7 @@ A merged production/config fix is not proof of runtime behavior until the applic
 
 ## Next bounded engineering task
 
-Prepare the foreground maintenance-controller implementation proposal, isolated verification plan and review package against the separately supplied CONTROL-PLAN.md. Return the proposed artifact set and remaining gates; do not implement the controller or apply controls under the current setup-only authorization. See [LAUNCH_READINESS_SCOPE.md](LAUNCH_READINESS_SCOPE.md).
+Complete the remaining release acceptance through a legitimate authorized clean-account session: desktop/mobile tutorial playback, captions, layout and navigation, plus the affected composer no-speech/review/recovery checks. Retain the deployed BUILD_ID and required physical-device evidence. Billing entry can initiate checkout and requires its applicable authorization. If account access or authorization is missing, record that gate and keep acceptance pending; no production retry or auth bypass is implied. See the [release ledger](../RELEASE-LEDGER.md#pc-image-release--2026-11-22-utc-authenticated-acceptance-pending) and [LAUNCH_READINESS_SCOPE.md](LAUNCH_READINESS_SCOPE.md).
 
 Any later implementation starts from current main with explicit owned, shared and prohibited paths. Video-editor tasks must preserve Standard routing and keep Cooked activation/runtime work and PR #251 visual-prototype translation separate unless an approved task explicitly joins them. Record unresolved capacity, deployment or activation decisions rather than inferring them from repository state.
 
