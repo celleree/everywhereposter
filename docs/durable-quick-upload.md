@@ -1,8 +1,8 @@
 # Durable Quick Upload preparation
 
-PR B is reconciled onto main after PR #169 (merge `321311d8828eb5efc1844471e0d15f6172f95990`) and PR #164 (merge `d5de3c3a20a60bda2fd918a02152b5bc5438369a`). It retains their final integration repairs and contains only the durable Quick Upload increment. It remains draft pending fresh focused checks, CI, independent exact-HEAD review and separate merge approval.
+The durable Quick Upload increment is merged in [PR #170](https://github.com/celleree/everywhereposter/pull/170) (merge `2989891b21bda75ec3093cbac591ecd7eeaeaca2`), after PR #169 (merge `321311d8828eb5efc1844471e0d15f6172f95990`) and PR #164 (merge `d5de3c3a20a60bda2fd918a02152b5bc5438369a`). It retains their final integration repairs. [Issue #162](https://github.com/celleree/everywhereposter/issues/162) remains open for the release acceptance below; the merge does not establish feature activation or deployed behavior.
 
-Enrollment is disabled unless `ENABLE_DURABLE_QUICK_UPLOAD=true`. No production configuration has been changed. This gate must remain off until the prerequisite publishing contract, additive migrations, matching workers/API/client and physical/deployed acceptance have been verified.
+Enrollment is disabled unless `ENABLE_DURABLE_QUICK_UPLOAD=true`. Current production activation is not established by repository configuration or merge status. This gate must remain off until the prerequisite publishing contract, additive migrations, matching workers/API/client and physical/deployed acceptance have been verified.
 
 ## Consent and execution
 
@@ -20,4 +20,4 @@ Tests use disposable loopback PostgreSQL, local synthetic MP4 files, mocked capt
 
 Required release acceptance remains: physical iPhone/iPad Safari picker, navigation, lock/background/termination, reconnect/reselect original file, resumed chunk integrity and HEVC preview behavior; Android background return; complete-transfer close followed by server processing, worker restart/outbox recovery and per-platform skipped/uncertain states using separately authorized provider tests. Safari can stop when suspended or terminated. `Safe to leave` requires the server's completed-media receipt and refers to saved transfer, while publishing has its own persisted state.
 
-This coherent draft exceeds normal soft PR size limits because consent ownership, claims, immutable submission handoff and visible saved status must agree. Review order: additive schema/consent ownership, workflow and generation claims, #164 handoff/uncertainty, then the transfer tray lifecycle. The prerequisite publishing and resumable-upload contracts remain intact.
+The merged increment exceeded normal soft PR size limits because consent ownership, claims, immutable submission handoff and visible saved status must agree. Its review order was additive schema/consent ownership, workflow and generation claims, #164 handoff/uncertainty, then the transfer tray lifecycle. The prerequisite publishing and resumable-upload contracts remain intact.
