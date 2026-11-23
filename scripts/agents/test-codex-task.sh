@@ -135,7 +135,7 @@ run_case() {
     stored-credentials) touch "$runner_home/.git-credentials" ;;
   esac
   PATH="$TEST_ROOT/bin:$PATH" TEST_LOG="$case_dir/log" SCENARIO="$name" VISIBILITY="$visibility" \
-    CODEX_TASK_MODEL=gpt-6.1-sol CODEX_TASK_REASONING_EFFORT=high CODEX_TASK_SETTINGS_SOURCE=github-actions-vars \
+    CODEX_TASK_MODEL=gpt-6.2-sol CODEX_TASK_REASONING_EFFORT=high CODEX_TASK_SETTINGS_SOURCE=github-actions-vars \
     CODEX_RECOVERY_ROOT="$PRIVATE_ROOT/$name" HOME="$runner_home" GH_TOKEN=synthetic-workflow-token GITHUB_ACTOR="$actor" GITHUB_TRIGGERING_ACTOR="$rerunner" \
     sh "$ROOT/scripts/agents/codex-task.sh" "$mode" 221 > "$case_dir/output" 2>&1 || status=$?
   if [[ "$status" != "$expected" ]]; then cat "$case_dir/output"; echo "FAIL $name: expected $expected, got $status"; exit 1; fi
@@ -143,7 +143,7 @@ run_case() {
     grep -Fq -- '--sandbox read-only' "$case_dir/log"
     ! grep -Fq -- 'features.use_legacy_landlock=' "$case_dir/log"
     grep -Fq -- '--config features.apps=false --config features.plugins=false --config features.skill_mcp_dependency_install=false --config tools.web_search=false' "$case_dir/log"
-    grep -Fq -- '--model gpt-6.1-sol --config model_reasoning_effort="high" --json' "$case_dir/log"
+    grep -Fq -- '--model gpt-6.2-sol --config model_reasoning_effort="high" --json' "$case_dir/log"
     grep -Fxq posted "$case_dir/log"
   elif [[ "$name" != stale ]] && grep -Fq 'codex:' "$case_dir/log"; then
     echo "FAIL $name reached Codex"; exit 1

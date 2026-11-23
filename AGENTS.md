@@ -123,8 +123,8 @@ Preserve the current session's configured model and reasoning effort unless the 
 For an authorized new worker, the permitted models are:
 
 - `gpt-6-luna`: lighter tasks, targeted inspection, extraction, and mechanical work.
-- `gpt-6.1-sol`: ordinary coding, coordination, debugging, and independent review.
-- `gpt-6-astra`: exceptional work only when the permitted smaller models cannot adequately handle it, after discussing justification and obtaining user authorization. Never escalate to Astra automatically.
+- `gpt-6.2-sol`: ordinary coding, coordination, debugging, and independent review.
+- `gpt-6.2-astra`: exceptional work only when the permitted smaller models cannot adequately handle it, after discussing justification and obtaining user authorization. Never escalate to Astra automatically.
 
 Retain any stricter applicable allowlist. Model choice does not replace fresh reviewer context or repository gates. Follow [the root protocol](docs/brain/ORCHESTRATOR_PROTOCOL.md) for worker ownership and escalation; verify the executor exposes an option before recommending it.
 

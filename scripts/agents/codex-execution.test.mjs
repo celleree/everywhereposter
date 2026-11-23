@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { authorize, observations, prepare, verify } from './codex-execution.mjs';
 
 const policy = JSON.parse(readFileSync(new URL('./codex-execution-policy.json',import.meta.url)));
-const requested = {model:'gpt-6.1-sol',reasoningEffort:'high',source:'github-actions-vars'};
+const requested = {model:'gpt-6.2-sol',reasoningEffort:'high',source:'github-actions-vars'};
 const bindings = {helperSha256:'a'.repeat(64),policySha256:'b'.repeat(64)};
 const identity = {revision:'c'.repeat(40),runId:'123',runAttempt:'1',recoveryRecord:'private-fixture'};
 const argv = (prompt='normal') => ['--ask-for-approval','never','exec','--ephemeral','--ignore-user-config','--model',requested.model,'--config','model_reasoning_effort="high"','--json','--sandbox','workspace-write',prompt];
@@ -31,10 +31,11 @@ function fixture() {
 
 test('explicit pair/source only, full allowlist retained, Astra and unsupported pairs rejected without fallback',()=>{
  assert.deepEqual(authorize(policy,requested),requested);
- for(const input of [{...requested,model:''},{...requested,reasoningEffort:''},{...requested,source:''},{...requested,source:'user-config'},{...requested,model:'gpt-6.1-terra'},{...requested,model:'gpt-6-astra'},{...requested,model:'gpt-6-luna',reasoningEffort:'ultra'},{...requested,reasoningEffort:'extra-high'},{...requested,reasoningEffort:'HIGH'}])assert.throws(()=>authorize(policy,input));
+ for(const input of [{...requested,model:''},{...requested,reasoningEffort:''},{...requested,source:''},{...requested,source:'user-config'},{...requested,model:'gpt-6.1-terra'},{...requested,model:'gpt-6.2-astra'},{...requested,model:'gpt-6.1-sol'},{...requested,model:'gpt-6-astra'},{...requested,model:'gpt-6-luna',reasoningEffort:'ultra'},{...requested,reasoningEffort:'extra-high'},{...requested,reasoningEffort:'HIGH'}])assert.throws(()=>authorize(policy,input));
  assert.deepEqual(authorize(policy,{...requested,model:'gpt-6-luna',reasoningEffort:'max'}),{...requested,model:'gpt-6-luna',reasoningEffort:'max'});
- assert.deepEqual(policy.globalAllowlist,['gpt-6-luna','gpt-6.1-sol','gpt-6-astra']);
- assert.equal(policy.advertisedSnapshot.clientVersion,'0.164.0');assert.equal(policy.cliObservation.version,'codex-cli 0.163.0');assert.equal(policy.remoteSupport,'unverified');
+ assert.deepEqual(policy.globalAllowlist,['gpt-6-luna','gpt-6.2-sol','gpt-6.2-astra']);
+ assert.deepEqual(policy.unattendedAllowlist,['gpt-6-luna','gpt-6.2-sol']);
+ assert.equal(policy.advertisedSnapshot.clientVersion,'0.171.0');assert.equal(policy.cliObservation.version,'codex-cli 0.171.0');assert.equal(policy.remoteSupport,'unverified');
 });
 test('intent binds exact settings/policy/helper/run/revision/argv; no invocation or observed inference before spawn',()=>{
  const f=fixture(),result=prepare(policy,bindings,requested,identity,argv(),f.file),receipt=verify(f.file,result.sha256);

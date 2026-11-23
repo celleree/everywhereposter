@@ -10,7 +10,7 @@ const encoded = value => Buffer.from(`${JSON.stringify(value)}\n`);
 const assert = (value) => { if (!value) throw new Error('execution_contract'); };
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const safeInteger = value => Number.isSafeInteger(value) && value >= 0;
-const PAIRS = { 'gpt-6-luna': ['low','medium','high','xhigh','max'], 'gpt-6.1-sol': ['low','medium','high','xhigh','max','ultra'], 'gpt-6-astra': ['low','medium','high','xhigh','max','ultra'] };
+const PAIRS = { 'gpt-6-luna': ['low','medium','high','xhigh','max'], 'gpt-6.2-sol': ['low','medium','high','xhigh','max','ultra'], 'gpt-6.2-astra': ['low','medium','high','xhigh','max','ultra'] };
 export function boundedRead(file, limit) {
   const fd = openSync(file, C.O_RDONLY | C.O_NOFOLLOW);
   try {
