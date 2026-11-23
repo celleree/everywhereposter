@@ -2,6 +2,8 @@
 
 This workflow deploys an already-built full-SHA EverywherePoster image from GitHub Actions to the existing Hetzner host over SSH.
 
+Route status, 2026-11-22: verified production is PC WSL/rootless `epprod-live`; legacy Hetzner remains fenced. This workflow was not used for that release and is not the PC deployment route. See the [release ledger](RELEASE-LEDGER.md#pc-image-release--2026-11-22-utc-authenticated-acceptance-pending); any later PC operation requires current reviewed target-specific operational authority and applicable human approval.
+
 It does not build on Hetzner, restart unrelated services, or deploy an image that lacks a successful `Build EverywherePoster image` workflow run. Before recreating the app, it runs the existing Prisma migration deployment against the configured database.
 
 ## What the workflow does
@@ -232,7 +234,7 @@ Do not use `StrictHostKeyChecking=no`. The workflow intentionally fails if the s
 
 A workflow-only or documentation-only merge may advance `main` without producing a new app image. In that case, release the newest successful image SHA. Release mode permits this only when commits after that SHA do not change `postiz-app` or `.github/workflows/build-postiz-ghcr.yml`.
 
-## Normal releases
+## Normal releases on the Hetzner route
 
 Use `release` mode with the newest successful app-image SHA. It is usually the current `main` SHA, but it can be an earlier `main` SHA when later commits change only non-image inputs such as deployment documentation.
 
