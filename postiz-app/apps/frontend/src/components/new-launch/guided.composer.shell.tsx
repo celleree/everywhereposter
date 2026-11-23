@@ -54,6 +54,8 @@ import {
 import { quickUploadAccountReason, quickUploadCopyReason, QuickUploadSkip } from './guided.composer.quick-upload';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 
+import { getGuidedReviewMediaOverrides } from './guided.review.media';
+
 export const GUIDED_COMPOSER_STEP_DETAILS: Record<
   GuidedComposerStep,
   {
@@ -112,6 +114,7 @@ export const GuidedComposerShell: FC<{
   const fetch = useFetch();
   const {
     global,
+    internal,
     integrations,
     selectedIntegrations,
     chars,
@@ -119,6 +122,7 @@ export const GuidedComposerShell: FC<{
   } = useLaunchStore(
     useShallow((state) => ({
       global: state.global,
+      internal: state.internal,
       integrations: state.integrations,
       selectedIntegrations: state.selectedIntegrations,
       chars: state.chars,
@@ -278,14 +282,18 @@ export const GuidedComposerShell: FC<{
   const reviewRegenerationLoading = enabledReviewDrafts.some(
     (draft) => draft.regenerationStatus === 'loading'
   );
+  const reviewMediaOverrides = getGuidedReviewMediaOverrides(
+    globalMedia, sourceMediaId, selectedDestinations, internal
+  );
   const reviewHasBlockingError = enabledReviewDrafts.some((draft) => {
     const limit = getGuidedReviewDestinationLimit({
       providerLimit: chars[draft.destinationId],
       platform: draft.platform,
     });
     return Boolean(
-      getGuidedReviewDraftValidation(draft, limit, globalMedia.length > 0)
-        .errors.length
+      getGuidedReviewDraftValidation(
+        draft, limit, (reviewMediaOverrides[draft.destinationId] ?? globalMedia).length > 0
+      ).errors.length
     );
   });
   const reviewStepValid =

@@ -24,6 +24,7 @@ import WarpcastProvider from '@gitroom/frontend/components/new-launch/providers/
 import TelegramProvider from '@gitroom/frontend/components/new-launch/providers/telegram/telegram.provider';
 import NostrProvider from '@gitroom/frontend/components/new-launch/providers/nostr/nostr.provider';
 import VkProvider from '@gitroom/frontend/components/new-launch/providers/vk/vk.provider';
+import type { GuidedRootMedia } from '../guided.review.media';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import React, { FC, forwardRef, useEffect, useImperativeHandle } from 'react';
@@ -195,7 +196,10 @@ export const ShowAllProviders = forwardRef(
   const hasGlobalMedia = !!global?.[0]?.media?.length;
 
   useImperativeHandle(ref, () => ({
-    checkAllValid: async (destinationIds?: string[]) => {
+    checkAllValid: async (
+      destinationIds?: string[],
+      mediaOverrides?: Record<string, GuidedRootMedia>
+    ) => {
       const destinationScope = destinationIds
         ? new Set(destinationIds)
         : null;
@@ -206,7 +210,7 @@ export const ShowAllProviders = forwardRef(
               !destinationScope ||
               destinationScope.has(selected.integration.id)
           )
-          .map(async (p) => await p.ref?.current.isValid())
+          .map((p) => p.ref?.current.isValid(mediaOverrides?.[p.integration.id]))
       );
     },
     getAllValues: async () => {
