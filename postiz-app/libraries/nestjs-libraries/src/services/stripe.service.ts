@@ -25,6 +25,14 @@ const canonicalJson = (value: any): string => JSON.stringify(value, (_key, item)
     ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 const launchFingerprint = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 const providerId = (value: any): string | undefined => typeof value === 'string' ? value : value?.id;
+const hostedCheckoutText = (allowTrial: boolean): Stripe.Checkout.SessionCreateParams.CustomText => ({
+  submit: {
+    message: 'Your subscription automatically renews at the recurring price and billing interval shown here until you cancel. ' +
+      'Cancel from Billing in your account before your next billing date to stop future renewals.' +
+      (allowTrial ? ' If a free trial is shown, it converts to a paid subscription when the trial ends unless you cancel before then.' : '') +
+      ' [Terms of Service](https://everywhereposter.com/terms/).',
+  },
+});
 
 @Injectable()
 export class StripeService {
@@ -213,6 +221,7 @@ export class StripeService {
       ui_mode: mode, customer, client_reference_id: id, mode: 'subscription',
       ...(mode === 'custom' ? { return_url: success } : {
         success_url: success, cancel_url: process.env['FRONTEND_URL'] + `/billing?cancel=true${isUtm}`,
+        custom_text: hostedCheckoutText(allowTrial),
       }),
       payment_method_collection: 'always', payment_method_types: ['card'], allow_promotion_codes: false,
       line_items: [{ price, quantity: 1 }],
@@ -883,6 +892,7 @@ export class StripeService {
 
     const { url } = await stripe.checkout.sessions.create({
       customer,
+      custom_text: hostedCheckoutText(allowTrial),
       cancel_url: process.env['FRONTEND_URL'] + `/billing?cancel=true${isUtm}`,
       success_url:
         process.env['FRONTEND_URL'] +

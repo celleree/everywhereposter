@@ -1,4 +1,5 @@
 import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
+import { createHash } from 'crypto';
 import { channelAllowance, pricing, purchasePlans } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 
 jest.mock('@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service', () => ({ SubscriptionService: class {} }));
@@ -29,6 +30,12 @@ const validPrice = (period = 'MONTHLY') => ({
   lookup_key: period === 'MONTHLY' ? 'everywhereposter_launch_v1_monthly' : 'everywhereposter_launch_v1_yearly',
   metadata: { plan_version: 'LAUNCH_V1' },
 });
+const renewalDisclosure = 'Your subscription automatically renews at the recurring price and billing interval shown here until you cancel. Cancel from Billing in your account before your next billing date to stop future renewals.';
+const trialDisclosure = ' If a free trial is shown, it converts to a paid subscription when the trial ends unless you cancel before then.';
+const termsLink = ' [Terms of Service](https://everywhereposter.com/terms/).';
+const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value, (_key, item) =>
+  item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)).digest('hex');
 const harness = (tier?: string) => {
   // A small service-port fake; real row locks, constraints and CAS are covered
   // separately by stripe.launch-checkout.integration.spec.ts on PostgreSQL.
@@ -110,7 +117,7 @@ it.each(['embedded', 'subscribe', 'prorate'])('rejects forged legacy %s before a
 it.each(['subscribe', 'embedded'].flatMap(method => ['MONTHLY', 'YEARLY'].flatMap(period =>
   [true, false].map(eligible => [method, period, eligible]))))('builds %s %s Checkout (trial eligible=%s)', async (method, period, eligible) => {
   mockPrices.mockResolvedValue({ data: [validPrice(period)] });
-  const { service } = harness();
+  const { service, attempts } = harness();
   await (service as any)[method]('track', 'org_fixture', 'user', { billing: 'LAUNCH_V1', period } as any, eligible);
   expect(mockPrices).toHaveBeenCalledWith({ active: true, lookup_keys: [validPrice(period).lookup_key], limit: 2 },
     { timeout: 10000, maxNetworkRetries: 0 });
@@ -122,6 +129,15 @@ it.each(['subscribe', 'embedded'].flatMap(method => ['MONTHLY', 'YEARLY'].flatMa
   if (eligible) expect(payload.subscription_data.trial_period_days).toBe(7);
   else expect(payload.subscription_data).not.toHaveProperty('trial_period_days');
   if (method === 'embedded') expect(payload.ui_mode).toBe('custom');
+  if (method === 'subscribe') {
+    expect(payload.custom_text).toEqual({ submit: {
+      message: renewalDisclosure + (eligible ? trialDisclosure : '') + termsLink,
+    } });
+    expect(attempts[0].parameters.custom_text).toEqual(payload.custom_text);
+    expect(attempts[0].requestFingerprint).toBe(fingerprint(attempts[0].parameters));
+    const { custom_text, ...withoutDisclosure } = attempts[0].parameters;
+    expect(fingerprint(withoutDisclosure)).not.toBe(attempts[0].requestFingerprint);
+  } else expect(payload).not.toHaveProperty('custom_text');
   expect(payload.client_reference_id).toBe(payload.metadata.launchAttemptId);
   expect(payload.metadata.requestFingerprint).toMatch(/^[a-f0-9]{64}$/);
   expect(mockCheckout.mock.calls[0][1]).toMatchObject({ timeout: 10000, maxNetworkRetries: 0,
@@ -130,6 +146,29 @@ it.each(['subscribe', 'embedded'].flatMap(method => ['MONTHLY', 'YEARLY'].flatMa
 
 const launch = (service: StripeService, method = 'subscribe', period = 'MONTHLY') =>
   (service as any)[method]('track', 'org_fixture', 'user', { billing: 'LAUNCH_V1', period }, true);
+
+it('retries a pre-disclosure dispatched request with its original parameters, fingerprint and key', async () => {
+  const { service, attempts } = harness();
+  const parameters = (service as any).launchParameters('attempt_before_disclosure', 'hosted', 'cus_fixture',
+    'price_approved', { billing: 'LAUNCH_V1', period: 'MONTHLY' }, 'user', 'track', true);
+  delete parameters.custom_text;
+  const requestFingerprint = fingerprint(parameters);
+  const originalParameters = structuredClone(parameters);
+  attempts.push({ id: 'attempt_before_disclosure', organizationId: 'org_fixture', customerId: 'cus_fixture',
+    operationKey: 'launch-checkout:attempt_before_disclosure', parameters, requestFingerprint,
+    state: 'DISPATCHED', firstDispatchedAt: new Date(Date.now()), sessionId: null, leaseToken: null, leaseUntil: null });
+
+  await launch(service);
+
+  expect(mockCheckout).toHaveBeenCalledTimes(1);
+  expect(mockCheckout).toHaveBeenCalledWith({ ...originalParameters,
+    metadata: { ...originalParameters.metadata, requestFingerprint } },
+    { timeout: 10000, maxNetworkRetries: 0, idempotencyKey: 'launch-checkout:attempt_before_disclosure' });
+  expect(mockCheckout.mock.calls[0][0]).not.toHaveProperty('custom_text');
+  expect(attempts).toHaveLength(1);
+  expect(attempts[0].parameters).toEqual(originalParameters);
+  expect(attempts[0].requestFingerprint).toBe(requestFingerprint);
+});
 
 it.each(['subscribe', 'embedded'])('reuses one verified matching %s session without storing a client secret', async method => {
   const { service, attempts } = harness();
