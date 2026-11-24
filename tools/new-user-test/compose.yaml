@@ -1,0 +1,172 @@
+name: ep-new-user-20261107
+x-node: &node
+  # Existing image supplies OpenSSL/toolchain only; /app code/entrypoint never runs.
+  image: ghcr.io/celleree/publish-everywhere-postiz@sha256:6cb9ee54fbe150247189a5c0c48e871e726cc7a55520825b3b5bfd1b5f6ed87c
+  pull_policy: never
+  entrypoint: [/usr/bin/env]
+  user: "${QA_UID}:${QA_GID}"
+  working_dir: /workspace/postiz-app
+  volumes: ["${QA_ROOT}:/workspace"]
+  tmpfs: [/tmp, /config, /uploads]
+  read_only: true
+  networks: [isolated]
+  init: true
+  restart: "no"
+  cpus: 2
+  mem_limit: 3g
+  pids_limit: 256
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+x-app-env: &app-env
+  NODE_ENV: development
+  HOME: /tmp
+  DATABASE_URL: postgresql://isolated:isolated@qa-postgres:5432/ep_new_user
+  REDIS_URL: redis://qa-redis:6379
+  TEMPORAL_ADDRESS: qa-temporal:7233
+  TEMPORAL_NAMESPACE: default
+  JWT_SECRET: local-disposable-new-user-fixture-never-use-in-production
+  FRONTEND_URL: http://localhost:4317
+  MAIN_URL: http://localhost:4317
+  NEXT_PUBLIC_BACKEND_URL: /backend-api
+  BACKEND_INTERNAL_URL: http://qa-backend:3000
+  STORAGE_PROVIDER: local
+  UPLOAD_DIRECTORY: /workspace/postiz-app/tmp/new-user-environment/uploads
+  NOT_SECURED: "true"
+  DISABLE_REGISTRATION: "false"
+  DISABLE_POSTIZ_MCP: "true"
+  BILLING_ENABLED: "false"
+  AI_WALLET_ENABLED: "false"
+  NEXT_TELEMETRY_DISABLED: "1"
+  NX_DAEMON: "false"
+  NEXT_PUBLIC_GUIDED_COMPOSER_SHELL: "true"
+  NEXT_FONT_GOOGLE_MOCKED_RESPONSES: /workspace/postiz-app/tests/browser/fonts.cjs
+  NODE_OPTIONS: --max-old-space-size=2048 --require=/workspace/tools/new-user-test/network-guard.cjs
+services:
+  qa-postgres:
+    image: postgres@sha256:c7526c0f6c3f30260a563d7bcf8ad778effac59a44f8ffa86678c35418338609
+    pull_policy: never
+    environment:
+      POSTGRES_USER: isolated
+      POSTGRES_PASSWORD: isolated
+      POSTGRES_DB: ep_new_user
+    volumes: [app-db:/var/lib/postgresql/data]
+    networks: [isolated]
+    cpus: 1
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U isolated -d ep_new_user"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  qa-redis:
+    image: redis@sha256:37aa82f9fdff30517603b2e2c5376b34b106d353c2b508262260d3bb0d2c21ba
+    pull_policy: never
+    command: [redis-server, --save, "", --appendonly, "no"]
+    networks: [isolated]
+    cpus: 0.5
+    mem_limit: 128m
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  qa-temporal-db:
+    image: postgres@sha256:71e27bf60b70bded003791b5573f8b808365613f341df20ffcf0c1ed7bc13ddf
+    pull_policy: never
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    volumes: [temporal-db:/var/lib/postgresql/data]
+    networks: [isolated]
+    cpus: 1
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U temporal"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  qa-temporal:
+    image: temporalio/auto-setup@sha256:607d68caa111338d754771efb876c92dfcdae06d056e4530bb31cd0f37406e6a
+    pull_policy: never
+    depends_on:
+      qa-temporal-db: {condition: service_healthy}
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: qa-temporal-db
+      ENABLE_ES: "false"
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    volumes: ["${QA_ROOT}/dynamicconfig:/etc/temporal/config/dynamicconfig:ro"]
+    networks: [isolated]
+    cpus: 1.5
+    mem_limit: 1g
+    pids_limit: 256
+    healthcheck:
+      test: [CMD-SHELL, "temporal operator cluster health --address qa-temporal:7233"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  qa-migrate:
+    <<: *node
+    profiles: [tools]
+    environment: *app-env
+    command: [sh, -c, "node node_modules/prisma/build/index.js generate --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma && node node_modules/prisma/build/index.js migrate deploy --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma"]
+  qa-build:
+    <<: *node
+    profiles: [tools]
+    environment: *app-env
+    working_dir: /workspace/postiz-app/apps/backend
+    command: [node, /workspace/postiz-app/node_modules/@nestjs/cli/bin/nest.js, build]
+  qa-backend:
+    <<: *node
+    depends_on:
+      qa-postgres: {condition: service_healthy}
+      qa-redis: {condition: service_healthy}
+      qa-temporal: {condition: service_healthy}
+    environment:
+      <<: *app-env
+      PORT: "3000"
+    command: [node, --experimental-require-module, apps/backend/dist/apps/backend/src/main.js]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/auth/can-register').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  qa-frontend:
+    <<: *node
+    environment: *app-env
+    command: [node, /workspace/postiz-app/node_modules/next/dist/bin/next, dev, --webpack, --hostname, 0.0.0.0, --port, "4317"]
+    working_dir: /workspace/postiz-app/apps/frontend
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4317/auth').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 9s
+      retries: 24
+  qa-ingress:
+    image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    pull_policy: never
+    entrypoint: [nginx, -g, "daemon off;"]
+    user: "${QA_UID}:${QA_GID}"
+    volumes: ["${QA_ROOT}/tools/new-user-test/proxy.conf:/etc/nginx/nginx.conf:ro"]
+    tmpfs: [/tmp]
+    read_only: true
+    networks: [isolated, ingress]
+    ports: ["127.0.0.1:4317:8080", "127.0.0.1:4318:8081"]
+    restart: "no"
+    cpus: 0.5
+    mem_limit: 64m
+    pids_limit: 32
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+networks:
+  isolated:
+    internal: true
+  ingress: {}
+volumes:
+  app-db:
+  temporal-db:
