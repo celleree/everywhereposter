@@ -254,11 +254,46 @@ describe('guided composer existing provider settings', () => {
     expect(ref.current.getValues().settings.title).toBe('My accessible title');
     await waitFor(async () => expect((await validateYoutube(ref)).valid).toBe(true));
   });
-  const completeTitle = (title: unknown, mode: 'generate' | 'adapt-by-platform' | 'use-everywhere' = 'generate', stale = false) => act(() => {
+  const completeTitle = (title: unknown, mode: 'generate' | 'adapt-by-platform' | 'use-everywhere' = 'generate', stale = false, mediaId = 'video-1') => act(() => {
     const launch = useLaunchStore.getState();
     const guided = useGuidedComposerStore.getState();
     guided.setCaptionMode(mode);
-    guided.completeGeneration({ requestId: 'title-fixture', status: 'complete', results: [{ platform: 'youtube', draft: 'Description', title, origin: 'generated', warnings: [] }], warnings: [], imagePlans: [] } as any, [], stale ? 'stale' : buildGuidedGenerationFingerprint({ mediaId: 'video-1', destinations: launch.selectedIntegrations.map(item => item.integration), captionMode: mode, sourceCaption: guided.sourceCaption, additionalContext: guided.additionalContext }));
+    guided.completeGeneration({ requestId: 'title-fixture', status: 'complete', results: [{ platform: 'youtube', draft: 'Description', title, origin: 'generated', warnings: [] }], warnings: [], imagePlans: [] } as any, [], stale ? 'stale' : buildGuidedGenerationFingerprint({ mediaId, destinations: launch.selectedIntegrations.map(item => item.integration), captionMode: mode, sourceCaption: guided.sourceCaption, additionalContext: guided.additionalContext }));
+  });
+
+  const replaceVideo = () => act(() => {
+    useLaunchStore.setState(state => ({
+      global: state.global.map(post => ({
+        ...post,
+        media: [{ id: 'video-2', path: '/second.mp4', type: 'video' }],
+      })),
+    }));
+    useGuidedComposerStore.getState().selectSourceMedia('video-2');
+  });
+
+  it('clears the untouched automatic title when the video changes and seeds the matching replacement', async () => {
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    completeTitle('Keyboard shortcuts');
+    const input = screen.getByLabelText('Title');
+    expect(input).toHaveProperty('value', 'Keyboard shortcuts');
+
+    replaceVideo();
+    expect(input).toHaveProperty('value', '');
+    expect((await validateYoutube(ref)).valid).toBe(false);
+    completeTitle('Late result for video 1');
+    expect(input).toHaveProperty('value', '');
+    completeTitle('Sourdough baking tutorial', 'generate', false, 'video-2');
+    expect(ref.current.getValues().settings.title).toBe('Sourdough baking tutorial');
+    expect((await validateYoutube(ref)).valid).toBe(true);
+  });
+
+  it.each(['My title for any source', ''])('preserves manual title %j when the video changes', value => {
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    completeTitle('Keyboard shortcuts');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value } });
+    replaceVideo();
+    completeTitle('Sourdough baking tutorial', 'generate', false, 'video-2');
+    expect(ref.current.getValues().settings.title).toBe(value);
   });
 
   it.each(['generate', 'adapt-by-platform'] as const)('seeds one editable title in %s and preserves edits, clearing and regeneration', async mode => {

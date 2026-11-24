@@ -101,9 +101,11 @@ const YoutubeSettings: FC = () => {
   })));
   const selected = launch.selectedIntegrations.find(item => item.integration.id === integration?.id);
   const titleOwned = useRef(Object.prototype.hasOwnProperty.call(selected?.settings || {}, 'title'));
+  const automaticTitle = useRef<{ mediaId?: string; value: string } | null>(null);
   const titleField = register('title');
+  const mediaId = selectGuidedGenerationMedia(launch.global[0]?.media || [], guided.sourceMediaId)?.id;
   const currentFingerprint = buildGuidedGenerationFingerprint({
-    mediaId: selectGuidedGenerationMedia(launch.global[0]?.media || [], guided.sourceMediaId)?.id,
+    mediaId,
     destinations: launch.selectedIntegrations.map(item => item.integration),
     captionMode: guided.captionMode,
     sourceCaption: guided.sourceCaption,
@@ -121,12 +123,24 @@ const YoutubeSettings: FC = () => {
       : undefined;
 
   useEffect(() => {
-    if (!proposedTitle || titleOwned.current) return;
-    // Any user input, including a deliberately cleared title, owns this field.
-    titleOwned.current = true;
-    if (getFieldState('title').isDirty || getValues('title')) return;
-    setValue('title', proposedTitle, { shouldValidate: true });
-  }, [getFieldState, getValues, proposedTitle, setValue]);
+    if (titleOwned.current || getFieldState('title').isDirty) return;
+    const currentTitle = getValues('title');
+    const seeded = automaticTitle.current;
+    if (seeded) {
+      if (seeded.mediaId === mediaId || currentTitle !== seeded.value) return;
+    } else if (currentTitle) {
+      return;
+    }
+
+    if (proposedTitle) {
+      automaticTitle.current = { mediaId, value: proposedTitle };
+      setValue('title', proposedTitle, { shouldValidate: true });
+    } else if (seeded) {
+      // The previous video's suggestion cannot satisfy the new video's required title.
+      automaticTitle.current = null;
+      setValue('title', '', { shouldValidate: true });
+    }
+  }, [getFieldState, getValues, mediaId, proposedTitle, setValue]);
   return (
     <div className="flex flex-col">
       <div className="text-[14px] font-[600] mb-[10px]">Details</div>
