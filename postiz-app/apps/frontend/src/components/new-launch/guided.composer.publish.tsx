@@ -32,6 +32,8 @@ import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import type { QuickUploadSkip } from './guided.composer.quick-upload';
 import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
+import { getGuidedReviewMediaOverrides, type GuidedRootMedia } from './guided.review.media';
+
 export type GuidedPublishTiming = 'now' | 'schedule';
 
 interface GuidedPublishRequestBase {
@@ -39,6 +41,7 @@ interface GuidedPublishRequestBase {
   sourceMediaId?: string;
   destinationIds: string[];
   captionOverrides: Record<string, string>;
+  mediaOverrides?: Record<string, GuidedRootMedia>;
 }
 
 export type GuidedPublishRequest = GuidedPublishRequestBase &
@@ -354,10 +357,11 @@ export const GuidedComposerPublish: FC<{
   const recovery = useComposerDraftRecovery();
   const fetch = useFetch();
   const { available, submit } = useContext(GuidedPublishBridgeContext);
-  const { global, integrations, selectedIntegrations, chars, date, setDate } =
+  const { global, internal, integrations, selectedIntegrations, chars, date, setDate } =
     useLaunchStore(
       useShallow((state) => ({
         global: state.global,
+        internal: state.internal,
         integrations: state.integrations,
         selectedIntegrations: state.selectedIntegrations,
         chars: state.chars,
@@ -366,6 +370,7 @@ export const GuidedComposerPublish: FC<{
       }))
     );
   const reviewDrafts = useGuidedComposerStore((state) => state.reviewDrafts);
+  const sourceMediaId = useGuidedComposerStore((state) => state.sourceMediaId);
   const [timing, setTiming] = useState<GuidedPublishTiming>(quickUpload ? 'now' : recovery.timing);
   const [phase, setPhase] = useState<
     'idle' | 'submitting' | 'success' | 'failed'
@@ -402,7 +407,11 @@ export const GuidedComposerPublish: FC<{
         ),
     [availableDestinationIds, reviewDrafts, selectedIntegrations]
   );
-  const media = global[0]?.media || [];
+  const media = useMemo(() => global[0]?.media || [], [global]);
+  const mediaOverrides = useMemo(
+    () => quickUpload ? {} : getGuidedReviewMediaOverrides(media, sourceMediaId, destinations, internal),
+    [quickUpload, media, sourceMediaId, destinations, internal]
+  );
   const video = media.find((item) => isGuidedMp4MovMedia(item));
   const validationByDestination = useMemo(
     () =>
@@ -415,11 +424,11 @@ export const GuidedComposerPublish: FC<{
           });
           return [
             destination.id,
-            getGuidedReviewDraftValidation(draft, limit, media.length > 0),
+            getGuidedReviewDraftValidation(draft, limit, (mediaOverrides[destination.id] ?? media).length > 0),
           ];
         })
       ),
-    [chars, destinations, media.length, reviewDrafts]
+    [chars, destinations, media, mediaOverrides, reviewDrafts]
   );
   const hasBlockingError = destinations.some(
     (destination) => validationByDestination[destination.id]?.errors.length > 0
@@ -475,7 +484,13 @@ export const GuidedComposerPublish: FC<{
     });
 
     try {
+      const submittedMediaOverrides = Object.fromEntries(
+        submissionDestinations
+          .filter(({ id }) => mediaOverrides[id] !== undefined)
+          .map(({ id }) => [id, mediaOverrides[id]])
+      );
       const requestDetails: GuidedPublishRequestBase = {
+        ...(Object.keys(submittedMediaOverrides).length ? { mediaOverrides: submittedMediaOverrides } : {}),
         ...(quickUpload ? { quickUpload: true, sourceMediaId: video?.id } : {}),
         destinationIds: submissionDestinations.map(
           (destination) => destination.id
@@ -619,6 +634,7 @@ export const GuidedComposerPublish: FC<{
     destinations,
     fetch,
     hasBlockingError,
+    mediaOverrides,
     onSubmittingChange,
     results,
     reviewDrafts,
@@ -740,6 +756,8 @@ export const GuidedComposerPublish: FC<{
                         </div>
                         <div className="truncate text-[11px] text-textColor/55">
                           {identity.label} ·{' '}
+                          {mediaOverrides[destination.id]?.length === 0 && 'Text post · '}
+                          {mediaOverrides[destination.id]?.some(isGuidedMp4MovMedia) && 'Video + caption · '}
                           {reviewDrafts[destination.id].caption.length}{' '}
                           characters
                         </div>
