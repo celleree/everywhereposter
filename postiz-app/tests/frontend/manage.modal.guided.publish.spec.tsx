@@ -1,6 +1,7 @@
 import React, { createRef } from 'react';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
+import { TextDecoder, TextEncoder } from 'node:util';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const mockYoutubeInsert = jest.fn();
@@ -14,6 +15,8 @@ jest.mock('axios', () => ({ __esModule: true, default: jest.fn(async () => ({ da
 import axios from 'axios';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { YoutubeProvider } from '../../libraries/nestjs-libraries/src/integrations/social/youtube.provider';
+
+Object.assign(global, { TextEncoder, TextDecoder });
 
 let mockUseActualEditor = false;
 let mockUploaderCallbacks: any;
@@ -128,7 +131,7 @@ jest.mock('@gitroom/react/helpers/image.with.fallback', () => ({
   default: ({ fallbackSrc: _fallbackSrc, ...props }: any) => <img {...props} />,
 }));
 jest.mock('@gitroom/react/helpers/video.frame', () => ({
-  VideoFrame: () => null,
+  VideoFrame: ({ url }: { url: string }) => <video data-testid="review-video" src={url} />,
 }));
 jest.mock('@gitroom/react/helpers/use.media.directory', () => ({
   useMediaDirectory: () => ({ set: (path: string) => path }),
@@ -520,6 +523,104 @@ describe('ManageModal guided publishing bridge', () => {
     ]);
     await screen.findByText('Publishing was confirmed for every enabled destination.');
     view.unmount();
+  });
+
+  it('sends the reviewed video to Instagram and only the reviewed text to LinkedIn', async () => {
+    const instagram = {
+      ...founderLinkedIn,
+      id: 'instagram-account',
+      identifier: 'instagram',
+      name: 'Founder Instagram',
+      display: '@founder',
+    };
+    const accounts = [instagram, founderLinkedIn, companyLinkedIn];
+    const launch = useLaunchStore.getState();
+    launch.setAllIntegrations(accounts);
+    launch.setSelectedIntegrations(accounts.map((integration) => ({
+      selectedIntegrations: integration,
+      settings: {},
+    })));
+    const guided = useGuidedComposerStore.getState();
+    guided.selectSourceMedia(media[0].id);
+    guided.setTranscriptionState(media[0].id, 'READY', null, true);
+    guided.setComposerStep('destinations');
+
+    const existingFetch = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url !== '/posts/copy/generate') return existingFetch(url, options);
+      const generation = {
+        requestId: 'mixed-format-copy',
+        status: 'complete',
+        warnings: [],
+        results: [
+          { platform: 'instagram', draft: 'Watch how we cut setup time in half.' },
+          { platform: 'linkedin', draft: 'We cut setup time by removing one handoff.' },
+        ].map((result) => ({ ...result, origin: 'generated', warnings: [] })),
+      };
+      let read = false;
+      return {
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              if (read) return { done: true };
+              read = true;
+              return {
+                done: false,
+                value: new TextEncoder().encode(JSON.stringify({ name: 'completed', data: generation })),
+              };
+            },
+          }),
+        },
+      };
+    });
+
+    const providerRefs = Object.fromEntries(accounts.map(({ id }) => [id, createRef<any>()]));
+    mockCheckAllValid.mockImplementation(async (ids: string[], overrides) =>
+      Promise.all(ids.map((id) => providerRefs[id].current.isValid(overrides?.[id])))
+    );
+    render(
+      <GuidedComposerShell>
+        {accounts.map(({ id }) => <MediaPayloadProvider key={id} id={id} ref={providerRefs[id]} />)}
+        <ManageModal {...manageModalProps} integrations={accounts} guidedComposerActive />
+      </GuidedComposerShell>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    const instagramCaption = await screen.findByLabelText<HTMLTextAreaElement>('Founder Instagram caption');
+    expect(instagramCaption.value).toBe('Watch how we cut setup time in half.');
+    expect(screen.getByRole('heading', { name: 'Video + caption' })).toBeTruthy();
+    const videoPath = screen.getByTestId('review-video').getAttribute('src');
+    expect(videoPath).toBe(media[0].path);
+    fireEvent.change(instagramCaption, { target: { value: 'See how we simplified setup.' } });
+    const reviewedCaption = instagramCaption.value;
+
+    fireEvent.click(screen.getByRole('tab', { name: /Founder LinkedIn/ }));
+    const linkedInText = screen.getByLabelText<HTMLTextAreaElement>('Founder LinkedIn post text');
+    expect(linkedInText.value).toBe('We cut setup time by removing one handoff.');
+    expect(screen.getByRole('heading', { name: 'Text post' })).toBeTruthy();
+    expect(screen.queryByTestId('review-video')).toBeNull();
+    fireEvent.change(linkedInText, { target: { value: '' } });
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Continue to Publish' }).disabled).toBe(true);
+    fireEvent.change(linkedInText, { target: { value: 'Removing one handoff cut setup time in half.' } });
+    const reviewedText = linkedInText.value;
+
+    fireEvent.click(screen.getByRole('tab', { name: /Company LinkedIn/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Disable Company LinkedIn' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Publish' }));
+    expect(postPayload()).toBeUndefined();
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+
+    await waitFor(() => expect(postPayload()?.posts).toHaveLength(2));
+    expect(postPayload().posts.map(({ integration, value }: any) => ({
+      id: integration.id,
+      content: value[0].content,
+      image: value[0].image,
+    }))).toEqual([
+      { id: instagram.id, content: reviewedCaption, image: [{ ...media[0], path: videoPath }] },
+      { id: founderLinkedIn.id, content: reviewedText, image: [] },
+    ]);
+    expect(useLaunchStore.getState().global[0].media).toEqual(media);
   });
 
   it('Quick Upload skips missing provider fields, preserves YouTube description and disables shortlinks/repeats', async () => {

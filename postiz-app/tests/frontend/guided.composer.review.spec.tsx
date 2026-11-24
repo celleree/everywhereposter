@@ -314,7 +314,7 @@ describe('guided composer review', () => {
     renderReview();
 
     expect(
-      await screen.findByLabelText('Founder LinkedIn caption')
+      await screen.findByLabelText('Founder LinkedIn post text')
     ).toHaveProperty('value', 'Visible legacy draft');
     expect(screen.queryByDisplayValue('Hidden stale caption')).toBeNull();
   });
@@ -375,7 +375,7 @@ describe('guided composer review', () => {
     renderReview();
 
     const founderCaption = await screen.findByLabelText(
-      'Founder LinkedIn caption'
+      'Founder LinkedIn post text'
     );
     expect(founderCaption).toHaveProperty('value', 'Shared LinkedIn caption.');
     expect(screen.getByText('AI generated')).toBeTruthy();
@@ -384,7 +384,7 @@ describe('guided composer review', () => {
     expect(screen.getByText('Edited by you')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('tab', { name: /Company LinkedIn/ }));
-    expect(screen.getByLabelText('Company LinkedIn caption')).toHaveProperty(
+    expect(screen.getByLabelText('Company LinkedIn post text')).toHaveProperty(
       'value',
       'Shared LinkedIn caption.'
     );
@@ -396,7 +396,7 @@ describe('guided composer review', () => {
       },
     });
 
-    fireEvent.change(screen.getByLabelText('Company LinkedIn caption'), {
+    fireEvent.change(screen.getByLabelText('Company LinkedIn post text'), {
       target: { value: 'Company edit' },
     });
     fireEvent.click(screen.getByRole('tab', { name: /Founder LinkedIn/ }));
@@ -404,7 +404,7 @@ describe('guided composer review', () => {
       screen.getByRole('button', { name: 'Reset Founder LinkedIn caption' })
     );
 
-    expect(screen.getByLabelText('Founder LinkedIn caption')).toHaveProperty(
+    expect(screen.getByLabelText('Founder LinkedIn post text')).toHaveProperty(
       'value',
       'Shared LinkedIn caption.'
     );
@@ -437,7 +437,7 @@ describe('guided composer review', () => {
     const fingerprintBeforeRefresh = generatedState.generationInputFingerprint;
     renderReview();
 
-    fireEvent.change(await screen.findByLabelText('Founder LinkedIn caption'), {
+    fireEvent.change(await screen.findByLabelText('Founder LinkedIn post text'), {
       target: { value: 'Edit that survives a reload' },
     });
     const continueButton = screen.getByRole('button', {
@@ -467,7 +467,7 @@ describe('guided composer review', () => {
     );
 
     expect(
-      await screen.findByLabelText('Founder LinkedIn caption')
+      await screen.findByLabelText('Founder LinkedIn post text')
     ).toHaveProperty('value', 'Edit that survives a reload');
     expect(screen.getByText('Edited by you')).toBeTruthy();
     expect(useGuidedComposerStore.getState()).toMatchObject({
@@ -504,7 +504,7 @@ describe('guided composer review', () => {
     });
     renderReview();
 
-    const caption = await screen.findByLabelText('Founder LinkedIn caption');
+    const caption = await screen.findByLabelText('Founder LinkedIn post text');
     expect(screen.getByText('Adapted from your caption')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'View original' }));
     expect(
@@ -539,7 +539,7 @@ describe('guided composer review', () => {
     );
     renderReview();
 
-    await screen.findByLabelText('Founder LinkedIn caption');
+    await screen.findByLabelText('Founder LinkedIn post text');
     fireEvent.click(screen.getByRole('tab', { name: /Company LinkedIn/ }));
     fireEvent.click(
       screen.getByRole('button', {
@@ -557,7 +557,7 @@ describe('guided composer review', () => {
         .caption
     ).toBe('Initial adaptation');
 
-    const companyCaption = screen.getByLabelText('Company LinkedIn caption');
+    const companyCaption = screen.getByLabelText('Company LinkedIn post text');
     fireEvent.change(companyCaption, {
       target: { value: 'Later manual edit' },
     });
@@ -709,7 +709,7 @@ describe('guided composer review', () => {
     mockFetch.mockRejectedValue(new Error('Regeneration unavailable'));
     renderReview();
 
-    const caption = await screen.findByLabelText('Founder LinkedIn caption');
+    const caption = await screen.findByLabelText('Founder LinkedIn post text');
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Regenerate Founder LinkedIn caption',
@@ -726,7 +726,7 @@ describe('guided composer review', () => {
     mockFetch.mockReturnValue(response.promise);
     renderReview();
 
-    await screen.findByLabelText('Founder LinkedIn caption');
+    await screen.findByLabelText('Founder LinkedIn post text');
     const continueButton = screen.getByRole('button', {
       name: 'Continue to Publish',
     });
@@ -772,7 +772,7 @@ describe('guided composer review', () => {
     });
     renderReview();
 
-    await screen.findByLabelText('Founder LinkedIn caption');
+    await screen.findByLabelText('Founder LinkedIn post text');
     fireEvent.click(screen.getByRole('tab', { name: /Founder X/ }));
 
     expect(
@@ -893,7 +893,7 @@ describe('guided composer review', () => {
     renderReview();
 
     const founderCaption = await screen.findByLabelText(
-      'Founder LinkedIn caption'
+      'Founder LinkedIn post text'
     );
     fireEvent.change(founderCaption, {
       target: { value: 'Persistent founder edit' },
@@ -902,7 +902,7 @@ describe('guided composer review', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
 
     expect(
-      await screen.findByLabelText('Founder LinkedIn caption')
+      await screen.findByLabelText('Founder LinkedIn post text')
     ).toHaveProperty('value', 'Persistent founder edit');
     expect(mockFetch).not.toHaveBeenCalled();
 
@@ -938,7 +938,7 @@ describe('guided composer review', () => {
     const newRequest = deferred<Response>();
     mockFetch.mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise);
     renderReview();
-    fireEvent.change(await screen.findByLabelText('Founder LinkedIn caption'), { target: { value: 'Manual caption to preserve' } });
+    fireEvent.change(await screen.findByLabelText('Founder LinkedIn post text'), { target: { value: 'Manual caption to preserve' } });
     const before = useGuidedComposerStore.getState().reviewDrafts[linkedinPersonal.id];
     fireEvent.click(screen.getByRole('button', { name: 'Regenerate Founder LinkedIn caption' }));
     expect(JSON.parse(mockFetch.mock.calls[0][1].body).additionalContext).toBe('Context A');
@@ -973,7 +973,7 @@ describe('guided composer review', () => {
       .mockResolvedValueOnce(streamResponse(generatedResponse([generatedResult('linkedin', 'Generated with context B')])))
       .mockReturnValueOnce(fresh.promise);
     renderReview();
-    fireEvent.change(await screen.findByLabelText('Founder LinkedIn caption'), { target: { value: 'Reviewed caption' } });
+    fireEvent.change(await screen.findByLabelText('Founder LinkedIn post text'), { target: { value: 'Reviewed caption' } });
     fireEvent.click(screen.getByRole('button', { name: 'Regenerate Founder LinkedIn caption' }));
     fireEvent.click(screen.getByRole('button', { name: 'Upload Step 1 of 4' }));
     fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: 'Context B' } });
@@ -995,7 +995,7 @@ describe('guided composer review', () => {
   it('preserves reviewed captions on context edits but invalidates other material inputs', async () => {
     seedGeneratedReview({ destinations: [linkedinPersonal] });
     renderReview();
-    const caption = await screen.findByLabelText('Founder LinkedIn caption');
+    const caption = await screen.findByLabelText('Founder LinkedIn post text');
     fireEvent.change(caption, { target: { value: 'Manually refined caption' } });
     fireEvent.change(screen.getByLabelText('Optional context'), { target: { value: 'Target founders and keep this concise' } });
     expect((caption as HTMLTextAreaElement).value).toBe('Manually refined caption');
