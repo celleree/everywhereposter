@@ -41,6 +41,6 @@ test('Guided no speech: completed silent source offers an explicit caption path 
   await expect(page.getByRole('button', { name: 'Add my own caption', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Continue to Review', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Review Step 3 of 4', exact: true })).toHaveAttribute('aria-current', 'step');
-  await expect(page.getByRole('textbox', { name: 'Synthetic LinkedIn caption', exact: true })).toHaveValue(caption);
+  await expect(page.getByRole('textbox', { name: 'Synthetic LinkedIn post text', exact: true })).toHaveValue(caption);
   await capture(page, info, 'no-speech-own-caption-review');
 });

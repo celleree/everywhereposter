@@ -34,6 +34,8 @@ import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { buildGuidedGenerationFingerprint, selectGuidedGenerationMedia } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
 import { isGuidedMp4MovMedia } from '@gitroom/frontend/components/new-launch/guided.video.validation';
 
+import { getGuidedReviewMediaOverrides } from './guided.review.media';
+
 const SOURCE_LABELS: Record<GuidedReviewCaptionSource, string> = {
   generated: 'AI generated',
   original: 'Original caption',
@@ -180,9 +182,10 @@ export const GuidedComposerReview: FC = () => {
   const recovery = useComposerDraftRecovery();
   const generationError = useGuidedComposerStore((state) => state.generationError);
   const fetch = useFetch();
-  const { global, integrations, selectedIntegrations, chars } = useLaunchStore(
+  const { global, integrations, selectedIntegrations, chars, internal } = useLaunchStore(
     useShallow((state) => ({
       global: state.global,
+      internal: state.internal,
       integrations: state.integrations,
       selectedIntegrations: state.selectedIntegrations,
       chars: state.chars,
@@ -238,8 +241,12 @@ export const GuidedComposerReview: FC = () => {
         .filter((integration) => availableDestinationIds.has(integration.id)),
     [availableDestinationIds, selectedIntegrations]
   );
-  const media = global[0]?.media || [];
+  const media = useMemo(() => global[0]?.media || [], [global]);
   const sourceMediaId = useGuidedComposerStore((state) => state.sourceMediaId);
+  const mediaOverrides = useMemo(
+    () => getGuidedReviewMediaOverrides(media, sourceMediaId, destinations, internal),
+    [media, sourceMediaId, destinations, internal]
+  );
   const generationMedia = selectGuidedGenerationMedia(media, sourceMediaId);
   const video = generationMedia && isGuidedMp4MovMedia(generationMedia) ? generationMedia : undefined;
   const legacyCaption = stripHtmlValidation(
@@ -318,6 +325,12 @@ export const GuidedComposerReview: FC = () => {
   const activeDraft = activeDestinationId
     ? reviewDrafts[activeDestinationId]
     : undefined;
+  const activeMediaOverride = activeDestinationId ? mediaOverrides[activeDestinationId] : undefined;
+  const previewMedia = activeMediaOverride ?? media;
+  const previewVideo = activeMediaOverride
+    ? activeMediaOverride.find((item) => isGuidedMp4MovMedia(item))
+    : video;
+  const isStandaloneText = activeMediaOverride?.length === 0;
   const activeLimit = activeDraft
     ? getGuidedReviewDestinationLimit({
         providerLimit: chars[activeDraft.destinationId],
@@ -325,7 +338,7 @@ export const GuidedComposerReview: FC = () => {
       })
     : null;
   const activeValidation = activeDraft
-    ? getGuidedReviewDraftValidation(activeDraft, activeLimit, media.length > 0)
+    ? getGuidedReviewDraftValidation(activeDraft, activeLimit, previewMedia.length > 0)
     : null;
 
   const summary = useMemo(() => {
@@ -343,7 +356,7 @@ export const GuidedComposerReview: FC = () => {
       const validation = getGuidedReviewDraftValidation(
         draft,
         limit,
-        media.length > 0
+        (mediaOverrides[draft.destinationId] ?? media).length > 0
       );
       if (
         validation.errors.length ||
@@ -357,7 +370,7 @@ export const GuidedComposerReview: FC = () => {
     });
 
     return { selected, ready, needsAttention };
-  }, [chars, media.length, visibleDrafts]);
+  }, [chars, media, mediaOverrides, visibleDrafts]);
 
   const regenerateDestination = useCallback(async () => {
     if (
@@ -481,13 +494,15 @@ export const GuidedComposerReview: FC = () => {
 
         <div className="mt-[20px] grid min-w-0 grid-cols-[minmax(240px,0.72fr)_minmax(0,1.6fr)] gap-[18px] mobile:grid-cols-1">
           <div className="min-w-0">
-            <h2 className="text-[14px] font-[700] text-white">Media preview</h2>
+            <h2 className="text-[14px] font-[700] text-white">
+              {isStandaloneText ? 'Text post' : activeMediaOverride && previewVideo ? 'Video + caption' : 'Media preview'}
+            </h2>
             <div className="mt-[9px] flex aspect-video min-h-[180px] items-center justify-center overflow-hidden rounded-[16px] border border-newBorder bg-black/35 mobile:min-h-[150px]">
-              {video?.path ? (
-                <VideoFrame url={video.path} />
-              ) : media[0]?.path ? (
+              {previewVideo?.path ? (
+                <VideoFrame url={previewVideo.path} />
+              ) : previewMedia[0]?.path ? (
                 <img
-                  src={media[0].thumbnail || media[0].path}
+                  src={previewMedia[0].thumbnail || previewMedia[0].path}
                   alt="Post media preview"
                   className="h-full w-full object-contain"
                 />
@@ -521,7 +536,7 @@ export const GuidedComposerReview: FC = () => {
                   ? getGuidedReviewDraftValidation(
                       draft,
                       limit,
-                      media.length > 0
+                      (mediaOverrides[destination.id] ?? media).length > 0
                     )
                   : null;
                 const needsAttention = Boolean(
@@ -646,11 +661,11 @@ export const GuidedComposerReview: FC = () => {
                   htmlFor={`review-caption-${activeDestination.id}`}
                   className="mt-[12px] block text-[12px] font-[700] text-textColor/70"
                 >
-                  Caption
+                  {isStandaloneText ? 'Post text' : 'Caption'}
                 </label>
                 <textarea
                   id={`review-caption-${activeDestination.id}`}
-                  aria-label={`${activeDestination.name} caption`}
+                  aria-label={`${activeDestination.name} ${isStandaloneText ? 'post text' : 'caption'}`}
                   value={activeDraft.caption}
                   disabled={
                     !activeDraft.enabled ||
