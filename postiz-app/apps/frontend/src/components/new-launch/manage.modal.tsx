@@ -934,9 +934,9 @@ export const ManageModal: FC<
       }
 
       setLoading(true);
-      const checkedProviders = await ref.current.checkAllValid(
-        guidedRequest?.destinationIds
-      );
+      const checkedProviders = guidedRequest?.mediaOverrides
+        ? await ref.current.checkAllValid(guidedRequest.destinationIds, guidedRequest.mediaOverrides)
+        : await ref.current.checkAllValid(guidedRequest?.destinationIds);
       let checkAllValid = guidedRequest
         ? checkedProviders.map((post: any) => ({
             ...post,

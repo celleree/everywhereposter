@@ -27,6 +27,8 @@ import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import SafeImage from '@gitroom/react/helpers/safe.image';
 
+import type { GuidedRootMedia } from '../guided.review.media';
+
 class Empty {
   @IsOptional()
   empty: string;
@@ -295,7 +297,10 @@ export const withProvider = function <T extends object>(params: {
     useImperativeHandle(
       ref,
       () => ({
-        isValid: async () => {
+        isValid: async (rootMedia?: GuidedRootMedia) => {
+          const postValues = rootMedia
+            ? value.map((row, index) => index === 0 ? { ...row, media: rootMedia } : row)
+            : value;
           const settings = form.getValues();
           return {
             id: props.id,
@@ -305,7 +310,7 @@ export const withProvider = function <T extends object>(params: {
             err: form.formState.errors,
             errors: checkValidity
               ? await checkValidity(
-                  value.map((p) => p.media || []),
+                  postValues.map((p) => p.media || []),
                   settings,
                   parseAdditionalSettings(
                     selectedIntegration.integration.additionalSettings
@@ -313,7 +318,7 @@ export const withProvider = function <T extends object>(params: {
                 )
               : true,
             settings,
-            values: value,
+            values: postValues,
             maximumCharacters:
               typeof maximumCharacters === 'number'
                 ? maximumCharacters
