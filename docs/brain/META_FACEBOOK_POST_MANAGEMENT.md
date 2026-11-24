@@ -4,9 +4,9 @@ Implementation contract for Meta App Review. Provider behavior still needs separ
 
 ## Supported path
 
-An administrator can open a published Facebook Page copy from its Calendar entry or from **Published** in the scheduled-posts list. Select the Page's entry and choose **Manage Facebook post**. On mobile, **Delete on platform** also opens the same panel. It shows the Page name and ID, post ID, message, and a link to the post on Facebook.
+An administrator can open a published Facebook Page copy from its Calendar entry or from **Published** in the scheduled-posts list. Select the Page's entry and choose **Manage Facebook post**. On mobile, **Delete on platform** also opens the same panel. It shows the Page name, published message, and a link to the post on Facebook.
 
-**Delete from Facebook** opens a confirmation naming the Page and post. **Confirm Facebook deletion** deletes that remote post. **Cancel** or Escape dismisses the confirmation. Each sibling destination keeps its own publication and status.
+**Delete from Facebook** opens a confirmation naming the Page and quoting the published message. **Confirm Facebook deletion** deletes that remote post. **Cancel** or Escape dismisses the confirmation. Each sibling destination keeps its own publication and status.
 
 Deletion requires a trusted receipt for a message-only Page feed post. A URL in the message qualifies, including in a multi-destination **Post now** submission. Explicit link attachments, media and child posts are ineligible. Imported posts are read-only. For an earlier Calendar copy without a receipt, open the exact post on its Facebook Page, verify the Page and message, and delete it through the post menu.
 

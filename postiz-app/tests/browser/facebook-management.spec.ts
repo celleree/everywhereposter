@@ -63,9 +63,12 @@ test('Facebook management: same-ID edit, cache refresh, reload, keyboard cancell
   await capture(page, info, 'facebook-edited');
   await expect(page.locator('#composer-preview-content')).toContainText('Edited through the real controller');
   await expect(page.locator('#composer-preview-content')).not.toContainText('Original Browser Page A text');
+  await message.fill('Unsaved local draft');
   const remove = panel.getByRole('button', { name: 'Delete from Facebook', exact: true });
   await remove.click();
   const confirmation = panel.getByRole('alertdialog');
+  await expect(confirmation).toHaveAccessibleDescription('Edited through the real controller');
+  await expect(confirmation).not.toContainText('Unsaved local draft');
   await expect(confirmation.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(confirmation).toHaveCount(0);
@@ -184,8 +187,8 @@ test('Facebook management: composer creates a real receipt then opens same-ID te
 
 test('Facebook management: Calendar Post now deletes only the selected Page copy', async ({ page, context }, info) => {
   const { integrationIds } = await reset(context.request, { empty: true, mixed: true });
-  const names = ['Browser Page A', 'Browser Page B', 'Browser LinkedIn'];
-  const message = 'Watch this https://www.youtube.com/watch?v=synthetic';
+  const names = ['California Home Services', 'Central Valley Home Services', 'Home Services Network'];
+  const message = 'Spring home maintenance checklist. Watch the video at https://www.youtube.com/watch?v=synthetic';
   const mobile = mobileProject(info);
 
   if (mobile) {
@@ -232,19 +235,28 @@ test('Facebook management: Calendar Post now deletes only the selected Page copy
   await openApp(page, `/launches?display=${mobile ? 'list' : 'month'}`);
   if (mobile) {
     await page.getByRole('button', { name: 'Published', exact: true }).click();
-    await page.getByRole('button', { name: 'Delete on platform: Browser Page A', exact: true }).click();
+    await page.getByRole('button', { name: `Delete on platform: ${names[0]}`, exact: true }).click();
   } else {
     await page.locator(`[data-calendar-post-id="${target.id}"]`).getByText(message).click();
+    const detail = page.getByRole('dialog');
+    await expect(detail.getByText(names[0], { exact: true }).first()).toBeVisible();
+    await expect(detail.getByText(message, { exact: true })).toBeVisible();
+    await expect(detail).not.toContainText(target.releaseId);
+    await expect(detail).not.toContainText(target.id);
     await page.getByRole('button', { name: 'Manage Facebook post', exact: true }).click();
   }
   const panel = page.getByRole('region', { name: 'Facebook text post management' });
+  await expect(panel.getByRole('heading', { name: names[0], exact: true })).toBeVisible();
   await expect(panel.getByText(message, { exact: true })).toBeVisible();
+  await expect(panel).not.toContainText('9900');
   await expect(panel.getByRole('link', { name: 'Open this post on Facebook' })).toHaveAttribute('href', target.releaseURL);
   await expect(panel.getByRole('button', { name: 'Save Facebook message' })).toHaveCount(0);
   await panel.getByRole('button', { name: 'Delete from Facebook', exact: true }).click();
   const confirmation = panel.getByRole('alertdialog');
-  await expect(confirmation).toContainText('Browser Page A (9900)');
-  await expect(confirmation).toContainText(target.releaseId);
+  await expect(confirmation).toHaveAccessibleName(`Permanently delete this post from ${names[0]}?`);
+  await expect(confirmation).toHaveAccessibleDescription(message);
+  await expect(confirmation.getByText(message, { exact: true })).toBeVisible();
+  await expect(panel).not.toContainText('9900');
   expect((await evidence(context.request)).calls.filter((call: any) => call.method === 'DELETE')).toEqual([]);
   await confirmation.getByRole('button', { name: 'Confirm Facebook deletion' }).click();
   await expect(panel.getByText('Deleted on Facebook.', { exact: true })).toBeVisible();

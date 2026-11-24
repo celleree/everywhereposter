@@ -113,8 +113,10 @@ module.exports = function facebookRuntime() {
   async function reset(body) {
     mode = 'success'; calls = []; remote = new Map(); reads = 0;
     const organization = await prisma.organization.create({ data: { id: randomUUID(), name: 'Browser fixture only' } });
-    const pageNames = ['Browser Page A', 'Browser Page B'];
-    const names = body.mixed ? [...pageNames, 'Browser LinkedIn'] : pageNames;
+    const pageNames = body.mixed
+      ? ['California Home Services', 'Central Valley Home Services']
+      : ['Browser Page A', 'Browser Page B'];
+    const names = body.mixed ? [...pageNames, 'Home Services Network'] : pageNames;
     const accounts = await Promise.all(names.map((name, index) => prisma.integration.create({ data: {
       id: randomUUID(), organizationId: organization.id, internalId: `990${index}`, name,
       providerIdentifier: index < pageNames.length ? 'facebook' : 'linkedin', type: 'social', token: 'fixture-not-a-real-token',

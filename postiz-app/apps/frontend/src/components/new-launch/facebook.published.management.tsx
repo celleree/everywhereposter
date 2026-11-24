@@ -8,8 +8,6 @@ type Status = {
   canEdit?: boolean;
   reason?: string;
   pageName?: string;
-  pageId?: string;
-  releaseId?: string;
   permalink?: string;
   message?: string;
   revision?: number;
@@ -35,6 +33,10 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
   const guard = useRef(false);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const epoch = useRef(0);
+  const cancelDeletion = useCallback(() => {
+    setConfirm(false);
+    requestAnimationFrame(() => deleteButton.current?.focus());
+  }, []);
   useEffect(() => {
     if (!confirm) return;
     // The outer composer has a native document hotkey. Capture Escape before
@@ -43,14 +45,11 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!busy) {
-        setConfirm(false);
-        deleteButton.current?.focus();
-      }
+      if (!busy) cancelDeletion();
     };
     document.addEventListener('keydown', dismiss, true);
     return () => document.removeEventListener('keydown', dismiss, true);
-  }, [confirm, busy]);
+  }, [confirm, busy, cancelDeletion]);
   const request = useCallback(
     async (method = 'GET', body?: object, reconcile = false) => {
       const response = await fetch(
@@ -161,7 +160,7 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
       aria-label="Facebook text post management"
       className="flex min-w-0 flex-col gap-3 rounded-lg border border-newBorder p-4"
     >
-      <h2 className="font-semibold">Facebook text/feed post</h2>
+      <h2 className="break-words font-semibold">{status?.pageName || 'Facebook post'}</h2>
       {busy && <p role="status">Waiting for Facebook confirmation…</p>}
       {error && (
         <p role="alert" className="break-words text-red-400">
@@ -172,9 +171,9 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
       {status && !status.eligible && <p>{status.reason}</p>}
       {status?.eligible && (
         <>
-          <p className="break-words">
-            Page: {status.pageName} ({status.pageId}) · Post: {status.releaseId}
-          </p>
+          {!confirm && (status.deleted || !canEdit) && (
+            <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words">{status.message}</p>
+          )}
           <a
             href={status.permalink}
             target="_blank"
@@ -187,7 +186,7 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
             <p role="status">Deleted on Facebook.</p>
           ) : (
             <>
-              {canEdit ? (
+              {canEdit && !confirm && (
                 <>
                   <label htmlFor={`facebook-message-${postId}`}>Post message</label>
                   <textarea
@@ -201,8 +200,6 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
                   />
                   <p>Only the message text can be edited here.</p>
                 </>
-              ) : (
-                <p className="whitespace-pre-wrap break-words">{status.message}</p>
               )}
               {needsCheck ? (
                 <>
@@ -219,7 +216,7 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
                     Check result
                   </button>
                 </>
-              ) : (
+              ) : !confirm && (
                 <>
                   {canEdit && (
                     <button
@@ -244,20 +241,23 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
                 <div
                   role="alertdialog"
                   aria-labelledby={`facebook-delete-${postId}`}
+                  aria-describedby={`facebook-delete-message-${postId}`}
                   className="rounded border border-red-400 p-3"
                 >
                   <p id={`facebook-delete-${postId}`} className="break-words">
-                    Permanently delete post {status.releaseId} from Facebook
-                    Page {status.pageName} ({status.pageId})? The deletion applies
-                    to this Facebook post only.
+                    Permanently delete this post from <strong>{status.pageName}</strong>?
                   </p>
+                  <blockquote
+                    id={`facebook-delete-message-${postId}`}
+                    className="my-3 max-h-48 overflow-y-auto whitespace-pre-wrap break-words border-s-2 border-newBorder ps-3"
+                  >
+                    {status.message}
+                  </blockquote>
+                  <p>Only this Page’s copy will be deleted.</p>
                   <button
                     autoFocus
                     disabled={busy}
-                    onClick={() => {
-                      setConfirm(false);
-                      deleteButton.current?.focus();
-                    }}
+                    onClick={cancelDeletion}
                     className="p-3"
                   >
                     Cancel

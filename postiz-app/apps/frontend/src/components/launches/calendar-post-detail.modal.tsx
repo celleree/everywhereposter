@@ -215,17 +215,16 @@ export const CalendarPostDetailModal: FC<{
                 value={post.integration.providerIdentifier}
               />
               <DetailRow label={t('tags', 'Tags')} value={tags} />
-              <DetailRow
-                label={t('platform_post_id', 'Platform Post ID')}
-                value={post.platformPostId || post.releaseId || t('not_connected', 'Not connected')}
-              />
+              {!onManageFacebook && (
+                <DetailRow
+                  label={t('platform_post_id', 'Platform Post ID')}
+                  value={post.platformPostId || post.releaseId || t('not_connected', 'Not connected')}
+                />
+              )}
               {isHistoricalPost && post.postType && (
                 <DetailRow label={t('post_type', 'Post Type')} value={post.postType} />
               )}
-              <DetailRow
-                label={t('post_id', 'Post ID')}
-                value={post.id}
-              />
+              {!onManageFacebook && <DetailRow label={t('post_id', 'Post ID')} value={post.id} />}
             </div>
 
             {isHistoricalPost && (post.thumbnailUrl || post.mediaPreviewUrl) && (
