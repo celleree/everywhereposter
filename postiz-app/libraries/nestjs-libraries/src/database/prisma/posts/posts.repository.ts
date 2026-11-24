@@ -17,6 +17,13 @@ dayjs.extend(weekOfYear);
 dayjs.extend(isSameOrAfter);
 dayjs.extend(utc);
 
+const withoutConfirmedFacebookPublication: Prisma.PostWhereInput = {
+  OR: [
+    { facebookPublicationReceipt: null },
+    { facebookPublicationReceipt: { providerResult: { equals: Prisma.DbNull } } },
+  ],
+};
+
 @Injectable()
 export class PostsRepository {
   constructor(
@@ -345,38 +352,23 @@ export class PostsRepository {
     const page = query.page || 0;
     const limit = query.limit || 20;
     const skip = page * limit;
+    const published = query.mode === 'published';
     const scheduledOnce = query.mode === 'scheduled-once';
-    const now = dayjs.utc().toDate();
-
     const where = {
-      AND: [
-        {
-          OR: [
-            {
-              organizationId: orgId,
-            },
-          ],
+      organizationId: orgId,
+      deletedAt: null,
+      parentPostId: null,
+      intervalInDays: null,
+      ...(published
+        ? { state: 'PUBLISHED' as const }
+        : { publishDate: { gte: dayjs.utc().toDate() } }),
+      ...(scheduledOnce ? { state: 'QUEUE' as const } : {}),
+      ...(query.mode || query.customer ? {
+        integration: {
+          ...(query.mode ? { deletedAt: null } : {}),
+          ...(query.customer ? { customerId: query.customer } : {}),
         },
-        {
-          publishDate: {
-            gte: now,
-          },
-        },
-      ],
-      deletedAt: null as Date | null,
-      parentPostId: null as string | null,
-      intervalInDays: null as number | null,
-      ...(scheduledOnce
-        ? {
-            state: 'QUEUE' as const,
-            integration: {
-              deletedAt: null as Date | null,
-              ...(query.customer ? { customerId: query.customer } : {}),
-            },
-          }
-        : query.customer
-        ? { integration: { customerId: query.customer } }
-        : {}),
+      } : {}),
     };
 
     const [posts, total] = await Promise.all([
@@ -384,9 +376,9 @@ export class PostsRepository {
         where,
         skip,
         take: limit,
-        orderBy: scheduledOnce
-          ? [{ publishDate: 'asc' as const }, { id: 'asc' as const }]
-          : { publishDate: 'asc' as const },
+        orderBy: query.mode
+          ? [{ publishDate: published ? 'desc' : 'asc' }, { id: 'asc' }]
+          : { publishDate: 'asc' },
         select: {
           id: true,
           content: true,
@@ -496,6 +488,7 @@ export class PostsRepository {
       where: {
         id,
         state: { not: 'DELETED_REMOTE' },
+        AND: withoutConfirmedFacebookPublication,
         // Nullable fields need explicit null branches: SQL <> does not match NULL.
         OR: [
           { state: { not: 'PUBLISHED' } },
@@ -606,10 +599,11 @@ export class PostsRepository {
     const include = { integration: { select: { providerIdentifier: true } } } as const;
     let update;
     if (state === 'ERROR') {
-      // A late notification/activity failure must not overwrite a committed
-      // durable provider receipt. This predicate races safely with receipt commit.
+      // A late notification/activity failure must preserve a committed publication.
       const changed = await this._post.model.post.updateMany({ where: {
-        id, OR: [{ submissionDestination: null }, { submissionDestination: { providerState: { not: 'SUCCEEDED' } }, state: { not: 'PUBLISHED' } }],
+        id,
+        AND: withoutConfirmedFacebookPublication,
+        OR: [{ submissionDestination: null }, { submissionDestination: { providerState: { not: 'SUCCEEDED' } }, state: { not: 'PUBLISHED' } }],
       }, data });
       update = await this._post.model.post.findUnique({ where: { id }, include });
       if (!changed.count) return update;
@@ -722,7 +716,12 @@ export class PostsRepository {
     // add thread children, or alter content for a subsequent safe retry.
     const reservedPost = await postModel.findFirst({
       where: {
-        submissionDestination: { isNot: null },
+        AND: {
+          OR: [
+            { submissionDestination: { isNot: null } },
+            { facebookPublicationReceipt: { providerResult: { not: Prisma.DbNull } } },
+          ],
+        },
         OR: [
           { id: { in: body.value.map((value) => value.id).filter(Boolean) } },
           ...(body.group ? [{ group: body.group }] : []),

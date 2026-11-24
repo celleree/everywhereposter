@@ -52,9 +52,10 @@ const DetailRow: FC<{
 export const CalendarPostDetailModal: FC<{
   post: CalendarPostDetailPost;
   onEdit?: () => void;
+  onManageFacebook?: () => void;
   onDuplicate?: () => void;
   onRemoveHistoricalPost?: () => void;
-}> = ({ post, onEdit, onDuplicate, onRemoveHistoricalPost }) => {
+}> = ({ post, onEdit, onManageFacebook, onDuplicate, onRemoveHistoricalPost }) => {
   const t = useT();
   const [tab, setTab] = useState<CalendarPostDetailTab>('overview');
   const isHistoricalPost = isHistoricalCalendarPost(post);
@@ -124,10 +125,19 @@ export const CalendarPostDetailModal: FC<{
             </div>
           </div>
         </div>
-        {!isHistoricalPost && onEdit && (
-          <Button type="button" onClick={onEdit} disabled={isRemoteDeleted}>
-            {t('edit_post', 'Edit Post')}
-          </Button>
+        {!isHistoricalPost && (
+          <div className="flex flex-wrap gap-[8px]">
+            {onManageFacebook && (
+              <Button type="button" onClick={onManageFacebook}>
+                {t('manage_facebook_post', 'Manage Facebook post')}
+              </Button>
+            )}
+            {onEdit && (
+              <Button type="button" onClick={onEdit} disabled={isRemoteDeleted}>
+                {t('edit_post', 'Edit Post')}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 

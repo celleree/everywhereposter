@@ -93,7 +93,7 @@ describe('Facebook text/feed Graph contract', () => {
   it('records creation provenance only for a new supported text/feed response', async () => {
     process.env.FACEBOOK_APP_ID = 'app';
     const provider = new FacebookProvider();
-    jest
+    const graph = jest
       .spyOn(provider as any, 'fetch')
       .mockResolvedValue(response({ id: '123_456' }));
     const result = await provider.post('123', 'private', [
@@ -109,10 +109,25 @@ describe('Facebook text/feed Graph contract', () => {
         revision: 0,
       },
     });
-    const link = await provider.post('123', 'private', [
+    const bodyUrl = await provider.post('123', 'private', [
       { id: 'local', message: 'https://example.com', settings: {}, media: [] },
     ]);
-    expect(link[0].facebookText).toBeUndefined();
+    expect(bodyUrl[0].facebookText).toBeUndefined();
+    expect(bodyUrl[0].facebookFeed).toEqual({
+      version: 2, pageId: '123', appId: 'app',
+      message: 'https://example.com', revision: 0, mutation: null,
+    });
+    expect(JSON.parse(graph.mock.calls[1][1].body)).toEqual({
+      message: 'https://example.com', published: true,
+    });
+    const attachment = await provider.post('123', 'private', [
+      { id: 'local', message: 'Text', settings: { url: 'https://example.com' }, media: [] },
+    ]);
+    expect(attachment[0].facebookText).toBeUndefined();
+    expect(attachment[0].facebookFeed).toBeUndefined();
+    expect(JSON.parse(graph.mock.calls[2][1].body)).toMatchObject({
+      message: 'Text', link: 'https://example.com',
+    });
   });
   it('maps an outside-person comment and preserves missing author fallback (fixture evidence only)', async () => {
     global.fetch = jest.fn().mockResolvedValue(

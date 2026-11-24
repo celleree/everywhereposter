@@ -55,6 +55,7 @@ import { CalendarPostDetailModal } from '@gitroom/frontend/components/launches/c
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import i18next from 'i18next';
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
+import { FacebookPublishedManagement } from '@gitroom/frontend/components/new-launch/facebook.published.management';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import copy from 'copy-to-clipboard';
@@ -123,6 +124,11 @@ export const hours = Array.from(
   (_, i) => i
 );
 
+const isPublishedFacebookPost = (post: CalendarPost) =>
+  !isHistoricalCalendarPost(post) &&
+  post.integration.providerIdentifier === 'facebook' &&
+  (post.state === 'PUBLISHED' || post.state === 'DELETED_REMOTE');
+
 // Shared hook for post actions (edit, delete, statistics)
 const usePostActions = (onMutate?: () => void) => {
   const t = useT();
@@ -135,6 +141,34 @@ const usePostActions = (onMutate?: () => void) => {
     reloadCalendarView();
     onMutate?.();
   }, [reloadCalendarView, onMutate]);
+
+  const confirmFacebookDeletion = useCallback(
+    (_message: string, deleted: boolean) => {
+      if (deleted) mutate();
+    },
+    [mutate]
+  );
+  const openFacebookPost = useCallback(
+    (post: CalendarPost) => {
+      modal.openModal({
+        title: t('facebook_post', 'Facebook post'),
+        closeOnClickOutside: true,
+        closeOnEscape: true,
+        withCloseButton: true,
+        classNames: { modal: 'w-full max-w-[640px]' },
+        children: (
+          <FacebookPublishedManagement
+            key={post.id}
+            postId={post.id}
+            deleteOnly
+            onConfirmed={confirmFacebookDeletion}
+          />
+        ),
+        size: '90%',
+      });
+    },
+    [modal, t, confirmFacebookDeletion]
+  );
 
   const editPost = useCallback(
     (loadPost: any, isDuplicate?: boolean) => async () => {
@@ -230,6 +264,10 @@ const usePostActions = (onMutate?: () => void) => {
     (post: any) => async () => {
       const isPublishedPost = post.state === 'PUBLISHED';
       const isRemoteDeletedPost = post.state === 'DELETED_REMOTE';
+      if (isPublishedPost && isPublishedFacebookPost(post)) {
+        openFacebookPost(post);
+        return;
+      }
       if (
         !(await deleteDialog(
           isPublishedPost
@@ -293,7 +331,7 @@ const usePostActions = (onMutate?: () => void) => {
 
       mutate();
     },
-    [toaster, t, fetch, mutate]
+    [toaster, t, fetch, mutate, openFacebookPost]
   );
 
   const duplicateHistoricalPost = useCallback(
@@ -430,6 +468,14 @@ const usePostActions = (onMutate?: () => void) => {
                   },
                 }
               : {
+                  ...(isPublishedFacebookPost(post)
+                    ? {
+                        onManageFacebook: () => {
+                          close();
+                          openFacebookPost(post);
+                        },
+                      }
+                    : {}),
                   onEdit: () => {
                     close();
                     void editPost(post, false)();
@@ -441,7 +487,7 @@ const usePostActions = (onMutate?: () => void) => {
         height: '85vh',
       });
     },
-    [modal, t, editPost, duplicateHistoricalPost, removeHistoricalPost]
+    [modal, t, editPost, duplicateHistoricalPost, removeHistoricalPost, openFacebookPost]
   );
 
   const openMissingRelease = useCallback(
@@ -706,7 +752,7 @@ export const MonthView = () => {
 export const ListView = () => {
   const t = useT();
   const user = useUser();
-  const { integrations, loading, listPosts } = useCalendar();
+  const { integrations, loading, listPosts, listTab, listError, reloadCalendarView } = useCalendar();
 
   // Use shared post actions hook
   const {
@@ -728,8 +774,10 @@ export const ListView = () => {
       }
       groups[dateKey].push(post);
     });
-    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [listPosts]);
+    return Object.entries(groups).sort(([a], [b]) =>
+      listTab === 'published' ? b.localeCompare(a) : a.localeCompare(b)
+    );
+  }, [listPosts, listTab]);
 
   if (loading) {
     return (
@@ -739,11 +787,24 @@ export const ListView = () => {
     );
   }
 
+  if (listError) {
+    return (
+      <div role="alert" className="flex flex-1 flex-col items-center justify-center gap-3">
+        {t('posts_load_failed', 'Posts could not be loaded.')}
+        <button type="button" onClick={reloadCalendarView} className="underline">
+          {t('retry', 'Retry')}
+        </button>
+      </div>
+    );
+  }
+
   if (listPosts.length === 0) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center">
         <div className="text-textColor text-[16px]">
-          {t('no_upcoming_posts', 'No upcoming posts scheduled')}
+          {listTab === 'published'
+            ? t('no_published_posts', 'No published posts yet.')
+            : t('no_upcoming_posts', 'No upcoming posts scheduled')}
         </div>
       </div>
     );
@@ -790,7 +851,8 @@ const MobileCalendar = () => {
   return (
     <MobilePostList
       posts={calendar.mobilePosts}
-      scheduled={calendar.mobileTab === 'scheduled'}
+      scheduled={calendar.listTab === 'scheduled'}
+      published={calendar.listTab === 'published'}
       loading={calendar.mobileLoading}
       error={calendar.mobileError}
       retry={calendar.retryMobile}

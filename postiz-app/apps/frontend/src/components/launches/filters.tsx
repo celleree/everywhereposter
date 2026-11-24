@@ -40,32 +40,46 @@ function getDateRange(
   }
 }
 
+const PostListTabs = ({ mobile = false }: { mobile?: boolean }) => {
+  const { listTab, setListTab } = useCalendar();
+  const t = useT();
+  const tabs = [
+    { value: 'scheduled', label: t('scheduled', 'Scheduled') },
+    { value: 'published', label: t('published', 'Published') },
+    ...(mobile ? [{ value: 'all' as const, label: t('all_posts', 'All posts') }] : []),
+  ] as const;
+  const active = !mobile && listTab === 'all' ? 'scheduled' : listTab;
+  return (
+    <div className="flex rounded-[8px] border border-newTableBorder p-[4px]">
+      {tabs.map(({ value, label }) => (
+        <button
+          key={value}
+          type="button"
+          aria-pressed={active === value}
+          onClick={() => setListTab(value)}
+          className={clsx(
+            'min-h-[44px] flex-1 rounded-[6px] px-[12px] text-[14px] font-[600]',
+            active === value && 'bg-boxFocused text-textItemFocused'
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 const MobileFilters = () => {
   const calendar = useCalendar();
   const t = useT();
-  const isScheduled = calendar.mobileTab === 'scheduled';
+  const isScheduled = calendar.listTab === 'scheduled';
 
   return (
     <div className="flex min-w-0 flex-col gap-[12px] text-textColor">
-      <div className="flex rounded-[8px] border border-newTableBorder p-[4px]">
-        {(['scheduled', 'all'] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            aria-pressed={calendar.mobileTab === tab}
-            onClick={() => calendar.setMobileTab(tab)}
-            className={clsx(
-              'min-h-[44px] flex-1 rounded-[6px] px-[12px] text-[14px] font-[600]',
-              calendar.mobileTab === tab && 'bg-boxFocused text-textItemFocused'
-            )}
-          >
-            {tab === 'scheduled' ? t('scheduled', 'Scheduled') : t('all_posts', 'All posts')}
-          </button>
-        ))}
-      </div>
+      <PostListTabs mobile />
       {isScheduled ? (
         <div className="text-[13px] text-textColor/70">{t('one_time_scheduled_posts', 'One-time scheduled posts.')}</div>
-      ) : (
+      ) : calendar.listTab === 'all' && (
         <div className="flex min-w-0 items-center justify-between gap-[8px]">
           <button type="button" aria-label="Previous month" onClick={() => calendar.moveMobileMonth(-1)} className="min-h-[44px] min-w-[44px] rounded-[8px] border border-newTableBorder">‹</button>
           <div className="min-w-0 text-center text-[14px] font-[500]">{newDayjs(calendar.mobileMonth).format('MMMM YYYY')}</div>
@@ -77,7 +91,7 @@ const MobileFilters = () => {
         onChange={calendar.setMobileCustomer}
         integrations={calendar.integrations}
       />
-      {isScheduled && calendar.mobileTotalPages > 1 && (
+      {calendar.listTab !== 'all' && calendar.mobileTotalPages > 1 && (
         <div className="flex items-center justify-between gap-[8px] text-[14px]">
           <button type="button" aria-label="Previous page" disabled={calendar.mobilePage === 0} onClick={() => calendar.setMobilePage(calendar.mobilePage - 1)} className="min-h-[44px] rounded-[8px] border border-newTableBorder px-[12px] disabled:opacity-50">{t('previous', 'Previous')}</button>
           <span>{t('page', 'Page')} {calendar.mobilePage + 1} {t('of', 'of')} {calendar.mobileTotalPages}</span>
@@ -382,6 +396,7 @@ const DesktopFilters = () => {
           </div>
         </div>
       )}
+      {isListView && <PostListTabs />}
       {isListView && (
         <div className="flex flex-grow flex-row items-center gap-[10px] mobile:w-full mobile:flex-wrap">
           <div className="flex h-[42px] items-center gap-[1px] overflow-hidden rounded-[8px] border border-newTableBorder bg-newTableBorder mobile:min-w-0 mobile:flex-1">
@@ -481,7 +496,11 @@ const DesktopFilters = () => {
         </div>
       )}
       <div className="flex flex-row rounded-[8px] border border-newTableBorder p-[4px] text-[14px] font-[500] mobile:w-full">
-        <div
+        <button
+          type="button"
+          aria-label={t('calendar_view', 'Calendar view')}
+          title={t('calendar_view', 'Calendar view')}
+          aria-pressed={!isListView}
           onClick={setCalendarView}
           className={clsx(
             'flex w-[34px] cursor-pointer items-center justify-center rounded-[6px] pt-[6px] pb-[5px] text-center mobile:flex-1',
@@ -504,8 +523,12 @@ const DesktopFilters = () => {
               strokeLinejoin="round"
             />
           </svg>
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
+          aria-label={t('scheduled_posts', 'Scheduled posts')}
+          title={t('scheduled_posts', 'Scheduled posts')}
+          aria-pressed={isListView}
           onClick={setList}
           className={clsx(
             'flex w-[34px] cursor-pointer items-center justify-center rounded-[6px] pt-[6px] pb-[5px] text-center mobile:flex-1',
@@ -528,7 +551,7 @@ const DesktopFilters = () => {
               strokeLinejoin="round"
             />
           </svg>
-        </div>
+        </button>
       </div>
     </div>
   );

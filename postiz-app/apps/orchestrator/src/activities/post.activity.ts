@@ -6,6 +6,7 @@ import {
   TemporalService,
 } from 'nestjs-temporal-core';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
+import type { FacebookPublicationOutcome } from '@gitroom/nestjs-libraries/database/prisma/posts/facebook-published.service';
 import {
   NotificationService,
   NotificationType,
@@ -90,8 +91,13 @@ export class PostActivity {
   }
 
   @ActivityMethod()
-  async updatePost(id: string, postId: string, releaseURL: string) {
-    return this._postService.updatePost(id, postId, releaseURL);
+  async updatePost(
+    id: string,
+    postId: string,
+    releaseURL: string,
+    facebookPublication?: FacebookPublicationOutcome
+  ) {
+    return this._postService.updatePost(id, postId, releaseURL, facebookPublication);
   }
 
   @ActivityMethod()

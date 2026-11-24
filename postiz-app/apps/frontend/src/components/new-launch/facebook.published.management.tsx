@@ -5,17 +5,21 @@ import { useSWRConfig } from 'swr';
 
 type Status = {
   eligible: boolean;
+  canEdit?: boolean;
   reason?: string;
   pageName?: string;
+  pageId?: string;
   releaseId?: string;
   permalink?: string;
   message?: string;
   revision?: number;
   deleted?: boolean;
   pending?: boolean;
+  pendingAction?: 'edit' | 'delete';
 };
-export function FacebookPublishedManagement({ postId, onConfirmed }: {
+export function FacebookPublishedManagement({ postId, deleteOnly = false, onConfirmed }: {
   postId: string;
+  deleteOnly?: boolean;
   onConfirmed?: (message: string, deleted: boolean) => void;
 }) {
   const fetch = useFetch();
@@ -25,6 +29,9 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [deletionNeedsCheck, setDeletionNeedsCheck] = useState(false);
+  const canEdit = status?.canEdit && !deleteOnly;
+  const needsCheck = status?.pending || deletionNeedsCheck;
   const guard = useRef(false);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const epoch = useRef(0);
@@ -72,6 +79,7 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
     setMessage('');
     setError('');
     setConfirm(false);
+    setDeletionNeedsCheck(false);
     setBusy(false);
     guard.current = false;
     request()
@@ -113,6 +121,7 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
       setStatus(data);
       setMessage(data.message || '');
       setConfirm(false);
+      setDeletionNeedsCheck(false);
       if (data.eligible && typeof data.message === 'string') {
         onConfirmed?.(data.message, !!data.deleted);
       }
@@ -120,6 +129,10 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
       await mutate(() => true);
     } catch (error) {
       if (generation !== epoch.current) return;
+      if (action === 'delete') {
+        setConfirm(false);
+        setDeletionNeedsCheck(true);
+      }
       setError(
         error instanceof Error
           ? error.message
@@ -127,7 +140,15 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
       );
       // Refresh only status: retain the requested text while reconciling.
       const data = await request().catch(() => undefined);
-      if (data && generation === epoch.current) setStatus(data);
+      if (data && generation === epoch.current) {
+        setStatus(data);
+        if (data.eligible && data.deleted && typeof data.message === 'string') {
+          setError('');
+          setDeletionNeedsCheck(false);
+          onConfirmed?.(data.message, true);
+          await mutate(() => true);
+        }
+      }
     } finally {
       if (generation === epoch.current) {
         guard.current = false;
@@ -152,7 +173,7 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
       {status?.eligible && (
         <>
           <p className="break-words">
-            Page: {status.pageName} · Post: {status.releaseId}
+            Page: {status.pageName} ({status.pageId}) · Post: {status.releaseId}
           </p>
           <a
             href={status.permalink}
@@ -166,25 +187,29 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
             <p role="status">Deleted on Facebook.</p>
           ) : (
             <>
-              <label htmlFor={`facebook-message-${postId}`}>Post message</label>
-              <textarea
-                id={`facebook-message-${postId}`}
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                disabled={busy || status.pending}
-                maxLength={63206}
-                rows={5}
-                className="w-full min-w-0 rounded border border-newBorder bg-newBgColor p-3"
-              />
-              <p>
-                Only text can change. Links, media, account selection and
-                comments are not editable here.
-              </p>
-              {status.pending ? (
+              {canEdit ? (
+                <>
+                  <label htmlFor={`facebook-message-${postId}`}>Post message</label>
+                  <textarea
+                    id={`facebook-message-${postId}`}
+                    value={message}
+                    onChange={(event) => setMessage(event.target.value)}
+                    disabled={busy || needsCheck}
+                    maxLength={63206}
+                    rows={5}
+                    className="w-full min-w-0 rounded-lg border border-newBorder bg-newBgColor p-3"
+                  />
+                  <p>Only the message text can be edited here.</p>
+                </>
+              ) : (
+                <p className="whitespace-pre-wrap break-words">{status.message}</p>
+              )}
+              {needsCheck ? (
                 <>
                   <p role="status">
-                    The previous operation needs confirmation. Publishing again
-                    is blocked.
+                    {deletionNeedsCheck || status.pendingAction === 'delete'
+                      ? 'Facebook deletion is unconfirmed. Check the result before taking any further action.'
+                      : 'The previous operation needs confirmation. Check the result before taking any further action.'}
                   </p>
                   <button
                     disabled={busy}
@@ -196,15 +221,15 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
                 </>
               ) : (
                 <>
-                  <button
-                    disabled={
-                      busy || !message.trim() || message === status.message
-                    }
-                    onClick={() => perform('edit')}
-                    className="rounded bg-btnSimple p-3"
-                  >
-                    Save Facebook message
-                  </button>
+                  {canEdit && (
+                    <button
+                      disabled={busy || !message.trim() || message === status.message}
+                      onClick={() => perform('edit')}
+                      className="rounded bg-btnSimple p-3"
+                    >
+                      Save Facebook message
+                    </button>
+                  )}
                   <button
                     ref={deleteButton}
                     disabled={busy}
@@ -215,7 +240,7 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
                   </button>
                 </>
               )}
-              {confirm && (
+              {confirm && !needsCheck && (
                 <div
                   role="alertdialog"
                   aria-labelledby={`facebook-delete-${postId}`}
@@ -223,8 +248,8 @@ export function FacebookPublishedManagement({ postId, onConfirmed }: {
                 >
                   <p id={`facebook-delete-${postId}`} className="break-words">
                     Permanently delete post {status.releaseId} from Facebook
-                    Page {status.pageName}? This removes the remote post, not
-                    just its local record.
+                    Page {status.pageName} ({status.pageId})? The deletion applies
+                    to this Facebook post only.
                   </p>
                   <button
                     autoFocus

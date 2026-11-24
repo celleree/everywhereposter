@@ -273,7 +273,7 @@ it.each(['day', 'week', 'month', 'list', 'scheduled', 'all'])(
     mount();
     await ready();
     if (view === 'all') {
-      act(() => latest.setMobileTab('all'));
+      act(() => latest.setListTab('all'));
       await ready();
     }
     let pending!: Promise<void>;

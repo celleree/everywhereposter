@@ -71,6 +71,8 @@ type Reschedule = {
   phase: 'confirming' | 'saving' | 'reconciling' | 'saved' | 'unknown';
 };
 
+type PostListTab = 'scheduled' | 'published' | 'all';
+
 export const CalendarContext = createContext({
   startDate: newDayjs().startOf('isoWeek').format('YYYY-MM-DD'),
   endDate: newDayjs().endOf('isoWeek').format('YYYY-MM-DD'),
@@ -107,11 +109,12 @@ export const CalendarContext = createContext({
   isRescheduling: (_id: string): boolean => false,
   // List view specific
   listPosts: [] as CalendarPost[],
+  listError: null as Error | null,
   listPage: 0,
   listTotalPages: 0,
   isMobile: null as boolean | null,
-  mobileTab: 'scheduled' as 'scheduled' | 'all',
-  setMobileTab: (_tab: 'scheduled' | 'all') => {},
+  listTab: 'scheduled' as PostListTab,
+  setListTab: (_tab: PostListTab) => {},
   mobileMonth: newDayjs().startOf('month').format('YYYY-MM-DD'),
   moveMobileMonth: (_months: number) => {},
   setMobileCustomer: (_customer: string | null) => {},
@@ -286,7 +289,7 @@ const CalendarProvider: FC<{
   const [displaySaved, setDisplaySaved] = useCookie('calendar-display', 'week');
   const display = searchParams.get('display') || displaySaved;
   const [isMobile, setIsMobile] = useState<boolean | null>(null);
-  const [mobileTab, setMobileTab] = useState<'scheduled' | 'all'>('scheduled');
+  const [listTab, selectListTab] = useState<PostListTab>('scheduled');
   const [mobileMonth, setMobileMonth] = useState(() =>
     newDayjs().startOf('month').format('YYYY-MM-DD')
   );
@@ -304,6 +307,12 @@ const CalendarProvider: FC<{
 
   // List view state
   const [listPage, setListPage] = useState(0);
+
+  const setListTab = (tab: PostListTab) => {
+    setListPage(0);
+    setMobilePage(0);
+    selectListTab(tab);
+  };
 
   // Initialize with current date range based on URL params or defaults
   const initStartDate = searchParams.get('startDate');
@@ -346,11 +355,12 @@ const CalendarProvider: FC<{
   // List view data fetcher
   const listParams = useMemo(() => {
     return new URLSearchParams({
+      ...(listTab === 'published' ? { mode: 'published' } : {}),
       page: listPage.toString(),
       limit: '100',
       customer: filters?.customer?.toString() || '',
     }).toString();
-  }, [listPage, filters.customer]);
+  }, [listPage, listTab, filters.customer]);
 
   const loadListData = useCallback(async () => {
     return loadPosts(`/posts/list?${listParams}`, true);
@@ -365,24 +375,24 @@ const CalendarProvider: FC<{
     }).toString();
   }, [mobileMonth, filters.customer]);
 
-  const scheduledParams = useMemo(
+  const mobileListParams = useMemo(
     () =>
       new URLSearchParams({
-        mode: 'scheduled-once',
+        mode: listTab === 'published' ? 'published' : 'scheduled-once',
         page: mobilePage.toString(),
         limit: '100',
         customer: filters.customer || '',
       }).toString(),
-    [mobilePage, filters.customer]
+    [mobilePage, listTab, filters.customer]
   );
 
   const loadMobileAll = useCallback(async () => {
     return loadPosts(`/posts?${mobileAllParams}`);
   }, [loadPosts, mobileAllParams]);
 
-  const loadScheduled = useCallback(async () => {
-    return loadPosts(`/posts/list?${scheduledParams}`, true);
-  }, [loadPosts, scheduledParams]);
+  const loadMobileList = useCallback(async () => {
+    return loadPosts(`/posts/list?${mobileListParams}`, true);
+  }, [loadPosts, mobileListParams]);
 
   // SWR for calendar view
   const {
@@ -405,6 +415,7 @@ const CalendarProvider: FC<{
   // SWR for list view
   const {
     data: listData,
+    error: listError,
     isLoading: listIsLoading,
     mutate: mutateList,
   } = useSWR(
@@ -426,22 +437,22 @@ const CalendarProvider: FC<{
     error: mobileAllError,
     mutate: mutateMobileAll,
   } = useSWR(
-    userId && orgId && isMobile && mobileTab === 'all'
+    userId && orgId && isMobile && listTab === 'all'
       ? ['calendar-mobile-all', userId, orgId, mobileAllParams]
       : null,
     loadMobileAll,
     { revalidateOnFocus: false }
   );
   const {
-    data: scheduledData,
-    isLoading: scheduledLoading,
-    error: scheduledError,
-    mutate: mutateScheduled,
+    data: mobileListData,
+    isLoading: mobileListLoading,
+    error: mobileListError,
+    mutate: mutateMobileList,
   } = useSWR(
-    userId && orgId && isMobile && mobileTab === 'scheduled'
-      ? ['calendar-mobile-scheduled', userId, orgId, scheduledParams]
+    userId && orgId && isMobile && listTab !== 'all'
+      ? ['calendar-mobile-list', userId, orgId, mobileListParams]
       : null,
-    loadScheduled,
+    loadMobileList,
     { revalidateOnFocus: false }
   );
 
@@ -575,19 +586,19 @@ const CalendarProvider: FC<{
         );
   }, [mobileAllData, showImportedPostsInCalendar, overlay]);
   const mobilePosts =
-    mobileTab === 'scheduled' ? overlay(scheduledData) : mobileAllPosts;
-  const mobileTotalPages = Math.ceil((scheduledData?.total || 0) / 100);
+    listTab === 'all' ? mobileAllPosts : overlay(mobileListData);
+  const mobileTotalPages = Math.ceil((mobileListData?.total || 0) / 100);
 
   useEffect(() => {
-    if (scheduledData && mobilePage > 0 && mobilePage >= mobileTotalPages) {
+    if (mobileListData && mobilePage > 0 && mobilePage >= mobileTotalPages) {
       setMobilePage(Math.max(0, mobileTotalPages - 1));
     }
-  }, [scheduledData, mobilePage, mobileTotalPages]);
+  }, [mobileListData, mobilePage, mobileTotalPages]);
 
   const retryMobile = useCallback(() => {
-    if (mobileTab === 'scheduled') void mutateScheduled();
+    if (listTab !== 'all') void mutateMobileList();
     else void mutateMobileAll();
-  }, [mobileTab, mutateScheduled, mutateMobileAll]);
+  }, [listTab, mutateMobileList, mutateMobileAll]);
 
   const comments = useMemo(() => calendarData?.comments || [], [calendarData?.comments]);
 
@@ -596,13 +607,19 @@ const CalendarProvider: FC<{
   const listTotal = listData?.total || 0;
   const listTotalPages = Math.ceil(listTotal / 100);
 
+  useEffect(() => {
+    if (listData && listPage > 0 && listPage >= listTotalPages) {
+      setListPage(Math.max(0, listTotalPages - 1));
+    }
+  }, [listData, listPage, listTotalPages]);
+
   const reconcile = useCallback(async () => {
     const before = { ...reads.current };
     const results = await Promise.allSettled([
       mutateCalendar(),
       mutateList(),
       mutateMobileAll(),
-      mutateScheduled(),
+      mutateMobileList(),
     ]);
     // SWR revalidation can resolve with cached data after a fetcher error.
     return (
@@ -610,7 +627,7 @@ const CalendarProvider: FC<{
       reads.current.failed === before.failed &&
       results.every((result) => result.status === 'fulfilled')
     );
-  }, [mutateCalendar, mutateList, mutateMobileAll, mutateScheduled]);
+  }, [mutateCalendar, mutateList, mutateMobileAll, mutateMobileList]);
 
   const reloadCalendarView = useCallback(() => {
     void reconcile();
@@ -753,12 +770,13 @@ const CalendarProvider: FC<{
         signature: sign,
         // List view specific
         listPosts,
+        listError: listError || null,
         listPage,
         listTotalPages,
         setListPage,
         isMobile,
-        mobileTab,
-        setMobileTab,
+        listTab,
+        setListTab,
         mobileMonth,
         moveMobileMonth,
         setMobileCustomer,
@@ -767,8 +785,8 @@ const CalendarProvider: FC<{
         mobileTotalPages,
         setMobilePage,
         mobileLoading: isMobile === null ||
-          (mobileTab === 'scheduled' ? scheduledLoading : mobileAllLoading),
-        mobileError: (mobileTab === 'scheduled' ? scheduledError : mobileAllError) || null,
+          (listTab === 'all' ? mobileAllLoading : mobileListLoading),
+        mobileError: (listTab === 'all' ? mobileAllError : mobileListError) || null,
         retryMobile,
       }}
     >

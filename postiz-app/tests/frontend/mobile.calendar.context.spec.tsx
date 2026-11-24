@@ -83,7 +83,7 @@ const Probe = () => {
         {calendar.isMobile === null
           ? 'pending'
           : calendar.isMobile
-          ? calendar.mobileTab
+          ? calendar.listTab
           : calendar.display}
       </span>
       <span data-testid="mobile-posts">
@@ -92,8 +92,8 @@ const Probe = () => {
       <span data-testid="error">{calendar.mobileError?.message || ''}</span>
       <span data-testid="page">{calendar.mobilePage}</span>
       <span data-testid="month">{calendar.mobileMonth}</span>
-      <button onClick={() => calendar.setMobileTab('all')}>All posts</button>
-      <button onClick={() => calendar.setMobileTab('scheduled')}>
+      <button onClick={() => calendar.setListTab('all')}>All posts</button>
+      <button onClick={() => calendar.setListTab('scheduled')}>
         Scheduled
       </button>
       <button onClick={() => calendar.setMobileCustomer('customer-2')}>
