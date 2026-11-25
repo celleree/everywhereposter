@@ -10,8 +10,8 @@ import { Transform } from 'class-transformer';
 
 export class GetPostsListDto {
   @IsOptional()
-  @IsIn(['scheduled-once'])
-  mode?: 'scheduled-once';
+  @IsIn(['scheduled-once', 'published'])
+  mode?: 'scheduled-once' | 'published';
 
   @IsOptional()
   @IsNumber()

@@ -50,7 +50,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       editMode: 'none',
       canDeletePublished: false,
       reason:
-        'Open an eligible new text/feed post to manage its message or deletion. Media, links, imported and legacy posts remain read-only.',
+        'Open the Facebook Page post to check which actions are available.',
       constraints: [
         'Facebook text/feed actions require a confirmed app publication receipt and administrator access.',
       ],
@@ -576,15 +576,22 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       finalId = postId;
     }
 
+    const appId = process.env.FACEBOOK_APP_ID;
+    const publication = !firstPost.media?.length && !firstPost.settings?.url &&
+      typeof finalId === 'string' && /^\d+_\d+$/.test(finalId) &&
+      finalId.startsWith(`${id}_`) && appId
+      ? { pageId: id, appId, message: firstPost.message, revision: 0, mutation: null }
+      : undefined;
+
     return [
       {
         id: firstPost.id,
         postId: finalId,
         releaseURL: finalUrl,
         status: 'success',
-        ...(!firstPost.media?.length && !firstPost.settings?.url && !/https?:\/\/|www\./i.test(firstPost.message) && /^\d+_\d+$/.test(finalId) && finalId.startsWith(`${id}_`) && process.env.FACEBOOK_APP_ID ? {
-          facebookText: { version: 1, pageId: id, appId: process.env.FACEBOOK_APP_ID, message: firstPost.message, revision: 0, mutation: null },
-        } : {}),
+        ...(publication && (/https?:\/\/|www\./i.test(firstPost.message)
+          ? { facebookFeed: { version: 2, ...publication } }
+          : { facebookText: { version: 1, ...publication } })),
       },
     ];
   }

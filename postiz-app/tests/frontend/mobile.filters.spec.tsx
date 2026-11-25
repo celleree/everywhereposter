@@ -18,8 +18,8 @@ jest.mock('@gitroom/frontend/components/launches/select.customer', () => ({
 beforeEach(() => {
   mockCalendar = {
     isMobile: true,
-    mobileTab: 'scheduled',
-    setMobileTab: jest.fn(),
+    listTab: 'scheduled',
+    setListTab: jest.fn(),
     mobileMonth: '2026-09-01',
     moveMobileMonth: jest.fn(),
     setMobileCustomer: jest.fn(),
@@ -42,8 +42,10 @@ it('shows only mobile tabs, customer and scheduled pagination controls', () => {
   expect(screen.queryByText('Day')).toBeNull();
   expect(screen.queryByText('Week')).toBeNull();
   expect(screen.queryByText('Month')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Published' }));
+  expect(mockCalendar.setListTab).toHaveBeenCalledWith('published');
   fireEvent.click(screen.getByRole('button', { name: 'All posts' }));
-  expect(mockCalendar.setMobileTab).toHaveBeenCalledWith('all');
+  expect(mockCalendar.setListTab).toHaveBeenCalledWith('all');
   fireEvent.click(screen.getByRole('button', { name: 'Choose customer' }));
   expect(mockCalendar.setMobileCustomer).toHaveBeenCalledWith('customer-2');
   fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
@@ -52,7 +54,7 @@ it('shows only mobile tabs, customer and scheduled pagination controls', () => {
 });
 
 it('shows simple month browsing only on the All posts tab', () => {
-  mockCalendar.mobileTab = 'all';
+  mockCalendar.listTab = 'all';
   render(<Filters />);
   expect(screen.getByText('September 2026')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Previous month' }));

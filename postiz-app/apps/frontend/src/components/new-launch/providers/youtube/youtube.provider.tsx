@@ -1,6 +1,7 @@
 'use client';
 
-import { FC } from 'react';
+import { FC, useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   PostComment,
   withProvider,
@@ -12,6 +13,12 @@ import { MediumTags } from '@gitroom/frontend/components/new-launch/providers/me
 import { MediaComponent } from '@gitroom/frontend/components/media/media.component';
 import { Select } from '@gitroom/react/form/select';
 import { YoutubePreview } from '@gitroom/frontend/components/new-launch/providers/youtube/youtube.preview';
+import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
+import { useLaunchStore, type SelectedIntegrations } from '@gitroom/frontend/components/new-launch/store';
+import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
+import { buildGuidedGenerationFingerprint, selectGuidedGenerationMedia } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
+import { normalizeGeneratedYoutubeTitle } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
 const type = [
   {
     label: 'Public',
@@ -75,12 +82,81 @@ const license = [
   },
 ];
 
+function rememberAutomaticTitle(id: string, automaticYoutubeTitle: SelectedIntegrations['automaticYoutubeTitle']) {
+  useLaunchStore.setState(state => ({
+    selectedIntegrations: state.selectedIntegrations.map(item =>
+      item.integration.id === id ? { ...item, automaticYoutubeTitle } : item),
+  }));
+}
+
 const YoutubeSettings: FC = () => {
-  const { register, control } = useSettings();
+  const t = useT();
+  const { register, control, getValues, getFieldState, setValue } = useSettings();
+  const { integration } = useIntegration();
+  const launch = useLaunchStore(useShallow(state => ({
+    global: state.global,
+    selectedIntegrations: state.selectedIntegrations,
+    integrations: state.integrations,
+  })));
+  const guided = useGuidedComposerStore(useShallow(state => ({
+    sourceMediaId: state.sourceMediaId,
+    captionMode: state.captionMode,
+    sourceCaption: state.sourceCaption,
+    additionalContext: state.additionalContext,
+    generationInputFingerprint: state.generationInputFingerprint,
+    generatedResponse: state.generatedResponse,
+  })));
+  const selected = launch.selectedIntegrations.find(item => item.integration.id === integration?.id);
+  const accountId = selected?.integration.id;
+  const seeded = selected?.automaticYoutubeTitle;
+  const titleOwned = useRef(!seeded && Object.prototype.hasOwnProperty.call(selected?.settings || {}, 'title'));
+  const titleField = register('title');
+  const mediaId = selectGuidedGenerationMedia(launch.global[0]?.media || [], guided.sourceMediaId)?.id;
+  const currentFingerprint = buildGuidedGenerationFingerprint({
+    mediaId,
+    destinations: launch.selectedIntegrations.map(item => item.integration),
+    captionMode: guided.captionMode,
+    sourceCaption: guided.sourceCaption,
+    additionalContext: guided.additionalContext,
+  });
+  const proposedTitle =
+    guided.captionMode !== 'use-everywhere' &&
+    guided.generationInputFingerprint === currentFingerprint &&
+    selected?.integration.identifier === integration?.identifier &&
+    launch.integrations.some(item =>
+      item.id === integration?.id && item.identifier === integration?.identifier &&
+      !item.disabled && !item.inBetweenSteps
+    )
+      ? normalizeGeneratedYoutubeTitle(guided.generatedResponse?.results.find(result => result.platform === 'youtube')?.title)
+      : undefined;
+
+  useEffect(() => {
+    if (!accountId || titleOwned.current || getFieldState('title').isDirty) return;
+    const currentTitle = getValues('title') ?? '';
+    const sourceId = mediaId ?? null;
+    if (seeded) {
+      if (currentTitle !== seeded.value || (seeded.value && seeded.mediaId === sourceId)) return;
+    } else if (currentTitle) {
+      return;
+    }
+
+    if (proposedTitle) {
+      rememberAutomaticTitle(accountId, { mediaId: sourceId, value: proposedTitle });
+      setValue('title', proposedTitle, { shouldValidate: true });
+    } else if (seeded?.value) {
+      // A blank waiting for a fresh suggestion stays automatic across recovery.
+      rememberAutomaticTitle(accountId, { mediaId: sourceId, value: '' });
+      setValue('title', '', { shouldValidate: true });
+    }
+  }, [accountId, getFieldState, getValues, mediaId, proposedTitle, seeded, setValue]);
   return (
     <div className="flex flex-col">
       <div className="text-[14px] font-[600] mb-[10px]">Details</div>
-      <Input label="Title" {...register('title')} maxLength={100} />
+      <Input label="Title" translationKey="label_title" aria-label={t('label_title', 'Title')} {...titleField} maxLength={100} onChange={event => {
+        titleOwned.current = true;
+        if (accountId && seeded) rememberAutomaticTitle(accountId, undefined);
+        titleField.onChange(event);
+      }} />
       <MediumTags label="Tags" {...register('tags')} />
       <div className="mt-[20px]">
         <MediaComponent

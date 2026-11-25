@@ -1,6 +1,7 @@
 import React, { createRef } from 'react';
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -9,6 +10,7 @@ import {
 } from '@testing-library/react';
 
 const mockCustomProviderGet = jest.fn();
+let mockTitleTranslation: string | null = null;
 
 jest.mock(
   '@gitroom/frontend/components/launches/general.preview.component',
@@ -28,7 +30,8 @@ jest.mock(
 );
 
 jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
-  useT: () => (_key: string, fallback: string) => fallback,
+  useT: () => (key: string, fallback: string) =>
+    key === 'label_title' ? mockTitleTranslation || fallback : fallback,
 }));
 
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
@@ -68,9 +71,12 @@ jest.mock('@gitroom/frontend/components/layout/set.timezone', () => ({
 
 jest.mock('@gitroom/react/form/input', () => {
   const ReactModule = require('react');
+  const ActualInput = jest.requireActual('@gitroom/react/form/input').Input;
   return {
     Input: ReactModule.forwardRef(
-      ({ label, ...props }: any, ref: React.Ref<HTMLInputElement>) => (
+      ({ label, ...props }: any, ref: React.Ref<HTMLInputElement>) => props.name === 'title' ? (
+        <ActualInput label={label} ref={ref} {...props} />
+      ) : (
         <label>
           {label}
           <input aria-label={label} ref={ref} {...props} />
@@ -145,7 +151,10 @@ jest.mock('@gitroom/react/form/color.picker', () => ({
 }));
 
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
+import { hydrateComposerDraft, readComposerDraft, snapshotComposerDraft } from '../../apps/frontend/src/components/new-launch/composer.draft.recovery';
 import YoutubeProvider from '../../apps/frontend/src/components/new-launch/providers/youtube/youtube.provider';
+import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
+import { buildGuidedGenerationFingerprint } from '../../apps/frontend/src/components/new-launch/guided.composer.generation';
 import PinterestProvider from '../../apps/frontend/src/components/new-launch/providers/pinterest/pinterest.provider';
 import TikTokProvider from '../../apps/frontend/src/components/new-launch/providers/tiktok/tiktok.provider';
 
@@ -195,8 +204,16 @@ const renderProvider = (
 describe('guided composer existing provider settings', () => {
   beforeEach(() => {
     useLaunchStore.getState().reset();
+    useGuidedComposerStore.getState().resetGuidedComposer();
     mockCustomProviderGet.mockReset();
+    mockTitleTranslation = null;
   });
+
+  const validateYoutube = async (ref: { current: any }) => {
+    let result: any;
+    await act(async () => { result = await ref.current.isValid(); });
+    return result;
+  };
 
   it('uses the existing YouTube form and DTO for the required title', async () => {
     const integration = {
@@ -213,19 +230,160 @@ describe('guided composer existing provider settings', () => {
     ]);
 
     await waitFor(() => expect(providerRef.current).toBeTruthy());
-    expect((await providerRef.current.isValid()).valid).toBe(false);
+    expect((await validateYoutube(providerRef)).valid).toBe(false);
 
     fireEvent.change(screen.getByLabelText('Title'), {
       target: { value: 'Launch walkthrough' },
     });
 
     await waitFor(async () =>
-      expect((await providerRef.current.isValid()).valid).toBe(true)
+      expect((await validateYoutube(providerRef)).valid).toBe(true)
     );
     expect(providerRef.current.getValues().settings).toMatchObject({
       title: 'Launch walkthrough',
       type: 'public',
     });
+  });
+
+  const youtube = { ...baseIntegration, id: 'youtube-ai', identifier: 'youtube' };
+  const video = [{ id: 'video-1', path: '/video.mp4', type: 'video' }];
+  it.each(['Title', 'Titre'])('names the real YouTube Title input with its visible translation (%s)', async label => {
+    mockTitleTranslation = label;
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    expect(screen.getByText(label)).toBeTruthy();
+    const title = screen.getByRole('textbox', { name: label, exact: true });
+    fireEvent.change(title, { target: { value: 'My accessible title' } });
+    expect(ref.current.getValues().settings.title).toBe('My accessible title');
+    await waitFor(async () => expect((await validateYoutube(ref)).valid).toBe(true));
+  });
+  const completeTitle = (title: unknown, mode: 'generate' | 'adapt-by-platform' | 'use-everywhere' = 'generate', stale = false, mediaId = 'video-1') => act(() => {
+    const launch = useLaunchStore.getState();
+    const guided = useGuidedComposerStore.getState();
+    guided.setCaptionMode(mode);
+    guided.completeGeneration({ requestId: 'title-fixture', status: 'complete', results: [{ platform: 'youtube', draft: 'Description', title, origin: 'generated', warnings: [] }], warnings: [], imagePlans: [] } as any, [], stale ? 'stale' : buildGuidedGenerationFingerprint({ mediaId, destinations: launch.selectedIntegrations.map(item => item.integration), captionMode: mode, sourceCaption: guided.sourceCaption, additionalContext: guided.additionalContext }));
+  });
+
+  const replaceVideo = () => act(() => {
+    useLaunchStore.setState(state => ({
+      global: state.global.map(post => ({
+        ...post,
+        media: [{ id: 'video-2', path: '/second.mp4', type: 'video' }],
+      })),
+    }));
+    useGuidedComposerStore.getState().selectSourceMedia('video-2');
+  });
+
+  it('clears the untouched automatic title when the video changes and seeds the matching replacement', async () => {
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    completeTitle('Keyboard shortcuts');
+    const input = screen.getByLabelText('Title');
+    expect(input).toHaveProperty('value', 'Keyboard shortcuts');
+
+    replaceVideo();
+    expect(input).toHaveProperty('value', '');
+    expect((await validateYoutube(ref)).valid).toBe(false);
+    completeTitle('Late result for video 1');
+    expect(input).toHaveProperty('value', '');
+    completeTitle('Sourdough baking tutorial', 'generate', false, 'video-2');
+    expect(ref.current.getValues().settings.title).toBe('Sourdough baking tutorial');
+    expect((await validateYoutube(ref)).valid).toBe(true);
+  });
+
+  it.each(['My title for any source', ''])('preserves manual title %j when the video changes', value => {
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    completeTitle('Keyboard shortcuts');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value } });
+    replaceVideo();
+    completeTitle('Sourdough baking tutorial', 'generate', false, 'video-2');
+    expect(ref.current.getValues().settings.title).toBe(value);
+  });
+
+  it.each([false, true])('recovers a blank title with its original ownership (manually cleared: %s)', async manual => {
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    completeTitle('First suggestion');
+    if (manual) fireEvent.change(screen.getByLabelText('Title'), { target: { value: '' } });
+    replaceVideo();
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
+
+    // Copy the live form values as the recovery provider's form watcher does.
+    const settings = ref.current.getValues().settings;
+    expect(settings).not.toHaveProperty('automaticYoutubeTitle');
+    act(() => useLaunchStore.setState(state => ({
+      selectedIntegrations: state.selectedIntegrations.map(item => ({ ...item, settings })),
+    })));
+    const saved = JSON.stringify(snapshotComposerDraft('user', 'org', 'now', null));
+    cleanup();
+    useLaunchStore.getState().reset();
+    useGuidedComposerStore.getState().resetGuidedComposer();
+    await hydrateComposerDraft(readComposerDraft(saved, 'user', 'org'), [youtube], async () =>
+      ({ ok: true, json: async () => ({ id: 'video-2', path: '/second.mp4', type: 'video' }) }) as Response);
+    const restored = useLaunchStore.getState().selectedIntegrations[0];
+    render(<YoutubeProvider id={youtube.id} ref={restored.ref} />);
+    completeTitle('Replacement suggestion', 'generate', false, 'video-2');
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', manual ? '' : 'Replacement suggestion');
+  });
+
+  it.each(['generate', 'adapt-by-platform'] as const)('seeds one editable title in %s and preserves edits, clearing and regeneration', async mode => {
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    completeTitle('  Grounded video title  ', mode);
+    await waitFor(() => expect(screen.getByLabelText('Title')).toHaveProperty('value', 'Grounded video title'));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'My title' } });
+    completeTitle('A regenerated title', mode);
+    expect(ref.current.getValues().settings.title).toBe('My title');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '' } });
+    completeTitle('Another title', mode);
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
+    expect((await validateYoutube(ref)).valid).toBe(false);
+  });
+
+  it.each([undefined, null, '', 'x', 'x'.repeat(101), 'Bad\ntitle', '<bad>'])('retains required manual validation for unusable title %s', async title => {
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    completeTitle(title);
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
+    expect((await validateYoutube(ref)).valid).toBe(false);
+  });
+
+  it.each([{ title: 'Saved manual title' }, { title: '' }])('preserves existing title authority including an explicitly blank restored field (%j)', settings => {
+    const ref = renderProvider(YoutubeProvider, youtube, video, settings);
+    completeTitle('Generated suggestion');
+    expect(ref.current.getValues().settings.title).toBe(settings.title);
+  });
+
+  it('preserves a title edited before generation completes', () => {
+    renderProvider(YoutubeProvider, youtube, video);
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'My pending title' } });
+    completeTitle('Late suggestion');
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', 'My pending title');
+  });
+
+  it('preserves a title deliberately cleared before generation completes', () => {
+    renderProvider(YoutubeProvider, youtube, video);
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Temporary' } });
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '' } });
+    completeTitle('Late suggestion');
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
+  });
+
+  it('ignores manual-mode and stale source/destination/connection results', () => {
+    renderProvider(YoutubeProvider, youtube, video);
+    completeTitle('Manual mode must stay manual', 'use-everywhere');
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
+    completeTitle('Stale source', 'generate', true);
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
+    act(() => useLaunchStore.setState({ integrations: [{ ...youtube, identifier: 'linkedin' }] }));
+    completeTitle('Replaced connection');
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
+  });
+
+  it('keeps separate user title authority for two YouTube destinations', async () => {
+    const second = { ...youtube, id: 'youtube-second' };
+    const ref = renderProvider(YoutubeProvider, youtube, video, { title: 'My first channel' });
+    const secondRef = createRef<any>();
+    act(() => useLaunchStore.setState({ integrations: [youtube, second], selectedIntegrations: [...useLaunchStore.getState().selectedIntegrations, { integration: second, settings: {}, ref: secondRef }] }));
+    render(<YoutubeProvider id={second.id} ref={secondRef} />);
+    completeTitle('Shared proposal');
+    await waitFor(() => expect(secondRef.current.getValues().settings.title).toBe('Shared proposal'));
+    expect(ref.current.getValues().settings.title).toBe('My first channel');
   });
 
   it('uses live TikTok creator settings with safe defaults', async () => {

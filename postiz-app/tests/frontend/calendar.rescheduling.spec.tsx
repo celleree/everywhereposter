@@ -273,7 +273,7 @@ it.each(['day', 'week', 'month', 'list', 'scheduled', 'all'])(
     mount();
     await ready();
     if (view === 'all') {
-      act(() => latest.setMobileTab('all'));
+      act(() => latest.setListTab('all'));
       await ready();
     }
     let pending!: Promise<void>;
@@ -523,6 +523,16 @@ it('preserves recurrence handling and sends the selected published-post action',
   expect(JSON.parse(writes()[0][1].body)).toEqual({ date: newDate, action: 'update' });
   await act(async () => { put.resolve({ ok: true }); await pending; });
   expect(latest.isRescheduling('repeat')).toBe(false);
+});
+
+it('keeps a receipt-bound Facebook copy out of the rescheduling dialog', async () => {
+  source = [post('facebook', { state: 'PUBLISHED', dateLocked: true })];
+  const confirm = jest.fn(async () => 'schedule' as const);
+  mount();
+  await ready();
+  await act(async () => { await save('facebook', confirm); });
+  expect(confirm).not.toHaveBeenCalled();
+  expect(writes()).toHaveLength(0);
 });
 
 it('releases a cancelled confirmation without sending a write', async () => {

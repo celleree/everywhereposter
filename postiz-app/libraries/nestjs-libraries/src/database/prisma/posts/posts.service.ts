@@ -3,7 +3,10 @@ import {
   Injectable,
   ValidationPipe,
 } from '@nestjs/common';
-import { FacebookPublishedService } from './facebook-published.service';
+import {
+  FacebookPublishedService,
+  type FacebookPublicationOutcome,
+} from './facebook-published.service';
 import { PublishingSubmissionService } from './publishing-submission.service';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
 import { PrismaService } from '../prisma.service';
@@ -128,7 +131,18 @@ export class PostsService {
     return this._postRepository.searchForMissingThreeHoursPosts();
   }
 
-  updatePost(id: string, postId: string, releaseURL: string) {
+  async updatePost(
+    id: string,
+    postId: string,
+    releaseURL: string,
+    facebookPublication?: FacebookPublicationOutcome
+  ) {
+    if (facebookPublication) {
+      const recorded = await this._facebookPublished?.recordLegacyPublication(
+        id, postId, releaseURL, facebookPublication
+      );
+      if (recorded) return recorded;
+    }
     return this._postRepository.updatePost(id, postId, releaseURL);
   }
 
@@ -1549,10 +1563,31 @@ export class PostsService {
         if (body.type === 'schedule') {
           this.assertScheduledDateInFuture(date);
         }
-        const { posts } = await this._postRepository.createOrUpdatePost(
+        const { posts, previousPost } = await this._postRepository.createOrUpdatePost(
           body.type, orgId, date, payload, body.tags, body.inter, tx
         );
         if (!posts.length) throw new BadRequestException('A post must contain at least one message.');
+        // The editor also sends an ID for new drafts. The upsert generates a
+        // database ID on creation and retains the supplied ID on update.
+        if (
+          body.type === 'now' &&
+          !body.inter &&
+          !previousPost &&
+          payload.settings.__type === 'facebook' &&
+          !payload.settings.url &&
+          payload.value.length === 1 &&
+          posts[0].id !== payload.value[0].id &&
+          !payload.value[0].image.length &&
+          !Object.keys(payload.settings).some((key) => key.startsWith('plug-'))
+        ) {
+          await tx.facebookPublicationReceipt.create({
+            data: {
+              postId: posts[0].id,
+              organizationId: orgId,
+              integrationId: payload.integration.id,
+            },
+          });
+        }
         destinations.push({ posts, taskQueue, integration: payload.integration.id });
       }
       return destinations;

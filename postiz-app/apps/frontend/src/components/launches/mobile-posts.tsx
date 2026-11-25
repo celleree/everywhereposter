@@ -35,6 +35,7 @@ export const consolidateMobileAllPosts = (posts: CalendarPost[]) => {
 export const MobilePostList = ({
   posts,
   scheduled,
+  published = false,
   loading,
   error,
   retry,
@@ -44,6 +45,7 @@ export const MobilePostList = ({
 }: {
   posts: CalendarPost[];
   scheduled: boolean;
+  published?: boolean;
   loading: boolean;
   error: Error | null;
   retry: () => void;
@@ -54,10 +56,10 @@ export const MobilePostList = ({
   const t = useT();
   const { ordinary, recurring } = useMemo(
     () =>
-      scheduled
+      scheduled || published
         ? { ordinary: posts, recurring: [] }
         : consolidateMobileAllPosts(posts),
-    [posts, scheduled]
+    [posts, scheduled, published]
   );
   const groups = useMemo(() => {
     const byDate = new Map<string, CalendarPost[]>();
@@ -65,8 +67,8 @@ export const MobilePostList = ({
       const date = newDayjs(post.publishDate).local().format('YYYY-MM-DD');
       byDate.set(date, [...(byDate.get(date) || []), post]);
     }
-    return [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [ordinary]);
+    return [...byDate.entries()].sort(([a], [b]) => published ? b.localeCompare(a) : a.localeCompare(b));
+  }, [ordinary, published]);
 
   if (error)
     return (
@@ -102,7 +104,9 @@ export const MobilePostList = ({
                 'no_one_time_scheduled_posts',
                 'No one-time scheduled posts yet.'
               )
-            : t('no_posts_in_month', 'No posts in this month.')}
+            : published
+              ? t('no_published_posts', 'No published posts yet.')
+              : t('no_posts_in_month', 'No posts in this month.')}
         </p>
         {scheduled && (
           <Link

@@ -211,8 +211,13 @@ export type FacebookTextReceipt = {
   mutation: null | { id: string; action: 'edit' | 'delete'; message?: string; phase: 'IN_FLIGHT' | 'UNCERTAIN' | 'CONFIRMED' };
 };
 
+export type FacebookFeedReceipt = Omit<FacebookTextReceipt, 'version'> & {
+  version: 2;
+};
+
 export type PostResponse = {
   facebookText?: FacebookTextReceipt;
+  facebookFeed?: FacebookFeedReceipt;
   id: string; // The db internal id of the post
   postId: string; // The ID of the scheduled post returned by the platform
   releaseURL: string; // The URL of the post on the platform

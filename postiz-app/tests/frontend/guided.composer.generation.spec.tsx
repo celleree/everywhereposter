@@ -531,7 +531,7 @@ describe('guided composer generation transition', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
     await waitFor(() => expect(useGuidedComposerStore.getState().composerStep).toBe('review'));
     expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({ captionMode: 'use-everywhere', sourceCaption: caption });
-    expect((screen.getByLabelText('Founder LinkedIn caption') as HTMLTextAreaElement).value).toBe(caption);
+    expect((screen.getByLabelText('Founder LinkedIn post text') as HTMLTextAreaElement).value).toBe(caption);
   });
 
   it('keeps network failures on Destinations and allows retry', async () => {
@@ -707,7 +707,7 @@ describe('guided composer generation transition', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     const caption = 'Reviewed wording to preserve.';
-    fireEvent.change(screen.getByLabelText('Founder LinkedIn caption'), { target: { value: caption } });
+    fireEvent.change(screen.getByLabelText('Founder LinkedIn post text'), { target: { value: caption } });
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     act(() =>
       useGuidedComposerStore.getState().setAdditionalContext('New context')

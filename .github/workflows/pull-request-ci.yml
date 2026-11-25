@@ -208,7 +208,7 @@ jobs:
 
           def migrations(root):
               files = sorted((root / "postiz-app/libraries/nestjs-libraries/src/database/prisma/migrations").glob("*/migration.sql"))
-              require(len(files) == 21, "Expected exactly 21 candidate migrations")
+              require(len(files) == 22, "Expected exactly 22 candidate migrations")
               return {p.parent.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 
           def verify_service(data, expected):
@@ -229,8 +229,8 @@ jobs:
 
           def verify_migrations(text, expected):
               rows = [line.split("|") for line in text.splitlines() if line]
-              require(len(rows) == 21 and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
-              require(len({row[0] for row in rows}) == 21, "Duplicate migration evidence")
+              require(len(rows) == len(expected) and all(len(row) == 3 for row in rows), "Missing or malformed migration evidence")
+              require(len({row[0] for row in rows}) == len(expected), "Duplicate migration evidence")
               require({row[0]: row[1] for row in rows} == expected and all(row[2] == "t" for row in rows), "Migrations differ or did not finish")
 
           def verify_tap(text, expected):
@@ -274,7 +274,7 @@ jobs:
               for result in selected:
                   assertions = result.get("assertionResults")
                   require(result.get("status") == "passed" and isinstance(assertions, list) and assertions and all(a.get("status") == "passed" for a in assertions), "Required suite failed or skipped")
-                  expected_count = {"launch.permissions.spec.ts": 17, "media.controller.video-edit.spec.ts": 24, "studio-editor.integration.spec.ts": 21, "studio-storage.spec.ts": 7, "studio.review.workspace.spec.tsx": 6, "studio-bridge.spec.ts": 37, "studio-evidence.spec.ts": 13, "studio-director.spec.ts": 59, "studio-title-runtime.spec.ts": 2, "studio-caption-plan.spec.ts": 6, "composer.draft.recovery.spec.tsx": 49, "manage.modal.guided.publish.spec.tsx": 42, "publishing-submission.spec.ts": 15, "publishing-submission.postgres.spec.ts": 36}.get(result["name"].replace("\\", "/").rsplit("/", 1)[-1])
+                  expected_count = {"launch.permissions.spec.ts": 17, "media.controller.video-edit.spec.ts": 24, "studio-editor.integration.spec.ts": 21, "studio-storage.spec.ts": 7, "studio.review.workspace.spec.tsx": 6, "studio-bridge.spec.ts": 37, "studio-evidence.spec.ts": 13, "studio-director.spec.ts": 59, "studio-title-runtime.spec.ts": 2, "studio-caption-plan.spec.ts": 6, "composer.draft.recovery.spec.tsx": 49, "manage.modal.guided.publish.spec.tsx": 49, "publishing-submission.spec.ts": 15, "publishing-submission.postgres.spec.ts": 36}.get(result["name"].replace("\\", "/").rsplit("/", 1)[-1])
                   if expected_count is not None:
                       require(len(assertions) == expected_count, "Unexpected local editor assertion count")
 
