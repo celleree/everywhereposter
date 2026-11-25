@@ -136,7 +136,7 @@ describeDatabase(
         } as Response;
       });
     });
-    it('keeps multi-destination receipts read-only without touching either post or Graph', async () => {
+    it('deletes exactly one durable destination and keeps multi-destination editing unavailable', async () => {
       const original =
         await prisma.publishingSubmissionDestination.findUniqueOrThrow({
           where: { id: ledger },
@@ -168,7 +168,7 @@ describeDatabase(
         },
       });
       const receipt = (original.providerResult as any[])[0];
-      await prisma.publishingSubmissionDestination.create({
+      const siblingReceipt = await prisma.publishingSubmissionDestination.create({
         data: {
           submissionId: original.submissionId,
           integrationId: siblingIntegration.id,
@@ -191,17 +191,12 @@ describeDatabase(
       });
       for (const target of [post, sibling.id]) {
         await expect(service.status(org, target)).resolves.toMatchObject({
-          eligible: false,
+          eligible: true,
+          canEdit: false,
         });
-        for (const action of ['edit', 'delete'] as const) {
-          await expect(
-            service.mutate(org, target, {
-              action,
-              revision: 0,
-              ...(action === 'edit' ? { message: 'Edited' } : {}),
-            })
-          ).rejects.toThrow('Only new');
-        }
+        await expect(
+          service.mutate(org, target, { action: 'edit', revision: 0, message: 'Edited' })
+        ).rejects.toThrow('Editing is unavailable');
       }
       expect(calls).toEqual([]);
       expect(
@@ -217,6 +212,144 @@ describeDatabase(
           })
         ).providerResult
       ).toEqual(original.providerResult);
+      await expect(service.mutate(org, post, { action: 'delete', revision: 0 }))
+        .resolves.toMatchObject({ deleted: true, releaseId: remote });
+      expect(calls).toEqual(['GET', 'GET', 'DELETE']);
+      expect(global.fetch).toHaveBeenLastCalledWith(
+        `https://graph.facebook.com/v25.0/${remote}`, expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(await prisma.post.findUnique({ where: { id: sibling.id } })).toEqual(sibling);
+      expect(await prisma.publishingSubmissionDestination.findUnique({
+        where: { id: siblingReceipt.id },
+      })).toEqual(siblingReceipt);
+    });
+    it('requires saved publication evidence for an already-published Calendar post', async () => {
+      const previous = await prisma.post.create({
+        data: {
+          organizationId: org,
+          integrationId: integration,
+          state: 'PUBLISHED',
+          content: 'Watch https://www.youtube.com/watch?v=synthetic',
+          group: randomUUID(),
+          publishDate: new Date(),
+          releaseId: '123_76543',
+          releaseURL: 'https://www.facebook.com/123_76543',
+        },
+      });
+      await expect(service.status(org, previous.id)).resolves.toMatchObject({
+        eligible: false,
+        reason: expect.stringContaining('open the exact post on its Facebook Page'),
+        pageName: 'Fixture Page',
+        permalink: 'https://www.facebook.com/123_76543',
+      });
+      expect(await service.status('other-org', previous.id)).not.toHaveProperty('permalink');
+      await expect(service.mutate(org, previous.id, { action: 'delete', revision: 0 }))
+        .rejects.toThrow('cannot verify');
+      expect(calls).toEqual([]);
+      expect(await prisma.post.findUnique({ where: { id: previous.id } })).toEqual(previous);
+      await prisma.post.update({ where: { id: previous.id }, data: { releaseId: '124_76543' } });
+      expect(await service.status(org, previous.id)).not.toHaveProperty('permalink');
+    });
+    it('keeps Calendar date writes from requeuing a Facebook publication or reviving its tombstone', async () => {
+      const { providerResult } = await prisma.publishingSubmissionDestination.delete({ where: { id: ledger } });
+      await prisma.facebookPublicationReceipt.create({
+        data: { postId: post, organizationId: org, integrationId: integration, providerResult: providerResult! },
+      });
+      const calendar = await posts.getPosts(org, {
+        startDate: '2000-01-01', endDate: '2099-01-01', customer: '',
+      });
+      expect(calendar.find(item => item.id === post)).toMatchObject({ dateLocked: true });
+      for (const state of ['PUBLISHED', 'DELETED_REMOTE']) {
+        if (state === 'DELETED_REMOTE') await service.mutate(org, post, { action: 'delete', revision: 0 });
+        const load = () => prisma.post.findUniqueOrThrow({
+          where: { id: post }, include: { facebookPublicationReceipt: true },
+        });
+        const before = await load();
+        expect(before).toMatchObject({ state, releaseId: remote });
+        for (const action of ['schedule', 'update'] as const) {
+          await expect(posts.changeDate(org, post, '2030-01-01', false, action)).rejects.toThrow('cannot be rescheduled');
+          expect(await load()).toEqual(before);
+        }
+        expect(await posts.searchForMissingThreeHoursPosts()).not.toContainEqual(expect.objectContaining({ id: post }));
+      }
+      expect(calls).toEqual(['GET', 'GET', 'DELETE']);
+    });
+    it('requires a confirmed legacy receipt and keeps a lost deletion acknowledgement locked', async () => {
+      const message = 'Watch https://www.youtube.com/watch?v=synthetic';
+      const legacy = await prisma.post.create({
+        data: {
+          organizationId: org, integrationId: integration, state: 'QUEUE',
+          content: message, group: randomUUID(), publishDate: new Date(),
+          facebookPublicationReceipt: { create: { organizationId: org, integrationId: integration } },
+        },
+      });
+      const releaseId = '123_76543';
+      const releaseURL = `https://www.facebook.com/${releaseId}`;
+      const result = {
+        id: legacy.id, postId: releaseId, releaseURL, status: 'success',
+        facebookFeed: { version: 2 as const, appId: 'fixture-app', pageId: '123', message, revision: 0, mutation: null },
+      };
+      await expect(service.status(org, legacy.id)).resolves.toMatchObject({ eligible: false });
+      await expect(posts.changeDate(org, legacy.id, '2030-01-01', false, 'schedule'))
+        .rejects.toThrow('cannot be rescheduled');
+      await expect(service.recordLegacyPublication(legacy.id, releaseId, releaseURL, {
+        result, organizationId: org, integrationId: 'other-integration',
+      })).resolves.toBeUndefined();
+      expect(await prisma.post.findUnique({ where: { id: legacy.id } })).toMatchObject({
+        state: 'QUEUE', releaseId: null,
+      });
+      const publisher = { result, organizationId: org, integrationId: integration };
+      await expect(posts.createOrUpdatePost('now', org, new Date().toISOString(), {
+        integration: { id: integration }, group: legacy.group,
+        value: [{ id: legacy.id, content: 'Queued editor change', image: [], delay: 0 }],
+        settings: { __type: 'facebook' },
+      } as any, [])).rejects.toThrow('immutable');
+      await expect(service.recordLegacyPublication(legacy.id, releaseId, releaseURL, publisher))
+        .resolves.toEqual({ count: 1 });
+      await expect(service.recordLegacyPublication(legacy.id, releaseId, releaseURL, publisher))
+        .resolves.toBeUndefined();
+      await expect(posts.updatePost(legacy.id, '123_9999', 'https://www.facebook.com/123_9999'))
+        .resolves.toEqual({ count: 0 });
+      await posts.changeState(legacy.id, 'ERROR', 'Late activity error');
+      await expect(service.status(org, legacy.id)).resolves.toMatchObject({
+        eligible: true, canEdit: false, releaseId, message,
+      });
+      for (const identity of [{ id: legacy.id }, { group: legacy.group }]) {
+        await expect(posts.createOrUpdatePost('draft', org, new Date().toISOString(), {
+          integration: { id: integration }, group: identity.group,
+          value: [{ id: identity.id, content: 'Replacement', image: [], delay: 0 }],
+          settings: { __type: 'facebook' },
+        } as any, [])).rejects.toThrow('immutable');
+      }
+      await expect(service.mutate(org, legacy.id, { action: 'edit', revision: 0, message: 'Edit' }))
+        .rejects.toThrow('Editing is unavailable');
+      expect(calls).toEqual([]);
+
+      let remoteExists = true;
+      (global.fetch as jest.Mock).mockImplementation(async (_url, init) => {
+        calls.push(init.method);
+        if (init.method === 'DELETE') {
+          remoteExists = false;
+          throw new Error('The provider accepted the request before the timeout');
+        }
+        return new Response(JSON.stringify(remoteExists ? { id: releaseId, message } : { error: { code: 100 } }));
+      });
+      await expect(service.mutate(org, legacy.id, { action: 'delete', revision: 0 }))
+        .rejects.toThrow('reconciliation');
+      await expect(service.status(org, legacy.id)).resolves.toMatchObject({
+        deleted: false, pending: true, pendingAction: 'delete', revision: 0,
+      });
+      await expect(service.mutate(org, legacy.id, { action: 'delete', revision: 0 }))
+        .rejects.toThrow('reconciliation');
+      await expect(service.reconcile(org, legacy.id)).rejects.toThrow('Deletion is unconfirmed');
+      expect(calls).toEqual(['GET', 'GET', 'DELETE']);
+      expect(remoteExists).toBe(false);
+      expect(await prisma.post.findUnique({ where: { id: legacy.id } })).toMatchObject({
+        state: 'PUBLISHED', releaseId, remoteDeletedAt: null,
+      });
+      expect(await prisma.post.findUnique({ where: { id: post } })).toMatchObject({
+        state: 'PUBLISHED', releaseId: remote, remoteDeletedAt: null,
+      });
     });
     it('allows only one winner across separate service instances and stale edit/delete requests', async () => {
       let release!: () => void;

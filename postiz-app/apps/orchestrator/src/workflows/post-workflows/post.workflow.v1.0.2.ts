@@ -221,12 +221,22 @@ export async function postWorkflowV102({
           );
         }
 
-        // mark post as successful
-        await updatePost(
-          postsList[i].id,
-          postsResults[i].postId,
-          postsResults[i].releaseURL
-        );
+        const result = postsResults[i];
+        const outcome = [postsList[i].id, result.postId, result.releaseURL] as const;
+        if (
+          !durableSubmission &&
+          i === 0 &&
+          (result.facebookText || result.facebookFeed) &&
+          patched('legacy-facebook-publication-receipt-v1')
+        ) {
+          await updatePost(...outcome, {
+            organizationId: post.organizationId,
+            integrationId: post.integration.id,
+            result,
+          });
+        } else {
+          await updatePost(...outcome);
+        }
 
         if (i === 0) {
           // send notification on a sucessful post
