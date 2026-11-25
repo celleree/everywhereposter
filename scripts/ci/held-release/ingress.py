@@ -1,9 +1,12 @@
-"""Loopback HTTP gate for the held application fixture."""
+"""Loopback TLS gate with a pinned private route to the held application."""
 
+from functools import partial
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import IPv4Address, IPv4Network
 import json
 import re
+import ssl
 import threading
 from urllib.parse import urlsplit
 
@@ -25,8 +28,8 @@ def select_route(method, target):
     return None
 
 
-def exchange(ip, port, method, path, body=None, headers=None):
-    connection = http.client.HTTPConnection(ip, port, timeout=8)
+def exchange(ip, port, method, path, body=None, headers=None, *, source_address):
+    connection = http.client.HTTPConnection(ip, port, timeout=8, source_address=source_address)
     try:
         connection.request(method, path, body=body, headers=headers or {})
         response = connection.getresponse()
@@ -39,14 +42,38 @@ def exchange(ip, port, method, path, body=None, headers=None):
 
 
 class Gate(ThreadingHTTPServer):
-    def __init__(self):
-        super().__init__(('127.0.0.1', 0), Handler)
+    def __init__(self, hostname, tls, proxy_ip, private_network):
+        self.proxy_ip = IPv4Address(proxy_ip)
+        self.private_network = IPv4Network(private_network)
+        if (not self.private_network.is_private or self.private_network.is_loopback
+                or not self.bridge_host(self.proxy_ip)):
+            raise ValueError('Proxy source must belong to the private application bridge')
         self.condition = threading.Condition()
         self.inflight = 0
         self.target = None
-        self.forward = exchange
+        self.forward = partial(exchange, source_address=(str(self.proxy_ip), 0))
+        self.tls = tls
+        super().__init__(('127.0.0.1', 0), Handler)
+        self.authority = f'{hostname}:{self.server_port}'
+        self.origin = f'https://{self.authority}'
+
+    def get_request(self):
+        connection, peer = super().get_request()
+        connection.settimeout(5)
+        try:
+            return self.tls.wrap_socket(connection, server_side=True, do_handshake_on_connect=False), peer
+        except OSError:
+            connection.close()
+            raise
+
+    def bridge_host(self, address):
+        network = self.private_network
+        return address in network and address not in (network.network_address, network.broadcast_address)
 
     def admit(self, target):
+        address = IPv4Address(target)
+        if address == self.proxy_ip or not self.bridge_host(address):
+            raise ValueError('Held application must belong to the private bridge')
         with self.condition:
             if self.target or self.inflight:
                 raise RuntimeError('Previous ingress has not drained')
@@ -72,10 +99,17 @@ class Gate(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    forwarded = {'content-type', 'accept', 'cookie', 'user-agent', 'auth', 'showorg'}
+    forwarded = {'content-type', 'accept', 'cookie', 'user-agent'}
 
     def log_message(self, *args):
         pass
+
+    def handle(self):
+        try:
+            self.connection.do_handshake()
+        except (ssl.SSLError, TimeoutError):
+            return
+        super().handle()
 
     def handle_held(self):
         self.connection.settimeout(5)
@@ -83,11 +117,13 @@ class Handler(BaseHTTPRequestHandler):
             route = select_route(self.command, self.path)
         except ValueError:
             route = None
-        host = f'127.0.0.1:{self.server.server_port}'
         lengths = self.headers.get_all('content-length', [])
-        if (not route or self.headers.get_all('host') != [host] or self.headers.get('transfer-encoding')
+        if (not route or self.requestline.split()[1] != self.path
+                or self.headers.get_all('host') != [self.server.authority] or self.headers.get('transfer-encoding')
                 or len(lengths) > 1 or any(len(self.headers.get_all(name, [])) > 1 for name in self.forwarded)
-                or any(name in self.headers for name in ('x-http-method-override', 'x-original-url', 'x-rewrite-url'))):
+                or (self.command == 'POST' and self.headers.get_all('origin') != [self.server.origin])
+                or any(name in self.headers for name in ('auth', 'showorg', 'x-http-method-override',
+                                                         'x-original-url', 'x-rewrite-url'))):
             self.send_error(405)
             return
         target = self.server.take()
@@ -104,7 +140,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(405)
                 return
             headers = {k: v for k, v in self.headers.items() if k.lower() in self.forwarded}
-            headers['Host'] = host
+            # Caller-supplied forwarding headers are outside the allowlist.
+            # Only this gate's TLS socket peer determines the upstream client address.
+            headers['Host'] = self.server.authority
+            headers['X-Forwarded-For'] = self.client_address[0]
+            headers['X-Forwarded-Proto'] = 'https'
             status, reply, data = self.server.forward(target, route[0], self.command, route[1], body, headers)
             self.send_response(status)
             for key, value in reply:
