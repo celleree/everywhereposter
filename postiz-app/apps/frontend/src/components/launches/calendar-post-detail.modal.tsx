@@ -52,9 +52,10 @@ const DetailRow: FC<{
 export const CalendarPostDetailModal: FC<{
   post: CalendarPostDetailPost;
   onEdit?: () => void;
+  onManageFacebook?: () => void;
   onDuplicate?: () => void;
   onRemoveHistoricalPost?: () => void;
-}> = ({ post, onEdit, onDuplicate, onRemoveHistoricalPost }) => {
+}> = ({ post, onEdit, onManageFacebook, onDuplicate, onRemoveHistoricalPost }) => {
   const t = useT();
   const [tab, setTab] = useState<CalendarPostDetailTab>('overview');
   const isHistoricalPost = isHistoricalCalendarPost(post);
@@ -124,10 +125,19 @@ export const CalendarPostDetailModal: FC<{
             </div>
           </div>
         </div>
-        {!isHistoricalPost && onEdit && (
-          <Button type="button" onClick={onEdit} disabled={isRemoteDeleted}>
-            {t('edit_post', 'Edit Post')}
-          </Button>
+        {!isHistoricalPost && (
+          <div className="flex flex-wrap gap-[8px]">
+            {onManageFacebook && (
+              <Button type="button" onClick={onManageFacebook}>
+                {t('manage_facebook_post', 'Manage Facebook post')}
+              </Button>
+            )}
+            {onEdit && (
+              <Button type="button" onClick={onEdit} disabled={isRemoteDeleted}>
+                {t('edit_post', 'Edit Post')}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -205,17 +215,16 @@ export const CalendarPostDetailModal: FC<{
                 value={post.integration.providerIdentifier}
               />
               <DetailRow label={t('tags', 'Tags')} value={tags} />
-              <DetailRow
-                label={t('platform_post_id', 'Platform Post ID')}
-                value={post.platformPostId || post.releaseId || t('not_connected', 'Not connected')}
-              />
+              {!onManageFacebook && (
+                <DetailRow
+                  label={t('platform_post_id', 'Platform Post ID')}
+                  value={post.platformPostId || post.releaseId || t('not_connected', 'Not connected')}
+                />
+              )}
               {isHistoricalPost && post.postType && (
                 <DetailRow label={t('post_type', 'Post Type')} value={post.postType} />
               )}
-              <DetailRow
-                label={t('post_id', 'Post ID')}
-                value={post.id}
-              />
+              {!onManageFacebook && <DetailRow label={t('post_id', 'Post ID')} value={post.id} />}
             </div>
 
             {isHistoricalPost && (post.thumbnailUrl || post.mediaPreviewUrl) && (

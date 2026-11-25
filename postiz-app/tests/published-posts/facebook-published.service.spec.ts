@@ -9,7 +9,7 @@ const setup = () => {
     id: 'ledger',
     postId: 'post',
     integrationId: 'integration',
-    submission: { _count: { destinations: 1 } },
+    submission: { organizationId: 'org', _count: { destinations: 1 } },
     providerState: 'SUCCEEDED',
     providerResult: [
       {
@@ -53,11 +53,6 @@ const setup = () => {
   };
   const db: any = {
     publishingSubmissionDestination: {
-      findFirst: jest.fn(async ({ where }) =>
-        where.submission.organizationId === 'org' && where.postId === 'post'
-          ? clone(row)
-          : null
-      ),
       updateMany: jest.fn(async ({ where, data }) => {
         if (
           JSON.stringify(where.providerResult.equals) !==
@@ -69,6 +64,11 @@ const setup = () => {
       }),
     },
     post: {
+      findFirst: jest.fn(async ({ where }) =>
+        where.organizationId === 'org' && where.id === 'post'
+          ? clone({ ...row.post, submissionDestination: row })
+          : null
+      ),
       updateMany: jest.fn(async ({ data }) => {
         Object.assign(row.post, data);
         return { count: 1 };
@@ -113,27 +113,26 @@ const setup = () => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('Facebook published message ledger', () => {
-  it('rejects multi-destination provenance before any provider or ledger mutation', async () => {
+  it('allows deletion of a multi-destination receipt while keeping its message read-only', async () => {
     const { service, row, db, read, update, remove } = setup();
     row.submission._count.destinations = 2;
     await expect(service.status('org', 'post')).resolves.toMatchObject({
-      eligible: false,
+      eligible: true,
+      canEdit: false,
     });
-    for (const action of ['edit', 'delete'] as const) {
-      await expect(
-        service.mutate('org', 'post', {
-          action,
-          revision: 0,
-          ...(action === 'edit' ? { message: 'Edited' } : {}),
-        })
-      ).rejects.toThrow('Only new');
-    }
+    await expect(
+      service.mutate('org', 'post', { action: 'edit', revision: 0, message: 'Edited' })
+    ).rejects.toThrow('Editing is unavailable');
     expect(read).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
     expect(
       db.publishingSubmissionDestination.updateMany
     ).not.toHaveBeenCalled();
+    await expect(
+      service.mutate('org', 'post', { action: 'delete', revision: 0 })
+    ).resolves.toMatchObject({ deleted: true });
+    expect(remove).toHaveBeenCalledWith('123', 'secret-token', '123_456');
   });
   it('commits only after remote verification while preserving identity, group and PUBLISHED state', async () => {
     const { service, row, update } = setup();
@@ -290,6 +289,15 @@ describe('Facebook published message ledger', () => {
       r.post.organizationId = 'another';
     },
     (r: any) => {
+      r.submission.organizationId = 'another';
+    },
+    (r: any) => {
+      r.post.integration.organizationId = 'another';
+    },
+    (r: any) => {
+      r.providerResult[0].id = 'another';
+    },
+    (r: any) => {
       r.post.integration.internalId = '999';
     },
     (r: any) => {
@@ -300,6 +308,9 @@ describe('Facebook published message ledger', () => {
     },
     (r: any) => {
       r.post.settings = '{"url":"https://example.com"}';
+    },
+    (r: any) => {
+      r.post.settings = '{';
     },
     (r: any) => {
       r.post.childrenPost = [{ id: 'comment' }];
