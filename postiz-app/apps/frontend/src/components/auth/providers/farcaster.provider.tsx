@@ -1,5 +1,6 @@
 'use client';
 
+import { useThemeMode } from '@gitroom/frontend/components/layout/mode.component';
 import { FC, useCallback } from 'react';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { NeynarContextProvider, Theme, useNeynarContext } from '@neynar/react';
@@ -15,13 +16,14 @@ export const ButtonCaster: FC<{
   login: (code: string) => void;
 }> = (props) => {
   const { login } = props;
+  const [mode] = useThemeMode();
   const { neynarClientId } = useVariables();
   const t = useT();
   return (
     <NeynarContextProvider
       settings={{
         clientId: neynarClientId,
-        defaultTheme: Theme.Dark,
+        defaultTheme: mode === 'dark' ? Theme.Dark : Theme.Light,
       }}
     >
       <NeynarAuthButton onLogin={login}>

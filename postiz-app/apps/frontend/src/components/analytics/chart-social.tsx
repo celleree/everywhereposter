@@ -3,7 +3,7 @@
 import { FC, useEffect, useMemo, useRef } from 'react';
 import DrawChart from 'chart.js/auto';
 import { chunk } from 'lodash';
-import useCookie from 'react-use-cookie';
+import { useThemeMode } from '@gitroom/frontend/components/layout/mode.component';
 
 type ChartPoint = { total: number | string; date: string };
 
@@ -23,7 +23,7 @@ export const ChartSocial: FC<{
   directPoints?: boolean;
 }> = (props) => {
   const { data, color = 'purple', directPoints = false } = props;
-  const [mode] = useCookie('mode', 'dark');
+  const [mode] = useThemeMode();
   const list = useMemo(() => {
     const points = directPoints ? data : mergeDataPoints(data, 7);
     return points.map((row) => ({

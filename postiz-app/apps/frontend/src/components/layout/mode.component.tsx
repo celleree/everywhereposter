@@ -1,18 +1,25 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import useCookie from 'react-use-cookie';
 import EventEmitter from 'events';
+import { resolveTheme } from './theme';
 
 export const modeEmitter = new EventEmitter();
 
+export function useThemeMode() {
+  const [value, setMode] = useCookie('mode');
+  return [resolveTheme(value), setMode] as const;
+}
+
 const ModeComponent = () => {
-  const [mode, setMode] = useCookie('mode', 'dark');
+  const [mode, setMode] = useThemeMode();
 
   const changeMode = useCallback(() => {
-    modeEmitter.emit('mode', mode === 'dark' ? 'light' : 'dark');
-    setMode(mode === 'dark' ? 'light' : 'dark');
-  }, [mode]);
+    const next = mode === 'dark' ? 'light' : 'dark';
+    modeEmitter.emit('mode', next);
+    setMode(next);
+  }, [mode, setMode]);
 
   useEffect(() => {
     document.body.classList.remove('dark', 'light');
