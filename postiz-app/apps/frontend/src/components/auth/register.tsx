@@ -253,9 +253,9 @@ export function RegisterAfter({
                   <Button
                     type="submit"
                     className={clsx(
-                      'flex-1 rounded-[10px] !h-[52px] focus-visible:!outline focus-visible:!outline-2 focus-visible:!outline-white focus-visible:outline-offset-2',
+                      'flex-1 rounded-[10px] !h-[52px] focus-visible:!outline focus-visible:!outline-2 focus-visible:!outline-textColor focus-visible:outline-offset-2',
                       !loading &&
-                        '!bg-white !text-neutral-900 transition-colors [@media(hover:hover)]:hover:!bg-neutral-600 [@media(hover:hover)]:hover:!text-white'
+                        '!bg-textColor !text-newBgColorInner transition-colors [@media(hover:hover)]:hover:!bg-neutral-600 [@media(hover:hover)]:hover:!text-white'
                     )}
                     loading={loading}
                   >

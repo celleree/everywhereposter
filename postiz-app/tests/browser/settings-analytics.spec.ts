@@ -48,6 +48,37 @@ async function settingsFixture(page: any) {
   });
 }
 
+test('Settings defaults to light and preserves a chosen theme on reload', async ({ page }) => {
+  await settingsFixture(page);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const body = page.locator('body');
+  const toggle = page.getByRole('button', { name: 'Toggle theme' });
+  const deviceTheme = page.getByRole('checkbox', { name: /use device theme/i });
+
+  async function expectThemeOnLoad(theme: 'light' | 'dark') {
+    const response = await page.goto('/settings', { waitUntil: 'domcontentloaded' });
+    const initialBody = await page.evaluate(html =>
+      new DOMParser().parseFromString(html, 'text/html').body.className,
+      await response!.text()
+    );
+    const expected = new RegExp(`\\b${theme}\\b`);
+    expect(initialBody).toMatch(expected);
+    await expect(toggle).toBeVisible();
+    await expect(body).toHaveClass(expected);
+  }
+
+  await expectThemeOnLoad('light');
+  await expect(deviceTheme).toBeVisible();
+  await expect(deviceTheme).toBeDisabled();
+  await expect(deviceTheme).not.toBeChecked();
+
+  for (const theme of ['dark', 'light'] as const) {
+    await toggle.click();
+    await expect(body).toHaveClass(new RegExp(`\\b${theme}\\b`));
+    await expectThemeOnLoad(theme);
+  }
+});
+
 test('Settings: selected navigation retains colors on hover and keyboard focus', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop navigation uses buttons; mobile uses a select.');
   await settingsFixture(page);

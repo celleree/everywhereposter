@@ -14,6 +14,8 @@
   "please_add_at_least": "Please add at least 20 characters",
   "send_invitation_via_email": "Send invitation via email?",
   "global_settings": "Global Settings",
+  "appearance": "Appearance",
+  "use_device_theme_unavailable": "Use device theme (currently unavailable)",
   "copy_id": "Copy Channel ID",
   "team_members": "Team Members",
   "invite_your_assistant_or_team_member_to_manage_your_account": "Invite your assistant or team member to manage your account",

@@ -9,6 +9,7 @@ import { ReactNode } from 'react';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import PlausibleProvider from 'next-plausible';
 import clsx from 'clsx';
+import { resolveTheme } from '@gitroom/frontend/components/layout/theme';
 import { VariableContextComponent } from '@gitroom/react/helpers/variable.context';
 import { Fragment } from 'react';
 import { PHProvider } from '@gitroom/react/helpers/posthog';
@@ -162,7 +163,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <ChangeDirClient />
       <body
         suppressHydrationWarning
-        className={clsx(jakartaSans.className, 'dark text-primary !bg-primary')}
+        className={clsx(
+          jakartaSans.className,
+          resolveTheme(cookieStore.get('mode')?.value),
+          'text-primary !bg-primary'
+        )}
       >
         <VariableContextComponent
           storageProvider={
