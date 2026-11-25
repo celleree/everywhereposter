@@ -77,6 +77,112 @@ async function picker(page: Page) {
   }
   return page.getByRole('dialog', { name: 'Add Channel', exact: true });
 }
+
+for (const [scenario, callbackParams, expectedMessage, expectedPosts] of [
+  [
+    'declined access',
+    'error=access_denied&error_reason=user_denied&error_description=The+user+denied+your+request',
+    'Instagram access was declined.',
+    0,
+  ],
+  [
+    'missing permissions',
+    'code=synthetic-code&state=synthetic-state',
+    'Instagram did not grant all required permissions.',
+    1,
+  ],
+] as const) {
+  test(`Mobile channels: Instagram Standalone recovers from ${scenario}`, async ({
+    page,
+  }, info) => {
+    const provider = 'instagram-standalone';
+    let posts = 0;
+    await page.route('**/backend-api/integrations', (route) =>
+      route.fulfill({
+        json: {
+          social: [{
+            identifier: provider,
+            name: 'Instagram\n(Standalone)',
+            connectionAvailable: true,
+            isExternal: false,
+            isWeb3: false,
+          }],
+          article: [],
+        },
+      })
+    );
+    await page.route(
+      `**/backend-api/integrations/social/${provider}`,
+      (route) => route.fulfill({
+        json: {
+          url: `${browserOrigin}/integrations/social/${provider}?${callbackParams}`,
+        },
+      })
+    );
+    await page.route(
+      `**/backend-api/integrations/social-connect/${provider}`,
+      (route) => {
+        posts++;
+        return route.fulfill({
+          status: 409,
+          json: {
+            msg: 'Missing required permissions: instagram_business_manage_insights',
+          },
+        });
+      }
+    );
+
+    const returnRoute = '/create?draft=kept#channels';
+    await openApp(page, returnRoute);
+    const dialog = await picker(page);
+    await dialog.getByRole('button', { name: 'Instagram (Standalone)' }).click();
+    const instructions = page.getByRole('dialog', {
+      name: 'Before connecting Instagram Standalone',
+    });
+    await expect(instructions.getByText(/Insufficient Developer Role/)).toBeVisible();
+    await noHorizontalOverflow(page);
+    const continueButton = instructions.getByRole('button', { name: 'Continue to Instagram' });
+    await expect(continueButton).toBeInViewport({ ratio: 1 });
+    if (!expectedPosts) await capture(page, info, 'standalone-role-guidance');
+
+    await page.clock.install();
+    await continueButton.click();
+    const error = page.getByRole('alert').filter({ hasText: expectedMessage });
+    await expect(error).toBeVisible({ timeout: 60_000 });
+    await page.clock.fastForward(3500);
+    await expect(error).toBeVisible();
+    expect(posts).toBe(expectedPosts);
+    await capture(page, info, `standalone-${scenario.replace(' ', '-')}`);
+    await page.getByRole('button', { name: 'Back to app' }).click();
+    await expect(page).toHaveURL(returnRoute);
+  });
+}
+
+for (const [provider, signedIn] of [
+  ['facebook', true],
+  ['instagram-standalone', false],
+] as const) {
+  test(`Mobile channels: ${provider} keeps existing ${signedIn ? 'signed-in' : 'guest'} callback recovery`, async ({
+    page,
+  }) => {
+    if (!signedIn) await page.context().clearCookies();
+    await page.clock.install();
+    await page.goto(
+      `/integrations/social/${provider}?error=access_denied&error_reason=user_denied&error_description=The+user+denied+your+request`,
+      { waitUntil: 'domcontentloaded' }
+    );
+    const error = page.getByRole('alert').filter({ hasText: 'The user denied your request' });
+    await expect(error).toBeVisible({ timeout: 60_000 });
+    await page.clock.fastForward(3500);
+    await expect(error).toBeVisible();
+    await expect(page.getByText(signedIn
+      ? 'How to switch Facebook accounts'
+      : /ask the person who sent this connection link for a new link/
+    )).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Back to app' })).toBeVisible();
+  });
+}
+
 for (const [provider, name] of providers) {
   test(`Mobile channels: ${provider} empty callback exits and initiates a fresh connection`, async ({
     page,

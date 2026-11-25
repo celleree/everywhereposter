@@ -90,6 +90,8 @@ export const ContinueIntegration: FC<{
   const exited = useRef(false);
   const saving = useRef(false);
   const isMeta = provider === 'facebook' || provider === 'instagram';
+  const isSignedInInstagramStandalone =
+    logged && provider === 'instagram-standalone';
 
   const getFailureFallback = useCallback(
     (onboarding?: boolean) =>
@@ -202,7 +204,16 @@ export const ContinueIntegration: FC<{
 
         const providerErrorMessage = getProviderErrorMessage(modifiedParams);
         if (providerErrorMessage) {
-          completeFailure(providerErrorMessage);
+          completeFailure(
+            isSignedInInstagramStandalone &&
+              firstValue(modifiedParams.error) === 'access_denied' &&
+              firstValue(modifiedParams.error_reason) === 'user_denied'
+              ? t(
+                  'instagram_standalone_access_declined',
+                  'Instagram access was declined. To connect this account, start a new connection and approve access in Instagram.'
+                )
+              : providerErrorMessage
+          );
           return;
         }
 
@@ -264,8 +275,17 @@ export const ContinueIntegration: FC<{
         ) {
           const errorData = await data.json().catch(() => ({}));
           if (!isCurrent()) return;
+          const message = errorData.message || errorData.msg;
           completeFailure(
-            errorData.message || errorData.msg || 'Could not add provider'
+            isSignedInInstagramStandalone &&
+              data.status === HttpStatusCode.Conflict &&
+              typeof message === 'string' &&
+              message.startsWith('Missing required permissions: ')
+              ? t(
+                  'instagram_standalone_missing_permissions',
+                  'Instagram did not grant all required permissions. Start a new connection and allow all requested permissions in Instagram. If any are unavailable, contact EverywherePoster support.'
+                )
+              : message || 'Could not add provider'
           );
           return;
         }
@@ -587,7 +607,7 @@ export const ContinueIntegration: FC<{
               )}
           </div>
           <div className="mt-[24px]">{recoveryControls}</div>
-          {logged && !isMeta && (
+          {logged && !isMeta && !isSignedInInstagramStandalone && (
             <Redirect url={failureRedirectUrl} delay={3000} />
           )}
         </div>
