@@ -395,6 +395,12 @@ const InstagramStandaloneInstructions: FC<{
           After switching accounts, return to EverywherePoster and click
           Instagram (Standalone) again.
         </p>
+        <p>
+          Use an Instagram professional account (business or creator). If
+          Instagram shows “Insufficient Developer Role,” go back and contact
+          EverywherePoster support so we can check whether your account can
+          connect.
+        </p>
       </div>
       <label className="flex items-center gap-[10px] text-[14px] text-textColor cursor-pointer select-none">
         <input
@@ -705,6 +711,9 @@ export const AddProviderComponent: FC<{
               modal.openModal({
                 title: 'Before connecting Instagram Standalone',
                 withCloseButton: true,
+                contentClassName: 'add-channel-modal',
+                size: 'min(600px, calc(100vw - 24px))',
+                top: 'max(12px, env(safe-area-inset-top))',
                 onClose: () => resolve(false),
                 children: (
                   <InstagramStandaloneInstructions
