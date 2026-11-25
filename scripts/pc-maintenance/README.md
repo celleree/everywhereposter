@@ -1,0 +1,24 @@
+# One-shot WSL maintenance metadata
+
+This package implements one read-only command for disposable WSL fixtures. The Windows `probe` uses native Python and connects to IPv4 loopback. Its only inputs are the fixture name and files in that fixture's private, fixed local Windows profile. The probe has no launcher. The server verifies an exact client certificate and fixed request frame. It reports only fixture name, enrollment instance, current Linux boot ID and UID under a fixed receipt kind. It has no path to a shell, Docker, the database, or a publisher.
+
+Both peers require a short-lived certificate from a per-pair CA and pin the exact opposite certificate. Pairing keys are stored in a new Windows profile ACL restricted to the current owner and SYSTEM. The pairing CA key is discarded. The guest installer copies its staging bundle to a mode-0700 directory and uses mode-0600 files. The guest lock prevents two listeners and prevents uninstall during an active listener. The listener closes after one success or a 90-second window. It responds only to the fixture's enrolled identity.
+
+## Install and query a disposable fixture
+
+Use a native Windows Python 3.12 or newer and OpenSSL with `req` and `x509`. Keep these scripts on a Windows local drive for the Windows commands. The disposable WSL guest requires Python 3.12 or newer, an existing `ep-meta` fixture user with UID 1100 and home `/home/ep-meta`, and the existing Windows-to-WSL loopback route. The fixture registration must use `ep-maint-meta-` followed by 12 lowercase hexadecimal characters. The supplied test creates a complete fixture in this form.
+
+1. On Windows, run `python -B pair.py pair FIXTURE C:\path\to\openssl.exe`. The returned `guestBundle` points to the guest's credentials inside the new local profile. Preserve the private ACL.
+2. From the console already connected to this disposable guest as `ep-meta`, run `python3 -B /path/to/channel.py install /mnt/c/path/to/guest`. Use the actual mounted path of the paired bundle. Installing creates only `~/.ep-maint-metadata` and sets up no startup service. On Windows, remove the staging copy with `python -B pair.py clear-guest FIXTURE` once installation succeeds.
+3. In that same guest console, run `python3 -B ~/.ep-maint-metadata/channel.py serve`. Use it in the foreground. On Windows, run `python -B channel.py probe FIXTURE`. Exit 0 prints the allowlisted JSON. Exit 1 prints a refusal or unavailable result to stderr with no metadata. A new one-shot window requires the guest operator to invoke `serve` again.
+4. After the listener exits, run `python3 -B ~/.ep-maint-metadata/channel.py uninstall` in the guest and `python -B pair.py unpair FIXTURE` on Windows. Pairing refuses overwrite. Uninstall refuses an active listener or unexpected installation contents.
+
+## Verify on this PC
+
+Run `python -B test-wsl.py PATH_TO_ROOTFS PATH_TO_OPENSSL` from Windows. The harness requires the pinned [Canonical root filesystem](https://cloud-images.ubuntu.com/wsl/releases/noble/20240423/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz) with SHA-256 `8251e27ffff381a4af5f41dcb94d867de3e0d9774a9241908ab34555d99315ea`. It imports one randomly named disposable distro, checks the actual Windows listener address and boot identity, exercises the native operator entry point, then removes that registration and both credential profiles. Its own boot hook writes synthetic counters in that disposable guest. Compare the counters after the harness deliberately restarts its fixture to verify that the earlier stopped probe did not trigger a boot or simulated publishing start. The check does not run any actual publisher. [Microsoft WSL localhost forwarding](https://learn.microsoft.com/en-us/windows/wsl/networking#accessing-linux-networking-apps-from-windows-localhost).
+
+## Separate production bootstrap review
+
+This package deliberately accepts only the disposable registration and fixture principal. The first production session is the step it cannot automate. A release operator must furnish a currently connected authenticated `ep-prod` session with target provenance and no reconnect or launch behavior. If one is unavailable, the operator must prove that a reviewed persistent publishing fence applies before a controlled boot. The fixed keepalive passes no commands. The Windows running list followed by a fresh WSL or UNC call does not establish a no-start guarantee.
+
+Once that entry is separately admitted, review a production-specific adaptation before installation. Bind its exact one-shot observer to the live principal, distro identity and reviewed rootless engine. Approve the exact metadata fields, executable and receiver, then qualify local-only peer authentication, pinning, timeout, and removal in that target's network mode. Preserve the existing release gates for any restart, migration or deployment. [PC access and command handoff](../ci/held-release/PC-ACCESS-BOOTSTRAP.md).
