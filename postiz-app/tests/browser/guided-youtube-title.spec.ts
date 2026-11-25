@@ -12,7 +12,10 @@ test('Guided YouTube: titles follow replacement media and preserve per-account e
   await page.route('**/backend-api/media**', route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/backend-api/media') return route.fulfill({ json: { pages: 1, results: [media, replacement] } });
-    const selected = [media, replacement].find(item => url.pathname === `/backend-api/media/${item.id}/transcription/ensure`);
+    const storedMedia = [media, replacement].find(item => url.pathname === `/backend-api/media/${item.id}`);
+    if (storedMedia) return route.fulfill({ json: storedMedia });
+    const selected = [media, replacement].find(item =>
+      [`/backend-api/media/${item.id}/transcription`, `/backend-api/media/${item.id}/transcription/ensure`].includes(url.pathname));
     if (selected) {
       const value = selected.id === media.id ? 'This demonstration shows three keyboard shortcuts.' : 'This demonstration explains baking sourdough.';
       return route.fulfill({ json: { mediaId: selected.id, status: 'READY', text: value, error: null } });
@@ -56,6 +59,14 @@ test('Guided YouTube: titles follow replacement media and preserve per-account e
   await expect(title).toHaveValue('My first channel title');
   await capture(page, info, 'youtube-title-after-regeneration');
 
+  // Identical saved strings can have different owners on different accounts.
+  await title.fill('Three keyboard shortcuts demonstrated');
+  await page.reload();
+  await page.getByRole('tab', { name: /Synthetic YouTube A/ }).click();
+  await expect(title).toHaveValue('Three keyboard shortcuts demonstrated');
+  await page.getByRole('tab', { name: /Synthetic YouTube B/ }).click();
+  await expect(title).toHaveValue('Three keyboard shortcuts demonstrated');
+
   const back = page.locator('.guided-composer-footer').getByRole('button', { name: 'Back', exact: true });
   await back.click();
   await back.click();
@@ -66,7 +77,7 @@ test('Guided YouTube: titles follow replacement media and preserve per-account e
   await expect(title).toHaveValue('Sourdough baking tutorial');
   await title.fill('My second channel title');
   await page.getByRole('tab', { name: /Synthetic YouTube A/ }).click();
-  await expect(title).toHaveValue('My first channel title');
+  await expect(title).toHaveValue('Three keyboard shortcuts demonstrated');
   await page.getByRole('tab', { name: /Synthetic YouTube B/ }).click();
   await expect(title).toHaveValue('My second channel title');
   expect(requests).toBe(3);

@@ -13,7 +13,7 @@ import dayjs from 'dayjs';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import type { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
-import { useLaunchStore } from './store';
+import { useLaunchStore, type SelectedIntegrations } from './store';
 import {
   useGuidedComposerStore,
   CAPTION_MODES,
@@ -104,6 +104,27 @@ export function readSubmissionStatus(value: any, journal: Journal): SubmissionSt
   }
   return value;
 }
+type StoredDestination = {
+  id: string;
+  settings: Record<string, unknown>;
+  automaticYoutubeTitle?: SelectedIntegrations['automaticYoutubeTitle'];
+};
+
+function storedDestination(
+  id: string,
+  item: Pick<StoredDestination, 'settings' | 'automaticYoutubeTitle'>
+): StoredDestination {
+  const { settings, automaticYoutubeTitle: seed } = item;
+  const destination: StoredDestination = { id, settings };
+  if (
+    seed && (seed.mediaId === null || typeof seed.mediaId === 'string') &&
+    typeof seed.value === 'string' && seed.value.length <= 100 && seed.value === settings?.title
+  ) {
+    destination.automaticYoutubeTitle = { mediaId: seed.mediaId, value: seed.value };
+  }
+  return destination;
+}
+
 export type ComposerDraft = {
   version: 1;
   userId: string;
@@ -115,7 +136,7 @@ export type ComposerDraft = {
     integrationValue: StoredValues;
     inheritRootMedia: boolean;
   }>;
-  destinations: Array<{ id: string; settings: Record<string, unknown> }>;
+  destinations: StoredDestination[];
   current: string;
   date: string;
   repeater: number | null;
@@ -193,10 +214,7 @@ export function snapshotComposerDraft(
       integrationValue: storedValues(item.integrationValue),
       inheritRootMedia: !!item.inheritRootMedia,
     })),
-    destinations: launch.selectedIntegrations.map((item) => ({
-      id: item.integration.id,
-      settings: item.settings,
-    })),
+    destinations: launch.selectedIntegrations.map((item) => storedDestination(item.integration.id, item)),
     current: launch.current,
     date: launch.date.toISOString(),
     repeater: launch.repeater ?? null,
@@ -398,10 +416,7 @@ export function readComposerDraft(
       integrationValue: storedValues(item.integrationValue),
       inheritRootMedia: item.inheritRootMedia,
     })),
-    destinations: draft.destinations.map((item: any) => ({
-      id: item.id,
-      settings: item.settings,
-    })),
+    destinations: draft.destinations.map((item: StoredDestination) => storedDestination(item.id, item)),
     current: draft.current,
     date: draft.date,
     repeater: draft.repeater,
@@ -498,6 +513,7 @@ export async function hydrateComposerDraft(
     selectedIntegrations: draft.destinations.map((item) => ({
       integration: byId.get(item.id)!,
       settings: item.settings,
+      automaticYoutubeTitle: item.automaticYoutubeTitle,
       ref: createRef(),
     })),
     current: byId.has(draft.current) ? draft.current : 'global',

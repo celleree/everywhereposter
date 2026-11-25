@@ -14,7 +14,7 @@ import { MediaComponent } from '@gitroom/frontend/components/media/media.compone
 import { Select } from '@gitroom/react/form/select';
 import { YoutubePreview } from '@gitroom/frontend/components/new-launch/providers/youtube/youtube.preview';
 import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
-import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
+import { useLaunchStore, type SelectedIntegrations } from '@gitroom/frontend/components/new-launch/store';
 import { useGuidedComposerStore } from '@gitroom/frontend/components/new-launch/guided.composer.store';
 import { buildGuidedGenerationFingerprint, selectGuidedGenerationMedia } from '@gitroom/frontend/components/new-launch/guided.composer.generation';
 import { normalizeGeneratedYoutubeTitle } from '@gitroom/nestjs-libraries/dtos/copy-generation/generate.media.copy.response';
@@ -82,6 +82,13 @@ const license = [
   },
 ];
 
+function rememberAutomaticTitle(id: string, automaticYoutubeTitle: SelectedIntegrations['automaticYoutubeTitle']) {
+  useLaunchStore.setState(state => ({
+    selectedIntegrations: state.selectedIntegrations.map(item =>
+      item.integration.id === id ? { ...item, automaticYoutubeTitle } : item),
+  }));
+}
+
 const YoutubeSettings: FC = () => {
   const t = useT();
   const { register, control, getValues, getFieldState, setValue } = useSettings();
@@ -100,8 +107,9 @@ const YoutubeSettings: FC = () => {
     generatedResponse: state.generatedResponse,
   })));
   const selected = launch.selectedIntegrations.find(item => item.integration.id === integration?.id);
-  const titleOwned = useRef(Object.prototype.hasOwnProperty.call(selected?.settings || {}, 'title'));
-  const automaticTitle = useRef<{ mediaId?: string; value: string } | null>(null);
+  const accountId = selected?.integration.id;
+  const seeded = selected?.automaticYoutubeTitle;
+  const titleOwned = useRef(!seeded && Object.prototype.hasOwnProperty.call(selected?.settings || {}, 'title'));
   const titleField = register('title');
   const mediaId = selectGuidedGenerationMedia(launch.global[0]?.media || [], guided.sourceMediaId)?.id;
   const currentFingerprint = buildGuidedGenerationFingerprint({
@@ -123,29 +131,30 @@ const YoutubeSettings: FC = () => {
       : undefined;
 
   useEffect(() => {
-    if (titleOwned.current || getFieldState('title').isDirty) return;
-    const currentTitle = getValues('title');
-    const seeded = automaticTitle.current;
+    if (!accountId || titleOwned.current || getFieldState('title').isDirty) return;
+    const currentTitle = getValues('title') ?? '';
+    const sourceId = mediaId ?? null;
     if (seeded) {
-      if (seeded.mediaId === mediaId || currentTitle !== seeded.value) return;
+      if (currentTitle !== seeded.value || (seeded.value && seeded.mediaId === sourceId)) return;
     } else if (currentTitle) {
       return;
     }
 
     if (proposedTitle) {
-      automaticTitle.current = { mediaId, value: proposedTitle };
+      rememberAutomaticTitle(accountId, { mediaId: sourceId, value: proposedTitle });
       setValue('title', proposedTitle, { shouldValidate: true });
-    } else if (seeded) {
-      // The previous video's suggestion cannot satisfy the new video's required title.
-      automaticTitle.current = null;
+    } else if (seeded?.value) {
+      // A blank waiting for a fresh suggestion stays automatic across recovery.
+      rememberAutomaticTitle(accountId, { mediaId: sourceId, value: '' });
       setValue('title', '', { shouldValidate: true });
     }
-  }, [getFieldState, getValues, mediaId, proposedTitle, setValue]);
+  }, [accountId, getFieldState, getValues, mediaId, proposedTitle, seeded, setValue]);
   return (
     <div className="flex flex-col">
       <div className="text-[14px] font-[600] mb-[10px]">Details</div>
       <Input label="Title" translationKey="label_title" aria-label={t('label_title', 'Title')} {...titleField} maxLength={100} onChange={event => {
         titleOwned.current = true;
+        if (accountId && seeded) rememberAutomaticTitle(accountId, undefined);
         titleField.onChange(event);
       }} />
       <MediumTags label="Tags" {...register('tags')} />

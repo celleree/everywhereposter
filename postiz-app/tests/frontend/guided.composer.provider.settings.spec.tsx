@@ -1,6 +1,7 @@
 import React, { createRef } from 'react';
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -150,6 +151,7 @@ jest.mock('@gitroom/react/form/color.picker', () => ({
 }));
 
 import { useLaunchStore } from '../../apps/frontend/src/components/new-launch/store';
+import { hydrateComposerDraft, readComposerDraft, snapshotComposerDraft } from '../../apps/frontend/src/components/new-launch/composer.draft.recovery';
 import YoutubeProvider from '../../apps/frontend/src/components/new-launch/providers/youtube/youtube.provider';
 import { useGuidedComposerStore } from '../../apps/frontend/src/components/new-launch/guided.composer.store';
 import { buildGuidedGenerationFingerprint } from '../../apps/frontend/src/components/new-launch/guided.composer.generation';
@@ -294,6 +296,31 @@ describe('guided composer existing provider settings', () => {
     replaceVideo();
     completeTitle('Sourdough baking tutorial', 'generate', false, 'video-2');
     expect(ref.current.getValues().settings.title).toBe(value);
+  });
+
+  it.each([false, true])('recovers a blank title with its original ownership (manually cleared: %s)', async manual => {
+    const ref = renderProvider(YoutubeProvider, youtube, video);
+    completeTitle('First suggestion');
+    if (manual) fireEvent.change(screen.getByLabelText('Title'), { target: { value: '' } });
+    replaceVideo();
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', '');
+
+    // Copy the live form values as the recovery provider's form watcher does.
+    const settings = ref.current.getValues().settings;
+    expect(settings).not.toHaveProperty('automaticYoutubeTitle');
+    act(() => useLaunchStore.setState(state => ({
+      selectedIntegrations: state.selectedIntegrations.map(item => ({ ...item, settings })),
+    })));
+    const saved = JSON.stringify(snapshotComposerDraft('user', 'org', 'now', null));
+    cleanup();
+    useLaunchStore.getState().reset();
+    useGuidedComposerStore.getState().resetGuidedComposer();
+    await hydrateComposerDraft(readComposerDraft(saved, 'user', 'org'), [youtube], async () =>
+      ({ ok: true, json: async () => ({ id: 'video-2', path: '/second.mp4', type: 'video' }) }) as Response);
+    const restored = useLaunchStore.getState().selectedIntegrations[0];
+    render(<YoutubeProvider id={youtube.id} ref={restored.ref} />);
+    completeTitle('Replacement suggestion', 'generate', false, 'video-2');
+    expect(screen.getByLabelText('Title')).toHaveProperty('value', manual ? '' : 'Replacement suggestion');
   });
 
   it.each(['generate', 'adapt-by-platform'] as const)('seeds one editable title in %s and preserves edits, clearing and regeneration', async mode => {
