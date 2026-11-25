@@ -3,18 +3,18 @@
   "settingsSource": "github-actions-vars",
   "globalAllowlist": [
     "gpt-6-luna",
-    "gpt-6.1-sol",
-    "gpt-6-astra"
+    "gpt-6.2-sol",
+    "gpt-6.2-astra"
   ],
   "unattendedAllowlist": [
     "gpt-6-luna",
-    "gpt-6.1-sol"
+    "gpt-6.2-sol"
   ],
   "advertisedSnapshot": {
     "source": "native-models-cache",
-    "fetchedAt": "2026-10-25T07:46:44.595003279Z",
-    "clientVersion": "0.164.0",
-    "sha256": "403d0e7c553d105c3b4d04c78f3c69078efa57e8bd2d7425fe8e4ef27bc4fc3f",
+    "fetchedAt": "2026-11-23T06:44:52.341101685Z",
+    "clientVersion": "0.171.0",
+    "sha256": "84b56f8a70776cdae3a1ad280e196face59591866ef4d95d1be7758b0eb37933",
     "models": {
       "gpt-6-luna": [
         "low",
@@ -23,7 +23,7 @@
         "xhigh",
         "max"
       ],
-      "gpt-6.1-sol": [
+      "gpt-6.2-sol": [
         "low",
         "medium",
         "high",
@@ -31,7 +31,7 @@
         "max",
         "ultra"
       ],
-      "gpt-6-astra": [
+      "gpt-6.2-astra": [
         "low",
         "medium",
         "high",
@@ -42,7 +42,7 @@
     }
   },
   "cliObservation": {
-    "version": "codex-cli 0.163.0",
+    "version": "codex-cli 0.171.0",
     "source": "separate-native-observation"
   },
   "remoteSupport": "unverified",

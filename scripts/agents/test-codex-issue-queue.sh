@@ -848,13 +848,13 @@ NODE
     chmod 600 "$TASK_SWAP_TARGET/execution.json"
   fi
   mkdir -m 700 "$PRIVATE_ROOT/task-$scenario"
-  export CODEX_TASK_MODEL=gpt-6.1-sol CODEX_TASK_REASONING_EFFORT=high CODEX_TASK_SETTINGS_SOURCE=github-actions-vars
+  export CODEX_TASK_MODEL=gpt-6.2-sol CODEX_TASK_REASONING_EFFORT=high CODEX_TASK_SETTINGS_SOURCE=github-actions-vars
   case "$scenario" in
     *settings-missing) export CODEX_TASK_MODEL= ;;
     *settings-effort-missing) export CODEX_TASK_REASONING_EFFORT= ;;
     *settings-source-missing) export CODEX_TASK_SETTINGS_SOURCE= ;;
     *settings-disallowed) export CODEX_TASK_MODEL=gpt-6.1-terra ;;
-    *settings-astra) export CODEX_TASK_MODEL=gpt-6-astra ;;
+    *settings-astra) export CODEX_TASK_MODEL=gpt-6.2-astra ;;
     *settings-luna-ultra) export CODEX_TASK_MODEL=gpt-6-luna CODEX_TASK_REASONING_EFFORT=ultra ;;
     *settings-luna-max) export CODEX_TASK_MODEL=gpt-6-luna CODEX_TASK_REASONING_EFFORT=max ;;
   esac
@@ -990,11 +990,11 @@ const store=process.argv[2],record=join(store,'records',readdirSync(join(store,'
 const recovery=JSON.parse(readFileSync(join(record,'receipt.json'))),event=recovery.events.at(-1),ref=event.artifacts.codexExecution;
 const bytes=readFileSync(join(record,ref.file)),receipt=JSON.parse(bytes);
 assert.equal(createHash('sha256').update(bytes).digest('hex'),ref.sha256);assert.equal(event.executionSha256,ref.sha256);
-assert.equal(receipt.requested.model,'gpt-6.1-sol');assert.equal(receipt.authorized.reasoningEffort,'high');assert.equal(receipt.invoked.trust,'os_process_started');
+assert.equal(receipt.requested.model,'gpt-6.2-sol');assert.equal(receipt.authorized.reasoningEffort,'high');assert.equal(receipt.invoked.trust,'os_process_started');
 assert.equal(receipt.observed.model,null);assert.equal(receipt.observed.reasoningEffort,null);assert.equal(receipt.observed.usage,null);assert.equal(receipt.billedCost,null);
 assert.equal(receipt.result.exitCode,0);assert.ok(receipt.result.elapsedMs>=0);
 const args=readFileSync(process.argv[3],'utf8').split('\0').slice(0,-1);
-assert.deepEqual(receipt.intendedArgv,args);assert.equal(args.filter(value=>value==='--model').length,1);assert.equal(args[args.indexOf('--model')+1],'gpt-6.1-sol');assert.ok(args.includes('model_reasoning_effort="high"'));assert.ok(args.includes('--json'));assert.ok(args.includes('--ignore-user-config'));
+assert.deepEqual(receipt.intendedArgv,args);assert.equal(args.filter(value=>value==='--model').length,1);assert.equal(args[args.indexOf('--model')+1],'gpt-6.2-sol');assert.ok(args.includes('model_reasoning_effort="high"'));assert.ok(args.includes('--json'));assert.ok(args.includes('--ignore-user-config'));
 for (const setting of ['features.apps=false','features.plugins=false','features.skill_mcp_dependency_install=false']) assert.ok(args.some((arg,index)=>arg==='--config' && args[index+1]===setting));
 NODE
 
