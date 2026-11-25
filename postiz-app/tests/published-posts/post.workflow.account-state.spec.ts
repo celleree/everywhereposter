@@ -252,4 +252,24 @@ describe('postWorkflowV102 durable submission boundary', () => {
     expect(internalPlugs).not.toHaveBeenCalled();
     expect(globalPlugs).not.toHaveBeenCalled();
   });
+
+  it.each([true, false])('records legacy Facebook evidence when the Temporal patch is active (%s)', async (active) => {
+    const facebook = { ...baseIntegration, providerIdentifier: 'facebook' };
+    setPostIntegrationState(facebook);
+    getIntegrationById.mockResolvedValue(facebook);
+    internalPlugs.mockResolvedValue([]);
+    globalPlugs.mockResolvedValue([]);
+    patched.mockImplementation((id) => id === 'legacy-facebook-publication-receipt-v1' ? active : true);
+    const result = {
+      id: 'post-1', postId: '123_456', releaseURL: 'https://www.facebook.com/123_456', status: 'success',
+      facebookFeed: { version: 2, appId: 'app', pageId: '123', message: 'https://example.com', revision: 0, mutation: null },
+    };
+    postSocial.mockResolvedValue([result]);
+    await postWorkflowV102({ taskQueue: 'facebook', postId: 'post-1', organizationId: 'org-1' });
+    expect(patched).toHaveBeenCalledWith('legacy-facebook-publication-receipt-v1');
+    const args = ['post-1', result.postId, result.releaseURL];
+    expect(updatePost).toHaveBeenCalledWith(...args, ...(active
+      ? [{ organizationId: 'org-1', integrationId: 'integration-1', result }]
+      : []));
+  });
 });

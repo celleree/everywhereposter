@@ -610,6 +610,7 @@ model Post {
   tags                       TagsPosts[]
 
   submissionDestination PublishingSubmissionDestination?
+  facebookPublicationReceipt FacebookPublicationReceipt?
 
   @@index([group])
   @@index([deletedAt])
@@ -1377,6 +1378,15 @@ model PublishingSubmissionDestination {
 
   @@unique([submissionId, integrationId])
   @@index([dispatched, createdAt])
+}
+
+// Private evidence for legacy immediate Facebook publications.
+model FacebookPublicationReceipt {
+  postId         String @id
+  organizationId String
+  integrationId  String
+  providerResult Json?
+  post           Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
 }
 
 // Consent, generated result and dispatch outbox are retained independently of a browser.

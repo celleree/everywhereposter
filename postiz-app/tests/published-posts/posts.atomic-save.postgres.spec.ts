@@ -143,6 +143,44 @@ suite('atomic legacy post saves (isolated PostgreSQL; no providers)', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it('reserves private Facebook evidence for a new root with a Calendar editor ID', async () => {
+    const integration = await db.integration.create({ data: {
+      organizationId: org, internalId: '123', name: 'Fixture Page',
+      providerIdentifier: 'facebook', type: 'social', token: 'synthetic-fixture-token',
+    } });
+    const destination = {
+      integration: { id: integration.id }, settings: { __type: 'facebook', url: '' },
+      value: [{ content: 'Watch https://www.youtube.com/watch?v=synthetic', image: [] }],
+    };
+    const draft = await repository.createOrUpdatePost('draft', org, body.date, destination as any, []);
+    const [created, reused] = await service.createPost(org, {
+      ...body, type: 'now', tags: [], posts: [
+        { ...destination, group: 'new-editor-group', value: [{ ...destination.value[0], id: 'new-editor-id' }] },
+        { ...destination, value: [{ ...destination.value[0], id: draft.posts[0].id }] },
+      ],
+    });
+    expect(created.postId).not.toBe('new-editor-id');
+    expect(await db.facebookPublicationReceipt.findUnique({ where: { postId: created.postId } })).toEqual({
+      postId: created.postId, organizationId: org, integrationId: integration.id, providerResult: null,
+    });
+    expect(reused.postId).toBe(draft.posts[0].id);
+    expect(await db.facebookPublicationReceipt.findUnique({ where: { postId: reused.postId } })).toBeNull();
+    await Promise.all(dispatch.mock.results.map((result) => result.value));
+    const queued = await db.post.findUniqueOrThrow({ where: { id: created.postId } });
+    const originalRows = await snapshot();
+    dispatch.mockClear();
+    for (const identity of [{ id: queued.id }, { group: queued.group }]) {
+      await expect(service.createPost(org, {
+        ...body, type: 'now', tags: [], posts: [{
+          ...destination, group: identity.group,
+          value: [{ ...destination.value[0], id: identity.id, content: 'Stale editor change' }],
+        }],
+      })).rejects.toThrow('immutable');
+      expect(await snapshot()).toEqual(originalRows);
+      expect(dispatch).not.toHaveBeenCalled();
+    }
+  });
+
   it.each(['draft', 'schedule', 'now'])('commits all %s destinations, children, tags and replacements before dispatch', async (type) => {
     body.type = type;
     body.inter = 7;
