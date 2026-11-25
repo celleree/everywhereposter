@@ -42,6 +42,7 @@ export type CalendarPost = Post & {
   source?: 'historical';
   isHistoricalImport?: boolean;
   readOnly?: boolean;
+  dateLocked?: boolean;
   actualDate?: string;
   platformPostId?: string | null;
   platformPermalink?: string | null;
@@ -645,6 +646,7 @@ const CalendarProvider: FC<{
         !mounted.current ||
         isRescheduling(post.id) ||
         isHistoricalCalendarPost(post) ||
+        post.dateLocked ||
         post.state === 'DELETED_REMOTE'
       )
         return;

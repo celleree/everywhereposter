@@ -138,8 +138,8 @@ export class FacebookPublishedService {
     });
   }
 
-  private async target(orgId: string, postId: string) {
-    const post = await this.prisma.post.findFirst({
+  private findPost(orgId: string, postId: string) {
+    return this.prisma.post.findFirst({
       where: { id: postId, organizationId: orgId },
       include: {
         integration: true,
@@ -157,6 +157,16 @@ export class FacebookPublishedService {
         },
       },
     });
+  }
+
+  private async target(orgId: string, postId: string) {
+    return this.verifiedTarget(orgId, await this.findPost(orgId, postId));
+  }
+
+  private verifiedTarget(
+    orgId: string,
+    post: Awaited<ReturnType<FacebookPublishedService['findPost']>>
+  ) {
     if (!post) throw new NotFoundException(unavailable);
     const integration = post.integration;
     const durable = post.submissionDestination;
@@ -224,15 +234,27 @@ export class FacebookPublishedService {
   }
 
   async status(orgId: string, postId: string) {
+    const post = await this.findPost(orgId, postId);
     try {
-      return this.publicStatus(await this.target(orgId, postId));
+      return this.publicStatus(this.verifiedTarget(orgId, post));
     } catch (error) {
+      if (!(error instanceof BadRequestException || error instanceof NotFoundException)) throw error;
+      const status = { eligible: false, reason: error.message };
       if (
-        error instanceof BadRequestException ||
-        error instanceof NotFoundException
-      )
-        return { eligible: false, reason: error.message };
-      throw error;
+        post && !post.deletedAt && post.state === 'PUBLISHED' &&
+        post.organizationId === orgId && post.integration.organizationId === orgId &&
+        post.integration.providerIdentifier === 'facebook' &&
+        !post.facebookPublicationReceipt?.providerResult && !post.submissionDestination?.providerResult &&
+        post.releaseId && /^\d+_\d+$/.test(post.releaseId) &&
+        post.releaseId.startsWith(`${post.integration.internalId}_`)
+      ) {
+        return {
+          ...status,
+          pageName: post.integration.name,
+          permalink: `https://www.facebook.com/${post.releaseId}`,
+        };
+      }
+      return status;
     }
   }
 

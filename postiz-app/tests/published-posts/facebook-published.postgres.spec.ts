@@ -239,11 +239,40 @@ describeDatabase(
       await expect(service.status(org, previous.id)).resolves.toMatchObject({
         eligible: false,
         reason: expect.stringContaining('open the exact post on its Facebook Page'),
+        pageName: 'Fixture Page',
+        permalink: 'https://www.facebook.com/123_76543',
       });
+      expect(await service.status('other-org', previous.id)).not.toHaveProperty('permalink');
       await expect(service.mutate(org, previous.id, { action: 'delete', revision: 0 }))
         .rejects.toThrow('cannot verify');
       expect(calls).toEqual([]);
       expect(await prisma.post.findUnique({ where: { id: previous.id } })).toEqual(previous);
+      await prisma.post.update({ where: { id: previous.id }, data: { releaseId: '124_76543' } });
+      expect(await service.status(org, previous.id)).not.toHaveProperty('permalink');
+    });
+    it('keeps Calendar date writes from requeuing a Facebook publication or reviving its tombstone', async () => {
+      const { providerResult } = await prisma.publishingSubmissionDestination.delete({ where: { id: ledger } });
+      await prisma.facebookPublicationReceipt.create({
+        data: { postId: post, organizationId: org, integrationId: integration, providerResult: providerResult! },
+      });
+      const calendar = await posts.getPosts(org, {
+        startDate: '2000-01-01', endDate: '2099-01-01', customer: '',
+      });
+      expect(calendar.find(item => item.id === post)).toMatchObject({ dateLocked: true });
+      for (const state of ['PUBLISHED', 'DELETED_REMOTE']) {
+        if (state === 'DELETED_REMOTE') await service.mutate(org, post, { action: 'delete', revision: 0 });
+        const load = () => prisma.post.findUniqueOrThrow({
+          where: { id: post }, include: { facebookPublicationReceipt: true },
+        });
+        const before = await load();
+        expect(before).toMatchObject({ state, releaseId: remote });
+        for (const action of ['schedule', 'update'] as const) {
+          await expect(posts.changeDate(org, post, '2030-01-01', false, action)).rejects.toThrow('cannot be rescheduled');
+          expect(await load()).toEqual(before);
+        }
+        expect(await posts.searchForMissingThreeHoursPosts()).not.toContainEqual(expect.objectContaining({ id: post }));
+      }
+      expect(calls).toEqual(['GET', 'GET', 'DELETE']);
     });
     it('requires a confirmed legacy receipt and keeps a lost deletion acknowledgement locked', async () => {
       const message = 'Watch https://www.youtube.com/watch?v=synthetic';
@@ -261,6 +290,8 @@ describeDatabase(
         facebookFeed: { version: 2 as const, appId: 'fixture-app', pageId: '123', message, revision: 0, mutation: null },
       };
       await expect(service.status(org, legacy.id)).resolves.toMatchObject({ eligible: false });
+      await expect(posts.changeDate(org, legacy.id, '2030-01-01', false, 'schedule'))
+        .rejects.toThrow('cannot be rescheduled');
       await expect(service.recordLegacyPublication(legacy.id, releaseId, releaseURL, {
         result, organizationId: org, integrationId: 'other-integration',
       })).resolves.toBeUndefined();

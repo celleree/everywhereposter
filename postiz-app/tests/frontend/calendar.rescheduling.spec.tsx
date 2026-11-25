@@ -525,6 +525,16 @@ it('preserves recurrence handling and sends the selected published-post action',
   expect(latest.isRescheduling('repeat')).toBe(false);
 });
 
+it('keeps a receipt-bound Facebook copy out of the rescheduling dialog', async () => {
+  source = [post('facebook', { state: 'PUBLISHED', dateLocked: true })];
+  const confirm = jest.fn(async () => 'schedule' as const);
+  mount();
+  await ready();
+  await act(async () => { await save('facebook', confirm); });
+  expect(confirm).not.toHaveBeenCalled();
+  expect(writes()).toHaveLength(0);
+});
+
 it('releases a cancelled confirmation without sending a write', async () => {
   mount();
   await ready();

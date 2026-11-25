@@ -169,19 +169,16 @@ export function FacebookPublishedManagement({ postId, deleteOnly = false, onConf
       )}
       {!status && !error && <p role="status">Loading Facebook post actions…</p>}
       {status && !status.eligible && <p>{status.reason}</p>}
+      {status?.eligible && !confirm && (status.deleted || !canEdit) && (
+        <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words">{status.message}</p>
+      )}
+      {status?.permalink && (
+        <a href={status.permalink} target="_blank" rel="noopener noreferrer" className="underline">
+          Open this post on Facebook
+        </a>
+      )}
       {status?.eligible && (
         <>
-          {!confirm && (status.deleted || !canEdit) && (
-            <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words">{status.message}</p>
-          )}
-          <a
-            href={status.permalink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline"
-          >
-            Open this post on Facebook
-          </a>
           {status.deleted ? (
             <p role="status">Deleted on Facebook.</p>
           ) : (

@@ -181,6 +181,8 @@ export class PostsRepository {
           releaseId: true,
           state: true,
           intervalInDays: true,
+          submissionDestination: { select: { postId: true } },
+          facebookPublicationReceipt: { select: { postId: true } },
           group: true,
           tags: {
             select: {
@@ -200,7 +202,8 @@ export class PostsRepository {
       this.getHistoricalCalendarPosts(orgId, query, startDate, endDate),
     ]);
 
-    const posts = list.reduce((all, post) => {
+    const posts = list.reduce((all, { submissionDestination, facebookPublicationReceipt, ...row }) => {
+      const post = { ...row, dateLocked: !!submissionDestination || !!facebookPublicationReceipt };
       if (!post.intervalInDays) {
         return [...all, post];
       }
@@ -644,18 +647,13 @@ export class PostsRepository {
     isDraft: boolean,
     action: 'schedule' | 'update' = 'schedule'
   ) {
-    if (await this._post.model.post.findFirst({
-      where: { organizationId: orgId, id, submissionDestination: { isNot: null } },
-      select: { id: true },
-    })) {
-      throw new ConflictException(
-        'Submission posts are immutable. Create a new draft and submission instead.'
-      );
-    }
-    return this._post.model.post.update({
+    const [updated] = await this._post.model.post.updateManyAndReturn({
       where: {
         organizationId: orgId,
         id,
+        submissionDestination: null,
+        facebookPublicationReceipt: null,
+        state: { not: 'DELETED_REMOTE' },
       },
       data: {
         publishDate: dayjs(date).toDate(),
@@ -670,6 +668,10 @@ export class PostsRepository {
           : {}),
       },
     });
+    if (!updated) {
+      throw new ConflictException('This post cannot be rescheduled. Create a new draft instead.');
+    }
+    return updated;
   }
 
   countPostsFromDay(orgId: string, date: Date) {

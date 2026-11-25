@@ -1305,7 +1305,7 @@ const CalendarItem: FC<{
   const [{ opacity }, dragRef] = useDrag(
     () => ({
       type: 'post',
-      canDrag: !pending && !isHistoricalPost && !isBeforeNow && !isRemoteDeleted,
+      canDrag: !pending && !isHistoricalPost && !isBeforeNow && !isRemoteDeleted && !post.dateLocked,
       item: {
         id: post.id,
         interval: !!post.intervalInDays,
@@ -1315,7 +1315,7 @@ const CalendarItem: FC<{
         opacity: monitor.isDragging() ? 0 : 1,
       }),
     }),
-    [date, pending, isBeforeNow, isHistoricalPost, isRemoteDeleted, post.id, post.intervalInDays]
+    [date, pending, isBeforeNow, isHistoricalPost, isRemoteDeleted, post.id, post.intervalInDays, post.dateLocked]
   );
   return (
     <div
