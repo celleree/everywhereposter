@@ -92,6 +92,12 @@ Final source decisions and rendered A/V durations are checked against that exact
 plan before the unchanged transcript verifier. The pinned review UI exposes
 separate whole-block controls; arbitrary word-selection editing is disabled.
 
+For an uncut AAC draft, remuxing uses the source sample rate as the MP4 movie
+timescale to avoid rounding its final packet's presentation duration. Exact audio
+packets, rendered-video packets and mono16k ASR PCM must still match before the
+candidate replaces the native render. A rejection logs only the three comparison
+results before temporary-candidate cleanup; it never promotes a failed output.
+
 ## Worker and app boundary
 
 Build the local Python/model image using the pinned preparation instructions in

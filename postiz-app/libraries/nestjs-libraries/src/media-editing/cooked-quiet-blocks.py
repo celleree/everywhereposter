@@ -184,6 +184,9 @@ def preserve_uncut_audio(source, edit, policy):
     if av['audio']['codec_name'] != 'aac' or any(abs(float(s['start_time'])) > .001 for s in av.values()) or abs(
             float(av['audio']['duration'])-float(av['video']['duration'])) > .001:
         return False
+    rate = int(av['audio']['sample_rate'])
+    if not 8000 <= rate <= 192000:
+        raise ValueError('UNSUPPORTED_AUDIO_RATE')
 
     def packets(path, kind):
         return json.loads(command(['ffprobe', '-v', 'error', '-protocol_whitelist', 'file', '-select_streams', kind+':0',
@@ -200,9 +203,16 @@ def preserve_uncut_audio(source, edit, policy):
     audio, video, source_pcm = packets(source, 'a'), packets(cut, 'v'), pcm(source)
     with tempfile.TemporaryDirectory(prefix='uncut-audio-', dir=edit) as folder:
         output = Path(folder)/'cut.mp4'
+        # The MP4 default millisecond movie timescale rounds a fractional final
+        # AAC packet. Keep its presentation end on the source's sample clock.
         command(['ffmpeg', '-nostdin', '-v', 'error', '-protocol_whitelist', 'file', '-i', str(cut), '-i', str(source),
-            '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-map_metadata', '-1', '-movflags', '+faststart', str(output)])
-        if packets(output, 'a') != audio or packets(output, 'v') != video or pcm(output) != source_pcm:
+            '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-map_metadata', '-1',
+            '-movie_timescale', str(rate), '-movflags', '+faststart', str(output)])
+        checks = dict(audioPacketsMatch=packets(output, 'a') == audio,
+            videoPacketsMatch=packets(output, 'v') == video, asrPcmMatch=pcm(output) == source_pcm)
+        if not all(checks.values()):
+            # Retain only predicate results in the bounded native log before cleanup.
+            print('UNCUT_MEDIA_AUDIT ' + json.dumps(checks, sort_keys=True), flush=True)
             raise ValueError('UNCUT_MEDIA_CHANGED')
         output.replace(cut)
     print('Uncut AAC packets, video packets and ASR PCM preserved', flush=True)

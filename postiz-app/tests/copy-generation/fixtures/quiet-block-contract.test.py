@@ -1,4 +1,6 @@
 import json
+import contextlib
+import io
 from pathlib import Path
 import runpy
 import shutil
@@ -61,7 +63,7 @@ class QuietBlockContract(unittest.TestCase):
             (edit/'report.json').write_text('{"frames":[[0,250]]}')
             (edit/'decisions.json').write_text('[{"start":0,"end":10}]')
             meta = dict(streams=[dict(codec_type='video', codec_name='h264', start_time='0', duration='10'),
-                dict(codec_type='audio', codec_name='aac', start_time='0', duration='10')])
+                dict(codec_type='audio', codec_name='aac', start_time='0', duration='10', sample_rate='44100')])
             g['probe'] = lambda _: meta
             mismatch = None; calls = []
             def fake_command(args):
@@ -79,8 +81,12 @@ class QuietBlockContract(unittest.TestCase):
             g['command'] = fake_command
             try:
                 for mismatch in ['a:0', 'v:0', 'pcm']:
-                    with self.assertRaisesRegex(ValueError, 'UNCUT_MEDIA_CHANGED'):
+                    diagnostic = io.StringIO()
+                    with contextlib.redirect_stdout(diagnostic), self.assertRaisesRegex(ValueError, 'UNCUT_MEDIA_CHANGED'):
                         preserve(source, edit, self.policy)
+                    checks = dict(audioPacketsMatch=mismatch != 'a:0', videoPacketsMatch=mismatch != 'v:0',
+                        asrPcmMatch=mismatch != 'pcm')
+                    self.assertEqual(diagnostic.getvalue(), 'UNCUT_MEDIA_AUDIT ' + json.dumps(checks, sort_keys=True) + '\n')
                     self.assertEqual(cut.read_bytes(), b'native render')
                     self.assertFalse(any(edit.glob('uncut-audio-*')))
                 mismatch = None
@@ -123,33 +129,37 @@ class QuietBlockContract(unittest.TestCase):
         def pcm(path):
             return command(['ffmpeg', '-nostdin', '-v', 'error', '-i', str(path), '-vn',
                 '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'hash', '-hash', 'sha256', '-']).stdout
-        with tempfile.TemporaryDirectory() as folder:
-            edit = Path(folder); source = edit/'source.mp4'; cut = edit/'cut.mp4'
-            run(['-f', 'lavfi', '-i', 'color=c=blue:s=64x64:r=25', '-f', 'lavfi',
-                '-i', 'sine=frequency=880:sample_rate=48000', '-t', '2', '-c:v', 'libx264',
-                '-preset', 'ultrafast', '-c:a', 'aac', '-b:a', '64k', str(source)])
-            run(['-i', str(source), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '27',
-                '-af', 'afade=t=in:d=0.008,afade=t=out:st=1.992:d=0.008',
-                '-c:a', 'aac', '-b:a', '192k', str(cut)])
-            policy = dict(version='quiet-block-v1', fps=25, total=50, blocks=[], blockFrames=[])
-            (edit/'safe-cuts.json').write_text('[]')
-            (edit/'report.json').write_text('{"frames":[[0,50]]}')
-            (edit/'decisions.json').write_text('[{"start":0,"end":2}]')
-            original, source_audio, source_pcm = digest(source), packets(source, 'a:0'), pcm(source)
-            native_video = packets(cut, 'v:0')
-            self.assertNotEqual(pcm(cut), source_pcm)
-            audit(edit, policy)
-            self.assertTrue(preserve(source, edit, policy))
-            audit(edit, policy)
-            self.assertEqual(digest(source), original)
-            self.assertEqual(packets(cut, 'a:0'), source_audio)
-            self.assertEqual(packets(cut, 'v:0'), native_video)
-            self.assertEqual(pcm(cut), source_pcm)
-            before = digest(cut); (edit/'safe-cuts.json').write_text('[[0.4,0.8]]')
-            self.assertFalse(preserve(source, edit, policy))
-            self.assertEqual(digest(cut), before)
-            self.assertEqual(digest(source), original)
-            self.assertFalse(any(edit.glob('uncut-audio-*')))
+        # Fractional 30fps endings expose the AAC duration rounding hidden by
+        # the original integer-second fixture, at both common sample rates.
+        for fps, total, rate in [(25, 50, 48000), (30, 61, 44100), (30, 61, 48000)]:
+            with self.subTest(fps=fps, total=total, rate=rate), tempfile.TemporaryDirectory() as folder:
+                edit = Path(folder); source = edit/'source.mp4'; cut = edit/'cut.mp4'
+                duration = total/fps
+                run(['-f', 'lavfi', '-i', f'color=c=blue:s=64x64:r={fps}', '-f', 'lavfi',
+                    '-i', f'sine=frequency=880:sample_rate={rate}', '-t', str(duration), '-c:v', 'libx264',
+                    '-preset', 'ultrafast', '-c:a', 'aac', '-b:a', '64k', '-movie_timescale', str(rate), str(source)])
+                run(['-i', str(source), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '27',
+                    '-af', f'afade=t=in:d=0.008,afade=t=out:st={duration-.008}:d=0.008',
+                    '-c:a', 'aac', '-b:a', '192k', str(cut)])
+                policy = dict(version='quiet-block-v1', fps=fps, total=total, blocks=[], blockFrames=[])
+                (edit/'safe-cuts.json').write_text('[]')
+                (edit/'report.json').write_text(json.dumps(dict(frames=[[0,total]])))
+                (edit/'decisions.json').write_text(json.dumps([dict(start=0,end=duration)]))
+                original, source_audio, source_pcm = digest(source), packets(source, 'a:0'), pcm(source)
+                native_video = packets(cut, 'v:0')
+                self.assertNotEqual(pcm(cut), source_pcm)
+                audit(edit, policy)
+                self.assertTrue(preserve(source, edit, policy))
+                audit(edit, policy)
+                self.assertEqual(digest(source), original)
+                self.assertEqual(packets(cut, 'a:0'), source_audio)
+                self.assertEqual(packets(cut, 'v:0'), native_video)
+                self.assertEqual(pcm(cut), source_pcm)
+                before = digest(cut); (edit/'safe-cuts.json').write_text('[[0.4,0.8]]')
+                self.assertFalse(preserve(source, edit, policy))
+                self.assertEqual(digest(cut), before)
+                self.assertEqual(digest(source), original)
+                self.assertFalse(any(edit.glob('uncut-audio-*')))
 
     def test_final_decisions_and_av_must_match_the_exact_block_plan(self):
         with tempfile.TemporaryDirectory() as folder:
