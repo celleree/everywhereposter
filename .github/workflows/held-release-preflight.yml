@@ -1,0 +1,48 @@
+name: Pinned held PC release rehearsal
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/held-release-preflight.yml
+      - scripts/ci/held-release/**
+
+permissions: {}
+
+jobs:
+  rehearsal:
+    if: github.repository == 'celleree/everywhereposter' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/pc-held-release-368'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Pull immutable fixture images and discard registry authorization
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/ep-held-registry-auth
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$DOCKER_CONFIG" = "$RUNNER_TEMP/ep-held-registry-auth"
+          umask 077
+          mkdir -m 700 "$DOCKER_CONFIG"
+          trap 'rm -f -- "$DOCKER_CONFIG/config.json"; rmdir -- "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          unset REGISTRY_TOKEN
+          docker pull ghcr.io/celleree/publish-everywhere-postiz@sha256:b98b88c4e484389a76f719e6226d244e1f11587cc65f081afc0bfbc8d63b086d
+          docker pull ghcr.io/celleree/publish-everywhere-postiz@sha256:e5460a07684b025a35ac28fc11cb1aa027ffd88d2eb98e49144c74700a2228a4
+          docker pull docker.io/library/postgres@sha256:c7526c0f6c3f30260a563d7bcf8ad778effac59a44f8ffa86678c35418338609
+          docker pull docker.io/library/redis@sha256:37aa82f9fdff30517603b2e2c5376b34b106d353c2b508262260d3bb0d2c21ba
+          docker pull docker.io/temporalio/admin-tools@sha256:01537b62d995f27a0f0d33a01ac4caa6779622f454fb2eb36fed0dccd45c6244
+      - name: Rehearse held prior, candidate, and prior recovery after the additive migration
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/ep-held-registry-auth
+        run: |
+          set -euo pipefail
+          test ! -e "$DOCKER_CONFIG"
+          python3 -B scripts/ci/held-release/verify.py | tee -a "$GITHUB_STEP_SUMMARY"
