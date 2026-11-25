@@ -198,7 +198,7 @@ describe('TikTok and YouTube copy-generation coverage', () => {
     );
   });
 
-  it('returns editable TikTok and YouTube results in the normal response shape', async () => {
+  it.each([' Shipping checks ', null, undefined, '', 'x', 'x'.repeat(101), 'Bad\ntitle', '<bad>', 42])('returns only usable YouTube titles from the existing draft request (%s)', async title => {
     const sourceBriefService = {
       build: jest.fn().mockResolvedValue({
         media: {
@@ -230,6 +230,7 @@ describe('TikTok and YouTube copy-generation coverage', () => {
             brief.platform.name === 'tiktok'
               ? 'We hand-label each small-batch order to catch shipping errors before the box leaves.'
               : 'This video shows the hand-labeling check our team uses to catch shipping errors before small-batch orders leave.',
+          title,
           angle: 'quality control',
           hook: 'The final check before shipping',
           cta: '',
@@ -251,7 +252,12 @@ describe('TikTok and YouTube copy-generation coverage', () => {
       events.push(event);
     }
 
+    expect(modelService.generatePlatformDraft).toHaveBeenCalledTimes(2);
     const completed = events[events.length - 1];
+    const youtubeResult = completed.data.results.find((result: any) => result.platform === 'youtube');
+    const tiktokResult = completed.data.results.find((result: any) => result.platform === 'tiktok');
+    expect(youtubeResult.title).toBe(title === ' Shipping checks ' ? 'Shipping checks' : undefined);
+    expect(tiktokResult).not.toHaveProperty('title');
     expect(completed.name).toBe('completed');
     expect(completed.data.status).toBe('complete');
     expect(

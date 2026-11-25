@@ -38,6 +38,7 @@ export interface SelectedIntegrations {
   settings: any;
   integration: Integrations;
   ref?: RefObject<any>;
+  automaticYoutubeTitle?: { mediaId: string | null; value: string };
 }
 
 interface StoreState {

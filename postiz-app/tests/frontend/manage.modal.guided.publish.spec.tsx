@@ -4,6 +4,18 @@ import { readFileSync } from 'fs';
 import { TextDecoder, TextEncoder } from 'node:util';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
+const mockYoutubeInsert = jest.fn();
+const mockYoutubeCredentials = jest.fn();
+const mockYoutubeThumbnail = jest.fn();
+jest.mock('googleapis', () => ({ google: {
+  auth: { OAuth2: jest.fn(() => ({ setCredentials: mockYoutubeCredentials })) },
+  youtube: jest.fn(() => ({ videos: { insert: mockYoutubeInsert }, thumbnails: { set: mockYoutubeThumbnail } })),
+} }));
+jest.mock('axios', () => ({ __esModule: true, default: jest.fn(async () => ({ data: 'synthetic-video-stream' })) }));
+import axios from 'axios';
+import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+import { YoutubeProvider } from '../../libraries/nestjs-libraries/src/integrations/social/youtube.provider';
+
 Object.assign(global, { TextEncoder, TextDecoder });
 
 let mockUseActualEditor = false;
@@ -425,6 +437,92 @@ describe('ManageModal guided publishing bridge', () => {
       }
       throw new Error(`Unexpected request: ${url}`);
     });
+  });
+
+  it.each([
+    ['use-everywhere', 'original', false],
+    ['use-everywhere', 'original', true],
+    ['adapt-by-platform', 'adapted', false],
+    ['adapt-by-platform', 'adapted', true],
+    ['generate', 'generated', false],
+    ['generate', 'generated', true],
+  ] as const)('issue87 %s / %s preserves Review through payload and provider (edited=%s)', async (mode, origin, edited) => {
+    const destinations = ['alpha', 'beta'].map(name => ({
+      ...companyLinkedIn, id: `youtube-${name}`, name: `YouTube ${name}`, identifier: 'youtube',
+    }));
+    const settings = { __type: 'youtube', title: 'User-entered title', type: 'unlisted',
+      selfDeclaredMadeForKids: 'no', notifySubscribers: 'no', license: 'youtube',
+      embeddable: 'yes', publicStatsViewable: 'no', hasPaidProductPlacement: 'yes',
+      tags: [{ label: 'demo' }], thumbnail: { path: 'https://media.example.com/thumb.jpg' },
+    };
+    useGuidedComposerStore.getState().resetGuidedComposer();
+    useLaunchStore.getState().setAllIntegrations(destinations);
+    useLaunchStore.getState().setSelectedIntegrations(destinations.map(integration => ({ selectedIntegrations: integration, settings })));
+    destinations.forEach(destination => useLaunchStore.getState().setChars(destination.id, 5000));
+    const sourceCaption = 'Original source caption\nSecond line #demo';
+    const baseline = mode === 'use-everywhere' ? sourceCaption : `${origin} final response — café 🎬\nhttps://example.test/demo #video`;
+    useGuidedComposerStore.getState().setCaptionMode(mode);
+    useGuidedComposerStore.getState().setSourceCaption(mode === 'generate' ? '' : sourceCaption);
+    useGuidedComposerStore.getState().completeGeneration({
+      requestId: `synthetic-${mode}`, status: 'complete', sourceConfidence: 0.9, warnings: [], imagePlans: [],
+      results: [{ platform: 'youtube', draft: baseline, origin, charCount: baseline.length,
+        confidence: 0.9, antiGenericScore: 0.9, rewritten: false, warnings: [] }],
+    } as any, [], `synthetic-fingerprint-${mode}`);
+    providerResults = destinations.map(integration => {
+      const result = providerResult(integration, settings);
+      result.values = result.values.slice(0, 1);
+      result.values[0].content = 'STALE pre-generation provider caption';
+      return result;
+    });
+    const view = render(<GuidedComposerPublishBridgeProvider>
+      <ManageModal {...manageModalProps} integrations={destinations} guidedComposerActive />
+      <GuidedComposerReview />
+      <GuidedComposerPublish />
+    </GuidedComposerPublishBridgeProvider>);
+    const expected = destinations.map((destination, index) => edited ? `Review override ${index} for ${mode}\nOnly this channel 🎬 #final` : baseline);
+    for (const [index, destination] of destinations.entries()) {
+      if (index) fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${destination.name} `) }));
+      const caption = await screen.findByLabelText(`${destination.name} caption`);
+      expect(caption).toHaveProperty('value', baseline);
+      if (edited) fireEvent.change(caption, { target: { value: expected[index] } });
+      expect(useGuidedComposerStore.getState().reviewDrafts[destination.id].caption).toBe(expected[index]);
+    }
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }));
+    await waitFor(() => expect(postPayload()).toBeTruthy());
+    const payload = postPayload();
+    expect(payload.posts).toHaveLength(2);
+    expect(mockCheckAllValid).toHaveBeenCalledWith(destinations.map(destination => destination.id));
+    mockYoutubeInsert.mockReset().mockResolvedValue({ data: { id: 'synthetic-remote-video' } });
+    mockYoutubeThumbnail.mockReset().mockResolvedValue({ data: {} });
+    mockYoutubeCredentials.mockReset();
+    (axios as unknown as jest.Mock).mockClear();
+    const provider = new YoutubeProvider();
+    jest.spyOn(provider as any, 'runInConcurrent').mockImplementation(async (run: any) => run());
+    for (const [index, post] of payload.posts.entries()) {
+      expect(post.integration.id).toBe(destinations[index].id);
+      expect(post.value[0].content).toBe(expected[index]);
+      expect(post.settings).toEqual(settings);
+      // Isolated boundary adapter: persistence/Temporal are not exercised here.
+      await provider.post(post.integration.id, 'synthetic-access-token', [{
+        id: post.value[0].id, message: stripHtmlValidation(provider.editor, post.value[0].content, true, false, !/<\/?[a-z][\s\S]*>/i.test(post.value[0].content), provider.mentionFormat),
+        media: post.value[0].image, settings: post.settings,
+      }] as any);
+      const insert = mockYoutubeInsert.mock.calls[index][0];
+      expect(insert.requestBody.snippet).toEqual({ title: settings.title, description: expected[index], tags: ['demo'] });
+      expect(insert.requestBody.status).toEqual({ privacyStatus: 'unlisted', selfDeclaredMadeForKids: false,
+        license: 'youtube', embeddable: true, publicStatsViewable: false });
+      expect(insert.notifySubscribers).toBe(false);
+      expect(insert.requestBody.paidProductPlacementDetails).toEqual({ hasPaidProductPlacement: true });
+    }
+    expect(mockYoutubeInsert).toHaveBeenCalledTimes(2);
+    expect(mockYoutubeCredentials).toHaveBeenCalledWith({ access_token: 'synthetic-access-token' });
+    expect(mockYoutubeThumbnail).toHaveBeenCalledTimes(2);
+    expect(axios).toHaveBeenCalledTimes(4);
+    expect(providerResults.map(result => result.values[0].content)).toEqual([
+      'STALE pre-generation provider caption', 'STALE pre-generation provider caption',
+    ]);
+    await screen.findByText('Publishing was confirmed for every enabled destination.');
+    view.unmount();
   });
 
   it('sends the reviewed video to Instagram and only the reviewed text to LinkedIn', async () => {

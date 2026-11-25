@@ -79,6 +79,10 @@ const PlatformDraftSchema = z.object({
   cta: z.string().optional().default(''),
 });
 
+const YoutubePlatformDraftSchema = PlatformDraftSchema.extend({
+  title: z.string().nullable().default(null).catch(null),
+});
+
 const RewriteDraftSchema = z.object({
   draft: z.string(),
 });
@@ -535,7 +539,8 @@ Rules:
     brief: CopyGenerationBrief,
     systemPrompt: string,
     promptConstraints: string
-  ): Promise<z.infer<typeof PlatformDraftSchema>> {
+  ): Promise<z.infer<typeof PlatformDraftSchema> & { title?: string | null }> {
+    const youtube = brief.platform.name === 'youtube';
     const response = await this.completion('draft', {
       ...customerCopyChat(),
       messages: [
@@ -553,10 +558,13 @@ Shape requirements:
 - Line break behavior: ${brief.platform.lineBreaks}.
 - CTA style: ${brief.platform.ctaStyle}.
 
-Return a JSON object with draft, angle, hook, and cta.`,
+Return a JSON object with draft, angle, hook, and cta.${youtube ? ' Also return title: one accurate, single-line YouTube title of 2–100 characters grounded in the same source and context, or null when the source cannot support a title. Do not use clickbait or invent claims.' : ''}`,
         },
       ],
-      response_format: zodResponseFormat(PlatformDraftSchema, 'platformDraft'),
+      response_format: zodResponseFormat(
+        youtube ? YoutubePlatformDraftSchema : PlatformDraftSchema,
+        'platformDraft'
+      ),
     });
 
     return (

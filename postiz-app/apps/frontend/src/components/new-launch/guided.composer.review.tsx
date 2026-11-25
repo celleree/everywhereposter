@@ -302,6 +302,11 @@ export const GuidedComposerReview: FC = () => {
     useLaunchStore.getState().current === 'global' ? null : useLaunchStore.getState().current
   );
   const [showOriginal, setShowOriginal] = useState(false);
+  const activeDestination = destinations.find(
+    (destination) => destination.id === activeDestinationId
+  );
+  const youtubeActive =
+    mapIntegrationIdentifierToCopyPlatform(activeDestination?.identifier || '') === 'youtube';
 
   useEffect(() => {
     if (
@@ -316,12 +321,10 @@ export const GuidedComposerReview: FC = () => {
 
   useEffect(() => {
     setShowOriginal(false);
-    if (recovery.active && activeDestinationId) useLaunchStore.getState().setCurrent(activeDestinationId);
-  }, [activeDestinationId, recovery.active]);
-
-  const activeDestination = destinations.find(
-    (destination) => destination.id === activeDestinationId
-  );
+    if ((recovery.active || youtubeActive) && activeDestinationId) {
+      useLaunchStore.getState().setCurrent(activeDestinationId);
+    }
+  }, [activeDestinationId, recovery.active, youtubeActive]);
   const activeDraft = activeDestinationId
     ? reviewDrafts[activeDestinationId]
     : undefined;
@@ -461,6 +464,14 @@ export const GuidedComposerReview: FC = () => {
 
   return (
     <div className="mx-auto w-full max-w-[1600px] px-[40px] py-[32px] mobile:px-[12px] mobile:py-[18px]">
+      {youtubeActive && <style data-guided-youtube-settings>{`
+        .guided-composer-shell[data-composer-step="review"] .guided-review-existing-editor { display: block; }
+        .guided-composer-shell[data-composer-step="review"] .guided-review-existing-editor section[data-guided-composer-section="media"],
+        .guided-composer-shell[data-composer-step="review"] .guided-review-existing-editor section[data-guided-composer-section="editor"],
+        .guided-composer-shell[data-composer-step="review"] .guided-review-existing-editor .guided-video-details,
+        .guided-composer-shell[data-composer-step="review"] .guided-review-existing-editor #wrapper-settings > div > button { display: none; }
+        .guided-composer-shell[data-composer-step="review"] .guided-review-existing-editor #wrapper-settings > div > div { display: block; }
+      `}</style>}
       <section className="rounded-[20px] border border-newBorder bg-newBgColorInner p-[22px] mobile:rounded-[16px] mobile:p-[14px]">
         <div className="grid grid-cols-3 gap-[12px] mobile:grid-cols-1">
           {[
