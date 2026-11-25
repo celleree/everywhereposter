@@ -714,14 +714,14 @@ export class PostsRepository {
   ) {
     const postModel = transaction?.post || this._post.model.post;
     // A reserved root and its group remain bound to their original attempt.
-    // The ledger mapping is permanent; ordinary edits cannot reset the fence,
-    // add thread children, or alter content for a subsequent safe retry.
+    // Both reservations exist before dispatch. A composer save must not replace
+    // the root while the provider is publishing it or after it confirms.
     const reservedPost = await postModel.findFirst({
       where: {
         AND: {
           OR: [
             { submissionDestination: { isNot: null } },
-            { facebookPublicationReceipt: { providerResult: { not: Prisma.DbNull } } },
+            { facebookPublicationReceipt: { isNot: null } },
           ],
         },
         OR: [

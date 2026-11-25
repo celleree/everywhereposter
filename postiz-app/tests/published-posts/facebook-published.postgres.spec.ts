@@ -299,6 +299,11 @@ describeDatabase(
         state: 'QUEUE', releaseId: null,
       });
       const publisher = { result, organizationId: org, integrationId: integration };
+      await expect(posts.createOrUpdatePost('now', org, new Date().toISOString(), {
+        integration: { id: integration }, group: legacy.group,
+        value: [{ id: legacy.id, content: 'Queued editor change', image: [], delay: 0 }],
+        settings: { __type: 'facebook' },
+      } as any, [])).rejects.toThrow('immutable');
       await expect(service.recordLegacyPublication(legacy.id, releaseId, releaseURL, publisher))
         .resolves.toEqual({ count: 1 });
       await expect(service.recordLegacyPublication(legacy.id, releaseId, releaseURL, publisher))

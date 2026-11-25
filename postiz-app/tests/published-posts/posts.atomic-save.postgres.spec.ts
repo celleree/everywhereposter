@@ -166,6 +166,19 @@ suite('atomic legacy post saves (isolated PostgreSQL; no providers)', () => {
     expect(reused.postId).toBe(draft.posts[0].id);
     expect(await db.facebookPublicationReceipt.findUnique({ where: { postId: reused.postId } })).toBeNull();
     await Promise.all(dispatch.mock.results.map((result) => result.value));
+    const queued = await db.post.findUniqueOrThrow({ where: { id: created.postId } });
+    const originalRows = await snapshot();
+    dispatch.mockClear();
+    for (const identity of [{ id: queued.id }, { group: queued.group }]) {
+      await expect(service.createPost(org, {
+        ...body, type: 'now', tags: [], posts: [{
+          ...destination, group: identity.group,
+          value: [{ ...destination.value[0], id: identity.id, content: 'Stale editor change' }],
+        }],
+      })).rejects.toThrow('immutable');
+      expect(await snapshot()).toEqual(originalRows);
+      expect(dispatch).not.toHaveBeenCalled();
+    }
   });
 
   it.each(['draft', 'schedule', 'now'])('commits all %s destinations, children, tags and replacements before dispatch', async (type) => {
