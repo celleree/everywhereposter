@@ -3,6 +3,7 @@
 import { FacebookPublishedManagement } from './facebook.published.management';
 import { quickUploadProviderReason, QuickUploadSkip } from './guided.composer.quick-upload';
 import { useComposerDraftRecovery } from './composer.draft.recovery';
+import { buildComposerSubmissionPosts } from './composer.submission.payload';
 
 import React, {
   FC,
@@ -1143,28 +1144,7 @@ export const ManageModal: FC<
         tags,
         shortLink,
         date: submissionDate.utc().format('YYYY-MM-DDTHH:mm:ss'),
-        posts: checkAllValid.map((post: any) => ({
-          integration: {
-            id: post.integration.id,
-          },
-          group,
-          settings: { ...(post.settings || {}) },
-          value: post.values.map((value: any) => ({
-            ...(value.id ? { id: value.id } : {}),
-            content: value.content,
-            delay: value.delay || 0,
-            image:
-              (value?.media || []).map(
-                ({ id, path, alt, thumbnail, thumbnailTimestamp }: any) => ({
-                  id,
-                  path,
-                  alt,
-                  thumbnail,
-                  thumbnailTimestamp,
-                })
-              ) || [],
-          })),
-        })),
+        posts: buildComposerSubmissionPosts(checkAllValid, group),
       };
 
       if (dummy) {
